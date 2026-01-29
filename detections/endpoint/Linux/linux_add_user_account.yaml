@@ -1,0 +1,152 @@
+# Detection Rule: Linux User Account Creation
+# This example translates the curl query into the standardized YAML format
+
+# === METADATA ===
+name: Linux User Account Creation Detection
+id: a1b2c3d4-e5f6-7890-abcd-ef1234567890
+version: 1
+schema_version: "1.0"
+date: "2026-01-29"
+author: SOCFORTRESS LLC
+status: production
+type: TTP
+
+# === DESCRIPTION ===
+description: >
+  Detects attempts to create new user accounts on Linux systems using useradd 
+  or adduser commands. This activity may indicate legitimate system administration 
+  or could represent an attacker establishing persistence by creating rogue accounts.
+  
+data_source:
+  - Wazuh Agent Logs
+  - Linux Auditd
+  - Syslog
+
+# === OPENSEARCH QUERY ===
+search:
+  # Index pattern - supports wildcards
+  index_pattern: "${INDEX_PATTERN}"
+  
+  # Number of results to return
+  size: 100
+  
+  # Sort configuration - list of field:direction pairs
+  sort:
+    - timestamp: desc
+  
+  # OpenSearch Query DSL - this is the key section
+  # YAML structure maps directly to JSON
+  query:
+    bool:
+      must:
+        # Static filters
+        - term:
+            agent_name: "${AGENT_NAME}"
+        - term:
+            agent_labels_customer: "${CUSTOMER_CODE}"
+        
+        # Nested bool for OR conditions (user creation commands)
+        - bool:
+            should:
+              - wildcard:
+                  full_log: "*useradd*"
+              - wildcard:
+                  full_log: "*adduser*"
+            minimum_should_match: 1
+        
+        # Time range filter
+        - range:
+            timestamp:
+              gte: "${START_TIME}"
+              lte: "${END_TIME}"
+      
+      # Exclusion filters
+      must_not:
+        - exists:
+            field: data_win_system_eventID
+        - wildcard:
+            rule_groups: "*windows*"
+  
+  # Fields to return in results
+  _source:
+    - timestamp
+    - agent_name
+    - data_process_exec_process_binary
+    - data_process_exec_process_arguments
+    - rule_mitre_id
+    - rule_description
+    - full_log
+
+# === PARAMETERS ===
+# Define runtime parameters with types and defaults
+parameters:
+  AGENT_NAME:
+    description: "Target agent/host name"
+    type: string
+    required: true
+    example: "Amine"
+  CUSTOMER_CODE:
+    description: "Customer label for filtering"
+    type: string
+    required: true
+    example: "lab"
+  START_TIME:
+    description: "Query start time (ISO 8601 or relative)"
+    type: datetime
+    required: false
+    default: "now-24h"
+    example: "2026-01-28 00:00:00.000"
+  END_TIME:
+    description: "Query end time (ISO 8601 or relative)"
+    type: datetime
+    required: false
+    default: "now"
+    example: "2026-01-28 23:59:59.999"
+
+# === IMPLEMENTATION ===
+how_to_implement: >
+  This detection requires Wazuh agents deployed on Linux endpoints with 
+  process execution logging enabled. Ensure the agent is configured to 
+  capture command-line arguments. The index pattern should match your 
+  Wazuh index naming convention.
+
+known_false_positives: >
+  System administrators legitimately creating user accounts for new employees 
+  or service accounts. Automated provisioning systems may also trigger this 
+  detection. Consider creating allowlists for known admin users or automation 
+  service accounts.
+
+references:
+  - https://attack.mitre.org/techniques/T1136/001/
+  - https://documentation.wazuh.com/current/user-manual/capabilities/index.html
+
+# === RESPONSE ===
+response:
+  message: >
+    User account creation detected on $agent_name$. 
+    Command: $data_process_exec_process_binary$ $data_process_exec_process_arguments$
+    MITRE ATT&CK: $rule_mitre_id$
+  risk_score: 45
+  severity: medium
+  
+  # Risk-based alerting configuration
+  risk_objects:
+    - field: agent_name
+      type: system
+      score: 45
+  
+  threat_objects:
+    - field: data_process_exec_process_binary
+      type: process
+
+# === CLASSIFICATION ===
+tags:
+  analytic_story:
+    - Linux Persistence Techniques
+    - Account Manipulation
+  asset_type: Linux
+  mitre_attack_id:
+    - T1136.001  # Create Account: Local Account
+  product:
+    - Wazuh
+  security_domain: endpoint
