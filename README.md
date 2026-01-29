@@ -37,7 +37,7 @@ data_source:
   - Wazuh Agent Logs
 
 search:
-  index_pattern: "wazuh-*"
+  index_pattern: "${INDEX_PATTERN}"
   query:
     bool:
       must:
