@@ -1,0 +1,123 @@
+name: Doas Privilege Escalation Detection
+id: 5f3b8a12-2d4c-4e7b-9c6d-8a1f2b4c9e3f
+version: 1
+schema_version: "1.0"
+date: "2026-01-29"
+author: SOCFORTRESS LLC
+status: production
+type: TTP
+
+description: >
+  Detects usage of the doas binary or its invocation as a parent process.
+  May indicate privilege escalation attempts on systems using doas
+  for elevated command execution.
+
+data_source:
+  - Wazuh Agent Logs
+  - Linux Auditd
+  - Syslog
+
+search:
+  index_pattern: "${INDEX_PATTERN}"
+  size: 100
+  sort:
+    - timestamp: desc
+  query:
+    bool:
+      must:
+        - term:
+            agent_name: "${AGENT_NAME}"
+        - term:
+            agent_labels_customer: "${CUSTOMER_CODE}"
+        - bool:
+            should:
+              - term:
+                  data_process_exec_process_binary: "/usr/bin/doas"
+              - term:
+                  data_process_exec_parent_binary: "/usr/bin/doas"
+              - wildcard:
+                  full_log: "*\"/usr/bin/doas\"*"
+            minimum_should_match: 1
+        - range:
+            timestamp:
+              gte: "${START_TIME}"
+              lte: "${END_TIME}"
+      must_not:
+        - exists:
+            field: data_win_system_eventID
+        - wildcard:
+            rule_groups: "*windows*"
+  _source:
+    - timestamp
+    - agent_name
+    - full_log
+    - rule_mitre_id
+    - rule_description
+    - location
+    - data_process_exec_process_binary
+    - data_process_exec_process_arguments
+    - data_process_exec_parent_binary
+
+parameters:
+  AGENT_NAME:
+    description: "Target agent/host name"
+    type: string
+    required: true
+    example: "Amine"
+  CUSTOMER_CODE:
+    description: "Customer label for filtering"
+    type: string
+    required: true
+    example: "lab"
+  START_TIME:
+    description: "Query start time (ISO 8601 or relative)"
+    type: datetime
+    required: false
+    default: "now-24h"
+    example: "2026-01-28 00:00:00.000"
+  END_TIME:
+    description: "Query end time (ISO 8601 or relative)"
+    type: datetime
+    required: false
+    default: "now"
+    example: "2026-01-28 23:59:59.999"
+
+how_to_implement: >
+  Requires Linux endpoints with Wazuh agents capturing process execution and
+  parent process context. Monitoring doas invocations can reveal privilege
+  escalation attempts.
+
+known_false_positives: >
+  Legitimate administrative use of doas by trusted users or automated
+  scripts. Allowlist known administrative workflows.
+
+references:
+  - https://attack.mitre.org/techniques/T1548/
+  - https://man.openbsd.org/doas
+
+response:
+  message: >
+    doas usage detected on $agent_name$.
+    Command: $data_process_exec_process_binary$ $data_process_exec_process_arguments$
+    Parent: $data_process_exec_parent_binary$
+    MITRE ATT&CK: $rule_mitre_id$
+  risk_score: 65
+  severity: high
+  risk_objects:
+    - field: agent_name
+      type: system
+      score: 65
+  threat_objects:
+    - field: data_process_exec_process_binary
+      type: process
+
+tags:
+  analytic_story:
+    - Privilege Escalation
+    - Linux Security
+  asset_type: Linux
+  mitre_attack_id:
+    - T1548
+  product:
+    - Wazuh
+  security_domain: endpoint
