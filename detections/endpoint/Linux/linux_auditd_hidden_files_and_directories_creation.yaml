@@ -1,1 +1,118 @@
 
+name: Linux Hidden File/Directory Creation
+id: f1e2d3c4-5b6a-7d8e-9f0a-1b2c3d4e5f6a
+version: 1
+schema_version: "1.0"
+date: "2026-01-30"
+author: SOCFORTRESS LLC
+status: production
+type: TTP
+
+description: >
+  Detects creation or modification of hidden files or directories
+  using common Linux utilities such as touch, mkdir, vim, and nano.
+
+data_source:
+  - Wazuh Agent Logs
+  - Linux Auditd
+  - Syslog
+
+search:
+  index_pattern: "${INDEX_PATTERN}"
+  size: 100
+  sort:
+    - timestamp: desc
+  query:
+    bool:
+      must:
+        - term:
+            agent_labels_customer: "${CUSTOMER_CODE}"
+        - bool:
+            should:
+              - wildcard:
+                  full_log: "*touch*"
+              - wildcard:
+                  full_log: "*mkdir*"
+              - wildcard:
+                  full_log: "*vim*"
+              - wildcard:
+                  full_log: "*nano*"
+            minimum_should_match: 1
+        - wildcard:
+            full_log: "*/.*"
+        - range:
+            timestamp:
+              gte: "${START_TIME}"
+              lte: "${END_TIME}"
+      must_not:
+        - exists:
+            field: data_win_system_eventID
+        - wildcard:
+            rule_groups: "*windows*"
+
+  _source:
+    - timestamp
+    - agent_name
+    - data_process_exec_process_binary
+    - data_process_exec_process_arguments
+    - rule_mitre_id
+    - rule_description
+    - full_log
+
+parameters:
+  CUSTOMER_CODE:
+    description: "Customer label for filtering"
+    type: string
+    required: true
+    example: "lab"
+  START_TIME:
+    description: "Query start time (ISO 8601 or relative)"
+    type: datetime
+    required: false
+    default: "now-24h"
+    example: "2026-01-29 00:00:00.000"
+  END_TIME:
+    description: "Query end time (ISO 8601 or relative)"
+    type: datetime
+    required: false
+    default: "now"
+    example: "2026-01-29 23:59:59.999"
+
+how_to_implement: >
+  Requires Linux endpoints with Wazuh agents capturing process execution.
+  Monitoring hidden file or directory creation helps detect suspicious
+  persistence, configuration changes, or evasion attempts.
+
+known_false_positives: >
+  Legitimate hidden file creation by system administrators or normal
+  user configuration files.
+
+references:
+  - https://attack.mitre.org/techniques/T1158/
+  - https://documentation.wazuh.com/current/user-manual/capabilities/index.html
+
+response:
+  message: >
+    Hidden file or directory creation detected on $agent_name$.
+    Command: $data_process_exec_process_binary$ $data_process_exec_process_arguments$
+    MITRE ATT&CK: $rule_mitre_id$
+  risk_score: 50
+  severity: medium
+  risk_objects:
+    - field: agent_name
+      type: system
+      score: 50
+  threat_objects:
+    - field: data_process_exec_process_binary
+      type: process
+
+tags:
+  analytic_story:
+    - Linux Persistence
+    - File/Directory Monitoring
+  asset_type: Linux
+  mitre_attack_id:
+    - T1158
+  product:
+    - Wazuh
+  security_domain: endpoint
