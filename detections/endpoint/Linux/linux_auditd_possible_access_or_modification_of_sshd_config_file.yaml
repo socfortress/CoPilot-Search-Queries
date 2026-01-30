@@ -1,0 +1,121 @@
+name: Linux SSH Configuration Access
+id: d4e5f6a7-8b9c-4d1e-a2b3-5f6e7a8b9c1d
+version: 1
+schema_version: "1.0"
+date: "2026-01-30"
+author: SOCFORTRESS LLC
+status: production
+type: TTP
+
+description: >
+  Detects access or modification attempts on SSH configuration files
+  (sshd_config or files under /etc/ssh/), which may indicate
+  unauthorized SSH configuration changes or reconnaissance activity.
+
+data_source:
+  - Wazuh Agent Logs
+  - Linux Auditd
+  - Syslog
+
+search:
+  index_pattern: "${INDEX_PATTERN}"
+  size: 100
+  sort:
+    - timestamp: desc
+  query:
+    bool:
+      must:
+        - term:
+            agent_name: "${AGENT_NAME}"
+        - term:
+            agent_labels_customer: "${CUSTOMER_CODE}"
+        - bool:
+            should:
+              - query_string:
+                  default_field: full_log
+                  query: "*sshd_config*"
+              - query_string:
+                  default_field: full_log
+                  query: "*\\/etc\\/ssh\\/*"
+            minimum_should_match: 1
+        - range:
+            timestamp:
+              gte: "${START_TIME}"
+              lte: "${END_TIME}"
+      must_not:
+        - exists:
+            field: data_win_system_eventID
+        - wildcard:
+            rule_groups: "*windows*"
+
+  _source:
+    - timestamp
+    - agent_name
+    - data_process_exec_process_binary
+    - data_process_exec_process_arguments
+    - rule_mitre_id
+    - rule_description
+    - full_log
+
+parameters:
+  AGENT_NAME:
+    description: "Target agent/host name"
+    type: string
+    required: true
+    example: "socfortress-lab-agent"
+  CUSTOMER_CODE:
+    description: "Customer label for filtering"
+    type: string
+    required: true
+    example: "lab"
+  START_TIME:
+    description: "Query start time (ISO 8601 or relative)"
+    type: datetime
+    required: false
+    default: "now-24h"
+    example: "2026-01-29 00:00:00.000"
+  END_TIME:
+    description: "Query end time (ISO 8601 or relative)"
+    type: datetime
+    required: false
+    default: "now"
+    example: "2026-01-29 23:59:59.999"
+
+how_to_implement: >
+  Requires Linux endpoints with Wazuh agents capturing process execution
+  and command-line arguments. Monitoring access to SSH configuration files
+  helps detect unauthorized modifications or reconnaissance.
+
+known_false_positives: >
+  Legitimate administrative changes to SSH configuration files by system
+  administrators or automated configuration management tools.
+
+references:
+  - https://attack.mitre.org/techniques/T1552/
+  - https://documentation.wazuh.com/current/user-manual/capabilities/index.html
+
+response:
+  message: >
+    SSH configuration file access detected on $agent_name$.
+    Command: $data_process_exec_process_binary$ $data_process_exec_process_arguments$
+    MITRE ATT&CK: $rule_mitre_id$
+  risk_score: 55
+  severity: medium
+  risk_objects:
+    - field: agent_name
+      type: system
+      score: 55
+  threat_objects:
+    - field: data_process_exec_process_binary
+      type: process
+
+tags:
+  analytic_story:
+    - Linux Persistence Techniques
+    - SSH Configuration Monitoring
+  asset_type: Linux
+  mitre_attack_id:
+    - T1552
+  product:
+    - Wazuh
+  security_domain: endpoint
