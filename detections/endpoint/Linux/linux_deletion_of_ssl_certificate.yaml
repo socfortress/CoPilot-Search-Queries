@@ -1,0 +1,132 @@
+name: Suspicious SSL Certificate Deletion
+id: 3c7e5d91-8f2b-4e6a-9d4c-5b1f2e7c8a9d
+version: 1
+schema_version: "1.0"
+date: "2026-01-29"
+author: SOCFORTRESS LLC
+status: production
+type: TTP
+
+description: >
+  Detects attempts to delete SSL certificate files (*.pem, *.crt) under
+  /etc/ssl/certs using commands like rm, rm -f, or rm -rf. This may
+  indicate malicious attempts to remove or tamper with certificates.
+
+data_source:
+  - Wazuh Agent Logs
+  - Linux Auditd
+  - Syslog
+
+search:
+  index_pattern: "${INDEX_PATTERN}"
+  size: 100
+  sort:
+    - timestamp: desc
+  query:
+    bool:
+      must:
+        - term:
+            agent_name: "${AGENT_NAME}"
+        - term:
+            agent_labels_customer: "${CUSTOMER_CODE}"
+        - term:
+            location: "/var/log/tetragon/tetragon.log"
+        - wildcard:
+            full_log: "*/etc/ssl/certs/*"
+        - bool:
+            should:
+              - wildcard:
+                  full_log: "*.pem*"
+              - wildcard:
+                  full_log: "*.crt*"
+            minimum_should_match: 1
+        - bool:
+            should:
+              - wildcard:
+                  full_log: "*\"/usr/bin/rm\"*"
+              - wildcard:
+                  full_log: "*rm -f*"
+              - wildcard:
+                  full_log: "*rm -rf*"
+            minimum_should_match: 1
+        - range:
+            timestamp:
+              gte: "${START_TIME}"
+              lte: "${END_TIME}"
+      must_not:
+        - exists:
+            field: data_win_system_eventID
+        - wildcard:
+            rule_groups: "*windows*"
+  _source:
+    - timestamp
+    - agent_name
+    - data_process_exec_process_binary
+    - data_process_exec_process_arguments
+    - data_process_exec_parent_binary
+    - rule_mitre_id
+    - rule_description
+    - full_log
+
+parameters:
+  AGENT_NAME:
+    description: "Target agent/host name"
+    type: string
+    required: true
+    example: "Amine"
+  CUSTOMER_CODE:
+    description: "Customer label for filtering"
+    type: string
+    required: true
+    example: "lab"
+  START_TIME:
+    description: "Query start time (ISO 8601 or relative)"
+    type: datetime
+    required: false
+    default: "now-24h"
+    example: "2026-01-28 00:00:00.000"
+  END_TIME:
+    description: "Query end time (ISO 8601 or relative)"
+    type: datetime
+    required: false
+    default: "now"
+    example: "2026-01-28 23:59:59.999"
+
+how_to_implement: >
+  Requires Linux endpoints with Wazuh agents configured to log full process
+  execution including command-line arguments. Monitoring deletion of SSL
+  certificate files can reveal tampering or malicious cleanup activity.
+
+known_false_positives: >
+  Legitimate certificate rotation or system maintenance by trusted users.
+
+references:
+  - https://attack.mitre.org/techniques/T1485/
+  - https://tetragon.io/docs/
+
+response:
+  message: >
+    Suspicious deletion of SSL certificates detected on $agent_name$.
+    Command: $data_process_exec_process_binary$ $data_process_exec_process_arguments$
+    Parent: $data_process_exec_parent_binary$
+    MITRE ATT&CK: $rule_mitre_id$
+  risk_score: 80
+  severity: high
+  risk_objects:
+    - field: agent_name
+      type: system
+      score: 80
+  threat_objects:
+    - field: data_process_exec_process_binary
+      type: process
+
+tags:
+  analytic_story:
+    - File Tampering
+    - Certificate Security
+  asset_type: Linux
+  mitre_attack_id:
+    - T1485
+  product:
+    - Wazuh
+  security_domain: endpoint
