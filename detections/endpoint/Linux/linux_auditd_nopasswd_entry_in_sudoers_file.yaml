@@ -1,0 +1,121 @@
+name: Linux Sudoers File Access
+id: a1b2c3d4-5e6f-7a8b-9c0d-e1f2a3b4c5d6
+version: 1
+schema_version: "1.0"
+date: "2026-01-30"
+author: SOCFORTRESS LLC
+status: production
+type: TTP
+
+description: >
+  Detects access or modification attempts on sudoers files or lines
+  containing NOPASSWD, which may indicate privilege escalation
+  or unauthorized sudo configuration changes.
+
+data_source:
+  - Wazuh Agent Logs
+  - Linux Auditd
+  - Syslog
+
+search:
+  index_pattern: "${INDEX_PATTERN}"
+  size: 100
+  sort:
+    - timestamp: desc
+  query:
+    bool:
+      must:
+        - term:
+            agent_name: "${AGENT_NAME}"
+        - term:
+            agent_labels_customer: "${CUSTOMER_CODE}"
+        - bool:
+            should:
+              - query_string:
+                  default_field: full_log
+                  query: "*NOPASSWD*"
+              - query_string:
+                  default_field: full_log
+                  query: "*sudoers*"
+            minimum_should_match: 1
+        - range:
+            timestamp:
+              gte: "${START_TIME}"
+              lte: "${END_TIME}"
+      must_not:
+        - exists:
+            field: data_win_system_eventID
+        - wildcard:
+            rule_groups: "*windows*"
+
+  _source:
+    - timestamp
+    - agent_name
+    - data_process_exec_process_binary
+    - data_process_exec_process_arguments
+    - rule_mitre_id
+    - rule_description
+    - full_log
+
+parameters:
+  AGENT_NAME:
+    description: "Target agent/host name"
+    type: string
+    required: true
+    example: "socfortress-lab-agent"
+  CUSTOMER_CODE:
+    description: "Customer label for filtering"
+    type: string
+    required: true
+    example: "lab"
+  START_TIME:
+    description: "Query start time (ISO 8601 or relative)"
+    type: datetime
+    required: false
+    default: "now-24h"
+    example: "2026-01-29 00:00:00.000"
+  END_TIME:
+    description: "Query end time (ISO 8601 or relative)"
+    type: datetime
+    required: false
+    default: "now"
+    example: "2026-01-29 23:59:59.999"
+
+how_to_implement: >
+  Requires Linux endpoints with Wazuh agents capturing process execution
+  and command-line arguments. Monitoring sudoers files and NOPASSWD
+  entries helps detect unauthorized privilege escalation attempts.
+
+known_false_positives: >
+  Legitimate administrative changes to sudoers files by system
+  administrators or automated configuration management tools.
+
+references:
+  - https://attack.mitre.org/techniques/T1548/
+  - https://documentation.wazuh.com/current/user-manual/capabilities/index.html
+
+response:
+  message: >
+    Sudoers/NOPASSWD file access detected on $agent_name$.
+    Command: $data_process_exec_process_binary$ $data_process_exec_process_arguments$
+    MITRE ATT&CK: $rule_mitre_id$
+  risk_score: 60
+  severity: medium
+  risk_objects:
+    - field: agent_name
+      type: system
+      score: 60
+  threat_objects:
+    - field: data_process_exec_process_binary
+      type: process
+
+tags:
+  analytic_story:
+    - Linux Privilege Escalation
+    - Sudoers Monitoring
+  asset_type: Linux
+  mitre_attack_id:
+    - T1548
+  product:
+    - Wazuh
+  security_domain: endpoint
