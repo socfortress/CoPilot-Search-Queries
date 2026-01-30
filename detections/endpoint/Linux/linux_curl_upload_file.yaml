@@ -1,0 +1,141 @@
+name: Linux Suspicious Curl Data Exfiltration
+id: c3d9e7f1-6a2b-4d8f-9c2b-5e6f7a8b9c0d
+version: 1
+schema_version: "1.0"
+date: "2026-01-30"
+author: SOCFORTRESS LLC
+status: production
+type: TTP
+
+description: >
+  Detects suspicious use of curl commands that include form data, uploads,
+  or requests targeting AWS credential/config files, which may indicate
+  data exfiltration or credential harvesting attempts on Linux endpoints.
+
+data_source:
+  - Wazuh Agent Logs
+  - Linux Auditd
+  - Syslog
+
+search:
+  index_pattern: "${INDEX_PATTERN}"
+  size: 100
+  sort:
+    - timestamp: desc
+  query:
+    bool:
+      must:
+        - term:
+            agent_name: "${AGENT_NAME}"
+        - term:
+            agent_labels_customer: "${CUSTOMER_CODE}"
+        - term:
+            data_process_exec_process_binary: "/usr/bin/curl"
+        - bool:
+            should:
+              - wildcard:
+                  data_process_exec_process_arguments: "*-F*"
+              - wildcard:
+                  data_process_exec_process_arguments: "*--form*"
+              - wildcard:
+                  data_process_exec_process_arguments: "*-T*"
+              - wildcard:
+                  data_process_exec_process_arguments: "*--upload-file*"
+              - wildcard:
+                  data_process_exec_process_arguments: "*-d*"
+              - wildcard:
+                  data_process_exec_process_arguments: "*--data*"
+              - wildcard:
+                  data_process_exec_process_arguments: "*--data-raw*"
+              - wildcard:
+                  data_process_exec_process_arguments: "*-I*"
+              - wildcard:
+                  data_process_exec_process_arguments: "*--head*"
+            minimum_should_match: 1
+        - bool:
+            should:
+              - wildcard:
+                  data_process_exec_process_arguments: "*.aws/credentials*"
+              - wildcard:
+                  data_process_exec_process_arguments: "*.aws/config*"
+            minimum_should_match: 1
+        - range:
+            timestamp:
+              gte: "${START_TIME}"
+              lte: "${END_TIME}"
+      must_not: []
+
+  _source:
+    - timestamp
+    - agent_name
+    - rule_description
+    - rule_id
+    - rule_level
+    - data_process_exec_process_arguments
+    - data_process_exec_process_auid
+    - data_process_exec_parent_binary
+    - data_process_exec_process_pid
+    - data_process_exec_parent_pid
+
+parameters:
+  AGENT_NAME:
+    description: "Target agent/host name"
+    type: string
+    required: true
+    example: "Amine"
+  CUSTOMER_CODE:
+    description: "Customer label for filtering"
+    type: string
+    required: true
+    example: "lab"
+  START_TIME:
+    description: "Query start time (ISO 8601 or relative)"
+    type: datetime
+    required: false
+    default: "now-24h"
+    example: "2026-01-27 00:00:00.000"
+  END_TIME:
+    description: "Query end time (ISO 8601 or relative)"
+    type: datetime
+    required: false
+    default: "now"
+    example: "2026-01-27 23:59:59.999"
+
+how_to_implement: >
+  Requires Linux endpoints with Wazuh agents capturing process execution
+  and command-line arguments. Monitoring curl commands with data upload
+  options or targeting AWS configuration files can indicate exfiltration attempts.
+
+known_false_positives: >
+  Legitimate automated scripts or backups using curl to send data or
+  interact with AWS endpoints may trigger this detection.
+
+references:
+  - https://attack.mitre.org/techniques/T1041/
+  - https://tetragon.io/docs/
+
+response:
+  message: >
+    Suspicious curl activity detected on $agent_name$.
+    Command: $data_process_exec_process_binary$ $data_process_exec_process_arguments$
+    MITRE ATT&CK: $rule_mitre_id$
+  risk_score: 75
+  severity: high
+  risk_objects:
+    - field: agent_name
+      type: system
+      score: 75
+  threat_objects:
+    - field: data_process_exec_process_binary
+      type: process
+
+tags:
+  analytic_story:
+    - Data Exfiltration
+    - Cloud Credential Theft
+  asset_type: Linux
+  mitre_attack_id:
+    - T1041
+  product:
+    - Wazuh
+  security_domain: endpoint
