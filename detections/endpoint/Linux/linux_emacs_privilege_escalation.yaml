@@ -1,0 +1,134 @@
+name: Suspicious Emacs Eval Execution via Sudo
+id: 8c2f7b91-4a9e-4f6d-9d6e-3a0b6c91f4aa
+version: 1
+schema_version: "1.0"
+date: "2026-01-29"
+author: SOCFORTRESS LLC
+status: production
+type: TTP
+
+description: >
+  Detects suspicious usage of Emacs with the --eval argument executed in
+  conjunction with sudo. Emacs --eval can be abused to execute arbitrary
+  Lisp code, and when combined with elevated privileges, may indicate
+  privilege escalation or defense evasion techniques.
+
+data_source:
+  - Wazuh Agent Logs
+  - Linux Auditd
+  - Syslog
+
+search:
+  index_pattern: "${INDEX_PATTERN}"
+
+  size: 100
+
+  sort:
+    - timestamp: desc
+
+  query:
+    bool:
+      must:
+        - term:
+            agent_name: "${AGENT_NAME}"
+
+        - term:
+            agent_labels_customer: "${CUSTOMER_CODE}"
+
+        - wildcard:
+            full_log: "*emacs*--eval*"
+
+        - wildcard:
+            full_log: "*sudo*"
+
+        - range:
+            timestamp:
+              gte: "${START_TIME}"
+              lte: "${END_TIME}"
+
+      must_not:
+        - exists:
+            field: data_win_system_eventID
+        - wildcard:
+            rule_groups: "*windows*"
+
+  _source:
+    - timestamp
+    - agent_name
+    - data_process_exec_process_binary
+    - data_process_exec_process_arguments
+    - data_process_exec_parent_binary
+    - rule_mitre_id
+    - rule_description
+    - full_log
+
+parameters:
+  AGENT_NAME:
+    description: "Target agent/host name"
+    type: string
+    required: true
+    example: "Amine"
+
+  CUSTOMER_CODE:
+    description: "Customer label for filtering"
+    type: string
+    required: true
+    example: "lab"
+
+  START_TIME:
+    description: "Query start time (ISO 8601 or relative)"
+    type: datetime
+    required: false
+    default: "now-24h"
+    example: "2026-01-28 00:00:00.000"
+
+  END_TIME:
+    description: "Query end time (ISO 8601 or relative)"
+    type: datetime
+    required: false
+    default: "now"
+    example: "2026-01-28 23:59:59.999"
+
+how_to_implement: >
+  This detection requires Linux endpoints with Wazuh agents configured to
+  capture full command-line arguments and parent process information.
+  Monitoring interactive editors invoked with elevated privileges is
+  critical for detecting living-off-the-land abuse.
+
+known_false_positives: >
+  Advanced users or administrators may legitimately use Emacs with sudo
+  for system configuration tasks. Consider allowlisting known admin users
+  or trusted maintenance workflows.
+
+references:
+  - https://attack.mitre.org/techniques/T1059/
+  - https://gtfobins.github.io/gtfobins/emacs/
+
+response:
+  message: >
+    Suspicious Emacs execution with --eval detected on $agent_name$ using sudo.
+    Command: $data_process_exec_process_binary$ $data_process_exec_process_arguments$
+    Parent: $data_process_exec_parent_binary$
+    MITRE ATT&CK: $rule_mitre_id$
+  risk_score: 70
+  severity: high
+
+  risk_objects:
+    - field: agent_name
+      type: system
+      score: 70
+
+  threat_objects:
+    - field: data_process_exec_process_binary
+      type: process
+
+tags:
+  analytic_story:
+    - Privilege Escalation
+    - Living off the Land
+  asset_type: Linux
+  mitre_attack_id:
+    - T1059
+  product:
+    - Wazuh
+  security_domain: endpoint
