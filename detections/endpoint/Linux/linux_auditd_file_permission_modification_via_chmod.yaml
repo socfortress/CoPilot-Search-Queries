@@ -1,0 +1,119 @@
+name: Linux File Permission Modification Detection
+id: e2f3g4h5-6789-1011-1213-141516171819
+version: 1
+schema_version: "1.0"
+date: "2026-01-30"
+author: SOCFORTRESS LLC
+status: production
+type: TTP
+
+description: >
+  Detects attempts to change file permissions using `chmod` with potentially
+  risky modes like 777, 755, 754, or adding execute permissions. This may
+  indicate privilege escalation, persistence setup, or unauthorized access.
+
+data_source:
+  - Wazuh Agent Logs
+  - Linux Auditd
+  - Syslog
+
+search:
+  index_pattern: "${INDEX_PATTERN}"
+  size: 20
+  sort:
+    - timestamp: desc
+  query:
+    bool:
+      must:
+        - term:
+            agent_name: "${AGENT_NAME}"
+        - term:
+            agent_labels_customer: "${CUSTOMER_CODE}"
+        - wildcard:
+            full_log: "*chmod*"
+        - bool:
+            should:
+              - wildcard: { full_log: "*777*" }
+              - wildcard: { full_log: "*755*" }
+              - wildcard: { full_log: "*754*" }
+              - wildcard: { full_log: "*+x*" }
+            minimum_should_match: 1
+        - range:
+            timestamp:
+              gte: "${START_TIME}"
+              lte: "${END_TIME}"
+      must_not:
+        - exists:
+            field: data_win_system_eventID
+        - wildcard:
+            rule_groups: "*windows*"
+
+  _source:
+    - timestamp
+    - agent_name
+    - full_log
+    - rule_mitre_id
+    - rule_description
+    - location
+
+parameters:
+  AGENT_NAME:
+    description: "Agent name to filter"
+    type: string
+    required: true
+    example: "Amine"
+  CUSTOMER_CODE:
+    description: "Customer label for filtering"
+    type: string
+    required: true
+    example: "lab"
+  START_TIME:
+    description: "Query start time"
+    type: datetime
+    required: true
+    example: "2026-01-28 14:30:00.000"
+  END_TIME:
+    description: "Query end time"
+    type: datetime
+    required: true
+    example: "2026-01-28 14:33:00.000"
+
+how_to_implement: >
+  Requires Linux endpoints with Wazuh agents capturing process execution.
+  Monitoring `chmod` commands with high-risk permission values helps detect
+  suspicious privilege escalation or persistence activities.
+
+known_false_positives: >
+  Legitimate administrative tasks modifying file permissions for service
+  operation or software installation.
+
+references:
+  - https://attack.mitre.org/techniques/T1098/
+  - https://man7.org/linux/man-pages/man1/chmod.1.html
+
+response:
+  message: >
+    Suspicious file permission modification detected on $agent_name$.
+    Command: $full_log$
+    MITRE ATT&CK: $rule_mitre_id$
+  risk_score: 50
+  severity: medium
+  risk_objects:
+    - field: agent_name
+      type: system
+      score: 50
+  threat_objects:
+    - field: full_log
+      type: process
+
+tags:
+  analytic_story:
+    - Linux Persistence
+    - Privilege Escalation
+    - File Tampering
+  asset_type: Linux
+  mitre_attack_id:
+    - T1098
+  product:
+    - Wazuh
+  security_domain: endpoint
