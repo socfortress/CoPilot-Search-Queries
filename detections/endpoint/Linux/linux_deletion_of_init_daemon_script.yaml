@@ -1,0 +1,124 @@
+name: Linux Init.d Script Deletion
+id: 6e2f9a41-3b7c-4d5e-8c9f-1a2b3d4f5e6a
+version: 1
+schema_version: "1.0"
+date: "2026-01-29"
+author: SOCFORTRESS LLC
+status: production
+type: TTP
+
+description: >
+  Detects attempts to delete daemon scripts under /etc/init.d using
+  commands like rm, rm -f, or rm -rf. This may indicate malicious
+  attempts to disable system services or tamper with startup scripts.
+
+data_source:
+  - Wazuh Agent Logs
+  - Linux Auditd
+  - Syslog
+
+search:
+  index_pattern: "${INDEX_PATTERN}"
+  size: 100
+  sort:
+    - timestamp: desc
+  query:
+    bool:
+      must:
+        - term:
+            agent_name: "${AGENT_NAME}"
+        - term:
+            agent_labels_customer: "${CUSTOMER_CODE}"
+        - term:
+            location: "/var/log/tetragon/tetragon.log"
+        - bool:
+            should:
+              - wildcard:
+                  full_log: "*\"/usr/bin/rm\"*/etc/init.d/*"
+              - wildcard:
+                  full_log: "*rm -f*/etc/init.d/*"
+              - wildcard:
+                  full_log: "*rm -rf*/etc/init.d/*"
+            minimum_should_match: 1
+        - range:
+            timestamp:
+              gte: "${START_TIME}"
+              lte: "${END_TIME}"
+      must_not:
+        - exists:
+            field: data_win_system_eventID
+        - wildcard:
+            rule_groups: "*windows*"
+  _source:
+    - timestamp
+    - agent_name
+    - data_process_exec_process_binary
+    - data_process_exec_process_arguments
+    - data_process_exec_parent_binary
+    - rule_mitre_id
+    - rule_description
+    - full_log
+
+parameters:
+  AGENT_NAME:
+    description: "Target agent/host name"
+    type: string
+    required: true
+    example: "Amine"
+  CUSTOMER_CODE:
+    description: "Customer label for filtering"
+    type: string
+    required: true
+    example: "lab"
+  START_TIME:
+    description: "Query start time (ISO 8601 or relative)"
+    type: datetime
+    required: false
+    default: "now-24h"
+    example: "2026-01-28 00:00:00.000"
+  END_TIME:
+    description: "Query end time (ISO 8601 or relative)"
+    type: datetime
+    required: false
+    default: "now"
+    example: "2026-01-28 23:59:59.999"
+
+how_to_implement: >
+  Requires Linux endpoints with Wazuh agents capturing process execution
+  and command-line arguments. Monitoring deletion of /etc/init.d scripts
+  can reveal tampering with system services.
+
+known_false_positives: >
+  Legitimate system maintenance or automated removal of service scripts
+  by trusted users.
+
+references:
+  - https://attack.mitre.org/techniques/T1485/
+  - https://tetragon.io/docs/
+
+response:
+  message: >
+    Deletion of /etc/init.d scripts detected on $agent_name$.
+    Command: $data_process_exec_process_binary$ $data_process_exec_process_arguments$
+    Parent: $data_process_exec_parent_binary$
+    MITRE ATT&CK: $rule_mitre_id$
+  risk_score: 85
+  severity: high
+  risk_objects:
+    - field: agent_name
+      type: system
+      score: 85
+  threat_objects:
+    - field: data_process_exec_process_binary
+      type: process
+
+tags:
+  analytic_story:
+    - File Tampering
+    - Service Security
+  asset_type: Linux
+  mitre_attack_id:
+    - T1485
+  product:
+    - Wazuh
+  security_domain: endpoint
