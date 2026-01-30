@@ -1,0 +1,127 @@
+name: Linux File Discovery Detection
+id: f3g4h5i6-7890-1112-1314-151617181920
+version: 1
+schema_version: "1.0"
+date: "2026-01-30"
+author: SOCFORTRESS LLC
+status: production
+type: TTP
+
+description: >
+  Detects attempts to search for or enumerate files on Linux endpoints
+  using commands like `find` or `grep` targeting sensitive file types
+  such as PDFs, documents, spreadsheets, images, and media files.
+  This may indicate data discovery or exfiltration attempts.
+
+data_source:
+  - Wazuh Agent Logs
+  - Linux Auditd
+  - Syslog
+
+search:
+  index_pattern: "${INDEX_PATTERN}"
+  size: 100
+  sort:
+    - timestamp: desc
+  query:
+    bool:
+      must:
+        - term:
+            agent_name: "${AGENT_NAME}"
+        - term:
+            agent_labels_customer: "${CUSTOMER_CODE}"
+        - bool:
+            should:
+              - wildcard: { full_log: "*find*" }
+              - wildcard: { full_log: "*grep*" }
+            minimum_should_match: 1
+        - bool:
+            should:
+              - wildcard: { full_log: "*.pdf*" }
+              - wildcard: { full_log: "*.doc*" }
+              - wildcard: { full_log: "*.xlsx*" }
+              - wildcard: { full_log: "*.jpg*" }
+              - wildcard: { full_log: "*.png*" }
+              - wildcard: { full_log: "*.mp4*" }
+              - wildcard: { full_log: "*.mp3*" }
+              - wildcard: { full_log: "*.avi*" }
+            minimum_should_match: 1
+        - range:
+            timestamp:
+              gte: "${START_TIME}"
+              lte: "${END_TIME}"
+      must_not:
+        - exists:
+            field: data_win_system_eventID
+        - wildcard:
+            rule_groups: "*windows*"
+
+  _source:
+    - timestamp
+    - agent_name
+    - data_process_exec_process_binary
+    - data_process_exec_process_arguments
+    - rule_mitre_id
+    - rule_description
+    - full_log
+
+parameters:
+  AGENT_NAME:
+    description: "Agent name to filter"
+    type: string
+    required: true
+    example: "Amine"
+  CUSTOMER_CODE:
+    description: "Customer label for filtering"
+    type: string
+    required: true
+    example: "lab"
+  START_TIME:
+    description: "Query start time"
+    type: datetime
+    required: true
+    example: "2026-01-28 00:00:00.000"
+  END_TIME:
+    description: "Query end time"
+    type: datetime
+    required: true
+    example: "2026-01-28 23:59:59.999"
+
+how_to_implement: >
+  Requires Linux endpoints with Wazuh agents capturing process execution.
+  Monitoring file discovery activity on sensitive file types helps detect
+  potential data exfiltration or reconnaissance activity.
+
+known_false_positives: >
+  Legitimate administrative or user searches for documents/media on the system.
+
+references:
+  - https://attack.mitre.org/techniques/T1083/
+  - https://linux.die.net/man/1/find
+  - https://linux.die.net/man/1/grep
+
+response:
+  message: >
+    Suspicious file discovery activity detected on $agent_name$.
+    Command: $full_log$
+    MITRE ATT&CK: $rule_mitre_id$
+  risk_score: 45
+  severity: medium
+  risk_objects:
+    - field: agent_name
+      type: system
+      score: 45
+  threat_objects:
+    - field: full_log
+      type: process
+
+tags:
+  analytic_story:
+    - Linux Reconnaissance
+    - Data Discovery
+  asset_type: Linux
+  mitre_attack_id:
+    - T1083
+  product:
+    - Wazuh
+  security_domain: endpoint
