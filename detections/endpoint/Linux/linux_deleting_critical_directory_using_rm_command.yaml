@@ -1,0 +1,126 @@
+name: Linux Critical Directory Deletion
+id: a3b7c9d2-4f5e-4b6d-8c1a-2d3f4e5b6c7a
+version: 1
+schema_version: "1.0"
+date: "2026-01-29"
+author: SOCFORTRESS LLC
+status: production
+type: TTP
+
+description: >
+  Detects destructive deletion attempts using rm -rf targeting critical
+  Linux directories such as /boot, /var/log, /etc, and /dev. This may
+  indicate malicious activity aiming to disrupt system operations or erase logs.
+
+data_source:
+  - Wazuh Agent Logs
+  - Linux Auditd
+  - Syslog
+
+search:
+  index_pattern: "${INDEX_PATTERN}"
+  size: 100
+  sort:
+    - timestamp: desc
+  query:
+    bool:
+      must:
+        - term:
+            agent_name: "${AGENT_NAME}"
+        - term:
+            agent_labels_customer: "${CUSTOMER_CODE}"
+        - term:
+            location: "/var/log/tetragon/tetragon.log"
+        - bool:
+            should:
+              - wildcard:
+                  full_log: "*\"/usr/bin/rm\"*-rf*/boot/*"
+              - wildcard:
+                  full_log: "*\"/usr/bin/rm\"*-rf*/var/log/*"
+              - wildcard:
+                  full_log: "*\"/usr/bin/rm\"*-rf*/etc/*"
+              - wildcard:
+                  full_log: "*\"/usr/bin/rm\"*-rf*/dev/*"
+            minimum_should_match: 1
+        - range:
+            timestamp:
+              gte: "${START_TIME}"
+              lte: "${END_TIME}"
+      must_not:
+        - exists:
+            field: data_win_system_eventID
+        - wildcard:
+            rule_groups: "*windows*"
+  _source:
+    - timestamp
+    - agent_name
+    - data_process_exec_process_binary
+    - data_process_exec_process_arguments
+    - data_process_exec_parent_binary
+    - rule_mitre_id
+    - rule_description
+    - full_log
+
+parameters:
+  AGENT_NAME:
+    description: "Target agent/host name"
+    type: string
+    required: true
+    example: "Amine"
+  CUSTOMER_CODE:
+    description: "Customer label for filtering"
+    type: string
+    required: true
+    example: "lab"
+  START_TIME:
+    description: "Query start time (ISO 8601 or relative)"
+    type: datetime
+    required: false
+    default: "now-24h"
+    example: "2026-01-28 00:00:00.000"
+  END_TIME:
+    description: "Query end time (ISO 8601 or relative)"
+    type: datetime
+    required: false
+    default: "now"
+    example: "2026-01-28 23:59:59.999"
+
+how_to_implement: >
+  Requires Linux endpoints with Wazuh agents capturing process execution
+  and command-line arguments. Monitoring destructive rm -rf commands can
+  reveal attempts to wipe critical system directories.
+
+known_false_positives: >
+  Legitimate system maintenance scripts are rare but may occasionally
+  remove files in monitored directories; use allowlists where appropriate.
+
+references:
+  - https://attack.mitre.org/techniques/T1485/
+  - https://tetragon.io/docs/
+
+response:
+  message: >
+    Destructive deletion of critical directories detected on $agent_name$.
+    Command: $data_process_exec_process_binary$ $data_process_exec_process_arguments$
+    Parent: $data_process_exec_parent_binary$
+    MITRE ATT&CK: $rule_mitre_id$
+  risk_score: 95
+  severity: critical
+  risk_objects:
+    - field: agent_name
+      type: system
+      score: 95
+  threat_objects:
+    - field: data_process_exec_process_binary
+      type: process
+
+tags:
+  analytic_story:
+    - File Tampering
+    - Destructive Commands
+  asset_type: Linux
+  mitre_attack_id:
+    - T1485
+  product:
+    - Wazuh
+  security_domain: endpoint
