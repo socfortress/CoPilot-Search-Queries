@@ -1,0 +1,116 @@
+name: Crontab Interactive Edit Execution
+id: 4e2a6c91-7f3d-4b6e-9a4f-1c8b0e5a92d4
+version: 1
+schema_version: "1.0"
+date: "2026-01-29"
+author: SOCFORTRESS LLC
+status: production
+type: TTP
+
+description: >
+  Detects usage of the crontab binary with the interactive edit flag (-e).
+  Adversaries may abuse crontab to establish persistence by modifying scheduled
+  tasks to execute malicious commands.
+
+data_source:
+  - Wazuh Agent Logs
+  - Linux Auditd
+  - Syslog
+
+search:
+  index_pattern: "${INDEX_PATTERN}"
+  size: 100
+  sort:
+    - timestamp: desc
+  query:
+    bool:
+      must:
+        - term:
+            agent_name: "${AGENT_NAME}"
+        - term:
+            agent_labels_customer: "${CUSTOMER_CODE}"
+        - term:
+            data_process_exec_process_binary: "/usr/bin/crontab"
+        - wildcard:
+            data_process_exec_process_arguments: "*-e*"
+        - range:
+            timestamp:
+              gte: "${START_TIME}"
+              lte: "${END_TIME}"
+      must_not:
+        - exists:
+            field: data_win_system_eventID
+        - wildcard:
+            rule_groups: "*windows*"
+  _source:
+    - timestamp
+    - agent_name
+    - data_process_exec_process_binary
+    - data_process_exec_process_arguments
+    - data_process_exec_parent_binary
+    - rule_mitre_id
+    - rule_description
+    - full_log
+
+parameters:
+  AGENT_NAME:
+    description: "Target agent/host name"
+    type: string
+    required: true
+    example: "Amine"
+  CUSTOMER_CODE:
+    description: "Customer label for filtering"
+    type: string
+    required: true
+    example: "lab"
+  START_TIME:
+    description: "Query start time (ISO 8601 or relative)"
+    type: datetime
+    required: false
+    default: "now-24h"
+    example: "2026-01-28 00:00:00.000"
+  END_TIME:
+    description: "Query end time (ISO 8601 or relative)"
+    type: datetime
+    required: false
+    default: "now"
+    example: "2026-01-28 23:59:59.999"
+
+how_to_implement: >
+  This detection requires Linux endpoints with Wazuh agents configured to log
+  process execution details, including command-line arguments.
+
+known_false_positives: >
+  System administrators legitimately editing scheduled tasks using crontab.
+  Consider allowlisting trusted users or maintenance windows.
+
+references:
+  - https://attack.mitre.org/techniques/T1053/003/
+  - https://gtfobins.github.io/gtfobins/crontab/
+
+response:
+  message: >
+    Crontab interactive edit detected on $agent_name$.
+    Command: $data_process_exec_process_binary$ $data_process_exec_process_arguments$
+    Parent: $data_process_exec_parent_binary$
+    MITRE ATT&CK: $rule_mitre_id$
+  risk_score: 60
+  severity: medium
+  risk_objects:
+    - field: agent_name
+      type: system
+      score: 60
+  threat_objects:
+    - field: data_process_exec_process_binary
+      type: process
+
+tags:
+  analytic_story:
+    - Linux Persistence
+    - Scheduled Task Abuse
+  asset_type: Linux
+  mitre_attack_id:
+    - T1053.003
+  product:
+    - Wazuh
+  security_domain: endpoint
