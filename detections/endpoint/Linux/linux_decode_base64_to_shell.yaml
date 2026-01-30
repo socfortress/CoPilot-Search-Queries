@@ -1,0 +1,146 @@
+name: Linux Suspicious Base64 Execution
+id: b7c4d8e1-5f2a-4c9b-8d3e-4f5a6b7c8d9e
+version: 1
+schema_version: "1.0"
+date: "2026-01-29"
+author: SOCFORTRESS LLC
+status: production
+type: TTP
+
+description: >
+  Detects suspicious use of base64 decoding commands that are piped
+  into bash or sh, which may indicate obfuscated script execution
+  or malware payload delivery on Linux endpoints.
+
+data_source:
+  - Wazuh Agent Logs
+  - Linux Auditd
+  - Syslog
+
+search:
+  index_pattern: "${INDEX_PATTERN}"
+  size: 100
+  sort:
+    - timestamp: desc
+  query:
+    bool:
+      must:
+        - term:
+            agent_name: "${AGENT_NAME}"
+        - term:
+            agent_labels_customer: "${CUSTOMER_CODE}"
+        - term:
+            location: "/var/log/tetragon/tetragon.log"
+        - bool:
+            should:
+              - term:
+                  data_process_exec_process_binary: "/usr/bin/base64"
+              - wildcard:
+                  data_process_exec_process_arguments: "*base64 -d*"
+              - wildcard:
+                  data_process_exec_process_arguments: "*base64 --decode*"
+              - wildcard:
+                  data_process_exec_parent_arguments: "*base64 -d*"
+              - wildcard:
+                  data_process_exec_parent_arguments: "*base64 --decode*"
+            minimum_should_match: 1
+        - bool:
+            should:
+              - wildcard:
+                  data_process_exec_process_arguments: "*| bash*"
+              - wildcard:
+                  data_process_exec_process_arguments: "*| sh*"
+              - wildcard:
+                  data_process_exec_parent_arguments: "*| bash*"
+              - wildcard:
+                  data_process_exec_parent_arguments: "*| sh*"
+              - term:
+                  data_process_exec_parent_binary: "/bin/bash"
+              - term:
+                  data_process_exec_parent_binary: "/usr/bin/bash"
+              - term:
+                  data_process_exec_parent_binary: "/bin/sh"
+              - term:
+                  data_process_exec_parent_binary: "/usr/bin/sh"
+            minimum_should_match: 1
+        - range:
+            timestamp:
+              gte: "${START_TIME}"
+              lte: "${END_TIME}"
+      must_not:
+        - exists:
+            field: data_win_system_eventID
+        - wildcard:
+            rule_groups: "*windows*"
+  _source:
+    - timestamp
+    - agent_name
+    - data_process_exec_process_binary
+    - data_process_exec_process_arguments
+    - data_process_exec_parent_binary
+    - data_process_exec_parent_arguments
+    - rule_mitre_id
+    - rule_description
+
+parameters:
+  AGENT_NAME:
+    description: "Target agent/host name"
+    type: string
+    required: true
+    example: "Amine"
+  CUSTOMER_CODE:
+    description: "Customer label for filtering"
+    type: string
+    required: true
+    example: "lab"
+  START_TIME:
+    description: "Query start time (ISO 8601 or relative)"
+    type: datetime
+    required: false
+    default: "now-24h"
+    example: "2026-01-28 00:00:00.000"
+  END_TIME:
+    description: "Query end time (ISO 8601 or relative)"
+    type: datetime
+    required: false
+    default: "now"
+    example: "2026-01-28 23:59:59.999"
+
+how_to_implement: >
+  Requires Linux endpoints with Wazuh agents capturing process execution
+  and command-line arguments. Monitoring base64 decoding piped into shells
+  can detect obfuscated scripts and potential malware activity.
+
+known_false_positives: >
+  Legitimate scripts using base64 decoding in automation may trigger this detection.
+
+references:
+  - https://attack.mitre.org/techniques/T1059/004/
+  - https://tetragon.io/docs/
+
+response:
+  message: >
+    Suspicious base64 execution detected on $agent_name$.
+    Command: $data_process_exec_process_binary$ $data_process_exec_process_arguments$
+    Parent: $data_process_exec_parent_binary$ $data_process_exec_parent_arguments$
+    MITRE ATT&CK: $rule_mitre_id$
+  risk_score: 80
+  severity: high
+  risk_objects:
+    - field: agent_name
+      type: system
+      score: 80
+  threat_objects:
+    - field: data_process_exec_process_binary
+      type: process
+
+tags:
+  analytic_story:
+    - Code Obfuscation
+    - Malicious Script Execution
+  asset_type: Linux
+  mitre_attack_id:
+    - T1059.004
+  product:
+    - Wazuh
+  security_domain: endpoint
