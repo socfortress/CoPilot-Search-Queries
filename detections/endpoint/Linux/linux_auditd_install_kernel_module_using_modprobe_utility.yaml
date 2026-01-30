@@ -1,0 +1,119 @@
+name: Linux Kernel Module Load
+id: f1e2d3c4-5b6a-7d8e-9f0a-1b2c3d4e5f6a
+version: 1
+schema_version: "1.0"
+date: "2026-01-30"
+author: SOCFORTRESS LLC
+status: production
+type: TTP
+
+description: >
+  Detects execution of modprobe or any process attempting to
+  load kernel modules, which can indicate unauthorized kernel
+  manipulation or persistence mechanisms.
+
+data_source:
+  - Wazuh Agent Logs
+  - Linux Auditd
+  - Syslog
+
+search:
+  index_pattern: "${INDEX_PATTERN}"
+  size: 100
+  sort:
+    - timestamp: desc
+  query:
+    bool:
+      must:
+        - term:
+            agent_name: "${AGENT_NAME}"
+        - term:
+            agent_labels_customer: "${CUSTOMER_CODE}"
+        - bool:
+            should:
+              - wildcard:
+                  data_process_exec_process_binary: "*modprobe*"
+              - wildcard:
+                  full_log: "*modprobe*"
+            minimum_should_match: 1
+        - range:
+            timestamp:
+              gte: "${START_TIME}"
+              lte: "${END_TIME}"
+      must_not:
+        - exists:
+            field: data_win_system_eventID
+        - wildcard:
+            rule_groups: "*windows*"
+
+  _source:
+    - timestamp
+    - agent_name
+    - data_process_exec_process_binary
+    - data_process_exec_process_arguments
+    - rule_mitre_id
+    - rule_description
+    - full_log
+
+parameters:
+  AGENT_NAME:
+    description: "Target agent/host name"
+    type: string
+    required: true
+    example: "socfortress-lab-agent"
+  CUSTOMER_CODE:
+    description: "Customer label for filtering"
+    type: string
+    required: true
+    example: "lab"
+  START_TIME:
+    description: "Query start time (ISO 8601 or relative)"
+    type: datetime
+    required: false
+    default: "now-24h"
+    example: "2026-01-29 00:00:00.000"
+  END_TIME:
+    description: "Query end time (ISO 8601 or relative)"
+    type: datetime
+    required: false
+    default: "now"
+    example: "2026-01-29 23:59:59.999"
+
+how_to_implement: >
+  Requires Linux endpoints with Wazuh agents capturing process execution.
+  Monitoring modprobe helps detect attempts to load kernel modules for
+  persistence or privilege escalation.
+
+known_false_positives: >
+  Legitimate kernel module loads by system administrators or automated
+  system updates.
+
+references:
+  - https://attack.mitre.org/techniques/T1215/
+  - https://documentation.wazuh.com/current/user-manual/capabilities/index.html
+
+response:
+  message: >
+    Kernel module load detected on $agent_name$.
+    Command: $data_process_exec_process_binary$ $data_process_exec_process_arguments$
+    MITRE ATT&CK: $rule_mitre_id$
+  risk_score: 70
+  severity: high
+  risk_objects:
+    - field: agent_name
+      type: system
+      score: 70
+  threat_objects:
+    - field: data_process_exec_process_binary
+      type: process
+
+tags:
+  analytic_story:
+    - Linux Persistence
+    - Kernel Module Monitoring
+  asset_type: Linux
+  mitre_attack_id:
+    - T1215
+  product:
+    - Wazuh
+  security_domain: endpoint
