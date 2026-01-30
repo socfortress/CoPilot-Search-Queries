@@ -1,0 +1,139 @@
+name: Linux Init Script Persistence Detection
+id: b3c8e2d1-4f1a-4b7c-9a22-91a6f2c4e8de
+version: 1
+schema_version: "1.0"
+date: "2026-01-29"
+author: SOCFORTRESS LLC
+status: production
+type: TTP
+
+description: >
+  Detects activity involving Linux init and startup script directories such as
+  /etc/init.d, /etc/rc.d, /sbin/init.d, and rc.local. Adversaries may abuse these
+  locations to establish persistence by executing malicious scripts at system
+  startup or service initialization.
+
+data_source:
+  - Wazuh Agent Logs
+  - Linux Auditd
+  - Syslog
+
+search:
+  index_pattern: "${INDEX_PATTERN}"
+
+  size: 100
+
+  sort:
+    - timestamp: desc
+
+  query:
+    bool:
+      must:
+        - term:
+            agent_name: "${AGENT_NAME}"
+
+        - term:
+            agent_labels_customer: "${CUSTOMER_CODE}"
+
+        - bool:
+            should:
+              - wildcard:
+                  full_log: "*/etc/init.d/*"
+              - wildcard:
+                  full_log: "*/etc/rc.d/*"
+              - wildcard:
+                  full_log: "*/sbin/init.d/*"
+              - wildcard:
+                  full_log: "*/etc/rc.local*"
+            minimum_should_match: 1
+
+        - range:
+            timestamp:
+              gte: "${START_TIME}"
+              lte: "${END_TIME}"
+
+      must_not:
+        - exists:
+            field: data_win_system_eventID
+        - wildcard:
+            rule_groups: "*windows*"
+
+  _source:
+    - timestamp
+    - agent_name
+    - data_process_exec_process_binary
+    - data_process_exec_process_arguments
+    - rule_mitre_id
+    - rule_description
+    - full_log
+
+parameters:
+  AGENT_NAME:
+    description: "Target agent/host name"
+    type: string
+    required: true
+    example: "Amine"
+
+  CUSTOMER_CODE:
+    description: "Customer label for filtering"
+    type: string
+    required: true
+    example: "lab"
+
+  START_TIME:
+    description: "Query start time (ISO 8601 or relative)"
+    type: datetime
+    required: false
+    default: "now-24h"
+    example: "now-24h"
+
+  END_TIME:
+    description: "Query end time (ISO 8601 or relative)"
+    type: datetime
+    required: false
+    default: "now"
+    example: "now"
+
+how_to_implement: >
+  This detection requires Linux systems with Wazuh agents configured to capture
+  process execution and command-line activity. Ensure monitoring includes
+  service management and system startup scripts.
+
+known_false_positives: >
+  Legitimate system administration tasks such as service installation,
+  configuration management tools (e.g., Ansible, Puppet), or package updates
+  may interact with init scripts. Allowlist known maintenance activities where appropriate.
+
+references:
+  - https://attack.mitre.org/techniques/T1037/
+  - https://attack.mitre.org/techniques/T1547/
+
+response:
+  message: >
+    Possible persistence-related activity detected on $agent_name$ involving
+    Linux init or startup scripts.
+    Command: $data_process_exec_process_binary$ $data_process_exec_process_arguments$
+    MITRE ATT&CK: $rule_mitre_id$
+  risk_score: 55
+  severity: medium
+
+  risk_objects:
+    - field: agent_name
+      type: system
+      score: 55
+
+  threat_objects:
+    - field: data_process_exec_process_binary
+      type: process
+
+tags:
+  analytic_story:
+    - Linux Persistence
+    - Startup Scripts Abuse
+  asset_type: Linux
+  mitre_attack_id:
+    - T1037
+    - T1547
+  product:
+    - Wazuh
+  security_domain: endpoint
