@@ -1,0 +1,135 @@
+name: Linux Unix Shell Configuration Modification
+id: linux-unix-shell-configuration-modification-001
+version: 1
+schema_version: "1.0"
+date: "2026-02-03"
+author: SOCFortress LLC
+status: production
+type: TTP
+
+description: >
+  Detects suspicious access or modifications to Unix shell configuration files, 
+  which may indicate an attempt to alter system behavior or gain unauthorized access. 
+  Shell configuration files like .bashrc, .profile, and /etc/profile control user 
+  environment settings and can be used to execute malicious commands, escalate 
+  privileges, or persist malicious activities.
+
+data_source:
+  - Tetragon
+  - Linux Auditd
+
+search:
+  index_pattern: "${INDEX_PATTERN}"
+  size: 100
+  sort:
+    - timestamp: desc
+  query:
+    bool:
+      must:
+        - term:
+            agent_name: "${AGENT_NAME}"
+        - term:
+            agent_labels_customer: "${CUSTOMER_CODE}"
+        - bool:
+            should:
+              - wildcard:
+                  full_log: "*.bashrc*"
+              - wildcard:
+                  full_log: "*.bash_profile*"
+              - wildcard:
+                  full_log: "*profile.d*"
+              - wildcard:
+                  full_log: "*/etc/profile*"
+              - wildcard:
+                  full_log: "*.zshrc*"
+              - wildcard:
+                  full_log: "*.zprofile*"
+              - wildcard:
+                  full_log: "*/etc/shells*"
+              - wildcard:
+                  full_log: "*.bash_login*"
+              - wildcard:
+                  full_log: "*.bash_logout*"
+              - wildcard:
+                  full_log: "*/etc/bash.bashrc*"
+            minimum_should_match: 1
+        - range:
+            timestamp:
+              gte: "${START_TIME}"
+              lte: "${END_TIME}"
+      must_not:
+        - exists:
+            field: data_win_system_eventID
+        - wildcard:
+            rule_groups: "*windows*"
+  _source:
+    - timestamp
+    - agent_name
+    - full_log
+    - rule_mitre_id
+    - rule_description
+    - location
+
+parameters:
+  AGENT_NAME:
+    description: "Target agent/host name"
+    type: string
+    required: true
+    example: "Amine"
+  CUSTOMER_CODE:
+    description: "Customer label for filtering"
+    type: string
+    required: true
+    example: "lab"
+  START_TIME:
+    description: "Query start time (ISO 8601 or relative)"
+    type: datetime
+    required: false
+    default: "now-24h"
+    example: "2026-02-03 00:00:00.000"
+  END_TIME:
+    description: "Query end time (ISO 8601 or relative)"
+    type: datetime
+    required: false
+    default: "now"
+    example: "2026-02-03 23:59:59.999"
+
+how_to_implement: >
+  This detection requires Wazuh agents deployed on Linux endpoints with Tetragon 
+  or auditd process execution logging enabled. The index pattern should match your 
+  Wazuh index naming convention.
+
+known_false_positives: >
+  Administrators may legitimately modify shell configuration files for system 
+  customization. Software installations may also update these files. Filter based 
+  on known automation scripts and authorized users.
+
+references:
+  - https://attack.mitre.org/techniques/T1546/004/
+  - https://github.com/peass-ng/PEASS-ng/tree/master/linPEAS
+
+response:
+  message: >
+    Unix shell configuration file access detected on $agent_name$. 
+    Modification of shell config files can be used for persistence or privilege 
+    escalation. MITRE ATT&CK: $rule_mitre_id$
+  risk_score: 64
+  severity: high
+  risk_objects:
+    - field: agent_name
+      type: system
+      score: 64
+  threat_objects: []
+
+tags:
+  analytic_story:
+    - Linux Living Off The Land
+    - Linux Privilege Escalation
+    - Linux Persistence Techniques
+    - Compromised Linux Host
+  asset_type: Linux
+  mitre_attack_id:
+    - T1546.004
+  product:
+    - Wazuh
+  security_domain: endpoint
