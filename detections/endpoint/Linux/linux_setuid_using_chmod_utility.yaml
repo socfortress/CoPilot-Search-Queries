@@ -1,0 +1,125 @@
+name: Linux Setuid Using Chmod Utility
+id: linux-setuid-using-chmod-utility-001
+version: 1
+schema_version: "1.0"
+date: "2026-02-03"
+author: SOCFortress LLC
+status: production
+type: Anomaly
+
+description: >
+  Detects the execution of the chmod utility to set the SUID or SGID bit on files, 
+  which can allow users to temporarily gain root or group-level access. This activity 
+  can indicate an attempt to escalate privileges or maintain persistence on a system.
+
+data_source:
+  - Tetragon
+  - Linux Auditd
+  - auth.log
+
+search:
+  index_pattern: "${INDEX_PATTERN}"
+  size: 100
+  sort:
+    - timestamp: desc
+  query:
+    bool:
+      must:
+        - term:
+            agent_name: "${AGENT_NAME}"
+        - term:
+            agent_labels_customer: "${CUSTOMER_CODE}"
+        - wildcard:
+            full_log: "*chmod*"
+        - bool:
+            should:
+              - wildcard:
+                  full_log: "*u+s*"
+              - wildcard:
+                  full_log: "*g+s*"
+              - wildcard:
+                  full_log: "*4777*"
+              - wildcard:
+                  full_log: "*4755*"
+              - wildcard:
+                  full_log: "*4577*"
+            minimum_should_match: 1
+        - range:
+            timestamp:
+              gte: "${START_TIME}"
+              lte: "${END_TIME}"
+      must_not:
+        - exists:
+            field: data_win_system_eventID
+        - wildcard:
+            rule_groups: "*windows*"
+  _source:
+    - timestamp
+    - agent_name
+    - full_log
+    - rule_mitre_id
+    - rule_description
+    - location
+
+parameters:
+  AGENT_NAME:
+    description: "Target agent/host name"
+    type: string
+    required: true
+    example: "Amine"
+  CUSTOMER_CODE:
+    description: "Customer label for filtering"
+    type: string
+    required: true
+    example: "lab"
+  START_TIME:
+    description: "Query start time (ISO 8601 or relative)"
+    type: datetime
+    required: false
+    default: "now-24h"
+    example: "2026-02-03 00:00:00.000"
+  END_TIME:
+    description: "Query end time (ISO 8601 or relative)"
+    type: datetime
+    required: false
+    default: "now"
+    example: "2026-02-03 23:59:59.999"
+
+how_to_implement: >
+  This detection requires Wazuh agents deployed on Linux endpoints with Tetragon 
+  or auditd process execution logging enabled. Auth.log monitoring provides sudo 
+  command visibility. The index pattern should match your Wazuh index naming convention.
+
+known_false_positives: >
+  Administrators may legitimately use setuid/setgid permissions for specific applications. 
+  Software installations may also set these permissions. Filter based on known binaries 
+  and authorized administrators.
+
+references:
+  - https://attack.mitre.org/techniques/T1548/001/
+  - https://www.hackingarticles.in/linux-privilege-escalation-using-capabilities/
+
+response:
+  message: >
+    Setuid/Setgid permission modification detected on $agent_name$. 
+    This may indicate privilege escalation attempt via SUID/SGID bits. 
+    MITRE ATT&CK: $rule_mitre_id$
+  risk_score: 49
+  severity: medium
+  risk_objects:
+    - field: agent_name
+      type: system
+      score: 49
+  threat_objects: []
+
+tags:
+  analytic_story:
+    - Linux Privilege Escalation
+    - Linux Persistence Techniques
+    - Linux Living Off The Land
+  asset_type: Linux
+  mitre_attack_id:
+    - T1548.001
+  product:
+    - Wazuh
+  security_domain: endpoint
