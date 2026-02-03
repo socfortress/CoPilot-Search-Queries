@@ -1,0 +1,120 @@
+name: Linux Auditd At Allow Deny Config File Modification
+id: linux-auditd-at-allow-deny-config-001
+version: 1
+schema_version: "1.0"
+date: "2026-01-28"
+author: SOCFortress LLC
+status: production
+type: TTP
+
+description: >
+  Detects access or modification to /etc/at.allow and /etc/at.deny configuration files. 
+  These files control which users are permitted to use the at command for task scheduling. 
+  Adversaries may modify these files to grant themselves permission to schedule malicious 
+  tasks or to restrict legitimate users from using the at utility.
+
+data_source:
+  - Tetragon
+  - Linux Auditd
+
+search:
+  index_pattern: "${INDEX_PATTERN}"
+  size: 100
+  sort:
+    - timestamp: desc
+  query:
+    bool:
+      must:
+        - term:
+            agent_name: "${AGENT_NAME}"
+        - term:
+            agent_labels_customer: "${CUSTOMER_CODE}"
+        - bool:
+            should:
+              - wildcard:
+                  full_log: "*/etc/at.allow*"
+              - wildcard:
+                  full_log: "*/etc/at.deny*"
+            minimum_should_match: 1
+        - range:
+            timestamp:
+              gte: "${START_TIME}"
+              lte: "${END_TIME}"
+      must_not:
+        - exists:
+            field: data_win_system_eventID
+        - wildcard:
+            rule_groups: "*windows*"
+  _source:
+    - timestamp
+    - agent_name
+    - data_process_exec_process_binary
+    - data_process_exec_process_arguments
+    - rule_mitre_id
+    - rule_description
+    - full_log
+
+parameters:
+  AGENT_NAME:
+    description: "Target agent/host name"
+    type: string
+    required: true
+    example: "Amine"
+  CUSTOMER_CODE:
+    description: "Customer label for filtering"
+    type: string
+    required: true
+    example: "lab"
+  START_TIME:
+    description: "Query start time (ISO 8601 or relative)"
+    type: datetime
+    required: false
+    default: "now-24h"
+    example: "2026-01-28 00:00:00.000"
+  END_TIME:
+    description: "Query end time (ISO 8601 or relative)"
+    type: datetime
+    required: false
+    default: "now"
+    example: "2026-01-28 23:59:59.999"
+
+how_to_implement: >
+  This detection requires Wazuh agents deployed on Linux endpoints with Tetragon 
+  or auditd process execution logging enabled. File integrity monitoring (FIM) on 
+  /etc/at.allow and /etc/at.deny is also recommended. The index pattern should 
+  match your Wazuh index naming convention.
+
+known_false_positives: >
+  System administrators may legitimately modify these files to manage user access 
+  to the at command. Configuration management tools like Ansible, Puppet, or Chef 
+  may also modify these files during system provisioning.
+
+references:
+  - https://attack.mitre.org/techniques/T1053/002/
+
+response:
+  message: >
+    Access to at configuration file detected on $agent_name$. 
+    Files: /etc/at.allow or /etc/at.deny were accessed or modified.
+    This may indicate an attempt to manipulate scheduled task permissions. MITRE ATT&CK: $rule_mitre_id$
+  risk_score: 49
+  severity: medium
+  risk_objects:
+    - field: agent_name
+      type: system
+      score: 49
+  threat_objects:
+    - field: data_process_exec_process_binary
+      type: process
+
+tags:
+  analytic_story:
+    - Linux Persistence Techniques
+    - Scheduled Tasks
+    - Compromised Linux Host
+  asset_type: Linux
+  mitre_attack_id:
+    - T1053.002
+  product:
+    - Wazuh
+  security_domain: endpoint
