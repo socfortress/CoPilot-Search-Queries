@@ -1,0 +1,124 @@
+name: Linux Security Monitoring Service Stop
+id: linux-security-monitoring-service-stop-001
+version: 1
+schema_version: "1.0"
+date: "2026-02-03"
+author: SOCFortress LLC
+status: production
+type: Anomaly
+
+description: >
+  Detects suspicious security monitoring service stop events. This includes Sysmon, 
+  Tetragon, Wazuh agent, auditd, and other security services. Stopping these services 
+  may indicate attempts to evade detection or disable security monitoring capabilities.
+
+data_source:
+  - Linux Auditd
+  - auth.log
+
+search:
+  index_pattern: "${INDEX_PATTERN}"
+  size: 100
+  sort:
+    - timestamp: desc
+  query:
+    bool:
+      must:
+        - term:
+            agent_name: "${AGENT_NAME}"
+        - term:
+            agent_labels_customer: "${CUSTOMER_CODE}"
+        - bool:
+            should:
+              - wildcard:
+                  full_log: "*SERVICE_STOP*"
+              - wildcard:
+                  full_log: "*sysmon*"
+              - wildcard:
+                  full_log: "*tetragon*"
+              - wildcard:
+                  full_log: "*wazuh*"
+              - wildcard:
+                  full_log: "*auditd*"
+              - wildcard:
+                  full_log: "*osquery*"
+            minimum_should_match: 1
+        - range:
+            timestamp:
+              gte: "${START_TIME}"
+              lte: "${END_TIME}"
+      must_not:
+        - exists:
+            field: data_win_system_eventID
+        - wildcard:
+            rule_groups: "*windows*"
+  _source:
+    - timestamp
+    - agent_name
+    - full_log
+    - rule_mitre_id
+    - rule_description
+    - location
+
+parameters:
+  AGENT_NAME:
+    description: "Target agent/host name"
+    type: string
+    required: true
+    example: "Amine"
+  CUSTOMER_CODE:
+    description: "Customer label for filtering"
+    type: string
+    required: true
+    example: "lab"
+  START_TIME:
+    description: "Query start time (ISO 8601 or relative)"
+    type: datetime
+    required: false
+    default: "now-24h"
+    example: "2026-02-03 00:00:00.000"
+  END_TIME:
+    description: "Query end time (ISO 8601 or relative)"
+    type: datetime
+    required: false
+    default: "now"
+    example: "2026-02-03 23:59:59.999"
+
+how_to_implement: >
+  This detection requires Wazuh agents deployed on Linux endpoints with auditd 
+  service monitoring enabled. Configure auditd to capture SERVICE_STOP events. 
+  The index pattern should match your Wazuh index naming convention.
+
+known_false_positives: >
+  Administrators may legitimately stop security services during maintenance or 
+  upgrades. Filter based on known maintenance windows and authorized users.
+
+references:
+  - https://attack.mitre.org/techniques/T1489/
+  - https://www.splunk.com/en_us/blog/security/deep-dive-on-persistence-privilege-escalation-technique-and-detection-in-linux-platform.html
+
+response:
+  message: >
+    Security monitoring service activity detected on $agent_name$. 
+    Stopping services like Sysmon, Tetragon, or Wazuh may indicate defense evasion. 
+    MITRE ATT&CK: $rule_mitre_id$
+  risk_score: 40
+  severity: medium
+  risk_objects:
+    - field: agent_name
+      type: system
+      score: 40
+  threat_objects: []
+
+tags:
+  analytic_story:
+    - Linux Living Off The Land
+    - Linux Privilege Escalation
+    - Linux Persistence Techniques
+    - Compromised Linux Host
+  asset_type: Linux
+  mitre_attack_id:
+    - T1489
+  product:
+    - Wazuh
+  security_domain: endpoint
