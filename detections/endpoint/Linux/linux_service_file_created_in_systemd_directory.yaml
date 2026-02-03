@@ -1,0 +1,132 @@
+name: Linux Service File Created In Systemd Directory
+id: linux-service-file-created-in-systemd-directory-001
+version: 1
+schema_version: "1.0"
+date: "2026-02-03"
+author: SOCFortress LLC
+status: production
+type: Anomaly
+
+description: >
+  Detects the creation of suspicious service files within the systemd directories 
+  on Linux platforms. This activity may indicate an adversary attempting to establish 
+  persistence on a compromised host by creating malicious systemd service units that 
+  will execute on system boot or service start.
+
+data_source:
+  - Tetragon
+  - Linux Auditd
+  - auth.log
+
+search:
+  index_pattern: "${INDEX_PATTERN}"
+  size: 100
+  sort:
+    - timestamp: desc
+  query:
+    bool:
+      must:
+        - term:
+            agent_name: "${AGENT_NAME}"
+        - term:
+            agent_labels_customer: "${CUSTOMER_CODE}"
+        - wildcard:
+            full_log: "*.service*"
+        - bool:
+            should:
+              - wildcard:
+                  full_log: "*/etc/systemd/*"
+              - wildcard:
+                  full_log: "*/lib/systemd/*"
+              - wildcard:
+                  full_log: "*/usr/lib/systemd/*"
+              - wildcard:
+                  full_log: "*/run/systemd/*"
+              - wildcard:
+                  full_log: "*/.config/systemd/*"
+              - wildcard:
+                  full_log: "*/.local/share/systemd/*"
+            minimum_should_match: 1
+        - range:
+            timestamp:
+              gte: "${START_TIME}"
+              lte: "${END_TIME}"
+      must_not:
+        - exists:
+            field: data_win_system_eventID
+        - wildcard:
+            rule_groups: "*windows*"
+  _source:
+    - timestamp
+    - agent_name
+    - full_log
+    - rule_mitre_id
+    - rule_description
+    - location
+
+parameters:
+  AGENT_NAME:
+    description: "Target agent/host name"
+    type: string
+    required: true
+    example: "Amine"
+  CUSTOMER_CODE:
+    description: "Customer label for filtering"
+    type: string
+    required: true
+    example: "lab"
+  START_TIME:
+    description: "Query start time (ISO 8601 or relative)"
+    type: datetime
+    required: false
+    default: "now-24h"
+    example: "2026-02-03 00:00:00.000"
+  END_TIME:
+    description: "Query end time (ISO 8601 or relative)"
+    type: datetime
+    required: false
+    default: "now"
+    example: "2026-02-03 23:59:59.999"
+
+how_to_implement: >
+  This detection requires Wazuh agents deployed on Linux endpoints with Tetragon 
+  or auditd process execution logging enabled. File integrity monitoring on systemd 
+  directories is also recommended. The index pattern should match your Wazuh index 
+  naming convention.
+
+known_false_positives: >
+  False positives may arise when administrators or network operators create service 
+  files in systemd directories for legitimate automation tasks. Package installations 
+  and updates may also create service files. Filter based on known service names and 
+  authorized administrators.
+
+references:
+  - https://attack.mitre.org/techniques/T1053/006/
+  - https://www.intezer.com/blog/research/kaiji-new-chinese-linux-malware-turning-to-golang/
+  - https://redcanary.com/blog/attck-t1501-understanding-systemd-service-persistence/
+
+response:
+  message: >
+    Service file activity detected in systemd directory on $agent_name$. 
+    This may indicate persistence establishment via systemd service. 
+    MITRE ATT&CK: $rule_mitre_id$
+  risk_score: 64
+  severity: medium
+  risk_objects:
+    - field: agent_name
+      type: system
+      score: 64
+  threat_objects: []
+
+tags:
+  analytic_story:
+    - Linux Privilege Escalation
+    - Linux Persistence Techniques
+    - Linux Living Off The Land
+    - Scheduled Tasks
+  asset_type: Linux
+  mitre_attack_id:
+    - T1053.006
+  product:
+    - Wazuh
+  security_domain: endpoint
