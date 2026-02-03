@@ -1,0 +1,119 @@
+name: Linux Auditd Apt Privilege Escalation
+id: linux-auditd-apt-privilege-escalation-001
+version: 1
+schema_version: "1.0"
+date: "2026-01-28"
+author: SOCFortress LLC
+status: production
+type: TTP
+
+description: >
+  Detects the use of apt with Pre-Invoke options which can be abused for privilege 
+  escalation. The apt package manager supports Pre-Invoke and Post-Invoke hooks that 
+  execute commands before and after package operations. Adversaries with sudo access 
+  to apt can leverage these hooks to execute arbitrary commands as root, bypassing 
+  restricted shell environments.
+
+data_source:
+  - Tetragon
+  - Linux Auditd
+
+search:
+  index_pattern: "${INDEX_PATTERN}"
+  size: 100
+  sort:
+    - timestamp: desc
+  query:
+    bool:
+      must:
+        - term:
+            agent_name: "${AGENT_NAME}"
+        - term:
+            agent_labels_customer: "${CUSTOMER_CODE}"
+        - wildcard:
+            full_log: "*apt*"
+        - wildcard:
+            full_log: "*Pre-Invoke*"
+        - range:
+            timestamp:
+              gte: "${START_TIME}"
+              lte: "${END_TIME}"
+      must_not:
+        - exists:
+            field: data_win_system_eventID
+        - wildcard:
+            rule_groups: "*windows*"
+  _source:
+    - timestamp
+    - agent_name
+    - data_process_exec_process_binary
+    - data_process_exec_process_arguments
+    - rule_mitre_id
+    - rule_description
+    - full_log
+
+parameters:
+  AGENT_NAME:
+    description: "Target agent/host name"
+    type: string
+    required: true
+    example: "Amine"
+  CUSTOMER_CODE:
+    description: "Customer label for filtering"
+    type: string
+    required: true
+    example: "lab"
+  START_TIME:
+    description: "Query start time (ISO 8601 or relative)"
+    type: datetime
+    required: false
+    default: "now-24h"
+    example: "2026-01-28 00:00:00.000"
+  END_TIME:
+    description: "Query end time (ISO 8601 or relative)"
+    type: datetime
+    required: false
+    default: "now"
+    example: "2026-01-28 23:59:59.999"
+
+how_to_implement: >
+  This detection requires Wazuh agents deployed on Linux endpoints with Tetragon 
+  or auditd process execution logging enabled. Ensure the agent is configured to 
+  capture command-line arguments. The index pattern should match your Wazuh index 
+  naming convention.
+
+known_false_positives: >
+  Pre-Invoke hooks are rarely used in normal operations. Legitimate use cases may 
+  include custom package management scripts or system hardening tools, but these 
+  should be well-documented. Any detection should be investigated.
+
+references:
+  - https://gtfobins.github.io/gtfobins/apt/
+  - https://attack.mitre.org/techniques/T1548/003/
+
+response:
+  message: >
+    APT privilege escalation attempt detected on $agent_name$. 
+    Command: $data_process_exec_process_binary$ $data_process_exec_process_arguments$
+    The Pre-Invoke option was used which can execute arbitrary commands as root. MITRE ATT&CK: $rule_mitre_id$
+  risk_score: 72
+  severity: high
+  risk_objects:
+    - field: agent_name
+      type: system
+      score: 72
+  threat_objects:
+    - field: data_process_exec_process_binary
+      type: process
+
+tags:
+  analytic_story:
+    - Linux Privilege Escalation
+    - Linux Living Off The Land
+    - Compromised Linux Host
+  asset_type: Linux
+  mitre_attack_id:
+    - T1548.003
+  product:
+    - Wazuh
+  security_domain: endpoint
