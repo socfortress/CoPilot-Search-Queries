@@ -1,0 +1,119 @@
+name: Linux Unix Shell Enable All SysRq Functions
+id: linux-unix-shell-enable-all-sysrq-functions-001
+version: 1
+schema_version: "1.0"
+date: "2026-02-03"
+author: SOCFortress LLC
+status: production
+type: Anomaly
+
+description: >
+  Detects interaction with the SysRq kernel interface, including attempts to enable 
+  all SysRq functions by writing to /proc/sys/kernel/sysrq. This technique was 
+  observed in the AwfulShred malware to enable kernel manipulation capabilities 
+  before forcing system reboots or other destructive actions.
+
+data_source:
+  - Tetragon
+  - Linux Auditd
+
+search:
+  index_pattern: "${INDEX_PATTERN}"
+  size: 100
+  sort:
+    - timestamp: desc
+  query:
+    bool:
+      must:
+        - term:
+            agent_name: "${AGENT_NAME}"
+        - term:
+            agent_labels_customer: "${CUSTOMER_CODE}"
+        - bool:
+            should:
+              - wildcard:
+                  full_log: "*/proc/sys/kernel/sysrq*"
+              - wildcard:
+                  full_log: "*kernel/sysrq*"
+              - wildcard:
+                  full_log: "*sysrq*"
+            minimum_should_match: 1
+        - range:
+            timestamp:
+              gte: "${START_TIME}"
+              lte: "${END_TIME}"
+      must_not:
+        - exists:
+            field: data_win_system_eventID
+        - wildcard:
+            rule_groups: "*windows*"
+  _source:
+    - timestamp
+    - agent_name
+    - full_log
+    - rule_mitre_id
+    - rule_description
+    - location
+
+parameters:
+  AGENT_NAME:
+    description: "Target agent/host name"
+    type: string
+    required: true
+    example: "Amine"
+  CUSTOMER_CODE:
+    description: "Customer label for filtering"
+    type: string
+    required: true
+    example: "lab"
+  START_TIME:
+    description: "Query start time (ISO 8601 or relative)"
+    type: datetime
+    required: false
+    default: "now-24h"
+    example: "2026-02-03 00:00:00.000"
+  END_TIME:
+    description: "Query end time (ISO 8601 or relative)"
+    type: datetime
+    required: false
+    default: "now"
+    example: "2026-02-03 23:59:59.999"
+
+how_to_implement: >
+  This detection requires Wazuh agents deployed on Linux endpoints with Tetragon 
+  or auditd process execution logging enabled. The index pattern should match your 
+  Wazuh index naming convention.
+
+known_false_positives: >
+  SysRq interface access is uncommon in normal operations. Kernel debugging or 
+  system recovery scenarios may legitimately access this interface, but such 
+  activity should be verified.
+
+references:
+  - https://www.kernel.org/doc/html/latest/admin-guide/sysrq.html
+  - https://cert.gov.ua/article/3718487
+  - https://attack.mitre.org/techniques/T1059/004/
+
+response:
+  message: >
+    SysRq kernel interface access detected on $agent_name$. 
+    Enabling all SysRq functions can allow kernel manipulation and forced reboots. 
+    This is associated with the AwfulShred malware. MITRE ATT&CK: $rule_mitre_id$
+  risk_score: 36
+  severity: medium
+  risk_objects:
+    - field: agent_name
+      type: system
+      score: 36
+  threat_objects: []
+
+tags:
+  analytic_story:
+    - AwfulShred
+    - Data Destruction
+  asset_type: Linux
+  mitre_attack_id:
+    - T1059.004
+  product:
+    - Wazuh
+  security_domain: endpoint
