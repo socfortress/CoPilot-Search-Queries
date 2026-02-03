@@ -1,0 +1,131 @@
+name: Linux Medusa Rootkit
+id: linux-medusa-rootkit-001
+version: 1
+schema_version: "1.0"
+date: "2026-02-03"
+author: SOCFortress LLC
+status: production
+type: TTP
+
+description: >
+  Detects file creation events associated with the installation of the Medusa 
+  rootkit, a userland LD_PRELOAD-based rootkit known for deploying shared objects, 
+  loader binaries, and configuration files into specific system directories. These 
+  files facilitate process hiding, credential theft, and backdoor access. Associated 
+  with UNC3886 China-Nexus threat activity, Hellcat Ransomware, and VoidLink malware.
+
+data_source:
+  - Tetragon
+  - auth.log
+
+search:
+  index_pattern: "${INDEX_PATTERN}"
+  size: 100
+  sort:
+    - timestamp: desc
+  query:
+    bool:
+      must:
+        - term:
+            agent_name: "${AGENT_NAME}"
+        - term:
+            agent_labels_customer: "${CUSTOMER_CODE}"
+        - bool:
+            should:
+              - wildcard:
+                  full_log: "*libseconf*"
+              - wildcard:
+                  full_log: "*sshpass*"
+              - wildcard:
+                  full_log: "*logpam*"
+              - wildcard:
+                  full_log: "*rkload*"
+              - wildcard:
+                  full_log: "*libdsx*"
+              - wildcard:
+                  full_log: "*backup_ld.so*"
+              - wildcard:
+                  full_log: "*.boot.sh*"
+              - wildcard:
+                  full_log: "*remote.txt*"
+            minimum_should_match: 1
+        - range:
+            timestamp:
+              gte: "${START_TIME}"
+              lte: "${END_TIME}"
+      must_not:
+        - exists:
+            field: data_win_system_eventID
+        - wildcard:
+            rule_groups: "*windows*"
+  _source:
+    - timestamp
+    - agent_name
+    - full_log
+    - rule_mitre_id
+    - rule_description
+    - location
+
+parameters:
+  AGENT_NAME:
+    description: "Target agent/host name"
+    type: string
+    required: true
+    example: "Amine"
+  CUSTOMER_CODE:
+    description: "Customer label for filtering"
+    type: string
+    required: true
+    example: "lab"
+  START_TIME:
+    description: "Query start time (ISO 8601 or relative)"
+    type: datetime
+    required: false
+    default: "now-24h"
+    example: "2026-02-03 00:00:00.000"
+  END_TIME:
+    description: "Query end time (ISO 8601 or relative)"
+    type: datetime
+    required: false
+    default: "now"
+    example: "2026-02-03 23:59:59.999"
+
+how_to_implement: >
+  This detection requires Wazuh agents deployed on Linux endpoints with Tetragon 
+  process execution logging enabled. Auth.log monitoring provides sudo command 
+  visibility for file creation operations in sensitive directories.
+
+known_false_positives: >
+  Little to no false positives in most environments. The file paths and names are 
+  highly specific to Medusa rootkit. Tune as needed for custom applications.
+
+references:
+  - https://cloud.google.com/blog/topics/threat-intelligence/uncovering-unc3886-espionage-operations
+  - https://attack.mitre.org/techniques/T1014/
+
+response:
+  message: >
+    Medusa rootkit files detected on $agent_name$. 
+    This userland rootkit enables process hiding, credential theft, and backdoor access. 
+    MITRE ATT&CK: $rule_mitre_id$
+  risk_score: 62
+  severity: critical
+  risk_objects:
+    - field: agent_name
+      type: system
+      score: 62
+  threat_objects: []
+
+tags:
+  analytic_story:
+    - China-Nexus Threat Activity
+    - Medusa Rootkit
+    - Hellcat Ransomware
+    - VoidLink Cloud-Native Linux Malware
+  asset_type: Linux
+  mitre_attack_id:
+    - T1014
+    - T1589.001
+  product:
+    - Wazuh
+  security_domain: endpoint
