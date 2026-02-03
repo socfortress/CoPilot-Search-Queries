@@ -1,0 +1,132 @@
+name: Linux Auditd SSH Config Keys Deletion
+id: linux-auditd-ssh-config-keys-deletion-001
+version: 1
+schema_version: "1.0"
+date: "2026-01-28"
+author: SOCFortress LLC
+status: production
+type: TTP
+
+description: >
+  Detects deletion of SSH configuration files and keys from /etc/ssh/ or user .ssh/ 
+  directories using rm, shred, or unlink commands. Adversaries may delete SSH keys 
+  and configurations to disrupt remote access, cover their tracks after establishing 
+  alternate persistence mechanisms, or as part of a destructive attack aimed at 
+  denying legitimate administrators access to systems.
+
+data_source:
+  - Tetragon
+  - Linux Auditd
+
+search:
+  index_pattern: "${INDEX_PATTERN}"
+  size: 100
+  sort:
+    - timestamp: desc
+  query:
+    bool:
+      must:
+        - term:
+            agent_name: "${AGENT_NAME}"
+        - term:
+            agent_labels_customer: "${CUSTOMER_CODE}"
+        - bool:
+            should:
+              - wildcard:
+                  full_log: "*/etc/ssh/*"
+              - wildcard:
+                  full_log: "*/.ssh/*"
+            minimum_should_match: 1
+        - bool:
+            should:
+              - wildcard:
+                  full_log: "*rm *"
+              - wildcard:
+                  full_log: "*shred*"
+              - wildcard:
+                  full_log: "*unlink*"
+            minimum_should_match: 1
+        - range:
+            timestamp:
+              gte: "${START_TIME}"
+              lte: "${END_TIME}"
+      must_not:
+        - exists:
+            field: data_win_system_eventID
+        - wildcard:
+            rule_groups: "*windows*"
+  _source:
+    - timestamp
+    - agent_name
+    - data_process_exec_process_binary
+    - data_process_exec_process_arguments
+    - rule_mitre_id
+    - rule_description
+    - full_log
+
+parameters:
+  AGENT_NAME:
+    description: "Target agent/host name"
+    type: string
+    required: true
+    example: "Amine"
+  CUSTOMER_CODE:
+    description: "Customer label for filtering"
+    type: string
+    required: true
+    example: "lab"
+  START_TIME:
+    description: "Query start time (ISO 8601 or relative)"
+    type: datetime
+    required: false
+    default: "now-24h"
+    example: "2026-01-28 00:00:00.000"
+  END_TIME:
+    description: "Query end time (ISO 8601 or relative)"
+    type: datetime
+    required: false
+    default: "now"
+    example: "2026-01-28 23:59:59.999"
+
+how_to_implement: >
+  This detection requires Wazuh agents deployed on Linux endpoints with Tetragon 
+  or auditd process execution logging enabled. Ensure the agent is configured to 
+  capture command-line arguments. The index pattern should match your Wazuh index 
+  naming convention.
+
+known_false_positives: >
+  System administrators may legitimately rotate or remove old SSH keys as part of 
+  key management practices. Automated key rotation scripts may also trigger this 
+  detection. User account deprovisioning processes may delete user SSH directories.
+
+references:
+  - https://attack.mitre.org/techniques/T1070/004/
+  - https://attack.mitre.org/techniques/T1485/
+
+response:
+  message: >
+    SSH configuration or key deletion detected on $agent_name$. 
+    Command: $data_process_exec_process_binary$ $data_process_exec_process_arguments$
+    Files in /etc/ssh/ or .ssh/ directories were deleted. MITRE ATT&CK: $rule_mitre_id$
+  risk_score: 72
+  severity: high
+  risk_objects:
+    - field: agent_name
+      type: system
+      score: 72
+  threat_objects:
+    - field: data_process_exec_process_binary
+      type: process
+
+tags:
+  analytic_story:
+    - Linux Defense Evasion
+    - Data Destruction
+    - Compromised Linux Host
+  asset_type: Linux
+  mitre_attack_id:
+    - T1070.004
+    - T1485
+  product:
+    - Wazuh
+  security_domain: endpoint
