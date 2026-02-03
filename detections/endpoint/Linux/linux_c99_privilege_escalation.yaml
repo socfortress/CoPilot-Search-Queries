@@ -1,0 +1,112 @@
+name: Linux c99 Privilege Escalation
+id: linux-c99-privilege-escalation-001
+version: 1
+schema_version: "1.0"
+date: "2026-02-03"
+author: SOCFortress LLC
+status: production
+type: Anomaly
+
+description: >
+  Detects the execution of the c99 utility with sudo privileges and the -wrapper 
+  flag, which can lead to privilege escalation on Linux systems. The c99 compiler 
+  front-end can be abused to spawn shells through the wrapper mechanism, allowing 
+  attackers to execute commands as root.
+
+data_source:
+  - auth.log
+  - Tetragon
+
+search:
+  index_pattern: "${INDEX_PATTERN}"
+  size: 100
+  sort:
+    - timestamp: desc
+  query:
+    bool:
+      must:
+        - term:
+            agent_name: "${AGENT_NAME}"
+        - term:
+            agent_labels_customer: "${CUSTOMER_CODE}"
+        - wildcard:
+            full_log: "*c99*"
+        - range:
+            timestamp:
+              gte: "${START_TIME}"
+              lte: "${END_TIME}"
+      must_not:
+        - exists:
+            field: data_win_system_eventID
+        - wildcard:
+            rule_groups: "*windows*"
+  _source:
+    - timestamp
+    - agent_name
+    - full_log
+    - rule_mitre_id
+    - rule_description
+    - location
+
+parameters:
+  AGENT_NAME:
+    description: "Target agent/host name"
+    type: string
+    required: true
+    example: "Amine"
+  CUSTOMER_CODE:
+    description: "Customer label for filtering"
+    type: string
+    required: true
+    example: "lab"
+  START_TIME:
+    description: "Query start time (ISO 8601 or relative)"
+    type: datetime
+    required: false
+    default: "now-24h"
+    example: "2026-02-03 00:00:00.000"
+  END_TIME:
+    description: "Query end time (ISO 8601 or relative)"
+    type: datetime
+    required: false
+    default: "now"
+    example: "2026-02-03 23:59:59.999"
+
+how_to_implement: >
+  This detection requires Wazuh agents deployed on Linux endpoints with auth.log 
+  monitoring enabled. Tetragon provides additional process execution visibility 
+  including the gcc compilation chain triggered by c99.
+
+known_false_positives: >
+  Developers may legitimately use c99 for compiling C programs. However, the 
+  -wrapper flag with shell paths (/bin/sh, /bin/bash) is rarely used legitimately.
+  Filter based on known development environments and expected usage patterns.
+
+references:
+  - https://gtfobins.github.io/gtfobins/c99/
+  - https://pubs.opengroup.org/onlinepubs/009604499/utilities/c99.html
+  - https://attack.mitre.org/techniques/T1548/003/
+
+response:
+  message: >
+    c99 privilege escalation attempt detected on $agent_name$. 
+    The c99 -wrapper pattern can spawn shells with elevated privileges. 
+    MITRE ATT&CK: $rule_mitre_id$
+  risk_score: 30
+  severity: medium
+  risk_objects:
+    - field: agent_name
+      type: system
+      score: 30
+  threat_objects: []
+
+tags:
+  analytic_story:
+    - Linux Privilege Escalation
+    - Linux Living Off The Land
+  asset_type: Linux
+  mitre_attack_id:
+    - T1548.003
+  product:
+    - Wazuh
+  security_domain: endpoint
