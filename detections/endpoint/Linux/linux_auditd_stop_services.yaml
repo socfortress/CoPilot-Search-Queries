@@ -1,0 +1,121 @@
+name: Linux Stop Services
+id: linux-stop-services-001
+version: 1
+schema_version: "1.0"
+date: "2026-02-03"
+author: SOCFortress LLC
+status: production
+type: Hunting
+
+description: >
+  Detects attempts to stop services on Linux systems. Adversaries often stop or 
+  terminate security or critical services to disable defenses or disrupt operations, 
+  as seen in malware like Industroyer2 and AwfulShred. This detection monitors for 
+  SERVICE_STOP audit events and systemctl/service stop commands.
+
+data_source:
+  - Linux Auditd
+  - auth.log
+
+search:
+  index_pattern: "${INDEX_PATTERN}"
+  size: 100
+  sort:
+    - timestamp: desc
+  query:
+    bool:
+      must:
+        - term:
+            agent_name: "${AGENT_NAME}"
+        - term:
+            agent_labels_customer: "${CUSTOMER_CODE}"
+        - bool:
+            should:
+              - wildcard:
+                  full_log: "*SERVICE_STOP*"
+              - wildcard:
+                  full_log: "*systemctl*stop*"
+              - wildcard:
+                  full_log: "*service*stop*"
+            minimum_should_match: 1
+        - range:
+            timestamp:
+              gte: "${START_TIME}"
+              lte: "${END_TIME}"
+      must_not:
+        - exists:
+            field: data_win_system_eventID
+        - wildcard:
+            rule_groups: "*windows*"
+  _source:
+    - timestamp
+    - agent_name
+    - full_log
+    - rule_mitre_id
+    - rule_description
+    - location
+
+parameters:
+  AGENT_NAME:
+    description: "Target agent/host name"
+    type: string
+    required: true
+    example: "Amine"
+  CUSTOMER_CODE:
+    description: "Customer label for filtering"
+    type: string
+    required: true
+    example: "lab"
+  START_TIME:
+    description: "Query start time (ISO 8601 or relative)"
+    type: datetime
+    required: false
+    default: "now-24h"
+    example: "2026-02-03 00:00:00.000"
+  END_TIME:
+    description: "Query end time (ISO 8601 or relative)"
+    type: datetime
+    required: false
+    default: "now"
+    example: "2026-02-03 23:59:59.999"
+
+how_to_implement: >
+  This detection requires Wazuh agents deployed on Linux endpoints with auditd 
+  service monitoring enabled. Configure auditd to capture SERVICE_STOP events. 
+  The index pattern should match your Wazuh index naming convention.
+
+known_false_positives: >
+  Administrators may legitimately stop services during maintenance or upgrades. 
+  System services may be stopped as part of normal operations. Filter based on 
+  known maintenance windows and critical service names.
+
+references:
+  - https://www.welivesecurity.com/2022/04/12/industroyer2-industroyer-reloaded/
+  - https://cert.gov.ua/article/39518
+  - https://attack.mitre.org/techniques/T1489/
+
+response:
+  message: >
+    Service stop event detected on $agent_name$. 
+    Stopping services may indicate defense evasion or destructive activity. 
+    MITRE ATT&CK: $rule_mitre_id$
+  risk_score: 25
+  severity: low
+  risk_objects:
+    - field: agent_name
+      type: system
+      score: 25
+  threat_objects: []
+
+tags:
+  analytic_story:
+    - Industroyer2
+    - Data Destruction
+    - AwfulShred
+    - Compromised Linux Host
+  asset_type: Linux
+  mitre_attack_id:
+    - T1489
+  product:
+    - Wazuh
+  security_domain: endpoint
