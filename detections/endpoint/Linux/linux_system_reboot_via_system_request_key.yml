@@ -1,0 +1,111 @@
+name: Linux System Reboot Via System Request Key
+id: linux-system-reboot-via-sysrq-001
+version: 1
+schema_version: "1.0"
+date: "2026-02-03"
+author: SOCFortress LLC
+status: production
+type: TTP
+
+description: >
+  Detects the execution of SysReq commands to reboot a Linux system host. The pattern 
+  'echo b > /proc/sysrq-trigger' is used to force an immediate system reboot without 
+  unmounting filesystems. This technique was observed in the AwfulShred malware wiper 
+  and indicates potential destructive activity.
+
+data_source:
+  - Tetragon
+  - Linux Auditd
+
+search:
+  index_pattern: "${INDEX_PATTERN}"
+  size: 100
+  sort:
+    - timestamp: desc
+  query:
+    bool:
+      must:
+        - term:
+            agent_name: "${AGENT_NAME}"
+        - term:
+            agent_labels_customer: "${CUSTOMER_CODE}"
+        - wildcard:
+            full_log: "*sysrq*"
+        - range:
+            timestamp:
+              gte: "${START_TIME}"
+              lte: "${END_TIME}"
+      must_not:
+        - exists:
+            field: data_win_system_eventID
+        - wildcard:
+            rule_groups: "*windows*"
+  _source:
+    - timestamp
+    - agent_name
+    - full_log
+    - rule_mitre_id
+    - rule_description
+    - location
+
+parameters:
+  AGENT_NAME:
+    description: "Target agent/host name"
+    type: string
+    required: true
+    example: "Amine"
+  CUSTOMER_CODE:
+    description: "Customer label for filtering"
+    type: string
+    required: true
+    example: "lab"
+  START_TIME:
+    description: "Query start time (ISO 8601 or relative)"
+    type: datetime
+    required: false
+    default: "now-24h"
+    example: "2026-02-03 00:00:00.000"
+  END_TIME:
+    description: "Query end time (ISO 8601 or relative)"
+    type: datetime
+    required: false
+    default: "now"
+    example: "2026-02-03 23:59:59.999"
+
+how_to_implement: >
+  This detection requires Wazuh agents deployed on Linux endpoints with Tetragon 
+  or auditd process execution logging enabled. The index pattern should match your 
+  Wazuh index naming convention.
+
+known_false_positives: >
+  SysRq usage is very rare in normal operations and is typically only used for 
+  debugging kernel issues. Any detection should be thoroughly investigated.
+
+references:
+  - https://www.kernel.org/doc/html/latest/admin-guide/sysrq.html
+  - https://cert.gov.ua/article/3718487
+  - https://attack.mitre.org/techniques/T1529/
+
+response:
+  message: >
+    SysRq activity detected on $agent_name$. 
+    The sysrq-trigger can be used to force system reboots or other kernel actions. 
+    This is commonly used in destructive malware like AwfulShred. MITRE ATT&CK: $rule_mitre_id$
+  risk_score: 49
+  severity: medium
+  risk_objects:
+    - field: agent_name
+      type: system
+      score: 49
+  threat_objects: []
+
+tags:
+  analytic_story:
+    - AwfulShred
+    - Data Destruction
+  asset_type: Linux
+  mitre_attack_id:
+    - T1529
+  product:
+    - Wazuh
+  security_domain: endpoint
