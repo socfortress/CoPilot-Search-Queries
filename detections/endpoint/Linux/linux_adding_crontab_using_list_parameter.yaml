@@ -1,0 +1,120 @@
+name: Linux Auditd Crontab Listing
+id: linux-auditd-crontab-listing-001
+version: 1
+schema_version: "1.0"
+date: "2026-01-28"
+author: SOCFortress LLC
+status: production
+type: Anomaly
+
+description: >
+  Detects the use of crontab with the -l flag to list scheduled cron jobs. Adversaries 
+  may enumerate cron jobs during reconnaissance to understand scheduled tasks on the 
+  system, identify potential persistence mechanisms, or discover opportunities to 
+  hijack existing scheduled tasks for privilege escalation or persistence.
+
+data_source:
+  - Tetragon
+  - Linux Auditd
+
+search:
+  index_pattern: "${INDEX_PATTERN}"
+  size: 20
+  sort:
+    - timestamp: desc
+  query:
+    bool:
+      must:
+        - term:
+            agent_name: "${AGENT_NAME}"
+        - term:
+            agent_labels_customer: "${CUSTOMER_CODE}"
+        - wildcard:
+            full_log: "*crontab*"
+        - wildcard:
+            full_log: "*-l*"
+        - range:
+            timestamp:
+              gte: "${START_TIME}"
+              lte: "${END_TIME}"
+      must_not:
+        - exists:
+            field: data_win_system_eventID
+        - wildcard:
+            rule_groups: "*windows*"
+  _source:
+    - timestamp
+    - agent_name
+    - full_log
+    - rule_mitre_id
+    - rule_description
+    - location
+    - data_process_exec_process_binary
+    - data_process_exec_process_arguments
+
+parameters:
+  AGENT_NAME:
+    description: "Target agent/host name"
+    type: string
+    required: true
+    example: "Amine"
+  CUSTOMER_CODE:
+    description: "Customer label for filtering"
+    type: string
+    required: true
+    example: "lab"
+  START_TIME:
+    description: "Query start time (ISO 8601 or relative)"
+    type: datetime
+    required: false
+    default: "now-24h"
+    example: "2026-01-28 00:00:00.000"
+  END_TIME:
+    description: "Query end time (ISO 8601 or relative)"
+    type: datetime
+    required: false
+    default: "now"
+    example: "2026-01-28 23:59:59.999"
+
+how_to_implement: >
+  This detection requires Wazuh agents deployed on Linux endpoints with Tetragon 
+  or auditd process execution logging enabled. Ensure the agent is configured to 
+  capture command-line arguments. The index pattern should match your Wazuh index 
+  naming convention.
+
+known_false_positives: >
+  System administrators and users may legitimately list their cron jobs for 
+  maintenance or troubleshooting purposes. Monitoring and backup tools may also 
+  enumerate cron jobs. Consider baselining normal crontab usage in your environment.
+
+references:
+  - https://attack.mitre.org/techniques/T1053/003/
+  - https://attack.mitre.org/techniques/T1082/
+
+response:
+  message: >
+    Crontab listing detected on $agent_name$. 
+    Command: $data_process_exec_process_binary$ $data_process_exec_process_arguments$
+    User enumerated scheduled cron jobs. MITRE ATT&CK: $rule_mitre_id$
+  risk_score: 25
+  severity: low
+  risk_objects:
+    - field: agent_name
+      type: system
+      score: 25
+  threat_objects:
+    - field: data_process_exec_process_binary
+      type: process
+
+tags:
+  analytic_story:
+    - Linux Persistence Techniques
+    - Discovery Techniques
+    - Compromised Linux Host
+  asset_type: Linux
+  mitre_attack_id:
+    - T1053.003
+    - T1082
+  product:
+    - Wazuh
+  security_domain: endpoint
