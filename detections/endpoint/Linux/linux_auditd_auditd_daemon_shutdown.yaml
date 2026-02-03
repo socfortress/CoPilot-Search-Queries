@@ -1,0 +1,111 @@
+name: Linux Auditd Daemon Shutdown
+id: linux-auditd-daemon-shutdown-001
+version: 1
+schema_version: "1.0"
+date: "2026-01-28"
+author: SOCFortress LLC
+status: production
+type: Anomaly
+
+description: >
+  Detects auditd daemon shutdown events (type=DAEMON_END) which indicate the audit 
+  daemon has been stopped. While this may occur during legitimate system shutdown 
+  or maintenance, unexpected daemon stops could indicate an attacker attempting to 
+  disable auditing to evade detection before performing malicious activities.
+
+data_source:
+  - Linux Auditd
+
+search:
+  index_pattern: "${INDEX_PATTERN}"
+  size: 100
+  sort:
+    - timestamp: desc
+  query:
+    bool:
+      must:
+        - term:
+            agent_name: "${AGENT_NAME}"
+        - term:
+            agent_labels_customer: "${CUSTOMER_CODE}"
+        - wildcard:
+            full_log: "*type=DAEMON_END*"
+        - range:
+            timestamp:
+              gte: "${START_TIME}"
+              lte: "${END_TIME}"
+      must_not:
+        - exists:
+            field: data_win_system_eventID
+        - wildcard:
+            rule_groups: "*windows*"
+  _source:
+    - timestamp
+    - agent_name
+    - data_process_exec_process_binary
+    - data_process_exec_process_arguments
+    - rule_mitre_id
+    - rule_description
+    - full_log
+
+parameters:
+  AGENT_NAME:
+    description: "Target agent/host name"
+    type: string
+    required: true
+    example: "Amine"
+  CUSTOMER_CODE:
+    description: "Customer label for filtering"
+    type: string
+    required: true
+    example: "lab"
+  START_TIME:
+    description: "Query start time (ISO 8601 or relative)"
+    type: datetime
+    required: false
+    default: "now-24h"
+    example: "2026-01-28 00:00:00.000"
+  END_TIME:
+    description: "Query end time (ISO 8601 or relative)"
+    type: datetime
+    required: false
+    default: "now"
+    example: "2026-01-28 23:59:59.999"
+
+how_to_implement: >
+  This detection requires Wazuh agents deployed on Linux endpoints with auditd 
+  logging enabled. The auditd service must be configured to log daemon events. 
+  The index pattern should match your Wazuh index naming convention.
+
+known_false_positives: >
+  System shutdowns, scheduled reboots, and legitimate administrative actions 
+  will trigger auditd daemon end events. Correlate with system shutdown times 
+  and change management windows to reduce false positives.
+
+references:
+  - https://attack.mitre.org/techniques/T1562/001/
+
+response:
+  message: >
+    Auditd daemon shutdown event detected on $agent_name$. 
+    Verify if this was expected due to system shutdown or maintenance. 
+    Unexpected stops may indicate an attacker disabling audit logging. MITRE ATT&CK: $rule_mitre_id$
+  risk_score: 50
+  severity: medium
+  risk_objects:
+    - field: agent_name
+      type: system
+      score: 50
+  threat_objects: []
+
+tags:
+  analytic_story:
+    - Linux Defense Evasion
+    - Audit Log Manipulation
+    - Compromised Linux Host
+  asset_type: Linux
+  mitre_attack_id:
+    - T1562.001
+  product:
+    - Wazuh
+  security_domain: endpoint
