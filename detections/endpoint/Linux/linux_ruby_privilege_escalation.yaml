@@ -1,0 +1,122 @@
+name: Linux Ruby Privilege Escalation
+id: linux-ruby-privilege-escalation-001
+version: 1
+schema_version: "1.0"
+date: "2026-02-03"
+author: SOCFortress LLC
+status: production
+type: Anomaly
+
+description: >
+  Detects the execution of Ruby commands with elevated privileges on a Linux system. 
+  This identifies processes where Ruby is used with the -e flag to execute commands 
+  via sudo. This activity indicates a potential privilege escalation attempt using 
+  GTFOBins techniques, allowing a user to execute commands as root.
+
+data_source:
+  - Tetragon
+  - Linux Auditd
+
+search:
+  index_pattern: "${INDEX_PATTERN}"
+  size: 100
+  sort:
+    - timestamp: desc
+  query:
+    bool:
+      must:
+        - term:
+            agent_name: "${AGENT_NAME}"
+        - term:
+            agent_labels_customer: "${CUSTOMER_CODE}"
+        - bool:
+            should:
+              - wildcard:
+                  full_log: "*ruby*"
+              - wildcard:
+                  full_log: "*72756279*"
+            minimum_should_match: 1
+        - bool:
+            should:
+              - term:
+                  location: "/var/log/tetragon/tetragon.log"
+              - term:
+                  location: "/var/log/audit/audit.log"
+            minimum_should_match: 1
+        - range:
+            timestamp:
+              gte: "${START_TIME}"
+              lte: "${END_TIME}"
+      must_not:
+        - exists:
+            field: data_win_system_eventID
+        - wildcard:
+            rule_groups: "*windows*"
+  _source:
+    - timestamp
+    - agent_name
+    - full_log
+    - rule_mitre_id
+    - rule_description
+    - location
+
+parameters:
+  AGENT_NAME:
+    description: "Target agent/host name"
+    type: string
+    required: true
+    example: "Amine"
+  CUSTOMER_CODE:
+    description: "Customer label for filtering"
+    type: string
+    required: true
+    example: "lab"
+  START_TIME:
+    description: "Query start time (ISO 8601 or relative)"
+    type: datetime
+    required: false
+    default: "now-24h"
+    example: "2026-02-03 00:00:00.000"
+  END_TIME:
+    description: "Query end time (ISO 8601 or relative)"
+    type: datetime
+    required: false
+    default: "now"
+    example: "2026-02-03 23:59:59.999"
+
+how_to_implement: >
+  This detection requires Wazuh agents deployed on Linux endpoints with Tetragon 
+  or auditd process execution logging enabled. Note that auditd hex-encodes commands 
+  with special characters, so the query includes the hex pattern for "ruby" (72756279).
+
+known_false_positives: >
+  False positives may occur from automated tooling or legitimate system administrative 
+  usage of Ruby scripts. Filter as needed based on authorized Ruby usage patterns.
+
+references:
+  - https://gtfobins.github.io/gtfobins/ruby/
+  - https://attack.mitre.org/techniques/T1548/003/
+
+response:
+  message: >
+    Ruby privilege escalation attempt detected on $agent_name$. 
+    Ruby was executed with elevated privileges which may indicate 
+    a GTFOBins-style privilege escalation. MITRE ATT&CK: $rule_mitre_id$
+  risk_score: 30
+  severity: low
+  risk_objects:
+    - field: agent_name
+      type: system
+      score: 30
+  threat_objects: []
+
+tags:
+  analytic_story:
+    - Linux Privilege Escalation
+    - Linux Living Off The Land
+  asset_type: Linux
+  mitre_attack_id:
+    - T1548.003
+  product:
+    - Wazuh
+  security_domain: endpoint
