@@ -1,0 +1,115 @@
+name: Linux Auditd Chown To Root
+id: linux-auditd-chown-to-root-001
+version: 1
+schema_version: "1.0"
+date: "2026-01-28"
+author: SOCFortress LLC
+status: production
+type: Anomaly
+
+description: >
+  Detects the use of chown command to change file ownership to root. This activity 
+  may indicate an attacker attempting to escalate privileges by changing ownership 
+  of files or scripts to root, potentially enabling execution with elevated privileges 
+  or persistence mechanisms.
+
+data_source:
+  - Tetragon
+  - Linux Auditd
+
+search:
+  index_pattern: "${INDEX_PATTERN}"
+  size: 100
+  sort:
+    - timestamp: desc
+  query:
+    bool:
+      must:
+        - term:
+            agent_name: "${AGENT_NAME}"
+        - term:
+            agent_labels_customer: "${CUSTOMER_CODE}"
+        - wildcard:
+            full_log: "*chown*root*"
+        - range:
+            timestamp:
+              gte: "${START_TIME}"
+              lte: "${END_TIME}"
+      must_not:
+        - exists:
+            field: data_win_system_eventID
+        - wildcard:
+            rule_groups: "*windows*"
+  _source:
+    - timestamp
+    - agent_name
+    - data_process_exec_process_binary
+    - data_process_exec_process_arguments
+    - rule_mitre_id
+    - rule_description
+    - full_log
+
+parameters:
+  AGENT_NAME:
+    description: "Target agent/host name"
+    type: string
+    required: true
+    example: "Amine"
+  CUSTOMER_CODE:
+    description: "Customer label for filtering"
+    type: string
+    required: true
+    example: "lab"
+  START_TIME:
+    description: "Query start time (ISO 8601 or relative)"
+    type: datetime
+    required: false
+    default: "now-24h"
+    example: "2026-01-28 00:00:00.000"
+  END_TIME:
+    description: "Query end time (ISO 8601 or relative)"
+    type: datetime
+    required: false
+    default: "now"
+    example: "2026-01-28 23:59:59.999"
+
+how_to_implement: >
+  This detection requires Wazuh agents deployed on Linux endpoints with Tetragon 
+  or auditd process execution logging enabled. Ensure the agent is configured to 
+  capture command-line arguments. The index pattern should match your Wazuh index 
+  naming convention.
+
+known_false_positives: >
+  System administrators may legitimately change file ownership to root during 
+  software installation, configuration management, or system maintenance. Package 
+  managers and automated deployment tools may also trigger this detection.
+
+references:
+  - https://attack.mitre.org/techniques/T1222/002/
+
+response:
+  message: >
+    File ownership change to root detected on $agent_name$. 
+    Command: $data_process_exec_process_binary$ $data_process_exec_process_arguments$
+    MITRE ATT&CK: $rule_mitre_id$
+  risk_score: 49
+  severity: medium
+  risk_objects:
+    - field: agent_name
+      type: system
+      score: 49
+  threat_objects:
+    - field: data_process_exec_process_binary
+      type: process
+
+tags:
+  analytic_story:
+    - Linux Privilege Escalation
+    - Linux Persistence Techniques
+    - Compromised Linux Host
+  asset_type: Linux
+  mitre_attack_id:
+    - T1222.002
+  product:
+    - Wazuh
+  security_domain: endpoint
