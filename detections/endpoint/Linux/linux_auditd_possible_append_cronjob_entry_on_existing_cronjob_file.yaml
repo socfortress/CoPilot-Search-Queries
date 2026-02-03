@@ -1,0 +1,134 @@
+name: Linux Append Cronjob Entry On Existing Cronjob File
+id: linux-append-cronjob-entry-001
+version: 1
+schema_version: "1.0"
+date: "2026-02-03"
+author: SOCFortress LLC
+status: production
+type: Hunting
+
+description: >
+  Detects potential tampering with cronjob files on a Linux system. Adversaries 
+  often modify cron files for persistence or privilege escalation. This detection 
+  monitors access to /etc/cron.*, /etc/anacrontab, and cron directories for 
+  suspicious activity associated with malware like XorDDos and Kaiji.
+
+data_source:
+  - Tetragon
+  - Linux Auditd
+  - auth.log
+
+search:
+  index_pattern: "${INDEX_PATTERN}"
+  size: 100
+  sort:
+    - timestamp: desc
+  query:
+    bool:
+      must:
+        - term:
+            agent_name: "${AGENT_NAME}"
+        - term:
+            agent_labels_customer: "${CUSTOMER_CODE}"
+        - bool:
+            should:
+              - wildcard:
+                  full_log: "*/etc/cron*"
+              - wildcard:
+                  full_log: "*/etc/anacrontab*"
+              - wildcard:
+                  full_log: "*cron.d*"
+              - wildcard:
+                  full_log: "*cron.daily*"
+              - wildcard:
+                  full_log: "*cron.hourly*"
+              - wildcard:
+                  full_log: "*cron.weekly*"
+              - wildcard:
+                  full_log: "*cron.monthly*"
+              - wildcard:
+                  full_log: "*crontab*"
+            minimum_should_match: 1
+        - range:
+            timestamp:
+              gte: "${START_TIME}"
+              lte: "${END_TIME}"
+      must_not:
+        - exists:
+            field: data_win_system_eventID
+        - wildcard:
+            rule_groups: "*windows*"
+  _source:
+    - timestamp
+    - agent_name
+    - full_log
+    - rule_mitre_id
+    - rule_description
+    - location
+
+parameters:
+  AGENT_NAME:
+    description: "Target agent/host name"
+    type: string
+    required: true
+    example: "Amine"
+  CUSTOMER_CODE:
+    description: "Customer label for filtering"
+    type: string
+    required: true
+    example: "lab"
+  START_TIME:
+    description: "Query start time (ISO 8601 or relative)"
+    type: datetime
+    required: false
+    default: "now-24h"
+    example: "2026-02-03 00:00:00.000"
+  END_TIME:
+    description: "Query end time (ISO 8601 or relative)"
+    type: datetime
+    required: false
+    default: "now"
+    example: "2026-02-03 23:59:59.999"
+
+how_to_implement: >
+  This detection requires Wazuh agents deployed on Linux endpoints with Tetragon 
+  or auditd process execution logging enabled. Auth.log monitoring provides sudo 
+  command visibility. The index pattern should match your Wazuh index naming convention.
+
+known_false_positives: >
+  Legitimate cron job execution is normal system activity. System administration 
+  tasks may involve cron file modification. Filter based on known system processes 
+  like anacron, cron daemon, and package management tools.
+
+references:
+  - https://attack.mitre.org/techniques/T1053/003/
+  - https://blog.aquasec.com/threat-alert-kinsing-malware-container-vulnerability
+  - https://www.intezer.com/blog/research/kaiji-new-chinese-linux-malware-turning-to-golang/
+
+response:
+  message: >
+    Cronjob file access detected on $agent_name$. 
+    Modification of cron files can enable persistence or scheduled malicious 
+    task execution. MITRE ATT&CK: $rule_mitre_id$
+  risk_score: 49
+  severity: medium
+  risk_objects:
+    - field: agent_name
+      type: system
+      score: 49
+  threat_objects: []
+
+tags:
+  analytic_story:
+    - XorDDos
+    - Linux Living Off The Land
+    - Compromised Linux Host
+    - Linux Privilege Escalation
+    - Scheduled Tasks
+    - Linux Persistence Techniques
+  asset_type: Linux
+  mitre_attack_id:
+    - T1053.003
+  product:
+    - Wazuh
+  security_domain: endpoint
