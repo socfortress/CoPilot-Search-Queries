@@ -1,0 +1,120 @@
+name: Linux Sqlite3 Privilege Escalation
+id: linux-sqlite3-privilege-escalation-001
+version: 1
+schema_version: "1.0"
+date: "2026-02-03"
+author: SOCFortress LLC
+status: production
+type: Anomaly
+
+description: >
+  Detects the execution of sqlite3 command with shell commands, which can be 
+  exploited for privilege escalation. The sqlite3 .shell command allows execution 
+  of arbitrary system commands, and when combined with sudo, can lead to root access.
+
+data_source:
+  - Tetragon
+  - Linux Auditd
+  - auth.log
+
+search:
+  index_pattern: "${INDEX_PATTERN}"
+  size: 100
+  sort:
+    - timestamp: desc
+  query:
+    bool:
+      must:
+        - term:
+            agent_name: "${AGENT_NAME}"
+        - term:
+            agent_labels_customer: "${CUSTOMER_CODE}"
+        - wildcard:
+            full_log: "*sqlite3*"
+        - bool:
+            should:
+              - term:
+                  location: "/var/log/tetragon/tetragon.log"
+              - term:
+                  location: "/var/log/audit/audit.log"
+              - term:
+                  location: "/var/log/auth.log"
+            minimum_should_match: 1
+        - range:
+            timestamp:
+              gte: "${START_TIME}"
+              lte: "${END_TIME}"
+      must_not:
+        - exists:
+            field: data_win_system_eventID
+        - wildcard:
+            rule_groups: "*windows*"
+  _source:
+    - timestamp
+    - agent_name
+    - full_log
+    - rule_mitre_id
+    - rule_description
+    - location
+
+parameters:
+  AGENT_NAME:
+    description: "Target agent/host name"
+    type: string
+    required: true
+    example: "Amine"
+  CUSTOMER_CODE:
+    description: "Customer label for filtering"
+    type: string
+    required: true
+    example: "lab"
+  START_TIME:
+    description: "Query start time (ISO 8601 or relative)"
+    type: datetime
+    required: false
+    default: "now-24h"
+    example: "2026-02-03 00:00:00.000"
+  END_TIME:
+    description: "Query end time (ISO 8601 or relative)"
+    type: datetime
+    required: false
+    default: "now"
+    example: "2026-02-03 23:59:59.999"
+
+how_to_implement: >
+  This detection requires Wazuh agents deployed on Linux endpoints with Tetragon 
+  or auditd process execution logging enabled. Auth.log monitoring provides sudo 
+  command visibility. The index pattern should match your Wazuh index naming convention.
+
+known_false_positives: >
+  Database administrators may legitimately use sqlite3 for database management. 
+  Filter based on known database files and authorized users. The .shell command 
+  usage is uncommon in normal operations.
+
+references:
+  - https://gtfobins.github.io/gtfobins/sqlite3/
+  - https://attack.mitre.org/techniques/T1548/003/
+
+response:
+  message: >
+    Sqlite3 execution detected on $agent_name$. 
+    Sqlite3 with .shell command can be used for privilege escalation. 
+    MITRE ATT&CK: $rule_mitre_id$
+  risk_score: 30
+  severity: low
+  risk_objects:
+    - field: agent_name
+      type: system
+      score: 30
+  threat_objects: []
+
+tags:
+  analytic_story:
+    - Linux Privilege Escalation
+    - Linux Living Off The Land
+  asset_type: Linux
+  mitre_attack_id:
+    - T1548.003
+  product:
+    - Wazuh
+  security_domain: endpoint
