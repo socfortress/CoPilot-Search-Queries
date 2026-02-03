@@ -1,0 +1,122 @@
+name: Linux Sudo Or Su Execution
+id: linux-sudo-or-su-execution-001
+version: 1
+schema_version: "1.0"
+date: "2026-02-03"
+author: SOCFortress LLC
+status: production
+type: Anomaly
+
+description: >
+  Detects the execution of sudo or su commands on a Linux system. These commands 
+  are commonly used by adversaries to elevate privileges, potentially leading to 
+  unauthorized access or control over the system. If confirmed malicious, this 
+  activity could allow attackers to execute commands with root privileges.
+
+data_source:
+  - Linux Auditd
+  - auth.log
+  - Tetragon
+
+search:
+  index_pattern: "${INDEX_PATTERN}"
+  size: 100
+  sort:
+    - timestamp: desc
+  query:
+    bool:
+      must:
+        - term:
+            agent_name: "${AGENT_NAME}"
+        - term:
+            agent_labels_customer: "${CUSTOMER_CODE}"
+        - bool:
+            should:
+              - wildcard:
+                  full_log: "*sudo *"
+              - wildcard:
+                  full_log: "* su *"
+              - wildcard:
+                  full_log: "*\"/usr/bin/sudo\"*"
+              - wildcard:
+                  full_log: "*\"/usr/bin/su\"*"
+            minimum_should_match: 1
+        - range:
+            timestamp:
+              gte: "${START_TIME}"
+              lte: "${END_TIME}"
+      must_not:
+        - exists:
+            field: data_win_system_eventID
+        - wildcard:
+            rule_groups: "*windows*"
+  _source:
+    - timestamp
+    - agent_name
+    - full_log
+    - rule_mitre_id
+    - rule_description
+    - location
+
+parameters:
+  AGENT_NAME:
+    description: "Target agent/host name"
+    type: string
+    required: true
+    example: "Amine"
+  CUSTOMER_CODE:
+    description: "Customer label for filtering"
+    type: string
+    required: true
+    example: "lab"
+  START_TIME:
+    description: "Query start time (ISO 8601 or relative)"
+    type: datetime
+    required: false
+    default: "now-24h"
+    example: "2026-02-03 00:00:00.000"
+  END_TIME:
+    description: "Query end time (ISO 8601 or relative)"
+    type: datetime
+    required: false
+    default: "now"
+    example: "2026-02-03 23:59:59.999"
+
+how_to_implement: >
+  This detection requires Wazuh agents deployed on Linux endpoints with auditd 
+  process execution logging enabled. Auth.log monitoring provides additional 
+  sudo command visibility. The index pattern should match your Wazuh index naming 
+  convention.
+
+known_false_positives: >
+  Administrators regularly use sudo and su for legitimate system administration. 
+  Filter based on known administrative users and expected command patterns. 
+  High frequency or unusual commands should be investigated.
+
+references:
+  - https://attack.mitre.org/techniques/T1548/003/
+
+response:
+  message: >
+    Sudo or su execution detected on $agent_name$. 
+    These commands are used for privilege escalation and may indicate 
+    unauthorized access attempts. MITRE ATT&CK: $rule_mitre_id$
+  risk_score: 25
+  severity: low
+  risk_objects:
+    - field: agent_name
+      type: system
+      score: 25
+  threat_objects: []
+
+tags:
+  analytic_story:
+    - Linux Privilege Escalation
+    - Linux Persistence Techniques
+    - Compromised Linux Host
+  asset_type: Linux
+  mitre_attack_id:
+    - T1548.003
+  product:
+    - Wazuh
+  security_domain: endpoint
