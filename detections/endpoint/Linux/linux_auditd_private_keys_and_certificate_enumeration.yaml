@@ -1,0 +1,142 @@
+name: Linux Private Keys and Certificate Enumeration
+id: linux-private-keys-certificate-enumeration-001
+version: 1
+schema_version: "1.0"
+date: "2026-02-03"
+author: SOCFortress LLC
+status: production
+type: Anomaly
+
+description: >
+  Detects suspicious attempts to find private keys and certificates, which may 
+  indicate an attacker's effort to access sensitive cryptographic information. 
+  Private keys are crucial for securing encrypted communications and data, and 
+  unauthorized access to them can lead to severe security breaches, including 
+  data decryption and identity theft.
+
+data_source:
+  - Tetragon
+  - Linux Auditd
+
+search:
+  index_pattern: "${INDEX_PATTERN}"
+  size: 100
+  sort:
+    - timestamp: desc
+  query:
+    bool:
+      must:
+        - term:
+            agent_name: "${AGENT_NAME}"
+        - term:
+            agent_labels_customer: "${CUSTOMER_CODE}"
+        - bool:
+            should:
+              - wildcard:
+                  full_log: "*find*"
+              - wildcard:
+                  full_log: "*grep*"
+            minimum_should_match: 1
+        - bool:
+            should:
+              - wildcard:
+                  full_log: "*.pem*"
+              - wildcard:
+                  full_log: "*.cer*"
+              - wildcard:
+                  full_log: "*.crt*"
+              - wildcard:
+                  full_log: "*.pgp*"
+              - wildcard:
+                  full_log: "*.key*"
+              - wildcard:
+                  full_log: "*.gpg*"
+              - wildcard:
+                  full_log: "*.ppk*"
+              - wildcard:
+                  full_log: "*.p12*"
+              - wildcard:
+                  full_log: "*.pfx*"
+              - wildcard:
+                  full_log: "*.p7b*"
+            minimum_should_match: 1
+        - range:
+            timestamp:
+              gte: "${START_TIME}"
+              lte: "${END_TIME}"
+      must_not:
+        - exists:
+            field: data_win_system_eventID
+        - wildcard:
+            rule_groups: "*windows*"
+  _source:
+    - timestamp
+    - agent_name
+    - full_log
+    - rule_mitre_id
+    - rule_description
+    - location
+
+parameters:
+  AGENT_NAME:
+    description: "Target agent/host name"
+    type: string
+    required: true
+    example: "Amine"
+  CUSTOMER_CODE:
+    description: "Customer label for filtering"
+    type: string
+    required: true
+    example: "lab"
+  START_TIME:
+    description: "Query start time (ISO 8601 or relative)"
+    type: datetime
+    required: false
+    default: "now-24h"
+    example: "2026-02-03 00:00:00.000"
+  END_TIME:
+    description: "Query end time (ISO 8601 or relative)"
+    type: datetime
+    required: false
+    default: "now"
+    example: "2026-02-03 23:59:59.999"
+
+how_to_implement: >
+  This detection requires Wazuh agents deployed on Linux endpoints with Tetragon 
+  or auditd process execution logging enabled. The index pattern should match your 
+  Wazuh index naming convention.
+
+known_false_positives: >
+  System processes like apt-key may legitimately search for GPG keys during package 
+  verification. Administrators may search for certificates during troubleshooting. 
+  Filter based on known system processes and authorized users.
+
+references:
+  - https://attack.mitre.org/techniques/T1552/004/
+  - https://github.com/peass-ng/PEASS-ng/tree/master/linPEAS
+
+response:
+  message: >
+    Private key or certificate enumeration detected on $agent_name$. 
+    Searching for .pem, .key, .crt, .ppk, .p12 files may indicate credential 
+    harvesting attempts. MITRE ATT&CK: $rule_mitre_id$
+  risk_score: 64
+  severity: high
+  risk_objects:
+    - field: agent_name
+      type: system
+      score: 64
+  threat_objects: []
+
+tags:
+  analytic_story:
+    - Linux Living Off The Land
+    - Linux Privilege Escalation
+    - Linux Persistence Techniques
+    - Compromised Linux Host
+  asset_type: Linux
+  mitre_attack_id:
+    - T1552.004
+  product:
+    - Wazuh
+  security_domain: endpoint
