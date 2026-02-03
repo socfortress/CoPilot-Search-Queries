@@ -1,0 +1,122 @@
+name: Linux Auditd Crontab Directory Files Modification
+id: linux-auditd-crontab-directory-files-modification-001
+version: 1
+schema_version: "1.0"
+date: "2026-01-28"
+author: SOCFortress LLC
+status: production
+type: TTP
+
+description: >
+  Detects access or modification to cron directories (/etc/cron* and /var/spool/cron/). 
+  Adversaries may create or modify files in these directories to establish persistence 
+  by scheduling malicious tasks. Cron jobs run with the privileges of the user who 
+  owns them, making system-level cron directories particularly valuable targets for 
+  establishing persistent root-level access.
+
+data_source:
+  - Tetragon
+  - Linux Auditd
+
+search:
+  index_pattern: "${INDEX_PATTERN}"
+  size: 100
+  sort:
+    - timestamp: desc
+  query:
+    bool:
+      must:
+        - term:
+            agent_name: "${AGENT_NAME}"
+        - term:
+            agent_labels_customer: "${CUSTOMER_CODE}"
+        - bool:
+            should:
+              - wildcard:
+                  full_log: "*/etc/cron*"
+              - wildcard:
+                  full_log: "*/var/spool/cron/*"
+            minimum_should_match: 1
+        - range:
+            timestamp:
+              gte: "${START_TIME}"
+              lte: "${END_TIME}"
+      must_not:
+        - exists:
+            field: data_win_system_eventID
+        - wildcard:
+            rule_groups: "*windows*"
+  _source:
+    - timestamp
+    - agent_name
+    - data_process_exec_process_binary
+    - data_process_exec_process_arguments
+    - rule_mitre_id
+    - rule_description
+    - full_log
+
+parameters:
+  AGENT_NAME:
+    description: "Target agent/host name"
+    type: string
+    required: true
+    example: "Amine"
+  CUSTOMER_CODE:
+    description: "Customer label for filtering"
+    type: string
+    required: true
+    example: "lab"
+  START_TIME:
+    description: "Query start time (ISO 8601 or relative)"
+    type: datetime
+    required: false
+    default: "now-24h"
+    example: "2026-01-28 00:00:00.000"
+  END_TIME:
+    description: "Query end time (ISO 8601 or relative)"
+    type: datetime
+    required: false
+    default: "now"
+    example: "2026-01-28 23:59:59.999"
+
+how_to_implement: >
+  This detection requires Wazuh agents deployed on Linux endpoints with Tetragon 
+  or auditd process execution logging enabled. File integrity monitoring (FIM) on 
+  cron directories is also recommended. The index pattern should match your Wazuh 
+  index naming convention.
+
+known_false_positives: >
+  System administrators may legitimately modify cron jobs for maintenance or 
+  automation purposes. Package installations and updates may also modify system 
+  cron directories. Configuration management tools may trigger this detection 
+  during scheduled runs.
+
+references:
+  - https://attack.mitre.org/techniques/T1053/003/
+
+response:
+  message: >
+    Cron directory access or modification detected on $agent_name$. 
+    Command: $data_process_exec_process_binary$ $data_process_exec_process_arguments$
+    Files in /etc/cron* or /var/spool/cron/ were accessed. MITRE ATT&CK: $rule_mitre_id$
+  risk_score: 49
+  severity: medium
+  risk_objects:
+    - field: agent_name
+      type: system
+      score: 49
+  threat_objects:
+    - field: data_process_exec_process_binary
+      type: process
+
+tags:
+  analytic_story:
+    - Linux Persistence Techniques
+    - Scheduled Tasks
+    - Compromised Linux Host
+  asset_type: Linux
+  mitre_attack_id:
+    - T1053.003
+  product:
+    - Wazuh
+  security_domain: endpoint
