@@ -1,0 +1,119 @@
+name: Linux Auditd Osquery Service Stop
+id: linux-auditd-osquery-service-stop-001
+version: 1
+schema_version: "1.0"
+date: "2026-02-04"
+author: SOCFortress LLC
+status: production
+type: Anomaly
+
+description: >
+  Detects suspicious stopping of the osquery service, which may indicate an attempt 
+  to disable monitoring and evade detection. Osquery is a powerful tool used for 
+  querying system information and detecting anomalies, and stopping its service can 
+  be a sign that an attacker is trying to disrupt security monitoring or hide 
+  malicious activities.
+
+data_source:
+  - Linux Auditd
+
+search:
+  index_pattern: "${INDEX_PATTERN}"
+  size: 100
+  sort:
+    - timestamp: desc
+  query:
+    bool:
+      must:
+        - term:
+            agent_name: "${AGENT_NAME}"
+        - term:
+            agent_labels_customer: "${CUSTOMER_CODE}"
+        - wildcard:
+            full_log: "*SERVICE_STOP*"
+        - bool:
+            should:
+              - wildcard:
+                  full_log: "*osqueryd*"
+              - wildcard:
+                  full_log: "*osquery*"
+            minimum_should_match: 1
+        - range:
+            timestamp:
+              gte: "${START_TIME}"
+              lte: "${END_TIME}"
+      must_not:
+        - exists:
+            field: data_win_system_eventID
+        - wildcard:
+            rule_groups: "*windows*"
+  _source:
+    - timestamp
+    - agent_name
+    - full_log
+    - rule_mitre_id
+    - rule_description
+    - location
+
+parameters:
+  AGENT_NAME:
+    description: "Target agent/host name"
+    type: string
+    required: true
+    example: "Amine"
+  CUSTOMER_CODE:
+    description: "Customer label for filtering"
+    type: string
+    required: true
+    example: "lab"
+  START_TIME:
+    description: "Query start time (ISO 8601 or relative)"
+    type: datetime
+    required: false
+    default: "now-24h"
+    example: "2026-02-04 00:00:00.000"
+  END_TIME:
+    description: "Query end time (ISO 8601 or relative)"
+    type: datetime
+    required: false
+    default: "now"
+    example: "2026-02-04 23:59:59.999"
+
+how_to_implement: >
+  This detection requires Wazuh agents deployed on Linux endpoints with auditd 
+  SERVICE_STOP event monitoring enabled. Osquery must be installed on monitored 
+  endpoints for this detection to be relevant.
+
+known_false_positives: >
+  Administrator or network operator may stop osquery for maintenance, updates, or 
+  troubleshooting. Filter based on known maintenance windows and authorized users.
+
+references:
+  - https://www.splunk.com/en_us/blog/security/deep-dive-on-persistence-privilege-escalation-technique-and-detection-in-linux-platform.html
+  - https://attack.mitre.org/techniques/T1489/
+
+response:
+  message: >
+    Osquery service stop detected on $agent_name$. 
+    Stopping security monitoring services may indicate defense evasion attempts. 
+    MITRE ATT&CK: T1489
+  risk_score: 64
+  severity: medium
+  risk_objects:
+    - field: agent_name
+      type: system
+      score: 64
+  threat_objects: []
+
+tags:
+  analytic_story:
+    - Linux Living Off The Land
+    - Linux Privilege Escalation
+    - Linux Persistence Techniques
+    - Compromised Linux Host
+  asset_type: Linux
+  mitre_attack_id:
+    - T1489
+  product:
+    - Wazuh
+  security_domain: endpoint
