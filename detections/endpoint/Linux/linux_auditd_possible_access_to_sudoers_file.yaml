@@ -1,0 +1,121 @@
+name: Linux Auditd Possible Access To Sudoers File
+id: linux-auditd-possible-access-sudoers-file-001
+version: 1
+schema_version: "1.0"
+date: "2026-02-04"
+author: SOCFortress LLC
+status: production
+type: Anomaly
+
+description: >
+  Detects potential access or modification of the /etc/sudoers file on a Linux system.
+  The sudoers file controls user permissions for executing commands with elevated 
+  privileges. This activity could indicate an attacker attempting to gain persistence 
+  or escalate privileges, compromising the security of the targeted host. Associated 
+  with Cobalt Strike and China-Nexus threat activity.
+
+data_source:
+  - Tetragon
+  - auth.log
+  - Linux Auditd
+
+search:
+  index_pattern: "${INDEX_PATTERN}"
+  size: 100
+  sort:
+    - timestamp: desc
+  query:
+    bool:
+      must:
+        - term:
+            agent_name: "${AGENT_NAME}"
+        - term:
+            agent_labels_customer: "${CUSTOMER_CODE}"
+        - bool:
+            should:
+              - wildcard:
+                  full_log: "*/etc/sudoers*"
+              - wildcard:
+                  full_log: "*sudoers.d*"
+            minimum_should_match: 1
+        - range:
+            timestamp:
+              gte: "${START_TIME}"
+              lte: "${END_TIME}"
+      must_not:
+        - exists:
+            field: data_win_system_eventID
+        - wildcard:
+            rule_groups: "*windows*"
+  _source:
+    - timestamp
+    - agent_name
+    - full_log
+    - rule_mitre_id
+    - rule_description
+    - location
+
+parameters:
+  AGENT_NAME:
+    description: "Target agent/host name"
+    type: string
+    required: true
+    example: "Amine"
+  CUSTOMER_CODE:
+    description: "Customer label for filtering"
+    type: string
+    required: true
+    example: "lab"
+  START_TIME:
+    description: "Query start time (ISO 8601 or relative)"
+    type: datetime
+    required: false
+    default: "now-24h"
+    example: "2026-02-04 00:00:00.000"
+  END_TIME:
+    description: "Query end time (ISO 8601 or relative)"
+    type: datetime
+    required: false
+    default: "now"
+    example: "2026-02-04 23:59:59.999"
+
+how_to_implement: >
+  This detection requires Wazuh agents deployed on Linux endpoints with Tetragon 
+  process execution logging enabled. Auth.log monitoring provides sudo command 
+  visibility. Correlate with EXECVE or PROCTITLE events to identify the process 
+  or user responsible.
+
+known_false_positives: >
+  Administrators may access sudoers files for legitimate privilege management. 
+  Filter based on known administrative users and expected maintenance windows.
+
+references:
+  - https://attack.mitre.org/techniques/T1548/003/
+  - https://web.archive.org/web/20210708035426/https://www.cobaltstrike.com/downloads/csmanual43.pdf
+
+response:
+  message: >
+    Sudoers file access detected on $agent_name$. 
+    Access to /etc/sudoers may indicate privilege enumeration or escalation attempt. 
+    MITRE ATT&CK: $rule_mitre_id$
+  risk_score: 25
+  severity: low
+  risk_objects:
+    - field: agent_name
+      type: system
+      score: 25
+  threat_objects: []
+
+tags:
+  analytic_story:
+    - Linux Persistence Techniques
+    - Compromised Linux Host
+    - China-Nexus Threat Activity
+    - Salt Typhoon
+    - Linux Privilege Escalation
+  asset_type: Linux
+  mitre_attack_id:
+    - T1548.003
+  product:
+    - Wazuh
+  security_domain: endpoint
