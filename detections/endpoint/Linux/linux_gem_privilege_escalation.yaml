@@ -1,0 +1,122 @@
+name: Linux Gem Privilege Escalation
+id: linux-gem-privilege-escalation-001
+version: 1
+schema_version: "1.0"
+date: "2026-02-04"
+author: SOCFortress LLC
+status: production
+type: Anomaly
+
+description: >
+  Detects the execution of Ruby Gem with elevated privileges that could lead to 
+  privilege escalation. The gem command can execute arbitrary code through the 
+  'open' command with -e flag or 'exec' command. If gem is granted sudo rights, 
+  attackers can spawn shells or execute system commands as root.
+
+data_source:
+  - auth.log
+  - Tetragon
+
+search:
+  index_pattern: "${INDEX_PATTERN}"
+  size: 100
+  sort:
+    - timestamp: desc
+  query:
+    bool:
+      must:
+        - term:
+            agent_name: "${AGENT_NAME}"
+        - term:
+            agent_labels_customer: "${CUSTOMER_CODE}"
+        - wildcard:
+            full_log: "*gem*"
+        - bool:
+            should:
+              - wildcard:
+                  full_log: "*open*"
+              - wildcard:
+                  full_log: "*exec*"
+              - wildcard:
+                  full_log: "*-e*"
+              - wildcard:
+                  full_log: "*system(*"
+            minimum_should_match: 1
+        - range:
+            timestamp:
+              gte: "${START_TIME}"
+              lte: "${END_TIME}"
+      must_not:
+        - exists:
+            field: data_win_system_eventID
+        - wildcard:
+            rule_groups: "*windows*"
+  _source:
+    - timestamp
+    - agent_name
+    - full_log
+    - rule_mitre_id
+    - rule_description
+    - location
+
+parameters:
+  AGENT_NAME:
+    description: "Target agent/host name"
+    type: string
+    required: true
+    example: "Amine"
+  CUSTOMER_CODE:
+    description: "Customer label for filtering"
+    type: string
+    required: true
+    example: "lab"
+  START_TIME:
+    description: "Query start time (ISO 8601 or relative)"
+    type: datetime
+    required: false
+    default: "now-24h"
+    example: "2026-02-04 00:00:00.000"
+  END_TIME:
+    description: "Query end time (ISO 8601 or relative)"
+    type: datetime
+    required: false
+    default: "now"
+    example: "2026-02-04 23:59:59.999"
+
+how_to_implement: >
+  This detection requires Wazuh agents deployed on Linux endpoints with auth.log 
+  monitoring and Tetragon process execution logging enabled. Ruby and gem must 
+  be installed on the system.
+
+known_false_positives: >
+  Ruby developers may use gem with various commands legitimately. However, the 
+  combination of sudo + gem open/exec with shell commands (-e, system()) is 
+  rarely legitimate. Filter based on known development environments.
+
+references:
+  - https://gtfobins.github.io/gtfobins/gem/
+  - https://attack.mitre.org/techniques/T1548/003/
+
+response:
+  message: >
+    Gem privilege escalation detected on $agent_name$. 
+    The sudo gem open/exec pattern can execute arbitrary commands as root. 
+    MITRE ATT&CK: T1548.003
+  risk_score: 30
+  severity: medium
+  risk_objects:
+    - field: agent_name
+      type: system
+      score: 30
+  threat_objects: []
+
+tags:
+  analytic_story:
+    - Linux Privilege Escalation
+    - Linux Living Off The Land
+  asset_type: Linux
+  mitre_attack_id:
+    - T1548.003
+  product:
+    - Wazuh
+  security_domain: endpoint
