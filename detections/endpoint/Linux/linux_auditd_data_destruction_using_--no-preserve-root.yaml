@@ -1,0 +1,121 @@
+name: Linux Auditd Data Destruction Command
+id: linux-auditd-data-destruction-command-001
+version: 1
+schema_version: "1.0"
+date: "2026-02-04"
+author: SOCFortress LLC
+status: production
+type: TTP
+
+description: >
+  Detects the execution of a Unix shell command designed to wipe root directories 
+  on a Linux host. Focuses on the 'rm' command with force recursive deletion and 
+  the '--no-preserve-root' option. This activity indicates potential data destruction 
+  attempts, often associated with malware like AwfulShred. If confirmed malicious, 
+  this behavior could lead to severe data loss, system instability, and compromised 
+  integrity of the affected Linux host.
+
+data_source:
+  - auth.log
+  - Tetragon
+  - Linux Auditd
+
+search:
+  index_pattern: "${INDEX_PATTERN}"
+  size: 100
+  sort:
+    - timestamp: desc
+  query:
+    bool:
+      must:
+        - term:
+            agent_name: "${AGENT_NAME}"
+        - term:
+            agent_labels_customer: "${CUSTOMER_CODE}"
+        - wildcard:
+            full_log: "*rm*"
+        - wildcard:
+            full_log: "*-rf*"
+        - wildcard:
+            full_log: "*--no-preserve-root*"
+        - range:
+            timestamp:
+              gte: "${START_TIME}"
+              lte: "${END_TIME}"
+      must_not:
+        - exists:
+            field: data_win_system_eventID
+        - wildcard:
+            rule_groups: "*windows*"
+  _source:
+    - timestamp
+    - agent_name
+    - full_log
+    - rule_mitre_id
+    - rule_description
+    - location
+
+parameters:
+  AGENT_NAME:
+    description: "Target agent/host name"
+    type: string
+    required: true
+    example: "Amine"
+  CUSTOMER_CODE:
+    description: "Customer label for filtering"
+    type: string
+    required: true
+    example: "lab"
+  START_TIME:
+    description: "Query start time (ISO 8601 or relative)"
+    type: datetime
+    required: false
+    default: "now-24h"
+    example: "2026-02-04 00:00:00.000"
+  END_TIME:
+    description: "Query end time (ISO 8601 or relative)"
+    type: datetime
+    required: false
+    default: "now"
+    example: "2026-02-04 23:59:59.999"
+
+how_to_implement: >
+  This detection requires Wazuh agents deployed on Linux endpoints with auth.log 
+  monitoring and Tetragon process execution logging enabled. The --no-preserve-root 
+  flag is the key indicator of malicious intent to bypass rm's safety check for root 
+  directory deletion.
+
+known_false_positives: >
+  Very rare in legitimate use. The --no-preserve-root flag is almost never used in 
+  normal operations and should be treated as highly suspicious. System administrators 
+  performing controlled data destruction should be documented.
+
+references:
+  - https://cert.gov.ua/article/3718487
+  - https://www.trustwave.com/en-us/resources/blogs/spiderlabs-blog/overview-of-the-cyber-weapons-used-in-the-ukraine-russia-war/
+  - https://attack.mitre.org/techniques/T1485/
+
+response:
+  message: >
+    Data destruction command detected on $agent_name$. 
+    The rm -rf --no-preserve-root pattern indicates potential system wipe attempt. 
+    Associated with AwfulShred malware. MITRE ATT&CK: T1485
+  risk_score: 90
+  severity: critical
+  risk_objects:
+    - field: agent_name
+      type: system
+      score: 90
+  threat_objects: []
+
+tags:
+  analytic_story:
+    - Data Destruction
+    - AwfulShred
+    - Compromised Linux Host
+  asset_type: Linux
+  mitre_attack_id:
+    - T1485
+  product:
+    - Wazuh
+  security_domain: endpoint
