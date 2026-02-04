@@ -1,0 +1,124 @@
+name: Linux Puppet Privilege Escalation
+id: linux-puppet-privilege-escalation-001
+version: 1
+schema_version: "1.0"
+date: "2026-02-04"
+author: SOCFortress LLC
+status: production
+type: Anomaly
+
+description: >
+  Detects the execution of Puppet commands with elevated privileges, specifically 
+  when Puppet is used to apply configurations with sudo rights using the exec 
+  resource type. This indicates a potential privilege escalation attempt where a 
+  user could gain root access and execute system commands as root. Puppet's exec 
+  resource can run arbitrary commands, making it a powerful privilege escalation 
+  vector.
+
+data_source:
+  - auth.log
+  - Tetragon
+
+search:
+  index_pattern: "${INDEX_PATTERN}"
+  size: 100
+  sort:
+    - timestamp: desc
+  query:
+    bool:
+      must:
+        - term:
+            agent_name: "${AGENT_NAME}"
+        - term:
+            agent_labels_customer: "${CUSTOMER_CODE}"
+        - wildcard:
+            full_log: "*puppet*"
+        - wildcard:
+            full_log: "*apply*"
+        - bool:
+            should:
+              - wildcard:
+                  full_log: "*exec*"
+              - wildcard:
+                  full_log: "*-e*"
+            minimum_should_match: 1
+        - range:
+            timestamp:
+              gte: "${START_TIME}"
+              lte: "${END_TIME}"
+      must_not:
+        - exists:
+            field: data_win_system_eventID
+        - wildcard:
+            rule_groups: "*windows*"
+  _source:
+    - timestamp
+    - agent_name
+    - full_log
+    - rule_mitre_id
+    - rule_description
+    - location
+
+parameters:
+  AGENT_NAME:
+    description: "Target agent/host name"
+    type: string
+    required: true
+    example: "Amine"
+  CUSTOMER_CODE:
+    description: "Customer label for filtering"
+    type: string
+    required: true
+    example: "lab"
+  START_TIME:
+    description: "Query start time (ISO 8601 or relative)"
+    type: datetime
+    required: false
+    default: "now-24h"
+    example: "2026-02-04 00:00:00.000"
+  END_TIME:
+    description: "Query end time (ISO 8601 or relative)"
+    type: datetime
+    required: false
+    default: "now"
+    example: "2026-02-04 23:59:59.999"
+
+how_to_implement: >
+  This detection requires Wazuh agents deployed on Linux endpoints with auth.log 
+  monitoring and Tetragon process execution logging enabled. Puppet must be 
+  installed on the system for exploitation.
+
+known_false_positives: >
+  System administrators may use puppet apply for legitimate configuration 
+  management. However, the combination of sudo + puppet apply -e with exec 
+  resources from command line is uncommon in production environments. Filter 
+  based on known automation pipelines and CI/CD systems.
+
+references:
+  - https://gtfobins.github.io/gtfobins/puppet/
+  - https://en.wikipedia.org/wiki/Puppet_(software)
+  - https://attack.mitre.org/techniques/T1548/003/
+
+response:
+  message: >
+    Puppet privilege escalation detected on $agent_name$. 
+    The sudo puppet apply -e exec pattern can execute arbitrary commands as root. 
+    MITRE ATT&CK: T1548.003
+  risk_score: 5
+  severity: low
+  risk_objects:
+    - field: agent_name
+      type: system
+      score: 5
+  threat_objects: []
+
+tags:
+  analytic_story:
+    - Linux Privilege Escalation
+    - Linux Living Off The Land
+  asset_type: Linux
+  mitre_attack_id:
+    - T1548.003
+  product:
+    - Wazuh
+  security_domain: endpoint
