@@ -1,0 +1,122 @@
+name: Linux Cpulimit Privilege Escalation
+id: linux-cpulimit-privilege-escalation-001
+version: 1
+schema_version: "1.0"
+date: "2026-02-04"
+author: SOCFortress LLC
+status: production
+type: Anomaly
+
+description: >
+  Detects the use of the 'cpulimit' command with specific flags (-l, -f) executed 
+  with sudo privileges. If cpulimit is granted sudo rights, a user can potentially 
+  execute system commands as root, leading to privilege escalation. This GTFOBins 
+  technique could allow an attacker to gain root access, execute arbitrary commands, 
+  and fully compromise the affected system.
+
+data_source:
+  - auth.log
+  - Tetragon
+
+search:
+  index_pattern: "${INDEX_PATTERN}"
+  size: 100
+  sort:
+    - timestamp: desc
+  query:
+    bool:
+      must:
+        - term:
+            agent_name: "${AGENT_NAME}"
+        - term:
+            agent_labels_customer: "${CUSTOMER_CODE}"
+        - wildcard:
+            full_log: "*cpulimit*"
+        - bool:
+            should:
+              - wildcard:
+                  full_log: "*-l*"
+              - wildcard:
+                  full_log: "*-f*"
+              - wildcard:
+                  full_log: "*sudo*"
+            minimum_should_match: 1
+        - range:
+            timestamp:
+              gte: "${START_TIME}"
+              lte: "${END_TIME}"
+      must_not:
+        - exists:
+            field: data_win_system_eventID
+        - wildcard:
+            rule_groups: "*windows*"
+  _source:
+    - timestamp
+    - agent_name
+    - full_log
+    - rule_mitre_id
+    - rule_description
+    - location
+
+parameters:
+  AGENT_NAME:
+    description: "Target agent/host name"
+    type: string
+    required: true
+    example: "Amine"
+  CUSTOMER_CODE:
+    description: "Customer label for filtering"
+    type: string
+    required: true
+    example: "lab"
+  START_TIME:
+    description: "Query start time (ISO 8601 or relative)"
+    type: datetime
+    required: false
+    default: "now-24h"
+    example: "2026-02-04 00:00:00.000"
+  END_TIME:
+    description: "Query end time (ISO 8601 or relative)"
+    type: datetime
+    required: false
+    default: "now"
+    example: "2026-02-04 23:59:59.999"
+
+how_to_implement: >
+  This detection requires Wazuh agents deployed on Linux endpoints with auth.log 
+  monitoring and Tetragon process execution logging enabled. The cpulimit tool 
+  must be present on the system for exploitation.
+
+known_false_positives: >
+  System administrators may use cpulimit to manage CPU resources for legitimate 
+  processes. However, the combination of sudo + cpulimit -l -f executing shell 
+  commands is rarely legitimate. Filter based on known administrative usage patterns.
+
+references:
+  - https://gtfobins.github.io/gtfobins/cpulimit/
+  - http://cpulimit.sourceforge.net/
+  - https://attack.mitre.org/techniques/T1548/003/
+
+response:
+  message: >
+    Cpulimit privilege escalation detected on $agent_name$. 
+    The sudo cpulimit -l -f pattern can execute arbitrary commands as root. 
+    MITRE ATT&CK: T1548.003
+  risk_score: 20
+  severity: low
+  risk_objects:
+    - field: agent_name
+      type: system
+      score: 20
+  threat_objects: []
+
+tags:
+  analytic_story:
+    - Linux Privilege Escalation
+    - Linux Living Off The Land
+  asset_type: Linux
+  mitre_attack_id:
+    - T1548.003
+  product:
+    - Wazuh
+  security_domain: endpoint
