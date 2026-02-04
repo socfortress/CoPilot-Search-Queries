@@ -1,0 +1,130 @@
+name: Linux Common Process For Elevation Control
+id: linux-common-process-elevation-control-001
+version: 1
+schema_version: "1.0"
+date: "2026-02-04"
+author: SOCFortress LLC
+status: production
+type: Hunting
+
+description: >
+  Detects the execution of common Linux processes used for elevation control, such 
+  as chmod, chown, chattr, and setcap. These processes are often abused by adversaries 
+  to gain persistence or escalate privileges on compromised hosts. If confirmed 
+  malicious, this behavior could allow attackers to modify file attributes, change 
+  file ownership, or set capabilities, potentially leading to unauthorized access 
+  and control over critical system resources.
+
+data_source:
+  - Tetragon
+  - auth.log
+
+search:
+  index_pattern: "${INDEX_PATTERN}"
+  size: 100
+  sort:
+    - timestamp: desc
+  query:
+    bool:
+      must:
+        - term:
+            agent_name: "${AGENT_NAME}"
+        - term:
+            agent_labels_customer: "${CUSTOMER_CODE}"
+        - bool:
+            should:
+              - wildcard:
+                  full_log: "*\"/usr/bin/chmod\"*"
+              - wildcard:
+                  full_log: "*\"/usr/bin/chown\"*"
+              - wildcard:
+                  full_log: "*\"/usr/bin/chattr\"*"
+              - wildcard:
+                  full_log: "*\"/usr/sbin/setcap\"*"
+              - wildcard:
+                  full_log: "*\"/usr/bin/setfacl\"*"
+              - wildcard:
+                  full_log: "*\"/usr/bin/lchown\"*"
+            minimum_should_match: 1
+        - range:
+            timestamp:
+              gte: "${START_TIME}"
+              lte: "${END_TIME}"
+      must_not:
+        - exists:
+            field: data_win_system_eventID
+        - wildcard:
+            rule_groups: "*windows*"
+  _source:
+    - timestamp
+    - agent_name
+    - full_log
+    - rule_mitre_id
+    - rule_description
+    - location
+
+parameters:
+  AGENT_NAME:
+    description: "Target agent/host name"
+    type: string
+    required: true
+    example: "Amine"
+  CUSTOMER_CODE:
+    description: "Customer label for filtering"
+    type: string
+    required: true
+    example: "lab"
+  START_TIME:
+    description: "Query start time (ISO 8601 or relative)"
+    type: datetime
+    required: false
+    default: "now-24h"
+    example: "2026-02-04 00:00:00.000"
+  END_TIME:
+    description: "Query end time (ISO 8601 or relative)"
+    type: datetime
+    required: false
+    default: "now"
+    example: "2026-02-04 23:59:59.999"
+
+how_to_implement: >
+  This detection requires Wazuh agents deployed on Linux endpoints with Tetragon 
+  process execution logging enabled. Auth.log monitoring provides sudo command 
+  visibility for these operations when executed with elevated privileges.
+
+known_false_positives: >
+  Administrators and system processes frequently use these commands for legitimate 
+  file management. Filter based on known administrative users, expected file paths, 
+  and automation scripts.
+
+references:
+  - https://attack.mitre.org/techniques/T1548/001/
+  - https://github.com/Neo23x0/auditd/blob/master/audit.rules#L285-L297
+  - https://github.com/microsoft/MSTIC-Sysmon/blob/main/linux/configs/attack-based/privilege_escalation/T1548.001_ElevationControl_CommonProcesses.xml
+
+response:
+  message: >
+    Elevation control process detected on $agent_name$. 
+    Commands like chmod, chown, chattr may indicate privilege escalation attempts. 
+    MITRE ATT&CK: $rule_mitre_id$
+  risk_score: 25
+  severity: low
+  risk_objects:
+    - field: agent_name
+      type: system
+      score: 25
+  threat_objects: []
+
+tags:
+  analytic_story:
+    - Linux Persistence Techniques
+    - China-Nexus Threat Activity
+    - Linux Living Off The Land
+    - Salt Typhoon
+    - Linux Privilege Escalation
+  asset_type: Linux
+  mitre_attack_id:
+    - T1548.001
+  product:
+    - Wazuh
+  security_domain: endpoint
