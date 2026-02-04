@@ -1,0 +1,115 @@
+name: Linux Make Privilege Escalation
+id: linux-make-privilege-escalation-001
+version: 1
+schema_version: "1.0"
+date: "2026-02-04"
+author: SOCFortress LLC
+status: production
+type: Anomaly
+
+description: >
+  Detects the use of the 'make' command with elevated privileges to execute system 
+  commands as root, potentially leading to a root shell. The make --eval flag allows 
+  arbitrary command execution through Makefile syntax. If confirmed malicious, an 
+  attacker could achieve full control over the system and compromise the entire 
+  environment.
+
+data_source:
+  - auth.log
+  - Tetragon
+
+search:
+  index_pattern: "${INDEX_PATTERN}"
+  size: 100
+  sort:
+    - timestamp: desc
+  query:
+    bool:
+      must:
+        - term:
+            agent_name: "${AGENT_NAME}"
+        - term:
+            agent_labels_customer: "${CUSTOMER_CODE}"
+        - wildcard:
+            full_log: "*make*"
+        - wildcard:
+            full_log: "*--eval*"
+        - range:
+            timestamp:
+              gte: "${START_TIME}"
+              lte: "${END_TIME}"
+      must_not:
+        - exists:
+            field: data_win_system_eventID
+        - wildcard:
+            rule_groups: "*windows*"
+  _source:
+    - timestamp
+    - agent_name
+    - full_log
+    - rule_mitre_id
+    - rule_description
+    - location
+
+parameters:
+  AGENT_NAME:
+    description: "Target agent/host name"
+    type: string
+    required: true
+    example: "Amine"
+  CUSTOMER_CODE:
+    description: "Customer label for filtering"
+    type: string
+    required: true
+    example: "lab"
+  START_TIME:
+    description: "Query start time (ISO 8601 or relative)"
+    type: datetime
+    required: false
+    default: "now-24h"
+    example: "2026-02-04 00:00:00.000"
+  END_TIME:
+    description: "Query end time (ISO 8601 or relative)"
+    type: datetime
+    required: false
+    default: "now"
+    example: "2026-02-04 23:59:59.999"
+
+how_to_implement: >
+  This detection requires Wazuh agents deployed on Linux endpoints with auth.log 
+  monitoring and Tetragon process execution logging enabled. The make utility 
+  is commonly installed on development systems.
+
+known_false_positives: >
+  Build systems and developers may use make with various flags. However, the 
+  combination of sudo + make --eval with shell commands is rarely legitimate. 
+  Filter based on known build environments and CI/CD pipelines.
+
+references:
+  - https://gtfobins.github.io/gtfobins/make/
+  - https://www.javatpoint.com/linux-make-command
+  - https://attack.mitre.org/techniques/T1548/003/
+
+response:
+  message: >
+    Make privilege escalation detected on $agent_name$. 
+    The sudo make --eval pattern can execute arbitrary commands as root. 
+    MITRE ATT&CK: T1548.003
+  risk_score: 20
+  severity: low
+  risk_objects:
+    - field: agent_name
+      type: system
+      score: 20
+  threat_objects: []
+
+tags:
+  analytic_story:
+    - Linux Privilege Escalation
+    - Linux Living Off The Land
+  asset_type: Linux
+  mitre_attack_id:
+    - T1548.003
+  product:
+    - Wazuh
+  security_domain: endpoint
