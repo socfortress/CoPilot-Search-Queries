@@ -1,0 +1,119 @@
+name: Linux Auditd Preload Hijack Library Calls
+id: linux-auditd-preload-hijack-library-calls-001
+version: 1
+schema_version: "1.0"
+date: "2026-02-04"
+author: SOCFortress LLC
+status: production
+type: TTP
+
+description: >
+  Detects the use of the LD_PRELOAD environment variable to hijack or hook library 
+  functions on a Linux platform. This technique is commonly used by adversaries, 
+  malware authors, and red teamers to gain elevated privileges and establish 
+  persistence on a compromised machine. If confirmed malicious, this behavior could 
+  allow attackers to execute arbitrary code, escalate privileges, and maintain 
+  long-term access to the system.
+
+data_source:
+  - Linux Auditd
+
+search:
+  index_pattern: "${INDEX_PATTERN}"
+  size: 100
+  sort:
+    - timestamp: desc
+  query:
+    bool:
+      must:
+        - term:
+            agent_name: "${AGENT_NAME}"
+        - term:
+            agent_labels_customer: "${CUSTOMER_CODE}"
+        - bool:
+            should:
+              - wildcard:
+                  full_log: "*LD_PRELOAD*"
+            minimum_should_match: 1
+        - range:
+            timestamp:
+              gte: "${START_TIME}"
+              lte: "${END_TIME}"
+      must_not:
+        - exists:
+            field: data_win_system_eventID
+        - wildcard:
+            rule_groups: "*windows*"
+  _source:
+    - timestamp
+    - agent_name
+    - full_log
+    - rule_mitre_id
+    - rule_description
+    - location
+
+parameters:
+  AGENT_NAME:
+    description: "Target agent/host name"
+    type: string
+    required: true
+    example: "Amine"
+  CUSTOMER_CODE:
+    description: "Customer label for filtering"
+    type: string
+    required: true
+    example: "lab"
+  START_TIME:
+    description: "Query start time (ISO 8601 or relative)"
+    type: datetime
+    required: false
+    default: "now-24h"
+    example: "2026-02-04 00:00:00.000"
+  END_TIME:
+    description: "Query end time (ISO 8601 or relative)"
+    type: datetime
+    required: false
+    default: "now"
+    example: "2026-02-04 23:59:59.999"
+
+how_to_implement: >
+  This detection requires Wazuh agents deployed on Linux endpoints with auditd 
+  EXECVE logging configured to capture environment variables. Standard configurations 
+  may not capture LD_PRELOAD. Add auditd rule: 
+  auditctl -a always,exit -F arch=b64 -S execve -k exec_with_env
+  Hex pattern 4C445F5052454C4F4144 represents LD_PRELOAD in hex-encoded auditd logs.
+
+known_false_positives: >
+  Some legitimate applications may use LD_PRELOAD for debugging or performance 
+  profiling. Filter based on known development tools and authorized usage patterns.
+
+references:
+  - https://compilepeace.medium.com/memory-malware-part-0x2-writing-userland-rootkits-via-ld-preload-30121c8343d5
+  - https://attack.mitre.org/techniques/T1574/006/
+
+response:
+  message: >
+    LD_PRELOAD hijack attempt detected on $agent_name$. 
+    The LD_PRELOAD environment variable can be used to load malicious libraries 
+    and hijack function calls. MITRE ATT&CK: T1574.006
+  risk_score: 81
+  severity: high
+  risk_objects:
+    - field: agent_name
+      type: system
+      score: 81
+  threat_objects: []
+
+tags:
+  analytic_story:
+    - Linux Persistence Techniques
+    - Compromised Linux Host
+    - China-Nexus Threat Activity
+    - Salt Typhoon
+    - Linux Privilege Escalation
+  asset_type: Linux
+  mitre_attack_id:
+    - T1574.006
+  product:
+    - Wazuh
+  security_domain: endpoint
