@@ -1,0 +1,167 @@
+name: Windows PowerShell Disable Security Monitoring
+id: windows-powershell-disable-security-monitoring-001
+version: 1
+schema_version: "1.0"
+date: "2026-02-12"
+author: SOCFortress LLC
+status: production
+type: TTP
+
+description: >
+  Detects attempts to disable Windows Defender security features via PowerShell 
+  Set-MpPreference commands. Covers disabling real-time monitoring, behavior monitoring, 
+  script scanning, IOAV protection, archive scanning, and other Defender features. 
+  Also detects abbreviated parameter forms. This is a common pre-ransomware step used 
+  by REvil and other threat actors.
+
+data_source:
+  - Sysmon EventID 1
+
+search:
+  index_pattern: "${INDEX_PATTERN}"
+  size: 100
+  sort:
+    - timestamp: desc
+  query:
+    bool:
+      must:
+        - term:
+            agent_name: "${AGENT_NAME}"
+        - term:
+            agent_labels_customer: "${CUSTOMER_CODE}"
+        - term:
+            data_win_system_eventID: "1"
+        - bool:
+            should:
+              - wildcard:
+                  data_win_eventdata_image: "*powershell*"
+              - wildcard:
+                  data_win_eventdata_image: "*pwsh*"
+            minimum_should_match: 1
+        - wildcard:
+            data_win_eventdata_commandLine: "*Set-MpPreference*"
+        - bool:
+            should:
+              - wildcard:
+                  data_win_eventdata_commandLine: "*DisableRealtimeMonitoring*"
+              - wildcard:
+                  data_win_eventdata_commandLine: "*DisableBehaviorMonitoring*"
+              - wildcard:
+                  data_win_eventdata_commandLine: "*DisableScriptScanning*"
+              - wildcard:
+                  data_win_eventdata_commandLine: "*DisableIOAVProtection*"
+              - wildcard:
+                  data_win_eventdata_commandLine: "*DisableBlockAtFirstSeen*"
+              - wildcard:
+                  data_win_eventdata_commandLine: "*DisableArchiveScanning*"
+              - wildcard:
+                  data_win_eventdata_commandLine: "*DisableRemovableDriveScanning*"
+              - wildcard:
+                  data_win_eventdata_commandLine: "*DisableScanningNetworkFiles*"
+              - wildcard:
+                  data_win_eventdata_commandLine: "*DisableCatchupFullScan*"
+              - wildcard:
+                  data_win_eventdata_commandLine: "*DisableCatchupQuickScan*"
+              - wildcard:
+                  data_win_eventdata_commandLine: "*DisableRestorePoint*"
+              - wildcard:
+                  data_win_eventdata_commandLine: "*PUAProtection*"
+              - wildcard:
+                  data_win_eventdata_commandLine: "*CloudBlockLevel*"
+              - wildcard:
+                  data_win_eventdata_commandLine: "*-drtm *"
+              - wildcard:
+                  data_win_eventdata_commandLine: "*-dbm *"
+              - wildcard:
+                  data_win_eventdata_commandLine: "*-dioavp *"
+              - wildcard:
+                  data_win_eventdata_commandLine: "*-dscrptsc *"
+              - wildcard:
+                  data_win_eventdata_commandLine: "*-dbaf *"
+              - wildcard:
+                  data_win_eventdata_commandLine: "*-darchsc *"
+              - wildcard:
+                  data_win_eventdata_commandLine: "*-drdsc *"
+              - wildcard:
+                  data_win_eventdata_commandLine: "*-dsnf *"
+              - wildcard:
+                  data_win_eventdata_commandLine: "*-dcfsc *"
+            minimum_should_match: 1
+        - range:
+            timestamp:
+              gte: "${START_TIME}"
+              lte: "${END_TIME}"
+  _source:
+    - timestamp
+    - agent_name
+    - data_win_system_eventID
+    - data_win_eventdata_image
+    - data_win_eventdata_commandLine
+    - data_win_eventdata_parentImage
+    - data_win_eventdata_user
+
+parameters:
+  AGENT_NAME:
+    description: "Target agent/host name"
+    type: string
+    required: true
+    example: "DESKTOP-AM0HLGE"
+  CUSTOMER_CODE:
+    description: "Customer label for filtering"
+    type: string
+    required: true
+    example: "lab"
+  START_TIME:
+    description: "Query start time (ISO 8601 or relative)"
+    type: datetime
+    required: false
+    default: "now-24h"
+    example: "2026-02-12 00:00:00.000"
+  END_TIME:
+    description: "Query end time (ISO 8601 or relative)"
+    type: datetime
+    required: false
+    default: "now"
+    example: "2026-02-12 23:59:59.999"
+
+how_to_implement: >
+  This detection requires Wazuh agents deployed on Windows endpoints with Sysmon 
+  installed and configured to log process creation events (EventID 1) with full 
+  command-line arguments. The index pattern should match your Wazuh index naming 
+  convention.
+
+known_false_positives: >
+  Some administrative scripts may legitimately modify Defender settings. Filter 
+  based on user context and parent process. Any automated disabling of Defender 
+  features should be investigated.
+
+references:
+  - https://attack.mitre.org/techniques/T1562/001/
+  - https://docs.microsoft.com/en-us/powershell/module/defender/set-mppreference
+  - https://github.com/redcanaryco/atomic-red-team/blob/master/atomics/T1562.001/T1562.001.md
+
+response:
+  message: >
+    Windows Defender security feature disabled on $agent_name$. 
+    Command line: $data_win_eventdata_commandLine$. 
+    Parent process: $data_win_eventdata_parentImage$. 
+    User: $data_win_eventdata_user$. MITRE ATT&CK: T1562.001
+  risk_score: 50
+  severity: high
+  risk_objects:
+    - field: agent_name
+      type: system
+      score: 50
+  threat_objects: []
+
+tags:
+  analytic_story:
+    - Ransomware
+    - Revil Ransomware
+    - Compromised Windows Host
+  asset_type: Endpoint
+  mitre_attack_id:
+    - T1562.001
+  product:
+    - Wazuh
+  security_domain: endpoint
