@@ -1,0 +1,158 @@
+name: Windows Mmc LOLBAS Execution Process Spawn
+id: windows-mmc-lolbas-execution-process-spawn-001
+version: 1
+schema_version: "1.0"
+date: "2026-02-12"
+author: SOCFortress LLC
+status: production
+type: TTP
+
+description: >
+  Detects mmc.exe spawning Living Off The Land binaries (LOLBAS). Adversaries can 
+  abuse the DCOM protocol and MMC20 COM object to execute malicious code using Windows 
+  native binaries. This behavior could indicate lateral movement, allowing attackers 
+  to execute code remotely and maintain persistence within the environment.
+
+data_source:
+  - Sysmon EventID 1
+
+search:
+  index_pattern: "${INDEX_PATTERN}"
+  size: 100
+  sort:
+    - timestamp: desc
+  query:
+    bool:
+      must:
+        - term:
+            agent_name: "${AGENT_NAME}"
+        - term:
+            agent_labels_customer: "${CUSTOMER_CODE}"
+        - term:
+            data_win_system_eventID: "1"
+        - wildcard:
+            data_win_eventdata_parentImage: "*mmc.exe"
+        - bool:
+            should:
+              - wildcard:
+                  data_win_eventdata_image: "*Rundll32.exe"
+              - wildcard:
+                  data_win_eventdata_image: "*Regsvr32.exe"
+              - wildcard:
+                  data_win_eventdata_image: "*Mshta.exe"
+              - wildcard:
+                  data_win_eventdata_image: "*Wmic.exe"
+              - wildcard:
+                  data_win_eventdata_image: "*Msbuild.exe"
+              - wildcard:
+                  data_win_eventdata_image: "*Schtasks.exe"
+              - wildcard:
+                  data_win_eventdata_image: "*Bitsadmin.exe"
+              - wildcard:
+                  data_win_eventdata_image: "*Msiexec.exe"
+              - wildcard:
+                  data_win_eventdata_image: "*Netsh.exe"
+              - wildcard:
+                  data_win_eventdata_image: "*Installutil.exe"
+              - wildcard:
+                  data_win_eventdata_image: "*Regasm.exe"
+              - wildcard:
+                  data_win_eventdata_image: "*Explorer.exe"
+              - wildcard:
+                  data_win_eventdata_image: "*Cmstp.exe"
+              - wildcard:
+                  data_win_eventdata_image: "*Bash.exe"
+              - wildcard:
+                  data_win_eventdata_image: "*Forfiles.exe"
+              - wildcard:
+                  data_win_eventdata_image: "*Mavinject.exe"
+              - wildcard:
+                  data_win_eventdata_image: "*Dllhost.exe"
+              - wildcard:
+                  data_win_eventdata_image: "*Odbcconf.exe"
+              - wildcard:
+                  data_win_eventdata_image: "*Regsvcs.exe"
+              - wildcard:
+                  data_win_eventdata_image: "*Msdt.exe"
+            minimum_should_match: 1
+        - range:
+            timestamp:
+              gte: "${START_TIME}"
+              lte: "${END_TIME}"
+  _source:
+    - timestamp
+    - agent_name
+    - data_win_system_eventID
+    - data_win_eventdata_image
+    - data_win_eventdata_commandLine
+    - data_win_eventdata_parentImage
+    - data_win_eventdata_user
+
+parameters:
+  AGENT_NAME:
+    description: "Target agent/host name"
+    type: string
+    required: true
+    example: "DESKTOP-AM0HLGE"
+  CUSTOMER_CODE:
+    description: "Customer label for filtering"
+    type: string
+    required: true
+    example: "lab"
+  START_TIME:
+    description: "Query start time (ISO 8601 or relative)"
+    type: datetime
+    required: false
+    default: "now-24h"
+    example: "2026-02-12 00:00:00.000"
+  END_TIME:
+    description: "Query end time (ISO 8601 or relative)"
+    type: datetime
+    required: false
+    default: "now"
+    example: "2026-02-12 23:59:59.999"
+
+how_to_implement: >
+  This detection requires Wazuh agents deployed on Windows endpoints with Sysmon 
+  installed and configured to log process creation events (EventID 1) with full 
+  command-line arguments and parent process information. The index pattern should 
+  match your Wazuh index naming convention. Note: This detection was not validated 
+  with a live simulation as DCOM lateral movement requires a multi-host lab setup. 
+  Query logic and field mappings are validated from previous detections.
+
+known_false_positives: >
+  Legitimate MMC snap-in usage may occasionally spawn some of these binaries. 
+  Filter based on the specific child process and command line context. Investigate 
+  any matches as potential DCOM lateral movement.
+
+references:
+  - https://attack.mitre.org/techniques/T1021/003/
+  - https://www.cybereason.com/blog/dcom-lateral-movement-techniques
+  - https://lolbas-project.github.io/
+
+response:
+  message: >
+    Mmc.exe spawned a LOLBAS process on $agent_name$. 
+    Child process: $data_win_eventdata_image$. 
+    Command line: $data_win_eventdata_commandLine$. 
+    User: $data_win_eventdata_user$. MITRE ATT&CK: T1021.003, T1218.014
+  risk_score: 54
+  severity: high
+  risk_objects:
+    - field: agent_name
+      type: system
+      score: 54
+  threat_objects: []
+
+tags:
+  analytic_story:
+    - Active Directory Lateral Movement
+    - Living Off The Land
+    - Compromised Windows Host
+  asset_type: Endpoint
+  mitre_attack_id:
+    - T1021.003
+    - T1218.014
+  product:
+    - Wazuh
+  security_domain: endpoint
