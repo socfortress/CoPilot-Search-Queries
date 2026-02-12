@@ -1,0 +1,134 @@
+name: Windows PowerShell Connect To Internet With Hidden Window
+id: windows-powershell-connect-to-internet-with-hidden-window-001
+version: 1
+schema_version: "1.0"
+date: "2026-02-12"
+author: SOCFortress LLC
+status: production
+type: Hunting
+
+description: >
+  Detects PowerShell commands using the WindowStyle parameter to hide the window, 
+  which is often used to conceal malicious activity. This technique attempts to bypass 
+  default PowerShell execution policies and run commands stealthily. Used by AgentTesla, 
+  HAFNIUM Group, Hermetic Wiper, and Log4Shell exploitation chains.
+
+data_source:
+  - Sysmon EventID 1
+
+search:
+  index_pattern: "${INDEX_PATTERN}"
+  size: 100
+  sort:
+    - timestamp: desc
+  query:
+    bool:
+      must:
+        - term:
+            agent_name: "${AGENT_NAME}"
+        - term:
+            agent_labels_customer: "${CUSTOMER_CODE}"
+        - term:
+            data_win_system_eventID: "1"
+        - bool:
+            should:
+              - wildcard:
+                  data_win_eventdata_image: "*powershell*"
+              - wildcard:
+                  data_win_eventdata_image: "*pwsh*"
+            minimum_should_match: 1
+        - bool:
+            should:
+              - wildcard:
+                  data_win_eventdata_commandLine: "*-WindowStyle*hidden*"
+              - wildcard:
+                  data_win_eventdata_commandLine: "*-w hidden*"
+              - wildcard:
+                  data_win_eventdata_commandLine: "*-win hid*"
+              - wildcard:
+                  data_win_eventdata_commandLine: "*-windowst*hid*"
+            minimum_should_match: 1
+        - range:
+            timestamp:
+              gte: "${START_TIME}"
+              lte: "${END_TIME}"
+  _source:
+    - timestamp
+    - agent_name
+    - data_win_system_eventID
+    - data_win_eventdata_image
+    - data_win_eventdata_commandLine
+    - data_win_eventdata_parentImage
+    - data_win_eventdata_user
+
+parameters:
+  AGENT_NAME:
+    description: "Target agent/host name"
+    type: string
+    required: true
+    example: "DESKTOP-AM0HLGE"
+  CUSTOMER_CODE:
+    description: "Customer label for filtering"
+    type: string
+    required: true
+    example: "lab"
+  START_TIME:
+    description: "Query start time (ISO 8601 or relative)"
+    type: datetime
+    required: false
+    default: "now-24h"
+    example: "2026-02-12 00:00:00.000"
+  END_TIME:
+    description: "Query end time (ISO 8601 or relative)"
+    type: datetime
+    required: false
+    default: "now"
+    example: "2026-02-12 23:59:59.999"
+
+how_to_implement: >
+  This detection requires Wazuh agents deployed on Windows endpoints with Sysmon 
+  installed and configured to log process creation events (EventID 1) with full 
+  command-line arguments. The index pattern should match your Wazuh index naming 
+  convention.
+
+known_false_positives: >
+  Some legitimate processes may use -WindowStyle Hidden for background tasks. 
+  Filter based on parent process context and the full command line to determine 
+  legitimacy. Common false positives include scheduled tasks and software updaters.
+
+references:
+  - https://attack.mitre.org/techniques/T1059/001/
+  - https://ss64.com/ps/powershell.html
+  - https://blog.netlab.360.com/ten-families-of-malicious-samples-are-spreading-using-the-log4j2-vulnerability-now/
+
+response:
+  message: >
+    PowerShell with hidden window detected on $agent_name$. 
+    Command line: $data_win_eventdata_commandLine$. 
+    Parent process: $data_win_eventdata_parentImage$. 
+    User: $data_win_eventdata_user$. MITRE ATT&CK: T1059.001
+  risk_score: 42
+  severity: medium
+  risk_objects:
+    - field: agent_name
+      type: system
+      score: 42
+  threat_objects:
+    - field: data_win_eventdata_parentImage
+      type: parent_process_name
+
+tags:
+  analytic_story:
+    - AgentTesla
+    - HAFNIUM Group
+    - Hermetic Wiper
+    - Malicious PowerShell
+    - Data Destruction
+    - Log4Shell CVE-2021-44228
+    - Compromised Windows Host
+  asset_type: Endpoint
+  mitre_attack_id:
+    - T1059.001
+  product:
+    - Wazuh
+  security_domain: endpoint
