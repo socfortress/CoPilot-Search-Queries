@@ -1,0 +1,134 @@
+name: Windows Malicious PowerShell Executed As A Service
+id: windows-malicious-powershell-executed-as-a-service-001
+version: 1
+schema_version: "1.0"
+date: "2026-02-12"
+author: SOCFortress LLC
+status: production
+type: TTP
+
+description: >
+  Detects the creation of a Windows service with a PowerShell command containing 
+  suspicious flags (-nop, -w hidden, -noexit, -enc) in the ImagePath. This indicates 
+  potential abuse of the Windows Service Control Manager (sc.exe) to execute malicious 
+  PowerShell payloads as a service, commonly used by ransomware (Rhysida) and RATs 
+  for persistence and code execution.
+
+data_source:
+  - Sysmon EventID 13
+
+search:
+  index_pattern: "${INDEX_PATTERN}"
+  size: 100
+  sort:
+    - timestamp: desc
+  query:
+    bool:
+      must:
+        - term:
+            agent_name: "${AGENT_NAME}"
+        - term:
+            agent_labels_customer: "${CUSTOMER_CODE}"
+        - term:
+            data_win_system_eventID: "13"
+        - wildcard:
+            data_win_eventdata_targetObject: "*Services*ImagePath"
+        - bool:
+            should:
+              - wildcard:
+                  data_win_eventdata_details: "*powershell*"
+              - wildcard:
+                  data_win_eventdata_details: "*pwsh*"
+              - wildcard:
+                  data_win_eventdata_details: "*powershell_ise*"
+            minimum_should_match: 1
+        - bool:
+            should:
+              - wildcard:
+                  data_win_eventdata_details: "*-nop*"
+              - wildcard:
+                  data_win_eventdata_details: "*-w hidden*"
+              - wildcard:
+                  data_win_eventdata_details: "*-noe*"
+              - wildcard:
+                  data_win_eventdata_details: "*-enc*"
+            minimum_should_match: 1
+        - range:
+            timestamp:
+              gte: "${START_TIME}"
+              lte: "${END_TIME}"
+  _source:
+    - timestamp
+    - agent_name
+    - data_win_system_eventID
+    - data_win_eventdata_targetObject
+    - data_win_eventdata_details
+    - data_win_eventdata_image
+    - data_win_eventdata_user
+
+parameters:
+  AGENT_NAME:
+    description: "Target agent/host name"
+    type: string
+    required: true
+    example: "DESKTOP-AM0HLGE"
+  CUSTOMER_CODE:
+    description: "Customer label for filtering"
+    type: string
+    required: true
+    example: "lab"
+  START_TIME:
+    description: "Query start time (ISO 8601 or relative)"
+    type: datetime
+    required: false
+    default: "now-24h"
+    example: "2026-02-12 00:00:00.000"
+  END_TIME:
+    description: "Query end time (ISO 8601 or relative)"
+    type: datetime
+    required: false
+    default: "now"
+    example: "2026-02-12 23:59:59.999"
+
+how_to_implement: >
+  This detection requires Wazuh agents deployed on Windows endpoints with Sysmon 
+  installed and configured to log registry value set events (EventID 13). Ensure 
+  the Sysmon configuration captures registry modifications under 
+  HKLM\System\CurrentControlSet\Services. The index pattern should match your 
+  Wazuh index naming convention.
+
+known_false_positives: >
+  Legitimate PowerShell-based services are rare but possible in managed environments. 
+  Filter based on known service names and authorized automation tools. The combination 
+  of PowerShell with suspicious flags (-nop, -w hidden, -enc) in a service ImagePath 
+  is highly suspicious and should be investigated.
+
+references:
+  - https://attack.mitre.org/techniques/T1569/002/
+  - https://www.fireeye.com/content/dam/fireeye-www/blog/pdfs/dosfuscation-report.pdf
+  - https://www.danielbohannon.com/blog-1/2017/3/12/powershell-execution-argument-obfuscation-how-it-can-make-detection-easier
+
+response:
+  message: >
+    Malicious PowerShell service creation detected on $agent_name$. 
+    A service was created with PowerShell and suspicious flags in the ImagePath: 
+    $data_win_eventdata_details$. MITRE ATT&CK: T1569.002
+  risk_score: 72
+  severity: high
+  risk_objects:
+    - field: agent_name
+      type: system
+      score: 72
+  threat_objects: []
+
+tags:
+  analytic_story:
+    - Compromised Windows Host
+    - Rhysida Ransomware
+    - Malicious PowerShell
+  asset_type: Endpoint
+  mitre_attack_id:
+    - T1569.002
+  product:
+    - Wazuh
+  security_domain: endpoint
