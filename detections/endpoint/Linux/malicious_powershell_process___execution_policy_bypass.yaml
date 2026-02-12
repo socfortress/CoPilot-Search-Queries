@@ -1,0 +1,123 @@
+name: Windows Malicious PowerShell Process - Execution Policy Bypass
+id: windows-malicious-powershell-process-execution-policy-bypass-001
+version: 1
+schema_version: "1.0"
+date: "2026-02-12"
+author: SOCFortress LLC
+status: production
+type: Anomaly
+
+description: >
+  Detects PowerShell processes launched with parameters that bypass the local execution 
+  policy for scripts. Bypassing execution policies is a common tactic used by attackers 
+  to run malicious scripts undetected. This technique is widely used by threat actors 
+  including Volt Typhoon, Salt Typhoon, AsyncRAT, XWorm, and DarkCrystal RAT.
+
+data_source:
+  - Sysmon EventID 1
+
+search:
+  index_pattern: "${INDEX_PATTERN}"
+  size: 100
+  sort:
+    - timestamp: desc
+  query:
+    bool:
+      must:
+        - term:
+            agent_name: "${AGENT_NAME}"
+        - term:
+            agent_labels_customer: "${CUSTOMER_CODE}"
+        - term:
+            data_win_system_eventID: "1"
+        - bool:
+            should:
+              - wildcard:
+                  data_win_eventdata_image: "*powershell*"
+              - wildcard:
+                  data_win_eventdata_image: "*pwsh*"
+            minimum_should_match: 1
+        - wildcard:
+            data_win_eventdata_commandLine: "*-ex*"
+        - wildcard:
+            data_win_eventdata_commandLine: "*bypass*"
+        - range:
+            timestamp:
+              gte: "${START_TIME}"
+              lte: "${END_TIME}"
+  _source:
+    - timestamp
+    - agent_name
+    - data_win_system_eventID
+    - data_win_eventdata_image
+    - data_win_eventdata_commandLine
+    - data_win_eventdata_parentImage
+    - data_win_eventdata_user
+
+parameters:
+  AGENT_NAME:
+    description: "Target agent/host name"
+    type: string
+    required: true
+    example: "DESKTOP-AM0HLGE"
+  CUSTOMER_CODE:
+    description: "Customer label for filtering"
+    type: string
+    required: true
+    example: "lab"
+  START_TIME:
+    description: "Query start time (ISO 8601 or relative)"
+    type: datetime
+    required: false
+    default: "now-24h"
+    example: "2026-02-12 00:00:00.000"
+  END_TIME:
+    description: "Query end time (ISO 8601 or relative)"
+    type: datetime
+    required: false
+    default: "now"
+    example: "2026-02-12 23:59:59.999"
+
+how_to_implement: >
+  This detection requires Wazuh agents deployed on Windows endpoints with Sysmon 
+  installed and configured to log process creation events (EventID 1) with full 
+  command-line arguments. The index pattern should match your Wazuh index naming 
+  convention.
+
+known_false_positives: >
+  There may be legitimate reasons to bypass the PowerShell execution policy, such as 
+  administrative scripts or software deployment tools. Validate the PowerShell script 
+  being run and the parent process context to determine legitimacy.
+
+references:
+  - https://attack.mitre.org/techniques/T1059/001/
+  - https://www.microsoft.com/en-us/security/blog/2023/05/24/volt-typhoon-targets-us-critical-infrastructure-with-living-off-the-land-techniques/
+
+response:
+  message: >
+    PowerShell execution policy bypass detected on $agent_name$. 
+    Command line: $data_win_eventdata_commandLine$. 
+    Parent process: $data_win_eventdata_parentImage$. 
+    User: $data_win_eventdata_user$. MITRE ATT&CK: T1059.001
+  risk_score: 42
+  severity: medium
+  risk_objects:
+    - field: agent_name
+      type: system
+      score: 42
+  threat_objects: []
+
+tags:
+  analytic_story:
+    - Volt Typhoon
+    - Salt Typhoon
+    - AsyncRAT
+    - XWorm
+    - DarkCrystal RAT
+    - Compromised Windows Host
+  asset_type: Endpoint
+  mitre_attack_id:
+    - T1059.001
+  product:
+    - Wazuh
+  security_domain: endpoint
