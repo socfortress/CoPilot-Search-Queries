@@ -1,0 +1,134 @@
+name: Windows PowerShell Enable SMB1Protocol Feature
+id: windows-powershell-enable-smb1protocol-feature-001
+version: 1
+schema_version: "1.0"
+date: "2026-02-12"
+author: SOCFortress LLC
+status: production
+type: TTP
+
+description: >
+  Detects the enabling of the SMB1 protocol via PowerShell using 
+  Enable-WindowsOptionalFeature with SMB1Protocol. Enabling SMB1 can facilitate 
+  lateral movement and file encryption by ransomware such as RedDot and Hermetic 
+  Wiper. Searches both Sysmon process creation (EventID 1) command lines and 
+  PowerShell Script Block Logging (EventID 4104).
+
+data_source:
+  - Sysmon EventID 1
+  - PowerShell Script Block Logging 4104
+
+search:
+  index_pattern: "${INDEX_PATTERN}"
+  size: 100
+  sort:
+    - timestamp: desc
+  query:
+    bool:
+      must:
+        - term:
+            agent_name: "${AGENT_NAME}"
+        - term:
+            agent_labels_customer: "${CUSTOMER_CODE}"
+        - bool:
+            should:
+              - bool:
+                  must:
+                    - term:
+                        data_win_system_eventID: "1"
+                    - wildcard:
+                        data_win_eventdata_commandLine: "*Enable-WindowsOptionalFeature*"
+                    - wildcard:
+                        data_win_eventdata_commandLine: "*SMB1Protocol*"
+              - bool:
+                  must:
+                    - term:
+                        data_win_system_eventID: "4104"
+                    - wildcard:
+                        data_win_eventdata_scriptBlockText: "*Enable-WindowsOptionalFeature*"
+                    - wildcard:
+                        data_win_eventdata_scriptBlockText: "*SMB1Protocol*"
+            minimum_should_match: 1
+        - range:
+            timestamp:
+              gte: "${START_TIME}"
+              lte: "${END_TIME}"
+  _source:
+    - timestamp
+    - agent_name
+    - data_win_system_eventID
+    - data_win_eventdata_image
+    - data_win_eventdata_commandLine
+    - data_win_eventdata_scriptBlockText
+    - data_win_eventdata_scriptBlockId
+    - data_win_eventdata_parentImage
+    - data_win_eventdata_user
+
+parameters:
+  AGENT_NAME:
+    description: "Target agent/host name"
+    type: string
+    required: true
+    example: "DESKTOP-AM0HLGE"
+  CUSTOMER_CODE:
+    description: "Customer label for filtering"
+    type: string
+    required: true
+    example: "lab"
+  START_TIME:
+    description: "Query start time (ISO 8601 or relative)"
+    type: datetime
+    required: false
+    default: "now-24h"
+    example: "2026-02-12 00:00:00.000"
+  END_TIME:
+    description: "Query end time (ISO 8601 or relative)"
+    type: datetime
+    required: false
+    default: "now"
+    example: "2026-02-12 23:59:59.999"
+
+how_to_implement: >
+  This detection requires Wazuh agents deployed on Windows endpoints with Sysmon 
+  installed and configured to log process creation events (EventID 1) with full 
+  command-line arguments. Additionally enable PowerShell Script Block Logging 
+  (EventCode 4104) for reliable coverage of script-based execution. The Wazuh 
+  agent ossec.conf should include the Microsoft-Windows-PowerShell/Operational 
+  event channel. Note: 4104 is the primary and most reliable data source for this 
+  detection as the command may be executed within an existing PowerShell session 
+  without spawning a new process.
+
+known_false_positives: >
+  Network operators may legitimately enable or disable SMB1. Filter based on user 
+  context. Enabling SMB1 should be rare and investigated in modern environments.
+
+references:
+  - https://attack.mitre.org/techniques/T1027/005/
+  - https://app.any.run/tasks/c0f98850-af65-4352-9746-fbebadee4f05/
+
+response:
+  message: >
+    SMB1Protocol feature enabled via PowerShell on $agent_name$. 
+    Command line: $data_win_eventdata_commandLine$. 
+    User: $data_win_eventdata_user$. MITRE ATT&CK: T1027.005
+  risk_score: 50
+  severity: high
+  risk_objects:
+    - field: agent_name
+      type: system
+      score: 50
+  threat_objects: []
+
+tags:
+  analytic_story:
+    - Ransomware
+    - Malicious PowerShell
+    - Hermetic Wiper
+    - Data Destruction
+    - Compromised Windows Host
+  asset_type: Endpoint
+  mitre_attack_id:
+    - T1027.005
+  product:
+    - Wazuh
+  security_domain: endpoint
