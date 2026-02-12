@@ -1,0 +1,125 @@
+name: Windows PowerShell Domain Enumeration
+id: windows-powershell-domain-enumeration-001
+version: 1
+schema_version: "1.0"
+date: "2026-02-12"
+author: SOCFortress LLC
+status: production
+type: TTP
+
+description: >
+  Detects PowerShell commands used for Active Directory domain enumeration via 
+  Script Block Logging (EventCode 4104). Covers get-netdomaintrust, get-netforesttrust, 
+  get-addomain, get-adgroupmember, and get-domainuser. This activity often indicates 
+  reconnaissance efforts to map domain structure and identify key users and groups.
+
+data_source:
+  - PowerShell Script Block Logging 4104
+
+search:
+  index_pattern: "${INDEX_PATTERN}"
+  size: 100
+  sort:
+    - timestamp: desc
+  query:
+    bool:
+      must:
+        - term:
+            agent_name: "${AGENT_NAME}"
+        - term:
+            agent_labels_customer: "${CUSTOMER_CODE}"
+        - term:
+            data_win_system_eventID: "4104"
+        - bool:
+            should:
+              - wildcard:
+                  data_win_eventdata_scriptBlockText: "*get-netdomaintrust*"
+              - wildcard:
+                  data_win_eventdata_scriptBlockText: "*get-netforesttrust*"
+              - wildcard:
+                  data_win_eventdata_scriptBlockText: "*get-addomain*"
+              - wildcard:
+                  data_win_eventdata_scriptBlockText: "*get-adgroupmember*"
+              - wildcard:
+                  data_win_eventdata_scriptBlockText: "*get-domainuser*"
+            minimum_should_match: 1
+        - range:
+            timestamp:
+              gte: "${START_TIME}"
+              lte: "${END_TIME}"
+  _source:
+    - timestamp
+    - agent_name
+    - data_win_system_eventID
+    - data_win_eventdata_scriptBlockText
+    - data_win_eventdata_scriptBlockId
+    - data_win_system_computer
+    - rule_description
+
+parameters:
+  AGENT_NAME:
+    description: "Target agent/host name"
+    type: string
+    required: true
+    example: "DESKTOP-AM0HLGE"
+  CUSTOMER_CODE:
+    description: "Customer label for filtering"
+    type: string
+    required: true
+    example: "lab"
+  START_TIME:
+    description: "Query start time (ISO 8601 or relative)"
+    type: datetime
+    required: false
+    default: "now-24h"
+    example: "2026-02-12 00:00:00.000"
+  END_TIME:
+    description: "Query end time (ISO 8601 or relative)"
+    type: datetime
+    required: false
+    default: "now"
+    example: "2026-02-12 23:59:59.999"
+
+how_to_implement: >
+  This detection requires PowerShell Script Block Logging (EventCode 4104) enabled 
+  on Windows endpoints and the Microsoft-Windows-PowerShell/Operational channel 
+  configured in the Wazuh agent ossec.conf. Ensure Wazuh rules are configured to 
+  forward verbose-level (level 5) PowerShell 4104 events, as the default rule 
+  threshold may filter them out. A custom Wazuh rule with sufficient level may be 
+  needed to ensure these events reach the indexer.
+
+known_false_positives: >
+  Legitimate AD administration scripts may use these cmdlets. Filter based on 
+  user context and frequency. Multiple enumeration commands in a short window 
+  increases confidence of malicious activity.
+
+references:
+  - https://attack.mitre.org/techniques/T1059/001/
+  - https://www.splunk.com/en_us/blog/security/hunting-for-malicious-powershell-using-script-block-logging.html
+
+response:
+  message: >
+    PowerShell domain enumeration detected on $agent_name$. 
+    Script content: $data_win_eventdata_scriptBlockText$. 
+    MITRE ATT&CK: T1059.001
+  risk_score: 42
+  severity: medium
+  risk_objects:
+    - field: agent_name
+      type: system
+      score: 42
+  threat_objects: []
+
+tags:
+  analytic_story:
+    - Hermetic Wiper
+    - Malicious PowerShell
+    - Data Destruction
+    - Interlock Ransomware
+    - Compromised Windows Host
+  asset_type: Endpoint
+  mitre_attack_id:
+    - T1059.001
+  product:
+    - Wazuh
+  security_domain: endpoint
