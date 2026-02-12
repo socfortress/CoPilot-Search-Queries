@@ -8,12 +8,14 @@ status: production
 type: TTP
 
 description: >
-  Detects PowerShell commands used for Active Directory domain enumeration via 
-  Script Block Logging (EventCode 4104). Covers get-netdomaintrust, get-netforesttrust, 
-  get-addomain, get-adgroupmember, and get-domainuser. This activity often indicates 
-  reconnaissance efforts to map domain structure and identify key users and groups.
+  Detects PowerShell commands used for Active Directory domain enumeration including 
+  get-netdomaintrust, get-netforesttrust, get-addomain, get-adgroupmember, and 
+  get-domainuser. This activity often indicates reconnaissance efforts to map domain 
+  structure and identify key users and groups. Searches both Sysmon process creation 
+  (EventID 1) command lines and PowerShell Script Block Logging (EventID 4104).
 
 data_source:
+  - Sysmon EventID 1
   - PowerShell Script Block Logging 4104
 
 search:
@@ -28,20 +30,42 @@ search:
             agent_name: "${AGENT_NAME}"
         - term:
             agent_labels_customer: "${CUSTOMER_CODE}"
-        - term:
-            data_win_system_eventID: "4104"
         - bool:
             should:
-              - wildcard:
-                  data_win_eventdata_scriptBlockText: "*get-netdomaintrust*"
-              - wildcard:
-                  data_win_eventdata_scriptBlockText: "*get-netforesttrust*"
-              - wildcard:
-                  data_win_eventdata_scriptBlockText: "*get-addomain*"
-              - wildcard:
-                  data_win_eventdata_scriptBlockText: "*get-adgroupmember*"
-              - wildcard:
-                  data_win_eventdata_scriptBlockText: "*get-domainuser*"
+              - bool:
+                  must:
+                    - term:
+                        data_win_system_eventID: "1"
+                    - bool:
+                        should:
+                          - wildcard:
+                              data_win_eventdata_commandLine: "*get-netdomaintrust*"
+                          - wildcard:
+                              data_win_eventdata_commandLine: "*get-netforesttrust*"
+                          - wildcard:
+                              data_win_eventdata_commandLine: "*get-addomain*"
+                          - wildcard:
+                              data_win_eventdata_commandLine: "*get-adgroupmember*"
+                          - wildcard:
+                              data_win_eventdata_commandLine: "*get-domainuser*"
+                        minimum_should_match: 1
+              - bool:
+                  must:
+                    - term:
+                        data_win_system_eventID: "4104"
+                    - bool:
+                        should:
+                          - wildcard:
+                              data_win_eventdata_scriptBlockText: "*get-netdomaintrust*"
+                          - wildcard:
+                              data_win_eventdata_scriptBlockText: "*get-netforesttrust*"
+                          - wildcard:
+                              data_win_eventdata_scriptBlockText: "*get-addomain*"
+                          - wildcard:
+                              data_win_eventdata_scriptBlockText: "*get-adgroupmember*"
+                          - wildcard:
+                              data_win_eventdata_scriptBlockText: "*get-domainuser*"
+                        minimum_should_match: 1
             minimum_should_match: 1
         - range:
             timestamp:
@@ -51,10 +75,12 @@ search:
     - timestamp
     - agent_name
     - data_win_system_eventID
+    - data_win_eventdata_image
+    - data_win_eventdata_commandLine
     - data_win_eventdata_scriptBlockText
     - data_win_eventdata_scriptBlockId
-    - data_win_system_computer
-    - rule_description
+    - data_win_eventdata_parentImage
+    - data_win_eventdata_user
 
 parameters:
   AGENT_NAME:
@@ -81,12 +107,12 @@ parameters:
     example: "2026-02-12 23:59:59.999"
 
 how_to_implement: >
-  This detection requires PowerShell Script Block Logging (EventCode 4104) enabled 
-  on Windows endpoints and the Microsoft-Windows-PowerShell/Operational channel 
-  configured in the Wazuh agent ossec.conf. Ensure Wazuh rules are configured to 
-  forward verbose-level (level 5) PowerShell 4104 events, as the default rule 
-  threshold may filter them out. A custom Wazuh rule with sufficient level may be 
-  needed to ensure these events reach the indexer.
+  This detection requires Wazuh agents deployed on Windows endpoints with Sysmon 
+  installed and configured to log process creation events (EventID 1) with full 
+  command-line arguments. Optionally enable PowerShell Script Block Logging 
+  (EventCode 4104) for additional coverage. The Wazuh agent ossec.conf should 
+  include the Microsoft-Windows-PowerShell/Operational event channel. The index 
+  pattern should match your Wazuh index naming convention.
 
 known_false_positives: >
   Legitimate AD administration scripts may use these cmdlets. Filter based on 
@@ -100,8 +126,9 @@ references:
 response:
   message: >
     PowerShell domain enumeration detected on $agent_name$. 
-    Script content: $data_win_eventdata_scriptBlockText$. 
-    MITRE ATT&CK: T1059.001
+    Command line: $data_win_eventdata_commandLine$. 
+    Parent process: $data_win_eventdata_parentImage$. 
+    User: $data_win_eventdata_user$. MITRE ATT&CK: T1059.001
   risk_score: 42
   severity: medium
   risk_objects:
