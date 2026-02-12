@@ -1,0 +1,121 @@
+name: Windows Network Connection Discovery With Arp
+id: windows-network-connection-discovery-with-arp-001
+version: 1
+schema_version: "1.0"
+date: "2026-02-12"
+author: SOCFortress LLC
+status: production
+type: Hunting
+
+description: >
+  Detects the execution of arp.exe with the -a flag, used to list network connections 
+  and ARP cache entries on a system. Both Red Teams and adversaries use arp.exe for 
+  situational awareness and network discovery. Used by Volt Typhoon, Qakbot, IcedID, 
+  and Prestige/Interlock ransomware for network reconnaissance prior to lateral movement.
+
+data_source:
+  - Sysmon EventID 1
+
+search:
+  index_pattern: "${INDEX_PATTERN}"
+  size: 100
+  sort:
+    - timestamp: desc
+  query:
+    bool:
+      must:
+        - term:
+            agent_name: "${AGENT_NAME}"
+        - term:
+            agent_labels_customer: "${CUSTOMER_CODE}"
+        - term:
+            data_win_system_eventID: "1"
+        - wildcard:
+            data_win_eventdata_image: "*arp.exe"
+        - wildcard:
+            data_win_eventdata_commandLine: "*-a*"
+        - range:
+            timestamp:
+              gte: "${START_TIME}"
+              lte: "${END_TIME}"
+  _source:
+    - timestamp
+    - agent_name
+    - data_win_system_eventID
+    - data_win_eventdata_image
+    - data_win_eventdata_commandLine
+    - data_win_eventdata_parentImage
+    - data_win_eventdata_user
+
+parameters:
+  AGENT_NAME:
+    description: "Target agent/host name"
+    type: string
+    required: true
+    example: "DESKTOP-AM0HLGE"
+  CUSTOMER_CODE:
+    description: "Customer label for filtering"
+    type: string
+    required: true
+    example: "lab"
+  START_TIME:
+    description: "Query start time (ISO 8601 or relative)"
+    type: datetime
+    required: false
+    default: "now-24h"
+    example: "2026-02-12 00:00:00.000"
+  END_TIME:
+    description: "Query end time (ISO 8601 or relative)"
+    type: datetime
+    required: false
+    default: "now"
+    example: "2026-02-12 23:59:59.999"
+
+how_to_implement: >
+  This detection requires Wazuh agents deployed on Windows endpoints with Sysmon 
+  installed and configured to log process creation events (EventID 1) with full 
+  command-line arguments. Ensure the Sysmon configuration does not exclude arp.exe 
+  from logging. The index pattern should match your Wazuh index naming convention. 
+  Note: This detection was not validated with a live simulation as the Sysmon config 
+  in the lab environment excludes arp.exe. Query logic and field mappings are validated 
+  from previous detections.
+
+known_false_positives: >
+  Administrators or power users may use arp -a for legitimate network troubleshooting. 
+  Filter based on parent process context and frequency. Multiple arp executions in 
+  a short time window increases confidence of malicious activity.
+
+references:
+  - https://attack.mitre.org/techniques/T1049/
+  - https://www.microsoft.com/en-us/security/blog/2023/05/24/volt-typhoon-targets-us-critical-infrastructure-with-living-off-the-land-techniques/
+  - https://thedfirreport.com/2023/05/22/icedid-macro-ends-in-nokoyawa-ransomware/
+
+response:
+  message: >
+    Network connection discovery via arp.exe detected on $agent_name$. 
+    Command line: $data_win_eventdata_commandLine$. 
+    Parent process: $data_win_eventdata_parentImage$. 
+    User: $data_win_eventdata_user$. MITRE ATT&CK: T1049
+  risk_score: 25
+  severity: low
+  risk_objects:
+    - field: agent_name
+      type: system
+      score: 25
+  threat_objects: []
+
+tags:
+  analytic_story:
+    - Active Directory Discovery
+    - Qakbot
+    - Windows Post-Exploitation
+    - Volt Typhoon
+    - IcedID
+    - Interlock Ransomware
+    - Compromised Windows Host
+  asset_type: Endpoint
+  mitre_attack_id:
+    - T1049
+  product:
+    - Wazuh
+  security_domain: endpoint
