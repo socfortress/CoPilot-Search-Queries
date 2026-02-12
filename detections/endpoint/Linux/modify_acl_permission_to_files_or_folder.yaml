@@ -1,0 +1,130 @@
+name: Windows Modify ACL Permission To Files Or Folder
+id: windows-modify-acl-permission-to-files-or-folder-001
+version: 1
+schema_version: "1.0"
+date: "2026-02-12"
+author: SOCFortress LLC
+status: production
+type: Anomaly
+
+description: >
+  Detects the modification of ACL permissions using icacls.exe, cacls.exe, or xcacls.exe 
+  to grant access to Everyone, SYSTEM, or the well-known SID S-1-1-0. This activity 
+  may indicate an adversary attempting to evade ACLs or access protected files. Commonly 
+  used by crypto miners (XMRig) and for defense evasion.
+
+data_source:
+  - Sysmon EventID 1
+
+search:
+  index_pattern: "${INDEX_PATTERN}"
+  size: 100
+  sort:
+    - timestamp: desc
+  query:
+    bool:
+      must:
+        - term:
+            agent_name: "${AGENT_NAME}"
+        - term:
+            agent_labels_customer: "${CUSTOMER_CODE}"
+        - term:
+            data_win_system_eventID: "1"
+        - bool:
+            should:
+              - wildcard:
+                  data_win_eventdata_image: "*icacls.exe"
+              - wildcard:
+                  data_win_eventdata_image: "*cacls.exe"
+              - wildcard:
+                  data_win_eventdata_image: "*xcacls.exe"
+            minimum_should_match: 1
+        - wildcard:
+            data_win_eventdata_commandLine: "*/grant*"
+        - bool:
+            should:
+              - wildcard:
+                  data_win_eventdata_commandLine: "*Everyone:*"
+              - wildcard:
+                  data_win_eventdata_commandLine: "*SYSTEM:*"
+              - wildcard:
+                  data_win_eventdata_commandLine: "*S-1-1-0:*"
+            minimum_should_match: 1
+        - range:
+            timestamp:
+              gte: "${START_TIME}"
+              lte: "${END_TIME}"
+  _source:
+    - timestamp
+    - agent_name
+    - data_win_system_eventID
+    - data_win_eventdata_image
+    - data_win_eventdata_commandLine
+    - data_win_eventdata_parentImage
+    - data_win_eventdata_user
+
+parameters:
+  AGENT_NAME:
+    description: "Target agent/host name"
+    type: string
+    required: true
+    example: "DESKTOP-AM0HLGE"
+  CUSTOMER_CODE:
+    description: "Customer label for filtering"
+    type: string
+    required: true
+    example: "lab"
+  START_TIME:
+    description: "Query start time (ISO 8601 or relative)"
+    type: datetime
+    required: false
+    default: "now-24h"
+    example: "2026-02-12 00:00:00.000"
+  END_TIME:
+    description: "Query end time (ISO 8601 or relative)"
+    type: datetime
+    required: false
+    default: "now"
+    example: "2026-02-12 23:59:59.999"
+
+how_to_implement: >
+  This detection requires Wazuh agents deployed on Windows endpoints with Sysmon 
+  installed and configured to log process creation events (EventID 1) with full 
+  command-line arguments. The index pattern should match your Wazuh index naming 
+  convention.
+
+known_false_positives: >
+  Administrators may legitimately use icacls to modify permissions during software 
+  installation or system configuration. Filter based on parent process context and 
+  target paths.
+
+references:
+  - https://attack.mitre.org/techniques/T1222/
+  - https://thedfirreport.com/2020/04/20/sqlserver-or-the-miner-in-the-basement/
+
+response:
+  message: >
+    Suspicious ACL permission modification detected on $agent_name$. 
+    Command line: $data_win_eventdata_commandLine$. 
+    Parent process: $data_win_eventdata_parentImage$. 
+    User: $data_win_eventdata_user$. MITRE ATT&CK: T1222
+  risk_score: 32
+  severity: medium
+  risk_objects:
+    - field: agent_name
+      type: system
+      score: 32
+  threat_objects: []
+
+tags:
+  analytic_story:
+    - Crypto Stealer
+    - XMRig
+    - Defense Evasion or Unauthorized Access Via SDDL Tampering
+    - Compromised Windows Host
+  asset_type: Endpoint
+  mitre_attack_id:
+    - T1222
+  product:
+    - Wazuh
+  security_domain: endpoint
