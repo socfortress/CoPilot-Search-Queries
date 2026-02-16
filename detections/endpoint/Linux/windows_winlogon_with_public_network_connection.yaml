@@ -1,0 +1,132 @@
+name: Windows WinLogon With Public Network Connection
+id: windows-winlogon-public-network-connection-001
+version: 1
+schema_version: "1.0"
+date: "2026-02-16"
+author: SOCFortress LLC
+status: production
+type: Hunting
+
+description: >
+  Detects winlogon.exe making network connections to public IP addresses via 
+  Sysmon EventID 3 (Network Connection). Under normal circumstances winlogon.exe 
+  should never connect to public IPs. This behavior may indicate a BlackLotus 
+  bootkit compromise or similar system-level threat.
+
+data_source:
+  - Sysmon EventID 3
+
+search:
+  index_pattern: "${INDEX_PATTERN}"
+  size: 100
+  sort:
+    - timestamp: desc
+  query:
+    bool:
+      must:
+        - term:
+            agent_name: "${AGENT_NAME}"
+        - term:
+            agent_labels_customer: "${CUSTOMER_CODE}"
+        - term:
+            data_win_system_eventID: "3"
+        - wildcard:
+            data_win_eventdata_image: "*\\\\winlogon.exe"
+        - range:
+            timestamp:
+              gte: "${START_TIME}"
+              lte: "${END_TIME}"
+      must_not:
+        - term:
+            data_win_eventdata_destinationIp: "127.0.0.1"
+        - term:
+            data_win_eventdata_destinationIp: "0:0:0:0:0:0:0:1"
+        - wildcard:
+            data_win_eventdata_destinationIp: "10.*"
+        - wildcard:
+            data_win_eventdata_destinationIp: "172.16.*"
+        - wildcard:
+            data_win_eventdata_destinationIp: "172.17.*"
+        - wildcard:
+            data_win_eventdata_destinationIp: "172.18.*"
+        - wildcard:
+            data_win_eventdata_destinationIp: "172.19.*"
+        - wildcard:
+            data_win_eventdata_destinationIp: "172.2*"
+        - wildcard:
+            data_win_eventdata_destinationIp: "172.30.*"
+        - wildcard:
+            data_win_eventdata_destinationIp: "172.31.*"
+        - wildcard:
+            data_win_eventdata_destinationIp: "192.168.*"
+  _source:
+    - timestamp
+    - agent_name
+    - data_win_system_eventID
+    - data_win_eventdata_image
+    - data_win_eventdata_destinationIp
+    - data_win_eventdata_destinationPort
+    - data_win_eventdata_user
+
+parameters:
+  AGENT_NAME:
+    description: "Target agent/host name"
+    type: string
+    required: true
+    example: "DESKTOP-AM0HLGE"
+  CUSTOMER_CODE:
+    description: "Customer label for filtering"
+    type: string
+    required: true
+    example: "lab"
+  START_TIME:
+    description: "Query start time (ISO 8601 or relative)"
+    type: datetime
+    required: false
+    default: "now-24h"
+    example: "2026-02-16 00:00:00.000"
+  END_TIME:
+    description: "Query end time (ISO 8601 or relative)"
+    type: datetime
+    required: false
+    default: "now"
+    example: "2026-02-16 23:59:59.999"
+
+how_to_implement: >
+  This detection requires Wazuh agents deployed on Windows endpoints with Sysmon 
+  installed and configured to log network connection events (EventID 3). The query 
+  excludes private IP ranges (RFC1918) and localhost to focus on public connections 
+  from winlogon.exe which should never occur under normal operation.
+
+known_false_positives: >
+  False positives should be minimal as winlogon.exe should not connect to public 
+  IPs. If detected, immediately investigate the endpoint for bootkit or rootkit 
+  compromise.
+
+references:
+  - https://attack.mitre.org/techniques/T1542/003/
+  - https://www.microsoft.com/en-us/security/blog/2023/04/11/guidance-for-investigating-attacks-using-cve-2022-21894-the-blacklotus-campaign/
+
+response:
+  message: >
+    CRITICAL: winlogon.exe connected to public IP $data_win_eventdata_destinationIp$ 
+    on port $data_win_eventdata_destinationPort$ on $agent_name$. 
+    This may indicate BlackLotus bootkit compromise. MITRE ATT&CK: T1542.003
+  risk_score: 90
+  severity: critical
+  risk_objects:
+    - field: agent_name
+      type: system
+      score: 90
+  threat_objects: []
+
+tags:
+  analytic_story:
+    - BlackLotus Campaign
+    - Compromised Windows Host
+  asset_type: Endpoint
+  mitre_attack_id:
+    - T1542.003
+  product:
+    - Wazuh
+  security_domain: endpoint
