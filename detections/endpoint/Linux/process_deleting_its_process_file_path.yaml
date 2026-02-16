@@ -1,0 +1,118 @@
+name: Windows Process Deleting Its Process File Path
+id: windows-process-deleting-its-process-file-path-001
+version: 1
+schema_version: "1.0"
+date: "2026-02-16"
+author: SOCFortress LLC
+status: production
+type: TTP
+
+description: >
+  Detects cmd.exe executing a delete command via /c flag, a behavior associated 
+  with malware self-deletion for defense evasion. Used by Clop ransomware, 
+  WhisperGate, and Remcos RAT to remove their executable after execution to 
+  avoid forensic analysis.
+
+data_source:
+  - Sysmon EventID 1
+
+search:
+  index_pattern: "${INDEX_PATTERN}"
+  size: 100
+  sort:
+    - timestamp: desc
+  query:
+    bool:
+      must:
+        - term:
+            agent_name: "${AGENT_NAME}"
+        - term:
+            agent_labels_customer: "${CUSTOMER_CODE}"
+        - term:
+            data_win_system_eventID: "1"
+        - wildcard:
+            data_win_eventdata_image: "*\\\\cmd.exe"
+        - wildcard:
+            data_win_eventdata_commandLine: "*/c *del*"
+        - range:
+            timestamp:
+              gte: "${START_TIME}"
+              lte: "${END_TIME}"
+  _source:
+    - timestamp
+    - agent_name
+    - data_win_system_eventID
+    - data_win_eventdata_image
+    - data_win_eventdata_commandLine
+    - data_win_eventdata_parentImage
+    - data_win_eventdata_parentCommandLine
+    - data_win_eventdata_user
+
+parameters:
+  AGENT_NAME:
+    description: "Target agent/host name"
+    type: string
+    required: true
+    example: "DESKTOP-AM0HLGE"
+  CUSTOMER_CODE:
+    description: "Customer label for filtering"
+    type: string
+    required: true
+    example: "lab"
+  START_TIME:
+    description: "Query start time (ISO 8601 or relative)"
+    type: datetime
+    required: false
+    default: "now-24h"
+    example: "2026-02-16 00:00:00.000"
+  END_TIME:
+    description: "Query end time (ISO 8601 or relative)"
+    type: datetime
+    required: false
+    default: "now"
+    example: "2026-02-16 23:59:59.999"
+
+how_to_implement: >
+  This detection requires Wazuh agents deployed on Windows endpoints with Sysmon 
+  installed and configured to log process creation events (EventID 1) with full 
+  command-line arguments. Analysts should review the parent process and the file 
+  being deleted to determine if the process is deleting its own executable.
+
+known_false_positives: >
+  Some legitimate installers or update processes may use cmd.exe /c del to clean 
+  up temporary files. Filter based on parent process image and the specific file 
+  being deleted. Focus on cases where the deleted file matches the parent process 
+  executable path.
+
+references:
+  - https://attack.mitre.org/techniques/T1070/
+  - https://www.mandiant.com/resources/fin11-email-campaigns-precursor-for-ransomware-data-theft
+  - https://www.microsoft.com/security/blog/2022/01/15/destructive-malware-targeting-ukrainian-organizations/
+
+response:
+  message: >
+    Process self-deletion detected on $agent_name$. 
+    Command: $data_win_eventdata_commandLine$. 
+    Parent: $data_win_eventdata_parentImage$. 
+    User: $data_win_eventdata_user$. MITRE ATT&CK: T1070
+  risk_score: 50
+  severity: high
+  risk_objects:
+    - field: agent_name
+      type: system
+      score: 50
+  threat_objects: []
+
+tags:
+  analytic_story:
+    - Clop Ransomware
+    - Data Destruction
+    - WhisperGate
+    - Remcos
+    - Compromised Windows Host
+  asset_type: Endpoint
+  mitre_attack_id:
+    - T1070
+  product:
+    - Wazuh
+  security_domain: endpoint
