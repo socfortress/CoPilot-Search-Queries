@@ -1,0 +1,138 @@
+name: Windows Certutil Root Certificate Addition
+id: windows-certutil-root-certificate-addition-001
+version: 1
+schema_version: "1.0"
+date: "2026-02-23"
+author: SOCFortress LLC
+status: production
+type: TTP
+
+description: >
+  Detects certutil.exe adding certificates to the Root certificate store from 
+  suspicious locations (Temp, ProgramData, Public, PerfLogs). Adversaries install 
+  malicious root certificates to intercept HTTPS traffic, impersonate trusted 
+  entities, or bypass security controls. Associated with Secret Blizzard AiTM 
+  campaigns and banking trojans.
+
+data_source:
+  - Sysmon EventID 1
+
+search:
+  index_pattern: "${INDEX_PATTERN}"
+  size: 100
+  sort:
+    - timestamp: desc
+  query:
+    bool:
+      must:
+        - term:
+            agent_name: "${AGENT_NAME}"
+        - term:
+            agent_labels_customer: "${CUSTOMER_CODE}"
+        - term:
+            data_win_system_eventID: "1"
+        - wildcard:
+            data_win_eventdata_commandLine: "*certutil*"
+        - wildcard:
+            data_win_eventdata_commandLine: "*-addstore*"
+        - wildcard:
+            data_win_eventdata_commandLine: "*root*"
+        - bool:
+            should:
+              - wildcard:
+                  data_win_eventdata_commandLine: "*\\\\Temp\\\\*"
+              - wildcard:
+                  data_win_eventdata_commandLine: "*\\\\ProgramData\\\\*"
+              - wildcard:
+                  data_win_eventdata_commandLine: "*\\\\Users\\\\Public\\\\*"
+              - wildcard:
+                  data_win_eventdata_commandLine: "*\\\\PerfLogs\\\\*"
+              - wildcard:
+                  data_win_eventdata_commandLine: "*\\\\Windows\\\\Temp\\\\*"
+              - wildcard:
+                  data_win_eventdata_commandLine: "*%Temp%*"
+              - wildcard:
+                  data_win_eventdata_commandLine: "*%AppData%*"
+              - wildcard:
+                  data_win_eventdata_commandLine: "*.tmp*"
+            minimum_should_match: 1
+        - range:
+            timestamp:
+              gte: "${START_TIME}"
+              lte: "${END_TIME}"
+  _source:
+    - timestamp
+    - agent_name
+    - data_win_system_eventID
+    - data_win_eventdata_image
+    - data_win_eventdata_commandLine
+    - data_win_eventdata_parentImage
+    - data_win_eventdata_user
+
+parameters:
+  AGENT_NAME:
+    description: "Target agent/host name"
+    type: string
+    required: true
+    example: "DESKTOP-AM0HLGE"
+  CUSTOMER_CODE:
+    description: "Customer label for filtering"
+    type: string
+    required: true
+    example: "lab"
+  START_TIME:
+    description: "Query start time (ISO 8601 or relative)"
+    type: datetime
+    required: false
+    default: "now-24h"
+    example: "2026-02-23 00:00:00.000"
+  END_TIME:
+    description: "Query end time (ISO 8601 or relative)"
+    type: datetime
+    required: false
+    default: "now"
+    example: "2026-02-23 23:59:59.999"
+
+how_to_implement: >
+  This detection requires Wazuh agents deployed on Windows endpoints with Sysmon 
+  installed and configured to log process creation events (EventID 1) with full 
+  command-line arguments.
+
+known_false_positives: >
+  Administrators or third-party utilities may use certutil to add root 
+  certificates. Filter by user context and verify the certificate source path 
+  is from an approved location.
+
+references:
+  - https://attack.mitre.org/techniques/T1587/003/
+  - https://www.microsoft.com/en-us/security/blog/2025/07/31/frozen-in-transit-secret-blizzards-aitm-campaign-against-diplomats/
+
+response:
+  message: >
+    Certutil root certificate addition from suspicious path on $agent_name$. 
+    Command: $data_win_eventdata_commandLine$. 
+    User: $data_win_eventdata_user$. MITRE ATT&CK: T1587.003
+  risk_score: 72
+  severity: high
+  risk_objects:
+    - field: agent_name
+      type: system
+      score: 72
+  threat_objects: []
+
+tags:
+  analytic_story:
+    - Secret Blizzard
+    - Compromised Windows Host
+  asset_type: Endpoint
+  mitre_attack_id:
+    - T1587.003
+  custom_tags:
+    - certutil
+    - certificate
+    - root_store
+    - aitm
+    - lolbin
+  product:
+    - Wazuh
+  security_domain: endpoint
