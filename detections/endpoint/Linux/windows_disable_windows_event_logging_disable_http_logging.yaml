@@ -1,0 +1,133 @@
+name: Windows Disable HTTP Logging via AppCmd
+id: windows-disable-http-logging-appcmd-001
+version: 1
+schema_version: "1.0"
+date: "2026-02-23"
+author: SOCFortress LLC
+status: production
+type: TTP
+
+description: >
+  Detects appcmd.exe used to disable HTTP logging on IIS servers. Adversaries 
+  disable logging to hide web shell activity, backdoor communications, and 
+  exploitation traces. Used by OilRig, Bronze Union, and IceApple framework.
+
+data_source:
+  - Sysmon EventID 1
+
+search:
+  index_pattern: "${INDEX_PATTERN}"
+  size: 100
+  sort:
+    - timestamp: desc
+  query:
+    bool:
+      must:
+        - term:
+            agent_name: "${AGENT_NAME}"
+        - term:
+            agent_labels_customer: "${CUSTOMER_CODE}"
+        - term:
+            data_win_system_eventID: "1"
+        - wildcard:
+            data_win_eventdata_image: "*\\\\appcmd.exe"
+        - bool:
+            should:
+              - wildcard:
+                  data_win_eventdata_commandLine: "*set config*"
+              - wildcard:
+                  data_win_eventdata_commandLine: "*httplogging*"
+              - wildcard:
+                  data_win_eventdata_commandLine: "*dontlog:true*"
+            minimum_should_match: 1
+        - range:
+            timestamp:
+              gte: "${START_TIME}"
+              lte: "${END_TIME}"
+      must_not:
+        - bool:
+            should:
+              - wildcard:
+                  data_win_eventdata_parentImage: "*\\\\msiexec.exe"
+              - wildcard:
+                  data_win_eventdata_parentImage: "*\\\\iissetup.exe"
+            minimum_should_match: 1
+  _source:
+    - timestamp
+    - agent_name
+    - data_win_system_eventID
+    - data_win_eventdata_image
+    - data_win_eventdata_commandLine
+    - data_win_eventdata_parentImage
+    - data_win_eventdata_user
+
+parameters:
+  AGENT_NAME:
+    description: "Target agent/host name"
+    type: string
+    required: true
+    example: "DESKTOP-AM0HLGE"
+  CUSTOMER_CODE:
+    description: "Customer label for filtering"
+    type: string
+    required: true
+    example: "lab"
+  START_TIME:
+    description: "Query start time (ISO 8601 or relative)"
+    type: datetime
+    required: false
+    default: "now-24h"
+    example: "2026-02-23 00:00:00.000"
+  END_TIME:
+    description: "Query end time (ISO 8601 or relative)"
+    type: datetime
+    required: false
+    default: "now"
+    example: "2026-02-23 23:59:59.999"
+
+how_to_implement: >
+  This detection requires Wazuh agents deployed on Windows IIS servers with 
+  Sysmon installed and configured to log process creation events (EventID 1) 
+  with full command-line arguments. Only applicable to hosts running IIS.
+
+known_false_positives: >
+  Administrators or installation scripts may disable logging temporarily. 
+  Excludes msiexec.exe and iissetup.exe as parent processes.
+
+references:
+  - https://attack.mitre.org/techniques/T1562/002/
+  - https://www.crowdstrike.com/wp-content/uploads/2022/05/crowdstrike-iceapple-a-novel-internet-information-services-post-exploitation-framework-1.pdf
+  - https://unit42.paloaltonetworks.com/unit42-oilrig-uses-rgdoor-iis-backdoor-targets-middle-east/
+
+response:
+  message: >
+    IIS HTTP logging disabled via appcmd.exe on $agent_name$. 
+    Command: $data_win_eventdata_commandLine$. 
+    Parent: $data_win_eventdata_parentImage$. 
+    User: $data_win_eventdata_user$. MITRE ATT&CK: T1562.002
+  risk_score: 64
+  severity: high
+  risk_objects:
+    - field: agent_name
+      type: system
+      score: 64
+  threat_objects: []
+
+tags:
+  analytic_story:
+    - IIS Components
+    - Windows Defense Evasion Tactics
+    - Compromised Windows Host
+  asset_type: Endpoint
+  mitre_attack_id:
+    - T1505.004
+    - T1562.002
+  custom_tags:
+    - appcmd
+    - iis
+    - http_logging
+    - defense_evasion
+    - anti_forensics
+  product:
+    - Wazuh
+  security_domain: endpoint
