@@ -1,0 +1,126 @@
+name: Windows WSUS Spawning Shell
+id: windows-wsus-spawning-shell-001
+version: 1
+schema_version: "1.0"
+date: "2026-02-23"
+author: SOCFortress LLC
+status: production
+type: TTP
+
+description: >
+  Detects wsusservice.exe spawning cmd.exe or powershell.exe, which may indicate 
+  exploitation of CVE-2025-59287, a critical deserialization vulnerability in 
+  Windows Server Update Services allowing unauthenticated remote code execution. 
+  wsusservice.exe should never spawn interactive shells under normal operation.
+
+data_source:
+  - Sysmon EventID 1
+
+search:
+  index_pattern: "${INDEX_PATTERN}"
+  size: 100
+  sort:
+    - timestamp: desc
+  query:
+    bool:
+      must:
+        - term:
+            agent_name: "${AGENT_NAME}"
+        - term:
+            agent_labels_customer: "${CUSTOMER_CODE}"
+        - term:
+            data_win_system_eventID: "1"
+        - wildcard:
+            data_win_eventdata_parentImage: "*\\\\wsusservice.exe"
+        - bool:
+            should:
+              - wildcard:
+                  data_win_eventdata_image: "*\\\\powershell.exe"
+              - wildcard:
+                  data_win_eventdata_image: "*\\\\cmd.exe"
+            minimum_should_match: 1
+        - range:
+            timestamp:
+              gte: "${START_TIME}"
+              lte: "${END_TIME}"
+  _source:
+    - timestamp
+    - agent_name
+    - data_win_system_eventID
+    - data_win_eventdata_image
+    - data_win_eventdata_commandLine
+    - data_win_eventdata_parentImage
+    - data_win_eventdata_user
+
+parameters:
+  AGENT_NAME:
+    description: "Target agent/host name"
+    type: string
+    required: true
+    example: "DESKTOP-AM0HLGE"
+  CUSTOMER_CODE:
+    description: "Customer label for filtering"
+    type: string
+    required: true
+    example: "lab"
+  START_TIME:
+    description: "Query start time (ISO 8601 or relative)"
+    type: datetime
+    required: false
+    default: "now-24h"
+    example: "2026-02-23 00:00:00.000"
+  END_TIME:
+    description: "Query end time (ISO 8601 or relative)"
+    type: datetime
+    required: false
+    default: "now"
+    example: "2026-02-23 23:59:59.999"
+
+how_to_implement: >
+  This detection requires Wazuh agents deployed on Windows WSUS servers with 
+  Sysmon installed and configured to log process creation events (EventID 1) 
+  with full command-line arguments and parent process tracking.
+
+known_false_positives: >
+  Legitimate WSUS maintenance scripts may rarely spawn shells. Review command 
+  line arguments and user context. wsusservice.exe spawning interactive shells 
+  is highly abnormal.
+
+references:
+  - https://attack.mitre.org/techniques/T1190/
+  - https://www.huntress.com/blog/exploitation-of-windows-server-update-services-remote-code-execution-vulnerability
+  - https://msrc.microsoft.com/update-guide/vulnerability/CVE-2025-59287
+
+response:
+  message: >
+    CRITICAL: WSUS service spawned shell on $agent_name$. 
+    Process: $data_win_eventdata_image$. 
+    Command: $data_win_eventdata_commandLine$. 
+    User: $data_win_eventdata_user$. 
+    Possible CVE-2025-59287 exploitation. MITRE ATT&CK: T1190, T1505.003
+  risk_score: 90
+  severity: critical
+  risk_objects:
+    - field: agent_name
+      type: system
+      score: 90
+  threat_objects: []
+
+tags:
+  analytic_story:
+    - Microsoft WSUS CVE-2025-59287
+    - Compromised Windows Host
+  asset_type: Endpoint
+  cve:
+    - CVE-2025-59287
+  mitre_attack_id:
+    - T1190
+    - T1505.003
+  custom_tags:
+    - wsus
+    - rce
+    - cve_exploit
+    - shell_spawn
+  product:
+    - Wazuh
+  security_domain: endpoint
