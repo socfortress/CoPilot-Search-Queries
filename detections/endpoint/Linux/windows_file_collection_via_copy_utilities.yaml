@@ -1,0 +1,137 @@
+name: Windows File Collection Via Copy Utilities
+id: windows-file-collection-copy-utilities-001
+version: 1
+schema_version: "1.0"
+date: "2026-02-23"
+author: SOCFortress LLC
+status: production
+type: Anomaly
+
+description: >
+  Detects xcopy.exe or copy.exe used to collect documents by file extension 
+  (doc, pdf, xls, ppt, txt, zip, rar, 7z). Adversaries use built-in copy 
+  utilities to harvest sensitive files from user directories and stage them 
+  for exfiltration. Used by LAMEHUG malware.
+
+data_source:
+  - Sysmon EventID 1
+
+search:
+  index_pattern: "${INDEX_PATTERN}"
+  size: 100
+  sort:
+    - timestamp: desc
+  query:
+    bool:
+      must:
+        - term:
+            agent_name: "${AGENT_NAME}"
+        - term:
+            agent_labels_customer: "${CUSTOMER_CODE}"
+        - term:
+            data_win_system_eventID: "1"
+        - bool:
+            should:
+              - wildcard:
+                  data_win_eventdata_image: "*\\\\xcopy.exe"
+              - wildcard:
+                  data_win_eventdata_image: "*\\\\copy.exe"
+            minimum_should_match: 1
+        - bool:
+            should:
+              - wildcard:
+                  data_win_eventdata_commandLine: "*.doc*"
+              - wildcard:
+                  data_win_eventdata_commandLine: "*.pdf*"
+              - wildcard:
+                  data_win_eventdata_commandLine: "*.xls*"
+              - wildcard:
+                  data_win_eventdata_commandLine: "*.ppt*"
+              - wildcard:
+                  data_win_eventdata_commandLine: "*.txt*"
+              - wildcard:
+                  data_win_eventdata_commandLine: "*.zip*"
+              - wildcard:
+                  data_win_eventdata_commandLine: "*.rar*"
+              - wildcard:
+                  data_win_eventdata_commandLine: "*.7z*"
+            minimum_should_match: 1
+        - range:
+            timestamp:
+              gte: "${START_TIME}"
+              lte: "${END_TIME}"
+  _source:
+    - timestamp
+    - agent_name
+    - data_win_system_eventID
+    - data_win_eventdata_image
+    - data_win_eventdata_commandLine
+    - data_win_eventdata_parentImage
+    - data_win_eventdata_user
+
+parameters:
+  AGENT_NAME:
+    description: "Target agent/host name"
+    type: string
+    required: true
+    example: "DESKTOP-AM0HLGE"
+  CUSTOMER_CODE:
+    description: "Customer label for filtering"
+    type: string
+    required: true
+    example: "lab"
+  START_TIME:
+    description: "Query start time (ISO 8601 or relative)"
+    type: datetime
+    required: false
+    default: "now-24h"
+    example: "2026-02-23 00:00:00.000"
+  END_TIME:
+    description: "Query end time (ISO 8601 or relative)"
+    type: datetime
+    required: false
+    default: "now"
+    example: "2026-02-23 23:59:59.999"
+
+how_to_implement: >
+  This detection requires Wazuh agents deployed on Windows endpoints with Sysmon 
+  installed and configured to log process creation events (EventID 1) with full 
+  command-line arguments.
+
+known_false_positives: >
+  Administrators may use xcopy/copy for legitimate file management. Investigate 
+  target destination, parent process, and volume of files copied.
+
+references:
+  - https://attack.mitre.org/techniques/T1119/
+  - https://cert.gov.ua/article/6284730
+
+response:
+  message: >
+    File collection via copy utility on $agent_name$. 
+    Command: $data_win_eventdata_commandLine$. 
+    User: $data_win_eventdata_user$. 
+    Possible data staging for exfiltration. MITRE ATT&CK: T1119
+  risk_score: 36
+  severity: medium
+  risk_objects:
+    - field: agent_name
+      type: system
+      score: 36
+  threat_objects: []
+
+tags:
+  analytic_story:
+    - LAMEHUG
+    - Compromised Windows Host
+  asset_type: Endpoint
+  mitre_attack_id:
+    - T1119
+  custom_tags:
+    - xcopy
+    - file_collection
+    - data_staging
+    - exfiltration_prep
+  product:
+    - Wazuh
+  security_domain: endpoint
