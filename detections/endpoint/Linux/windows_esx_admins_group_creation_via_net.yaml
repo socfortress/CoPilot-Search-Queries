@@ -1,0 +1,119 @@
+name: Windows ESX Admins Group Creation via Net
+id: windows-esx-admins-group-creation-net-001
+version: 1
+schema_version: "1.0"
+date: "2026-02-23"
+author: SOCFortress LLC
+status: production
+type: TTP
+
+description: >
+  Detects creation of "ESX Admins" group via net.exe or net1.exe, indicating 
+  potential exploitation of CVE-2024-37085 (VMware ESXi AD Integration 
+  Authentication Bypass). Ransomware operators exploit this to gain unauthorized 
+  access to ESXi hosts for mass encryption.
+
+data_source:
+  - Sysmon EventID 1
+
+search:
+  index_pattern: "${INDEX_PATTERN}"
+  size: 100
+  sort:
+    - timestamp: desc
+  query:
+    bool:
+      must:
+        - term:
+            agent_name: "${AGENT_NAME}"
+        - term:
+            agent_labels_customer: "${CUSTOMER_CODE}"
+        - term:
+            data_win_system_eventID: "1"
+        - wildcard:
+            data_win_eventdata_commandLine: "*ESX Admins*"
+        - wildcard:
+            data_win_eventdata_commandLine: "*/add*"
+        - range:
+            timestamp:
+              gte: "${START_TIME}"
+              lte: "${END_TIME}"
+  _source:
+    - timestamp
+    - agent_name
+    - data_win_system_eventID
+    - data_win_eventdata_image
+    - data_win_eventdata_commandLine
+    - data_win_eventdata_parentImage
+    - data_win_eventdata_user
+
+parameters:
+  AGENT_NAME:
+    description: "Target agent/host name"
+    type: string
+    required: true
+    example: "DESKTOP-AM0HLGE"
+  CUSTOMER_CODE:
+    description: "Customer label for filtering"
+    type: string
+    required: true
+    example: "lab"
+  START_TIME:
+    description: "Query start time (ISO 8601 or relative)"
+    type: datetime
+    required: false
+    default: "now-24h"
+    example: "2026-02-23 00:00:00.000"
+  END_TIME:
+    description: "Query end time (ISO 8601 or relative)"
+    type: datetime
+    required: false
+    default: "now"
+    example: "2026-02-23 23:59:59.999"
+
+how_to_implement: >
+  This detection requires Wazuh agents deployed on Windows endpoints with Sysmon 
+  installed and configured to log process creation events (EventID 1) with full 
+  command-line arguments.
+
+known_false_positives: >
+  Legitimate administrators may create an ESX Admins group. Verify authorization 
+  and context. Extremely suspicious on non-domain controller hosts.
+
+references:
+  - https://support.broadcom.com/web/ecx/support-content-notification/-/external/content/SecurityAdvisories/0/24505
+  - https://www.microsoft.com/en-us/security/blog/2024/07/29/ransomware-operators-exploit-esxi-hypervisor-vulnerability-for-mass-encryption/
+
+response:
+  message: >
+    ESX Admins group creation on $agent_name$. 
+    Command: $data_win_eventdata_commandLine$. 
+    Process: $data_win_eventdata_image$. 
+    User: $data_win_eventdata_user$. 
+    CVE-2024-37085 exploitation. MITRE ATT&CK: T1136.001
+  risk_score: 72
+  severity: high
+  risk_objects:
+    - field: agent_name
+      type: system
+      score: 72
+  threat_objects: []
+
+tags:
+  analytic_story:
+    - VMware ESXi AD Integration Authentication Bypass CVE-2024-37085
+    - Compromised Windows Host
+  asset_type: Endpoint
+  mitre_attack_id:
+    - T1136.001
+    - T1136.002
+  cve:
+    - CVE-2024-37085
+  custom_tags:
+    - esx_admins
+    - vmware
+    - esxi_bypass
+    - ransomware
+  product:
+    - Wazuh
+  security_domain: endpoint
