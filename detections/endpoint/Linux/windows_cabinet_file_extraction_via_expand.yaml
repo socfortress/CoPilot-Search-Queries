@@ -1,0 +1,123 @@
+name: Windows Cabinet File Extraction Via Expand
+id: windows-cabinet-file-extraction-expand-001
+version: 1
+schema_version: "1.0"
+date: "2026-02-23"
+author: SOCFortress LLC
+status: production
+type: TTP
+
+description: >
+  Detects usage of expand.exe to extract Microsoft Cabinet (CAB) archives, 
+  particularly to staging locations like ProgramData, Temp, or AppData. In 
+  recent APT37 activity, CAB payloads were expanded into ProgramData prior to 
+  persistence and execution. This is a strong indicator of ingress tool transfer 
+  and payload staging.
+
+data_source:
+  - Sysmon EventID 1
+
+search:
+  index_pattern: "${INDEX_PATTERN}"
+  size: 100
+  sort:
+    - timestamp: desc
+  query:
+    bool:
+      must:
+        - term:
+            agent_name: "${AGENT_NAME}"
+        - term:
+            agent_labels_customer: "${CUSTOMER_CODE}"
+        - term:
+            data_win_system_eventID: "1"
+        - wildcard:
+            data_win_eventdata_image: "*\\\\expand.exe"
+        - bool:
+            should:
+              - wildcard:
+                  data_win_eventdata_commandLine: "*-F:*"
+              - wildcard:
+                  data_win_eventdata_commandLine: "*/F:*"
+            minimum_should_match: 1
+        - range:
+            timestamp:
+              gte: "${START_TIME}"
+              lte: "${END_TIME}"
+  _source:
+    - timestamp
+    - agent_name
+    - data_win_system_eventID
+    - data_win_eventdata_image
+    - data_win_eventdata_commandLine
+    - data_win_eventdata_parentImage
+    - data_win_eventdata_user
+
+parameters:
+  AGENT_NAME:
+    description: "Target agent/host name"
+    type: string
+    required: true
+    example: "DESKTOP-AM0HLGE"
+  CUSTOMER_CODE:
+    description: "Customer label for filtering"
+    type: string
+    required: true
+    example: "lab"
+  START_TIME:
+    description: "Query start time (ISO 8601 or relative)"
+    type: datetime
+    required: false
+    default: "now-24h"
+    example: "2026-02-23 00:00:00.000"
+  END_TIME:
+    description: "Query end time (ISO 8601 or relative)"
+    type: datetime
+    required: false
+    default: "now"
+    example: "2026-02-23 23:59:59.999"
+
+how_to_implement: >
+  This detection requires Wazuh agents deployed on Windows endpoints with Sysmon 
+  installed and configured to log process creation events (EventID 1) with full 
+  command-line arguments.
+
+known_false_positives: >
+  Legitimate software deployment or administrators may use expand.exe for local 
+  file extraction. Filter by approved deployment tools, signed parent processes, 
+  and sanctioned paths.
+
+references:
+  - https://attack.mitre.org/techniques/T1105/
+  - https://www.zscaler.com/blogs/security-research/apt37-targets-windows-rust-backdoor-and-python-loader
+
+response:
+  message: >
+    CAB file extraction via expand.exe detected on $agent_name$. 
+    Command: $data_win_eventdata_commandLine$. 
+    Parent: $data_win_eventdata_parentImage$. 
+    User: $data_win_eventdata_user$. MITRE ATT&CK: T1105
+  risk_score: 50
+  severity: medium
+  risk_objects:
+    - field: agent_name
+      type: system
+      score: 50
+  threat_objects: []
+
+tags:
+  analytic_story:
+    - APT37 Rustonotto and FadeStealer
+    - Compromised Windows Host
+  asset_type: Endpoint
+  mitre_attack_id:
+    - T1105
+  custom_tags:
+    - cab
+    - expand
+    - lolbin
+    - payload_staging
+    - ingress_tool_transfer
+  product:
+    - Wazuh
+  security_domain: endpoint
