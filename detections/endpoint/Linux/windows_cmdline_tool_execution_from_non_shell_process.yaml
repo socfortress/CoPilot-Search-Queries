@@ -1,0 +1,152 @@
+name: Windows Cmdline Tool Execution From Non-Shell Process
+id: windows-cmdline-tool-from-non-shell-001
+version: 1
+schema_version: "1.0"
+date: "2026-02-23"
+author: SOCFortress LLC
+status: production
+type: Anomaly
+
+description: >
+  Detects discovery tools (ipconfig, systeminfo, whoami, arp, nslookup, route, 
+  netstat, hostname, net1) spawned by non-standard parent processes. Excludes 
+  cmd.exe, powershell.exe, pwsh.exe, explorer.exe as legitimate parents. This 
+  pattern indicates process injection or malware using compromised processes for 
+  host discovery. Used by FIN7 JSSLoader, Volt Typhoon, Qakbot, DarkGate, and 
+  Rhysida ransomware.
+
+data_source:
+  - Sysmon EventID 1
+
+search:
+  index_pattern: "${INDEX_PATTERN}"
+  size: 100
+  sort:
+    - timestamp: desc
+  query:
+    bool:
+      must:
+        - term:
+            agent_name: "${AGENT_NAME}"
+        - term:
+            agent_labels_customer: "${CUSTOMER_CODE}"
+        - term:
+            data_win_system_eventID: "1"
+        - bool:
+            should:
+              - wildcard:
+                  data_win_eventdata_image: "*\\\\ipconfig.exe"
+              - wildcard:
+                  data_win_eventdata_image: "*\\\\systeminfo.exe"
+              - wildcard:
+                  data_win_eventdata_image: "*\\\\whoami.exe"
+              - wildcard:
+                  data_win_eventdata_image: "*\\\\net1.exe"
+              - wildcard:
+                  data_win_eventdata_image: "*\\\\arp.exe"
+              - wildcard:
+                  data_win_eventdata_image: "*\\\\nslookup.exe"
+              - wildcard:
+                  data_win_eventdata_image: "*\\\\route.exe"
+              - wildcard:
+                  data_win_eventdata_image: "*\\\\netstat.exe"
+              - wildcard:
+                  data_win_eventdata_image: "*\\\\hostname.exe"
+            minimum_should_match: 1
+        - range:
+            timestamp:
+              gte: "${START_TIME}"
+              lte: "${END_TIME}"
+      must_not:
+        - wildcard:
+            data_win_eventdata_parentImage: "*\\\\cmd.exe"
+        - wildcard:
+            data_win_eventdata_parentImage: "*\\\\powershell.exe"
+        - wildcard:
+            data_win_eventdata_parentImage: "*\\\\pwsh.exe"
+        - wildcard:
+            data_win_eventdata_parentImage: "*\\\\explorer.exe"
+        - wildcard:
+            data_win_eventdata_parentImage: "*\\\\powershell_ise.exe"
+  _source:
+    - timestamp
+    - agent_name
+    - data_win_system_eventID
+    - data_win_eventdata_image
+    - data_win_eventdata_commandLine
+    - data_win_eventdata_parentImage
+    - data_win_eventdata_user
+
+parameters:
+  AGENT_NAME:
+    description: "Target agent/host name"
+    type: string
+    required: true
+    example: "DESKTOP-AM0HLGE"
+  CUSTOMER_CODE:
+    description: "Customer label for filtering"
+    type: string
+    required: true
+    example: "lab"
+  START_TIME:
+    description: "Query start time (ISO 8601 or relative)"
+    type: datetime
+    required: false
+    default: "now-24h"
+    example: "2026-02-23 00:00:00.000"
+  END_TIME:
+    description: "Query end time (ISO 8601 or relative)"
+    type: datetime
+    required: false
+    default: "now"
+    example: "2026-02-23 23:59:59.999"
+
+how_to_implement: >
+  This detection requires Wazuh agents deployed on Windows endpoints with Sysmon 
+  installed and configured to log process creation events (EventID 1) with full 
+  command-line arguments and parent process tracking.
+
+known_false_positives: >
+  Automated host discovery tools, system management software, or scheduled tasks 
+  may spawn discovery tools from non-shell parents. Baseline known management 
+  tools and filter by parent process path.
+
+references:
+  - https://attack.mitre.org/techniques/T1059/007/
+  - https://www.mandiant.com/resources/fin7-pursuing-an-enigmatic-and-evasive-global-criminal-operation
+  - https://www.microsoft.com/en-us/security/blog/2023/05/24/volt-typhoon-targets-us-critical-infrastructure-with-living-off-the-land-techniques/
+
+response:
+  message: >
+    Discovery tool spawned from non-shell parent on $agent_name$. 
+    Parent: $data_win_eventdata_parentImage$. 
+    Child: $data_win_eventdata_image$. 
+    Command: $data_win_eventdata_commandLine$. 
+    User: $data_win_eventdata_user$. MITRE ATT&CK: T1059.007
+  risk_score: 56
+  severity: medium
+  risk_objects:
+    - field: agent_name
+      type: system
+      score: 56
+  threat_objects: []
+
+tags:
+  analytic_story:
+    - FIN7
+    - Volt Typhoon
+    - Qakbot
+    - DarkGate Malware
+    - Rhysida Ransomware
+    - Compromised Windows Host
+  asset_type: Endpoint
+  mitre_attack_id:
+    - T1059.007
+  custom_tags:
+    - process_injection
+    - discovery
+    - non_shell_parent
+    - lotl
+  product:
+    - Wazuh
+  security_domain: endpoint
