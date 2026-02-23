@@ -1,0 +1,119 @@
+name: Windows DiskCryptor Usage
+id: windows-diskcryptor-usage-001
+version: 1
+schema_version: "1.0"
+date: "2026-02-23"
+author: SOCFortress LLC
+status: production
+type: Hunting
+
+description: >
+  Detects execution of DiskCryptor (dcrypt.exe or dcinst.exe), an open-source 
+  disk encryption tool abused by ransomware operators for full disk encryption 
+  during attacks. Immediate investigation required as this may indicate an 
+  active ransomware operation.
+
+data_source:
+  - Sysmon EventID 1
+
+search:
+  index_pattern: "${INDEX_PATTERN}"
+  size: 100
+  sort:
+    - timestamp: desc
+  query:
+    bool:
+      must:
+        - term:
+            agent_name: "${AGENT_NAME}"
+        - term:
+            agent_labels_customer: "${CUSTOMER_CODE}"
+        - term:
+            data_win_system_eventID: "1"
+        - bool:
+            should:
+              - wildcard:
+                  data_win_eventdata_image: "*\\\\dcrypt.exe"
+              - wildcard:
+                  data_win_eventdata_image: "*\\\\dcinst.exe"
+            minimum_should_match: 1
+        - range:
+            timestamp:
+              gte: "${START_TIME}"
+              lte: "${END_TIME}"
+  _source:
+    - timestamp
+    - agent_name
+    - data_win_system_eventID
+    - data_win_eventdata_image
+    - data_win_eventdata_commandLine
+    - data_win_eventdata_parentImage
+    - data_win_eventdata_user
+
+parameters:
+  AGENT_NAME:
+    description: "Target agent/host name"
+    type: string
+    required: true
+    example: "DESKTOP-AM0HLGE"
+  CUSTOMER_CODE:
+    description: "Customer label for filtering"
+    type: string
+    required: true
+    example: "lab"
+  START_TIME:
+    description: "Query start time (ISO 8601 or relative)"
+    type: datetime
+    required: false
+    default: "now-24h"
+    example: "2026-02-23 00:00:00.000"
+  END_TIME:
+    description: "Query end time (ISO 8601 or relative)"
+    type: datetime
+    required: false
+    default: "now"
+    example: "2026-02-23 23:59:59.999"
+
+how_to_implement: >
+  This detection requires Wazuh agents deployed on Windows endpoints with Sysmon 
+  installed and configured to log process creation events (EventID 1).
+
+known_false_positives: >
+  Legitimate use of DiskCryptor for authorized disk encryption. Very rare in 
+  enterprise environments. Investigate immediately.
+
+references:
+  - https://attack.mitre.org/techniques/T1486/
+  - https://thedfirreport.com/2021/11/15/exchange-exploit-leads-to-domain-wide-ransomware/
+  - https://github.com/DavidXanatos/DiskCryptor
+
+response:
+  message: >
+    DiskCryptor detected on $agent_name$. 
+    Process: $data_win_eventdata_image$. 
+    Command: $data_win_eventdata_commandLine$. 
+    User: $data_win_eventdata_user$. 
+    Possible ransomware disk encryption. MITRE ATT&CK: T1486
+  risk_score: 72
+  severity: high
+  risk_objects:
+    - field: agent_name
+      type: system
+      score: 72
+  threat_objects: []
+
+tags:
+  analytic_story:
+    - Ransomware
+    - Compromised Windows Host
+  asset_type: Endpoint
+  mitre_attack_id:
+    - T1486
+  custom_tags:
+    - diskcryptor
+    - ransomware
+    - disk_encryption
+    - data_destruction
+  product:
+    - Wazuh
+  security_domain: endpoint
