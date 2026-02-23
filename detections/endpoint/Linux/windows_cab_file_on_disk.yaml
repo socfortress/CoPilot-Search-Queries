@@ -1,0 +1,114 @@
+name: Windows CAB File on Disk
+id: windows-cab-file-on-disk-001
+version: 1
+schema_version: "1.0"
+date: "2026-02-23"
+author: SOCFortress LLC
+status: production
+type: Anomaly
+
+description: >
+  Detects .cab file creation on disk via Sysmon EventID 11. CAB files can be 
+  used to deliver malicious payloads including embedded .url files that execute 
+  harmful code. Used by DarkGate malware and APT37 for payload delivery and 
+  staging.
+
+data_source:
+  - Sysmon EventID 11
+
+search:
+  index_pattern: "${INDEX_PATTERN}"
+  size: 100
+  sort:
+    - timestamp: desc
+  query:
+    bool:
+      must:
+        - term:
+            agent_name: "${AGENT_NAME}"
+        - term:
+            agent_labels_customer: "${CUSTOMER_CODE}"
+        - term:
+            data_win_system_eventID: "11"
+        - wildcard:
+            data_win_eventdata_targetFilename: "*.cab"
+        - range:
+            timestamp:
+              gte: "${START_TIME}"
+              lte: "${END_TIME}"
+  _source:
+    - timestamp
+    - agent_name
+    - data_win_system_eventID
+    - data_win_eventdata_targetFilename
+    - data_win_eventdata_image
+    - data_win_eventdata_user
+
+parameters:
+  AGENT_NAME:
+    description: "Target agent/host name"
+    type: string
+    required: true
+    example: "DESKTOP-AM0HLGE"
+  CUSTOMER_CODE:
+    description: "Customer label for filtering"
+    type: string
+    required: true
+    example: "lab"
+  START_TIME:
+    description: "Query start time (ISO 8601 or relative)"
+    type: datetime
+    required: false
+    default: "now-24h"
+    example: "2026-02-23 00:00:00.000"
+  END_TIME:
+    description: "Query end time (ISO 8601 or relative)"
+    type: datetime
+    required: false
+    default: "now"
+    example: "2026-02-23 23:59:59.999"
+
+how_to_implement: >
+  This detection requires Wazuh agents deployed on Windows endpoints with Sysmon 
+  installed and configured to log file creation events (EventID 11) for .cab 
+  files. Verify Sysmon config includes .cab in FileCreate rules. The semicolon-
+  separated condition syntax may need to be split into individual rules.
+
+known_false_positives: >
+  Windows Update and legitimate software installations may create .cab files. 
+  Filter by file path — focus on user-writable directories like Temp, Downloads, 
+  AppData, and Public.
+
+references:
+  - https://attack.mitre.org/techniques/T1566/001/
+  - https://github.com/PaloAltoNetworks/Unit42-timely-threat-intel/blob/main/2023-10-25-IOCs-from-DarkGate-activity.txt
+
+response:
+  message: >
+    CAB file created on $agent_name$. 
+    File: $data_win_eventdata_targetFilename$. 
+    Process: $data_win_eventdata_image$. 
+    User: $data_win_eventdata_user$. MITRE ATT&CK: T1566.001
+  risk_score: 25
+  severity: low
+  risk_objects:
+    - field: agent_name
+      type: system
+      score: 25
+  threat_objects: []
+
+tags:
+  analytic_story:
+    - DarkGate Malware
+    - Compromised Windows Host
+  asset_type: Endpoint
+  mitre_attack_id:
+    - T1566.001
+  custom_tags:
+    - cab
+    - file_creation
+    - payload_delivery
+    - archive
+  product:
+    - Wazuh
+  security_domain: endpoint
