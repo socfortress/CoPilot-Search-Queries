@@ -1,0 +1,123 @@
+name: Windows IIS Components Add New Module
+id: windows-iis-components-add-new-module-001
+version: 1
+schema_version: "1.0"
+date: "2026-02-23"
+author: SOCFortress LLC
+status: production
+type: Anomaly
+
+description: >
+  Detects appcmd.exe used to install a new IIS module with image parameter. 
+  Adversaries install malicious IIS modules for webshells, backdoors, and credit 
+  card scraping. Used by OilRig, IceApple framework, and Bronze Union.
+
+data_source:
+  - Sysmon EventID 1
+
+search:
+  index_pattern: "${INDEX_PATTERN}"
+  size: 100
+  sort:
+    - timestamp: desc
+  query:
+    bool:
+      must:
+        - term:
+            agent_name: "${AGENT_NAME}"
+        - term:
+            agent_labels_customer: "${CUSTOMER_CODE}"
+        - term:
+            data_win_system_eventID: "1"
+        - wildcard:
+            data_win_eventdata_image: "*\\\\appcmd.exe"
+        - wildcard:
+            data_win_eventdata_commandLine: "*install*"
+        - wildcard:
+            data_win_eventdata_commandLine: "*module*"
+        - wildcard:
+            data_win_eventdata_commandLine: "*image*"
+        - range:
+            timestamp:
+              gte: "${START_TIME}"
+              lte: "${END_TIME}"
+      must_not:
+        - wildcard:
+            data_win_eventdata_parentImage: "*\\\\msiexec.exe"
+        - wildcard:
+            data_win_eventdata_parentImage: "*\\\\iissetup.exe"
+  _source:
+    - timestamp
+    - agent_name
+    - data_win_system_eventID
+    - data_win_eventdata_image
+    - data_win_eventdata_commandLine
+    - data_win_eventdata_parentImage
+    - data_win_eventdata_user
+
+parameters:
+  AGENT_NAME:
+    description: "Target agent/host name"
+    type: string
+    required: true
+    example: "DESKTOP-AM0HLGE"
+  CUSTOMER_CODE:
+    description: "Customer label for filtering"
+    type: string
+    required: true
+    example: "lab"
+  START_TIME:
+    description: "Query start time (ISO 8601 or relative)"
+    type: datetime
+    required: false
+    default: "now-24h"
+    example: "2026-02-23 00:00:00.000"
+  END_TIME:
+    description: "Query end time (ISO 8601 or relative)"
+    type: datetime
+    required: false
+    default: "now"
+    example: "2026-02-23 23:59:59.999"
+
+how_to_implement: >
+  This detection requires Wazuh agents deployed on Windows endpoints with Sysmon 
+  installed and configured to log process creation events (EventID 1) with full 
+  command-line arguments. IIS-specific detection for web servers.
+
+known_false_positives: >
+  Legitimate IIS module installations via msiexec or iissetup are excluded. 
+  Filter additional known deployment tools as needed.
+
+references:
+  - https://attack.mitre.org/techniques/T1505/004/
+  - https://www.microsoft.com/en-us/security/blog/2022/12/12/iis-modules-the-evolution-of-web-shells-and-how-to-detect-them/
+
+response:
+  message: >
+    IIS module installation on $agent_name$. 
+    Command: $data_win_eventdata_commandLine$. 
+    User: $data_win_eventdata_user$. 
+    Possible webshell/backdoor. MITRE ATT&CK: T1505.004
+  risk_score: 64
+  severity: high
+  risk_objects:
+    - field: agent_name
+      type: system
+      score: 64
+  threat_objects: []
+
+tags:
+  analytic_story:
+    - IIS Components
+    - GhostRedirector IIS Module and Rungan Backdoor
+  asset_type: Endpoint
+  mitre_attack_id:
+    - T1505.004
+  custom_tags:
+    - appcmd
+    - iis_module
+    - webshell
+    - persistence
+  product:
+    - Wazuh
+  security_domain: endpoint
