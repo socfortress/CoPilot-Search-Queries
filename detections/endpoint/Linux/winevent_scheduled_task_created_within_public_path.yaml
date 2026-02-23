@@ -1,0 +1,138 @@
+name: Windows Scheduled Task Created Within Public Path
+id: windows-scheduled-task-created-public-path-001
+version: 1
+schema_version: "1.0"
+date: "2026-02-23"
+author: SOCFortress LLC
+status: production
+type: TTP
+
+description: >
+  Detects creation of scheduled tasks targeting user-writable paths such as 
+  Users\Public, ProgramData, Temp, AppData, Windows\Tasks, and PerfLogs via 
+  Sysmon EventID 1. Adversaries use these writable locations to stage payloads 
+  and create persistence via scheduled tasks. Used by IcedID, Ryuk, Medusa, 
+  XWorm, AsyncRAT, Remcos, PlugX, and many other threat actors.
+
+data_source:
+  - Sysmon EventID 1
+
+search:
+  index_pattern: "${INDEX_PATTERN}"
+  size: 100
+  sort:
+    - timestamp: desc
+  query:
+    bool:
+      must:
+        - term:
+            agent_name: "${AGENT_NAME}"
+        - term:
+            agent_labels_customer: "${CUSTOMER_CODE}"
+        - term:
+            data_win_system_eventID: "1"
+        - wildcard:
+            data_win_eventdata_commandLine: "*schtasks*/create*"
+        - bool:
+            should:
+              - wildcard:
+                  data_win_eventdata_commandLine: "*\\\\Users\\\\Public\\\\*"
+              - wildcard:
+                  data_win_eventdata_commandLine: "*\\\\ProgramData\\\\*"
+              - wildcard:
+                  data_win_eventdata_commandLine: "*\\\\Temp\\\\*"
+              - wildcard:
+                  data_win_eventdata_commandLine: "*\\\\AppData\\\\*"
+              - wildcard:
+                  data_win_eventdata_commandLine: "*\\\\Windows\\\\Tasks\\\\*"
+              - wildcard:
+                  data_win_eventdata_commandLine: "*\\\\PerfLogs\\\\*"
+            minimum_should_match: 1
+        - range:
+            timestamp:
+              gte: "${START_TIME}"
+              lte: "${END_TIME}"
+  _source:
+    - timestamp
+    - agent_name
+    - data_win_system_eventID
+    - data_win_eventdata_image
+    - data_win_eventdata_commandLine
+    - data_win_eventdata_parentImage
+    - data_win_eventdata_user
+
+parameters:
+  AGENT_NAME:
+    description: "Target agent/host name"
+    type: string
+    required: true
+    example: "DESKTOP-AM0HLGE"
+  CUSTOMER_CODE:
+    description: "Customer label for filtering"
+    type: string
+    required: true
+    example: "lab"
+  START_TIME:
+    description: "Query start time (ISO 8601 or relative)"
+    type: datetime
+    required: false
+    default: "now-24h"
+    example: "2026-02-23 00:00:00.000"
+  END_TIME:
+    description: "Query end time (ISO 8601 or relative)"
+    type: datetime
+    required: false
+    default: "now"
+    example: "2026-02-23 23:59:59.999"
+
+how_to_implement: >
+  This detection requires Wazuh agents deployed on Windows endpoints with Sysmon 
+  installed and configured to log process creation events (EventID 1) with full 
+  command-line arguments. Uses Sysmon EventID 1 instead of Windows Security 
+  EventCode 4698 for broader compatibility across Windows editions.
+
+known_false_positives: >
+  Some legitimate software installers and update mechanisms may create scheduled 
+  tasks in ProgramData or AppData paths. Filter based on task name, parent 
+  process, and user context.
+
+references:
+  - https://attack.mitre.org/techniques/T1053/005/
+  - https://redcanary.com/threat-detection-report/techniques/scheduled-task-job/
+
+response:
+  message: >
+    Scheduled task created targeting public/writable path on $agent_name$. 
+    Command: $data_win_eventdata_commandLine$. 
+    Parent: $data_win_eventdata_parentImage$. 
+    User: $data_win_eventdata_user$. MITRE ATT&CK: T1053.005
+  risk_score: 63
+  severity: high
+  risk_objects:
+    - field: agent_name
+      type: system
+      score: 63
+  threat_objects: []
+
+tags:
+  analytic_story:
+    - Ransomware
+    - IcedID
+    - AsyncRAT
+    - XWorm
+    - Remcos
+    - Scheduled Tasks
+    - Windows Persistence Techniques
+    - Compromised Windows Host
+  asset_type: Endpoint
+  mitre_attack_id:
+    - T1053.005
+  custom_tags:
+    - scheduled_task
+    - persistence
+    - public_path
+    - writable_directory
+    - schtasks
+  product:
+    - Wazuh
+  security_domain: endpoint
