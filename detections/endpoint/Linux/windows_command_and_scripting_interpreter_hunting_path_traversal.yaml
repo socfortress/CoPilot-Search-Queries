@@ -1,0 +1,115 @@
+name: Windows Command and Scripting Interpreter Path Traversal
+id: windows-command-interpreter-path-traversal-001
+version: 1
+schema_version: "1.0"
+date: "2026-02-23"
+author: SOCFortress LLC
+status: production
+type: Hunting
+
+description: >
+  Detects command-line executions containing multiple path traversal sequences 
+  (\..\..\ or /../..). This technique is used to evade defenses by executing 
+  binaries through relative path traversal, notably seen in CVE-2022-30190 
+  (msdt.exe Follina) exploitation.
+
+data_source:
+  - Sysmon EventID 1
+
+search:
+  index_pattern: "${INDEX_PATTERN}"
+  size: 100
+  sort:
+    - timestamp: desc
+  query:
+    bool:
+      must:
+        - term:
+            agent_name: "${AGENT_NAME}"
+        - term:
+            agent_labels_customer: "${CUSTOMER_CODE}"
+        - term:
+            data_win_system_eventID: "1"
+        - wildcard:
+            data_win_eventdata_commandLine: "*..\\\\*..\\\\*"
+        - range:
+            timestamp:
+              gte: "${START_TIME}"
+              lte: "${END_TIME}"
+  _source:
+    - timestamp
+    - agent_name
+    - data_win_system_eventID
+    - data_win_eventdata_image
+    - data_win_eventdata_commandLine
+    - data_win_eventdata_parentImage
+    - data_win_eventdata_user
+
+parameters:
+  AGENT_NAME:
+    description: "Target agent/host name"
+    type: string
+    required: true
+    example: "DESKTOP-AM0HLGE"
+  CUSTOMER_CODE:
+    description: "Customer label for filtering"
+    type: string
+    required: true
+    example: "lab"
+  START_TIME:
+    description: "Query start time (ISO 8601 or relative)"
+    type: datetime
+    required: false
+    default: "now-24h"
+    example: "2026-02-23 00:00:00.000"
+  END_TIME:
+    description: "Query end time (ISO 8601 or relative)"
+    type: datetime
+    required: false
+    default: "now"
+    example: "2026-02-23 23:59:59.999"
+
+how_to_implement: >
+  This detection requires Wazuh agents deployed on Windows endpoints with Sysmon 
+  installed and configured to log process creation events (EventID 1) with full 
+  command-line arguments.
+
+known_false_positives: >
+  Some legitimate software may use relative path references with traversal 
+  sequences. Review the full command line and parent process to determine 
+  legitimacy. Hunting-type detection — expect some tuning.
+
+references:
+  - https://attack.mitre.org/techniques/T1059/
+  - https://app.any.run/tasks/713f05d2-fe78-4b9d-a744-f7c133e3fafb/
+
+response:
+  message: >
+    Path traversal detected in command line on $agent_name$. 
+    Command: $data_win_eventdata_commandLine$. 
+    Process: $data_win_eventdata_image$. 
+    Parent: $data_win_eventdata_parentImage$. 
+    User: $data_win_eventdata_user$. MITRE ATT&CK: T1059
+  risk_score: 36
+  severity: medium
+  risk_objects:
+    - field: agent_name
+      type: system
+      score: 36
+  threat_objects: []
+
+tags:
+  analytic_story:
+    - Windows Defense Evasion Tactics
+    - Microsoft Support Diagnostic Tool Vulnerability CVE-2022-30190
+  asset_type: Endpoint
+  mitre_attack_id:
+    - T1059
+  custom_tags:
+    - path_traversal
+    - defense_evasion
+    - hunting
+    - follina
+  product:
+    - Wazuh
+  security_domain: endpoint
