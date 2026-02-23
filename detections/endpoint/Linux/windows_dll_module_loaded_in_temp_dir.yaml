@@ -1,0 +1,116 @@
+name: Windows DLL Module Loaded in Temp Dir
+id: windows-dll-loaded-temp-dir-001
+version: 1
+schema_version: "1.0"
+date: "2026-02-23"
+author: SOCFortress LLC
+status: production
+type: Hunting
+
+description: >
+  Detects DLL modules loaded from Temp directories via Sysmon EventID 7. 
+  Loading DLLs from %TEMP% is uncommon for legitimate applications and often 
+  indicates DLL side-loading, search order hijacking, or malicious payload 
+  execution. Used by Interlock ransomware and Lokibot.
+
+data_source:
+  - Sysmon EventID 7
+
+search:
+  index_pattern: "${INDEX_PATTERN}"
+  size: 100
+  sort:
+    - timestamp: desc
+  query:
+    bool:
+      must:
+        - term:
+            agent_name: "${AGENT_NAME}"
+        - term:
+            agent_labels_customer: "${CUSTOMER_CODE}"
+        - term:
+            data_win_system_eventID: "7"
+        - wildcard:
+            data_win_eventdata_imageLoaded: "*\\\\temp\\\\*.dll"
+        - range:
+            timestamp:
+              gte: "${START_TIME}"
+              lte: "${END_TIME}"
+      must_not:
+        - wildcard:
+            data_win_eventdata_imageLoaded: "C:\\\\Program Files*"
+  _source:
+    - timestamp
+    - agent_name
+    - data_win_system_eventID
+    - data_win_eventdata_imageLoaded
+    - data_win_eventdata_image
+    - data_win_eventdata_user
+
+parameters:
+  AGENT_NAME:
+    description: "Target agent/host name"
+    type: string
+    required: true
+    example: "DESKTOP-AM0HLGE"
+  CUSTOMER_CODE:
+    description: "Customer label for filtering"
+    type: string
+    required: true
+    example: "lab"
+  START_TIME:
+    description: "Query start time (ISO 8601 or relative)"
+    type: datetime
+    required: false
+    default: "now-24h"
+    example: "2026-02-23 00:00:00.000"
+  END_TIME:
+    description: "Query end time (ISO 8601 or relative)"
+    type: datetime
+    required: false
+    default: "now"
+    example: "2026-02-23 23:59:59.999"
+
+how_to_implement: >
+  Requires Sysmon EventID 7 (Image Loaded) configured to include Temp directory 
+  paths. Default Sysmon configs may exclude Temp paths due to noise. Ensure 
+  Sysmon ImageLoad rules include Temp directory monitoring for DLL files.
+
+known_false_positives: >
+  Some legitimate applications may temporarily load DLLs from Temp during 
+  installation or updates. Investigate the loading process and DLL signature.
+
+references:
+  - https://attack.mitre.org/techniques/T1105/
+  - https://blog.sekoia.io/interlock-ransomware-evolving-under-the-radar/
+
+response:
+  message: >
+    DLL loaded from Temp directory on $agent_name$. 
+    DLL: $data_win_eventdata_imageLoaded$. 
+    Loading process: $data_win_eventdata_image$. 
+    User: $data_win_eventdata_user$. MITRE ATT&CK: T1105
+  risk_score: 36
+  severity: medium
+  risk_objects:
+    - field: agent_name
+      type: system
+      score: 36
+  threat_objects: []
+
+tags:
+  analytic_story:
+    - Interlock Rat
+    - Lokibot
+    - Compromised Windows Host
+  asset_type: Endpoint
+  mitre_attack_id:
+    - T1105
+  custom_tags:
+    - dll_sideloading
+    - temp_directory
+    - image_loaded
+    - hunting
+  product:
+    - Wazuh
+  security_domain: endpoint
