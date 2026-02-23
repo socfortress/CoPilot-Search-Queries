@@ -1,0 +1,119 @@
+name: Windows WPDBusEnum Registry Key Modification - USB Device Detection
+id: windows-wpdbusenum-registry-usb-device-001
+version: 1
+schema_version: "1.0"
+date: "2026-02-23"
+author: SOCFortress LLC
+status: production
+type: Anomaly
+
+description: >
+  Detects USB removable media device attachment via WPDBusEnum registry key 
+  modification using Sysmon EventID 13. Monitors for changes to 
+  HKLM\System\CurrentControlSet\Enum\SWD\WPDBUSENUM containing USBSTOR 
+  references. Adversaries and insider threats may use removable media for 
+  initial access, execution, data staging, and exfiltration.
+
+data_source:
+  - Sysmon EventID 13
+
+search:
+  index_pattern: "${INDEX_PATTERN}"
+  size: 100
+  sort:
+    - timestamp: desc
+  query:
+    bool:
+      must:
+        - term:
+            agent_name: "${AGENT_NAME}"
+        - term:
+            agent_labels_customer: "${CUSTOMER_CODE}"
+        - term:
+            data_win_system_eventID: "13"
+        - bool:
+            should:
+              - wildcard:
+                  data_win_eventdata_targetObject: "*WPDBUSENUM*USBSTOR*"
+              - wildcard:
+                  data_win_eventdata_targetObject: "*Windows Portable Devices*USBSTOR*"
+            minimum_should_match: 1
+        - range:
+            timestamp:
+              gte: "${START_TIME}"
+              lte: "${END_TIME}"
+  _source:
+    - timestamp
+    - agent_name
+    - data_win_system_eventID
+    - data_win_eventdata_targetObject
+    - data_win_eventdata_details
+    - data_win_eventdata_image
+    - data_win_eventdata_user
+
+parameters:
+  AGENT_NAME:
+    description: "Target agent/host name"
+    type: string
+    required: true
+    example: "DESKTOP-AM0HLGE"
+  CUSTOMER_CODE:
+    description: "Customer label for filtering"
+    type: string
+    required: true
+    example: "lab"
+  START_TIME:
+    description: "Query start time (ISO 8601 or relative)"
+    type: datetime
+    required: false
+    default: "now-24h"
+    example: "2026-02-23 00:00:00.000"
+  END_TIME:
+    description: "Query end time (ISO 8601 or relative)"
+    type: datetime
+    required: false
+    default: "now"
+    example: "2026-02-23 23:59:59.999"
+
+how_to_implement: >
+  This detection requires Wazuh agents deployed on Windows endpoints with Sysmon 
+  installed and configured to log registry value set events (EventID 13). Sysmon 
+  must be monitoring the WPDBUSENUM and Windows Portable Devices registry paths.
+
+known_false_positives: >
+  Legitimate USB device usage will trigger this detection. Use for visibility 
+  and alerting in high-security environments. Filter based on known authorized 
+  devices and user context.
+
+references:
+  - https://attack.mitre.org/techniques/T1200/
+  - https://www.cisa.gov/news-events/news/using-caution-usb-drives
+  - https://www.bleepingcomputer.com/news/security/fbi-hackers-use-badusb-to-target-defense-firms-with-ransomware/
+
+response:
+  message: >
+    USB removable media device detected on $agent_name$. 
+    Device: $data_win_eventdata_details$. 
+    Registry: $data_win_eventdata_targetObject$. 
+    User: $data_win_eventdata_user$. MITRE ATT&CK: T1200
+  risk_score: 25
+  severity: low
+  risk_objects:
+    - field: agent_name
+      type: system
+      score: 25
+  threat_objects: []
+
+tags:
+  analytic_story:
+    - Data Protection
+    - Insider Threat
+    - Compromised Windows Host
+  asset_type: Endpoint
+  mitre_attack_id:
+    - T1200
+    - T1025
+    - T1091
+  product:
+    - Wazuh
+  security_domain: Windows
