@@ -1,0 +1,131 @@
+name: Windows InstallUtil in Non Standard Path
+id: windows-installutil-non-standard-path-001
+version: 1
+schema_version: "1.0"
+date: "2026-02-23"
+author: SOCFortress LLC
+status: production
+type: TTP
+
+description: >
+  Detects InstallUtil.exe executed from non-standard paths (outside System32, 
+  SysWOW64, Microsoft.NET, WinSxS, ADWS). Attackers copy InstallUtil to 
+  unusual locations for LOLBIN proxy execution. Used by WhisperGate, 
+  ransomware, and signed binary proxy execution campaigns.
+
+data_source:
+  - Sysmon EventID 1
+
+search:
+  index_pattern: "${INDEX_PATTERN}"
+  size: 100
+  sort:
+    - timestamp: desc
+  query:
+    bool:
+      must:
+        - term:
+            agent_name: "${AGENT_NAME}"
+        - term:
+            agent_labels_customer: "${CUSTOMER_CODE}"
+        - term:
+            data_win_system_eventID: "1"
+        - wildcard:
+            data_win_eventdata_image: "*\\\\InstallUtil.exe"
+        - range:
+            timestamp:
+              gte: "${START_TIME}"
+              lte: "${END_TIME}"
+      must_not:
+        - wildcard:
+            data_win_eventdata_image: "*\\\\Windows\\\\System32\\\\*"
+        - wildcard:
+            data_win_eventdata_image: "*\\\\Windows\\\\SysWOW64\\\\*"
+        - wildcard:
+            data_win_eventdata_image: "*\\\\Windows\\\\Microsoft.NET\\\\*"
+        - wildcard:
+            data_win_eventdata_image: "*\\\\Windows\\\\WinSxS\\\\*"
+        - wildcard:
+            data_win_eventdata_image: "*\\\\Windows\\\\ADWS\\\\*"
+        - wildcard:
+            data_win_eventdata_image: "*\\\\Windows\\\\NetworkController\\\\*"
+        - wildcard:
+            data_win_eventdata_image: "*\\\\Windows\\\\SystemApps\\\\*"
+  _source:
+    - timestamp
+    - agent_name
+    - data_win_system_eventID
+    - data_win_eventdata_image
+    - data_win_eventdata_commandLine
+    - data_win_eventdata_parentImage
+    - data_win_eventdata_user
+
+parameters:
+  AGENT_NAME:
+    description: "Target agent/host name"
+    type: string
+    required: true
+    example: "DESKTOP-AM0HLGE"
+  CUSTOMER_CODE:
+    description: "Customer label for filtering"
+    type: string
+    required: true
+    example: "lab"
+  START_TIME:
+    description: "Query start time (ISO 8601 or relative)"
+    type: datetime
+    required: false
+    default: "now-24h"
+    example: "2026-02-23 00:00:00.000"
+  END_TIME:
+    description: "Query end time (ISO 8601 or relative)"
+    type: datetime
+    required: false
+    default: "now"
+    example: "2026-02-23 23:59:59.999"
+
+how_to_implement: >
+  This detection requires Wazuh agents deployed on Windows endpoints with Sysmon 
+  installed and configured to log process creation events (EventID 1) with full 
+  command-line arguments.
+
+known_false_positives: >
+  Third-party applications may include InstallUtil in non-standard paths. 
+  Filter by known application directories.
+
+references:
+  - https://attack.mitre.org/techniques/T1218/004/
+  - https://attack.mitre.org/techniques/T1036/003/
+
+response:
+  message: >
+    InstallUtil.exe from non-standard path on $agent_name$. 
+    Path: $data_win_eventdata_image$. 
+    Command: $data_win_eventdata_commandLine$. 
+    User: $data_win_eventdata_user$. MITRE ATT&CK: T1218.004
+  risk_score: 49
+  severity: medium
+  risk_objects:
+    - field: agent_name
+      type: system
+      score: 49
+  threat_objects: []
+
+tags:
+  analytic_story:
+    - Masquerading - Rename System Utilities
+    - Signed Binary Proxy Execution InstallUtil
+    - WhisperGate
+    - Living Off The Land
+  asset_type: Endpoint
+  mitre_attack_id:
+    - T1036.003
+    - T1218.004
+  custom_tags:
+    - installutil
+    - lolbin
+    - non_standard_path
+    - proxy_execution
+  product:
+    - Wazuh
+  security_domain: endpoint
