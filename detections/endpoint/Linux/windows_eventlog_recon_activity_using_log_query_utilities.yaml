@@ -1,0 +1,131 @@
+name: Windows EventLog Recon Activity Using Log Query Utilities
+id: windows-eventlog-recon-log-query-utilities-001
+version: 1
+schema_version: "1.0"
+date: "2026-02-23"
+author: SOCFortress LLC
+status: production
+type: Anomaly
+
+description: >
+  Detects event log reconnaissance using wevtutil qe/query-events, PowerShell 
+  Get-WinEvent/Get-EventLog, WMIC ntevent queries, Win32_NTLogEvent, PsLogList, 
+  or Eventquery. Adversaries enumerate logs to extract usernames, IP addresses, 
+  and session data. Used by Lazarus, APT41, and NetSupport intrusions.
+
+data_source:
+  - Sysmon EventID 1
+
+search:
+  index_pattern: "${INDEX_PATTERN}"
+  size: 100
+  sort:
+    - timestamp: desc
+  query:
+    bool:
+      must:
+        - term:
+            agent_name: "${AGENT_NAME}"
+        - term:
+            agent_labels_customer: "${CUSTOMER_CODE}"
+        - term:
+            data_win_system_eventID: "1"
+        - bool:
+            should:
+              - wildcard:
+                  data_win_eventdata_commandLine: "*Get-WinEvent*"
+              - wildcard:
+                  data_win_eventdata_commandLine: "*Get-EventLog*"
+              - wildcard:
+                  data_win_eventdata_commandLine: "*wevtutil* qe *"
+              - wildcard:
+                  data_win_eventdata_commandLine: "*wevtutil*query-events*"
+              - wildcard:
+                  data_win_eventdata_commandLine: "*ntevent*"
+              - wildcard:
+                  data_win_eventdata_commandLine: "*Win32_NTLogEvent*"
+              - wildcard:
+                  data_win_eventdata_commandLine: "*PsLogList*"
+              - wildcard:
+                  data_win_eventdata_commandLine: "*Eventquery*"
+            minimum_should_match: 1
+        - range:
+            timestamp:
+              gte: "${START_TIME}"
+              lte: "${END_TIME}"
+  _source:
+    - timestamp
+    - agent_name
+    - data_win_system_eventID
+    - data_win_eventdata_image
+    - data_win_eventdata_commandLine
+    - data_win_eventdata_parentImage
+    - data_win_eventdata_user
+
+parameters:
+  AGENT_NAME:
+    description: "Target agent/host name"
+    type: string
+    required: true
+    example: "DESKTOP-AM0HLGE"
+  CUSTOMER_CODE:
+    description: "Customer label for filtering"
+    type: string
+    required: true
+    example: "lab"
+  START_TIME:
+    description: "Query start time (ISO 8601 or relative)"
+    type: datetime
+    required: false
+    default: "now-24h"
+    example: "2026-02-23 00:00:00.000"
+  END_TIME:
+    description: "Query end time (ISO 8601 or relative)"
+    type: datetime
+    required: false
+    default: "now"
+    example: "2026-02-23 23:59:59.999"
+
+how_to_implement: >
+  This detection requires Wazuh agents deployed on Windows endpoints with Sysmon 
+  installed and configured to log process creation events (EventID 1) with full 
+  command-line arguments.
+
+known_false_positives: >
+  Administrators and monitoring tools may query event logs for troubleshooting. 
+  Filter by known admin accounts and monitoring solutions.
+
+references:
+  - https://attack.mitre.org/techniques/T1654/
+  - https://thedfirreport.com/2023/10/30/netsupport-intrusion-results-in-domain-compromise/
+  - https://www.cisa.gov/news-events/cybersecurity-advisories/aa23-144a
+
+response:
+  message: >
+    Event log reconnaissance on $agent_name$. 
+    Command: $data_win_eventdata_commandLine$. 
+    Process: $data_win_eventdata_image$. 
+    User: $data_win_eventdata_user$. MITRE ATT&CK: T1654
+  risk_score: 36
+  severity: medium
+  risk_objects:
+    - field: agent_name
+      type: system
+      score: 36
+  threat_objects: []
+
+tags:
+  analytic_story:
+    - Windows Discovery Techniques
+    - Compromised Windows Host
+  asset_type: Endpoint
+  mitre_attack_id:
+    - T1654
+  custom_tags:
+    - wevtutil
+    - eventlog_recon
+    - discovery
+    - log_query
+  product:
+    - Wazuh
+  security_domain: endpoint
