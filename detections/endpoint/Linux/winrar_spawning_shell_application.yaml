@@ -1,0 +1,138 @@
+name: Windows WinRAR Spawning Shell Application
+id: windows-winrar-spawning-shell-001
+version: 1
+schema_version: "1.0"
+date: "2026-02-23"
+author: SOCFortress LLC
+status: production
+type: TTP
+
+description: >
+  Detects WinRAR spawning shell processes such as cmd.exe, powershell.exe, 
+  certutil.exe, mshta.exe, bitsadmin.exe, wscript.exe, or cscript.exe. This 
+  may indicate exploitation of CVE-2023-38831 where malicious scripts are 
+  executed from spoofed ZIP archives opened in WinRAR.
+
+data_source:
+  - Sysmon EventID 1
+
+search:
+  index_pattern: "${INDEX_PATTERN}"
+  size: 100
+  sort:
+    - timestamp: desc
+  query:
+    bool:
+      must:
+        - term:
+            agent_name: "${AGENT_NAME}"
+        - term:
+            agent_labels_customer: "${CUSTOMER_CODE}"
+        - term:
+            data_win_system_eventID: "1"
+        - wildcard:
+            data_win_eventdata_parentImage: "*\\\\winrar.exe"
+        - bool:
+            should:
+              - wildcard:
+                  data_win_eventdata_image: "*\\\\cmd.exe"
+              - wildcard:
+                  data_win_eventdata_image: "*\\\\powershell.exe"
+              - wildcard:
+                  data_win_eventdata_image: "*\\\\pwsh.exe"
+              - wildcard:
+                  data_win_eventdata_image: "*\\\\certutil.exe"
+              - wildcard:
+                  data_win_eventdata_image: "*\\\\mshta.exe"
+              - wildcard:
+                  data_win_eventdata_image: "*\\\\bitsadmin.exe"
+              - wildcard:
+                  data_win_eventdata_image: "*\\\\wscript.exe"
+              - wildcard:
+                  data_win_eventdata_image: "*\\\\cscript.exe"
+            minimum_should_match: 1
+        - range:
+            timestamp:
+              gte: "${START_TIME}"
+              lte: "${END_TIME}"
+  _source:
+    - timestamp
+    - agent_name
+    - data_win_system_eventID
+    - data_win_eventdata_image
+    - data_win_eventdata_commandLine
+    - data_win_eventdata_parentImage
+    - data_win_eventdata_user
+
+parameters:
+  AGENT_NAME:
+    description: "Target agent/host name"
+    type: string
+    required: true
+    example: "DESKTOP-AM0HLGE"
+  CUSTOMER_CODE:
+    description: "Customer label for filtering"
+    type: string
+    required: true
+    example: "lab"
+  START_TIME:
+    description: "Query start time (ISO 8601 or relative)"
+    type: datetime
+    required: false
+    default: "now-24h"
+    example: "2026-02-23 00:00:00.000"
+  END_TIME:
+    description: "Query end time (ISO 8601 or relative)"
+    type: datetime
+    required: false
+    default: "now"
+    example: "2026-02-23 23:59:59.999"
+
+how_to_implement: >
+  This detection requires Wazuh agents deployed on Windows endpoints with Sysmon 
+  installed and configured to log process creation events (EventID 1) with full 
+  command-line arguments and parent process tracking.
+
+known_false_positives: >
+  WinRAR may legitimately spawn command-line processes in rare cases such as 
+  running post-extraction scripts. Review the command line arguments and user 
+  context to determine legitimacy.
+
+references:
+  - https://attack.mitre.org/techniques/T1105/
+  - https://www.group-ib.com/blog/cve-2023-38831-winrar-zero-day/
+  - https://github.com/b1tg/CVE-2023-38831-winrar-exploit
+
+response:
+  message: >
+    WinRAR spawned shell process on $agent_name$. 
+    Parent: $data_win_eventdata_parentImage$. 
+    Child: $data_win_eventdata_image$. 
+    Command: $data_win_eventdata_commandLine$. 
+    User: $data_win_eventdata_user$. 
+    Possible CVE-2023-38831 exploitation. MITRE ATT&CK: T1105
+  risk_score: 72
+  severity: high
+  risk_objects:
+    - field: agent_name
+      type: system
+      score: 72
+  threat_objects: []
+
+tags:
+  analytic_story:
+    - WinRAR Spoofing Attack CVE-2023-38831
+    - Compromised Windows Host
+  asset_type: Endpoint
+  cve:
+    - CVE-2023-38831
+  mitre_attack_id:
+    - T1105
+  custom_tags:
+    - winrar
+    - cve_exploit
+    - shell_spawn
+    - archive_exploitation
+  product:
+    - Wazuh
+  security_domain: endpoint
