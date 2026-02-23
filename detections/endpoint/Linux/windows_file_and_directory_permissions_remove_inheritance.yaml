@@ -1,0 +1,121 @@
+name: Windows File and Directory Permissions Remove Inheritance
+id: windows-file-directory-remove-inheritance-001
+version: 1
+schema_version: "1.0"
+date: "2026-02-23"
+author: SOCFortress LLC
+status: production
+type: Anomaly
+
+description: >
+  Detects icacls.exe, cacls.exe, or xcacls.exe used with /inheritance:r flag 
+  to strip inherited permissions from files or directories. Adversaries use 
+  this to isolate permissions, conceal malicious files, or bypass inherited 
+  security controls. Used by crypto stealers.
+
+data_source:
+  - Sysmon EventID 1
+
+search:
+  index_pattern: "${INDEX_PATTERN}"
+  size: 100
+  sort:
+    - timestamp: desc
+  query:
+    bool:
+      must:
+        - term:
+            agent_name: "${AGENT_NAME}"
+        - term:
+            agent_labels_customer: "${CUSTOMER_CODE}"
+        - term:
+            data_win_system_eventID: "1"
+        - bool:
+            should:
+              - wildcard:
+                  data_win_eventdata_image: "*\\\\icacls.exe"
+              - wildcard:
+                  data_win_eventdata_image: "*\\\\cacls.exe"
+              - wildcard:
+                  data_win_eventdata_image: "*\\\\xcacls.exe"
+            minimum_should_match: 1
+        - wildcard:
+            data_win_eventdata_commandLine: "*/inheritance:r*"
+        - range:
+            timestamp:
+              gte: "${START_TIME}"
+              lte: "${END_TIME}"
+  _source:
+    - timestamp
+    - agent_name
+    - data_win_system_eventID
+    - data_win_eventdata_image
+    - data_win_eventdata_commandLine
+    - data_win_eventdata_parentImage
+    - data_win_eventdata_user
+
+parameters:
+  AGENT_NAME:
+    description: "Target agent/host name"
+    type: string
+    required: true
+    example: "DESKTOP-AM0HLGE"
+  CUSTOMER_CODE:
+    description: "Customer label for filtering"
+    type: string
+    required: true
+    example: "lab"
+  START_TIME:
+    description: "Query start time (ISO 8601 or relative)"
+    type: datetime
+    required: false
+    default: "now-24h"
+    example: "2026-02-23 00:00:00.000"
+  END_TIME:
+    description: "Query end time (ISO 8601 or relative)"
+    type: datetime
+    required: false
+    default: "now"
+    example: "2026-02-23 23:59:59.999"
+
+how_to_implement: >
+  This detection requires Wazuh agents deployed on Windows endpoints with Sysmon 
+  installed and configured to log process creation events (EventID 1) with full 
+  command-line arguments.
+
+known_false_positives: >
+  Administrators or scripts may legitimately remove inheritance. Investigate 
+  target path and user context.
+
+references:
+  - https://attack.mitre.org/techniques/T1222/001/
+  - https://www.splunk.com/en_us/blog/security/-applocker-rules-as-defense-evasion-complete-analysis.html
+
+response:
+  message: >
+    Permission inheritance removed on $agent_name$. 
+    Command: $data_win_eventdata_commandLine$. 
+    User: $data_win_eventdata_user$. MITRE ATT&CK: T1222.001
+  risk_score: 49
+  severity: medium
+  risk_objects:
+    - field: agent_name
+      type: system
+      score: 49
+  threat_objects: []
+
+tags:
+  analytic_story:
+    - Crypto Stealer
+    - Compromised Windows Host
+  asset_type: Endpoint
+  mitre_attack_id:
+    - T1222.001
+  custom_tags:
+    - icacls
+    - inheritance_removal
+    - permissions
+    - defense_evasion
+  product:
+    - Wazuh
+  security_domain: endpoint
