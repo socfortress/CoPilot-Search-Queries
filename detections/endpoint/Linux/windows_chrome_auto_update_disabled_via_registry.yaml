@@ -1,0 +1,130 @@
+name: Windows Chrome Auto-Update Disabled via Registry
+id: windows-chrome-auto-update-disabled-registry-001
+version: 1
+schema_version: "1.0"
+date: "2026-02-23"
+author: SOCFortress LLC
+status: production
+type: Anomaly
+
+description: >
+  Detects registry modifications that disable Google Chrome auto-updates by 
+  setting values like AutoUpdateCheckPeriodMinutes, UpdateDefault, or 
+  DisableAutoUpdateChecksCheckboxValue under the Google Update policy key. 
+  This prevents Chrome from receiving security updates and may indicate 
+  browser hijacking, malware persistence, or unauthorized extension maintenance.
+
+data_source:
+  - Sysmon EventID 13
+
+search:
+  index_pattern: "${INDEX_PATTERN}"
+  size: 100
+  sort:
+    - timestamp: desc
+  query:
+    bool:
+      must:
+        - term:
+            agent_name: "${AGENT_NAME}"
+        - term:
+            agent_labels_customer: "${CUSTOMER_CODE}"
+        - term:
+            data_win_system_eventID: "13"
+        - wildcard:
+            data_win_eventdata_targetObject: "*Google\\\\Update*"
+        - bool:
+            should:
+              - wildcard:
+                  data_win_eventdata_targetObject: "*AutoUpdateCheckPeriodMinutes*"
+              - wildcard:
+                  data_win_eventdata_targetObject: "*UpdateDefault*"
+              - wildcard:
+                  data_win_eventdata_targetObject: "*DisableAutoUpdateChecksCheckboxValue*"
+              - wildcard:
+                  data_win_eventdata_targetObject: "*Update{8A69D345-D564-463C-AFF1-A69D9E530F96}*"
+            minimum_should_match: 1
+        - range:
+            timestamp:
+              gte: "${START_TIME}"
+              lte: "${END_TIME}"
+  _source:
+    - timestamp
+    - agent_name
+    - data_win_system_eventID
+    - data_win_eventdata_targetObject
+    - data_win_eventdata_details
+    - data_win_eventdata_image
+    - data_win_eventdata_user
+
+parameters:
+  AGENT_NAME:
+    description: "Target agent/host name"
+    type: string
+    required: true
+    example: "DESKTOP-AM0HLGE"
+  CUSTOMER_CODE:
+    description: "Customer label for filtering"
+    type: string
+    required: true
+    example: "lab"
+  START_TIME:
+    description: "Query start time (ISO 8601 or relative)"
+    type: datetime
+    required: false
+    default: "now-24h"
+    example: "2026-02-23 00:00:00.000"
+  END_TIME:
+    description: "Query end time (ISO 8601 or relative)"
+    type: datetime
+    required: false
+    default: "now"
+    example: "2026-02-23 23:59:59.999"
+
+how_to_implement: >
+  This detection requires Wazuh agents deployed on Windows endpoints with Sysmon 
+  installed and configured to log registry value set events (EventID 13). The 
+  Sysmon config must include monitoring of the Google Update policy registry 
+  path (HKLM\SOFTWARE\Policies\Google\Update). Add this path to the Sysmon 
+  RegistryEvent include rules if not already present.
+
+known_false_positives: >
+  IT administrators may intentionally disable Chrome auto-updates in managed 
+  environments for testing or compatibility purposes. Filter by approved GPO 
+  changes and authorized admin accounts.
+
+references:
+  - https://attack.mitre.org/techniques/T1185/
+  - https://www.gdatasoftware.com/blog/2025/11/38298-learning-about-browser-hijacking
+
+response:
+  message: >
+    Chrome auto-update disabled via registry on $agent_name$. 
+    Registry: $data_win_eventdata_targetObject$. 
+    Value: $data_win_eventdata_details$. 
+    Process: $data_win_eventdata_image$. 
+    User: $data_win_eventdata_user$. MITRE ATT&CK: T1185
+  risk_score: 36
+  severity: medium
+  risk_objects:
+    - field: agent_name
+      type: system
+      score: 36
+  threat_objects: []
+
+tags:
+  analytic_story:
+    - Browser Hijacking
+    - Compromised Windows Host
+  asset_type: Endpoint
+  mitre_attack_id:
+    - T1185
+  custom_tags:
+    - chrome
+    - browser
+    - auto_update
+    - registry_modification
+    - defense_evasion
+  product:
+    - Wazuh
+  security_domain: endpoint
