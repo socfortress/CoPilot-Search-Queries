@@ -1,0 +1,127 @@
+name: Windows Curl Upload to Remote Destination
+id: windows-curl-upload-remote-destination-001
+version: 1
+schema_version: "1.0"
+date: "2026-02-23"
+author: SOCFortress LLC
+status: production
+type: TTP
+
+description: >
+  Detects curl.exe used to upload files to remote destinations via -T, 
+  --upload-file, -d, --data, or -F flags. Adversaries use curl for data 
+  exfiltration and malicious payload uploads. Used in supply chain attacks, 
+  ransomware operations, and data theft campaigns.
+
+data_source:
+  - Sysmon EventID 1
+
+search:
+  index_pattern: "${INDEX_PATTERN}"
+  size: 100
+  sort:
+    - timestamp: desc
+  query:
+    bool:
+      must:
+        - term:
+            agent_name: "${AGENT_NAME}"
+        - term:
+            agent_labels_customer: "${CUSTOMER_CODE}"
+        - term:
+            data_win_system_eventID: "1"
+        - wildcard:
+            data_win_eventdata_image: "*\\\\curl.exe"
+        - bool:
+            should:
+              - wildcard:
+                  data_win_eventdata_commandLine: "*-T *"
+              - wildcard:
+                  data_win_eventdata_commandLine: "*--upload-file *"
+              - wildcard:
+                  data_win_eventdata_commandLine: "*-d *"
+              - wildcard:
+                  data_win_eventdata_commandLine: "*--data *"
+              - wildcard:
+                  data_win_eventdata_commandLine: "*-F *"
+            minimum_should_match: 1
+        - range:
+            timestamp:
+              gte: "${START_TIME}"
+              lte: "${END_TIME}"
+  _source:
+    - timestamp
+    - agent_name
+    - data_win_system_eventID
+    - data_win_eventdata_image
+    - data_win_eventdata_commandLine
+    - data_win_eventdata_parentImage
+    - data_win_eventdata_user
+
+parameters:
+  AGENT_NAME:
+    description: "Target agent/host name"
+    type: string
+    required: true
+    example: "DESKTOP-AM0HLGE"
+  CUSTOMER_CODE:
+    description: "Customer label for filtering"
+    type: string
+    required: true
+    example: "lab"
+  START_TIME:
+    description: "Query start time (ISO 8601 or relative)"
+    type: datetime
+    required: false
+    default: "now-24h"
+    example: "2026-02-23 00:00:00.000"
+  END_TIME:
+    description: "Query end time (ISO 8601 or relative)"
+    type: datetime
+    required: false
+    default: "now"
+    example: "2026-02-23 23:59:59.999"
+
+how_to_implement: >
+  This detection requires Wazuh agents deployed on Windows endpoints with Sysmon 
+  installed and configured to log process creation events (EventID 1) with full 
+  command-line arguments.
+
+known_false_positives: >
+  Source control applications and CI/CD pipelines may use curl upload flags 
+  legitimately. Filter by user context and destination URL.
+
+references:
+  - https://attack.mitre.org/techniques/T1105/
+  - https://everything.curl.dev/usingcurl/uploads
+
+response:
+  message: >
+    Curl upload to remote destination on $agent_name$. 
+    Command: $data_win_eventdata_commandLine$. 
+    Parent: $data_win_eventdata_parentImage$. 
+    User: $data_win_eventdata_user$. MITRE ATT&CK: T1105
+  risk_score: 72
+  severity: high
+  risk_objects:
+    - field: agent_name
+      type: system
+      score: 72
+  threat_objects: []
+
+tags:
+  analytic_story:
+    - Ingress Tool Transfer
+    - Compromised Windows Host
+    - NPM Supply Chain Compromise
+  asset_type: Endpoint
+  mitre_attack_id:
+    - T1105
+  custom_tags:
+    - curl
+    - upload
+    - exfiltration
+    - data_transfer
+  product:
+    - Wazuh
+  security_domain: endpoint
