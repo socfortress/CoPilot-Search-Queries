@@ -1,0 +1,135 @@
+name: Windows Files and Dirs Access Rights Modification Via Icacls
+id: windows-files-dirs-access-rights-icacls-001
+version: 1
+schema_version: "1.0"
+date: "2026-02-23"
+author: SOCFortress LLC
+status: production
+type: TTP
+
+description: >
+  Detects icacls.exe, cacls.exe, or xcacls.exe modifying file/directory access 
+  rights with permission flags (:R, :W, :F, :C, :N, /P, /E). Used by Amadey 
+  malware and coinminers to weaken security controls and maintain access.
+
+data_source:
+  - Sysmon EventID 1
+
+search:
+  index_pattern: "${INDEX_PATTERN}"
+  size: 100
+  sort:
+    - timestamp: desc
+  query:
+    bool:
+      must:
+        - term:
+            agent_name: "${AGENT_NAME}"
+        - term:
+            agent_labels_customer: "${CUSTOMER_CODE}"
+        - term:
+            data_win_system_eventID: "1"
+        - bool:
+            should:
+              - wildcard:
+                  data_win_eventdata_image: "*\\\\icacls.exe"
+              - wildcard:
+                  data_win_eventdata_image: "*\\\\cacls.exe"
+              - wildcard:
+                  data_win_eventdata_image: "*\\\\xcacls.exe"
+            minimum_should_match: 1
+        - bool:
+            should:
+              - wildcard:
+                  data_win_eventdata_commandLine: "*:F*"
+              - wildcard:
+                  data_win_eventdata_commandLine: "*:W*"
+              - wildcard:
+                  data_win_eventdata_commandLine: "*:R*"
+              - wildcard:
+                  data_win_eventdata_commandLine: "*:C*"
+              - wildcard:
+                  data_win_eventdata_commandLine: "*:N*"
+              - wildcard:
+                  data_win_eventdata_commandLine: "*/grant*"
+              - wildcard:
+                  data_win_eventdata_commandLine: "*/deny*"
+            minimum_should_match: 1
+        - range:
+            timestamp:
+              gte: "${START_TIME}"
+              lte: "${END_TIME}"
+  _source:
+    - timestamp
+    - agent_name
+    - data_win_system_eventID
+    - data_win_eventdata_image
+    - data_win_eventdata_commandLine
+    - data_win_eventdata_parentImage
+    - data_win_eventdata_user
+
+parameters:
+  AGENT_NAME:
+    description: "Target agent/host name"
+    type: string
+    required: true
+    example: "DESKTOP-AM0HLGE"
+  CUSTOMER_CODE:
+    description: "Customer label for filtering"
+    type: string
+    required: true
+    example: "lab"
+  START_TIME:
+    description: "Query start time (ISO 8601 or relative)"
+    type: datetime
+    required: false
+    default: "now-24h"
+    example: "2026-02-23 00:00:00.000"
+  END_TIME:
+    description: "Query end time (ISO 8601 or relative)"
+    type: datetime
+    required: false
+    default: "now"
+    example: "2026-02-23 23:59:59.999"
+
+how_to_implement: >
+  This detection requires Wazuh agents deployed on Windows endpoints with Sysmon 
+  installed and configured to log process creation events (EventID 1) with full 
+  command-line arguments.
+
+known_false_positives: >
+  Administrative scripts may use icacls for permission management. Filter by 
+  user context and target paths.
+
+references:
+  - https://attack.mitre.org/techniques/T1222/001/
+  - https://malpedia.caad.fkie.fraunhofer.de/details/win.amadey
+
+response:
+  message: >
+    Access rights modified via icacls on $agent_name$. 
+    Command: $data_win_eventdata_commandLine$. 
+    User: $data_win_eventdata_user$. MITRE ATT&CK: T1222.001
+  risk_score: 49
+  severity: medium
+  risk_objects:
+    - field: agent_name
+      type: system
+      score: 49
+  threat_objects: []
+
+tags:
+  analytic_story:
+    - Amadey
+    - Defense Evasion or Unauthorized Access Via SDDL Tampering
+  asset_type: Endpoint
+  mitre_attack_id:
+    - T1222.001
+  custom_tags:
+    - icacls
+    - access_rights
+    - permission_modification
+    - defense_evasion
+  product:
+    - Wazuh
+  security_domain: endpoint
