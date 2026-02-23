@@ -1,0 +1,130 @@
+name: Windows WMI Permanent Event Subscription
+id: windows-wmi-permanent-event-subscription-001
+version: 1
+schema_version: "1.0"
+date: "2026-02-23"
+author: SOCFortress LLC
+status: production
+type: TTP
+
+description: >
+  Detects creation of WMI permanent event subscriptions via Sysmon EventID 19 
+  (WmiEventFilter), 20 (WmiEventConsumer), and 21 (FilterToConsumerBinding). 
+  WMI event subscriptions execute with SYSTEM privileges and survive reboots, 
+  making them a powerful persistence mechanism. Used by Qakbot, Water Gamayun, 
+  and other threat actors for privilege escalation and persistence.
+
+data_source:
+  - Sysmon EventID 19
+  - Sysmon EventID 20
+  - Sysmon EventID 21
+
+search:
+  index_pattern: "${INDEX_PATTERN}"
+  size: 100
+  sort:
+    - timestamp: desc
+  query:
+    bool:
+      must:
+        - term:
+            agent_name: "${AGENT_NAME}"
+        - term:
+            agent_labels_customer: "${CUSTOMER_CODE}"
+        - bool:
+            should:
+              - term:
+                  data_win_system_eventID: "19"
+              - term:
+                  data_win_system_eventID: "20"
+              - term:
+                  data_win_system_eventID: "21"
+            minimum_should_match: 1
+        - range:
+            timestamp:
+              gte: "${START_TIME}"
+              lte: "${END_TIME}"
+  _source:
+    - timestamp
+    - agent_name
+    - data_win_system_eventID
+    - data_win_eventdata_eventType
+    - data_win_eventdata_name
+    - data_win_eventdata_query
+    - data_win_eventdata_destination
+    - data_win_eventdata_type
+    - data_win_eventdata_operation
+    - data_win_eventdata_user
+
+parameters:
+  AGENT_NAME:
+    description: "Target agent/host name"
+    type: string
+    required: true
+    example: "DESKTOP-AM0HLGE"
+  CUSTOMER_CODE:
+    description: "Customer label for filtering"
+    type: string
+    required: true
+    example: "lab"
+  START_TIME:
+    description: "Query start time (ISO 8601 or relative)"
+    type: datetime
+    required: false
+    default: "now-24h"
+    example: "2026-02-23 00:00:00.000"
+  END_TIME:
+    description: "Query end time (ISO 8601 or relative)"
+    type: datetime
+    required: false
+    default: "now"
+    example: "2026-02-23 23:59:59.999"
+
+how_to_implement: >
+  This detection requires Wazuh agents deployed on Windows endpoints with Sysmon 
+  version 6.1+ installed and configured to generate WMI activity alerts (EventID 
+  19, 20, 21). Wazuh built-in rule 89502 already detects EventID 20 at level 14. 
+  EventID 21 (FilterToConsumerBinding) may require a custom Wazuh forwarding rule.
+
+known_false_positives: >
+  Some enterprise management tools and monitoring solutions may create legitimate 
+  WMI subscriptions. Baseline known WMI subscriptions and filter by name and 
+  destination command.
+
+references:
+  - https://attack.mitre.org/techniques/T1546/003/
+  - https://github.com/redcanaryco/atomic-red-team/blob/master/atomics/T1546.003/T1546.003.md
+  - https://in.security/2019/04/03/an-intro-into-abusing-and-identifying-wmi-event-subscriptions-for-persistence/
+
+response:
+  message: >
+    WMI permanent event subscription detected on $agent_name$. 
+    EventType: $data_win_eventdata_eventType$. 
+    Name: $data_win_eventdata_name$. 
+    Destination: $data_win_eventdata_destination$. 
+    User: $data_win_eventdata_user$. MITRE ATT&CK: T1546.003
+  risk_score: 72
+  severity: high
+  risk_objects:
+    - field: agent_name
+      type: system
+      score: 72
+  threat_objects: []
+
+tags:
+  analytic_story:
+    - Suspicious WMI Use
+    - Qakbot
+    - Compromised Windows Host
+    - Windows Persistence Techniques
+  asset_type: Endpoint
+  mitre_attack_id:
+    - T1546.003
+  custom_tags:
+    - wmi
+    - persistence
+    - privilege_escalation
+    - event_subscription
+  product:
+    - Wazuh
+  security_domain: endpoint
