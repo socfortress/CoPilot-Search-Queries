@@ -1,0 +1,131 @@
+name: Windows Disable or Stop Browser Process
+id: windows-disable-stop-browser-process-001
+version: 1
+schema_version: "1.0"
+date: "2026-02-23"
+author: SOCFortress LLC
+status: production
+type: TTP
+
+description: >
+  Detects taskkill commands targeting browser processes (Chrome, Firefox, Edge, 
+  Brave, Opera, Chromium). Stealers like Braodo forcefully close browsers to 
+  unlock credential files (Login Data, cookies, Local State) for extraction. 
+  Also used by Hellcat ransomware and Castle RAT.
+
+data_source:
+  - Sysmon EventID 1
+
+search:
+  index_pattern: "${INDEX_PATTERN}"
+  size: 100
+  sort:
+    - timestamp: desc
+  query:
+    bool:
+      must:
+        - term:
+            agent_name: "${AGENT_NAME}"
+        - term:
+            agent_labels_customer: "${CUSTOMER_CODE}"
+        - term:
+            data_win_system_eventID: "1"
+        - wildcard:
+            data_win_eventdata_commandLine: "*taskkill*"
+        - bool:
+            should:
+              - wildcard:
+                  data_win_eventdata_commandLine: "*chrome.exe*"
+              - wildcard:
+                  data_win_eventdata_commandLine: "*firefox.exe*"
+              - wildcard:
+                  data_win_eventdata_commandLine: "*brave.exe*"
+              - wildcard:
+                  data_win_eventdata_commandLine: "*opera.exe*"
+              - wildcard:
+                  data_win_eventdata_commandLine: "*msedge.exe*"
+              - wildcard:
+                  data_win_eventdata_commandLine: "*chromium.exe*"
+            minimum_should_match: 1
+        - range:
+            timestamp:
+              gte: "${START_TIME}"
+              lte: "${END_TIME}"
+  _source:
+    - timestamp
+    - agent_name
+    - data_win_system_eventID
+    - data_win_eventdata_image
+    - data_win_eventdata_commandLine
+    - data_win_eventdata_parentImage
+    - data_win_eventdata_user
+
+parameters:
+  AGENT_NAME:
+    description: "Target agent/host name"
+    type: string
+    required: true
+    example: "DESKTOP-AM0HLGE"
+  CUSTOMER_CODE:
+    description: "Customer label for filtering"
+    type: string
+    required: true
+    example: "lab"
+  START_TIME:
+    description: "Query start time (ISO 8601 or relative)"
+    type: datetime
+    required: false
+    default: "now-24h"
+    example: "2026-02-23 00:00:00.000"
+  END_TIME:
+    description: "Query end time (ISO 8601 or relative)"
+    type: datetime
+    required: false
+    default: "now"
+    example: "2026-02-23 23:59:59.999"
+
+how_to_implement: >
+  This detection requires Wazuh agents deployed on Windows endpoints with Sysmon 
+  installed and configured to log process creation events (EventID 1) with full 
+  command-line arguments.
+
+known_false_positives: >
+  Administrators or users may terminate browsers via taskkill. Investigate 
+  parent process and whether credential files were subsequently accessed.
+
+references:
+  - https://attack.mitre.org/techniques/T1562/001/
+  - https://g0njxa.medium.com/from-vietnam-to-united-states-malware-fraud-and-dropshipping-98b7a7b2c36d
+
+response:
+  message: >
+    Browser process killed via taskkill on $agent_name$. 
+    Command: $data_win_eventdata_commandLine$. 
+    Parent: $data_win_eventdata_parentImage$. 
+    User: $data_win_eventdata_user$. 
+    Possible credential theft preparation. MITRE ATT&CK: T1562.001
+  risk_score: 64
+  severity: high
+  risk_objects:
+    - field: agent_name
+      type: system
+      score: 64
+  threat_objects: []
+
+tags:
+  analytic_story:
+    - Braodo Stealer
+    - Hellcat Ransomware
+    - Castle RAT
+    - Compromised Windows Host
+  asset_type: Endpoint
+  mitre_attack_id:
+    - T1562.001
+  custom_tags:
+    - taskkill
+    - browser_kill
+    - credential_theft
+    - stealer_preparation
+  product:
+    - Wazuh
+  security_domain: endpoint
