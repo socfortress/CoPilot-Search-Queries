@@ -1,0 +1,109 @@
+name: Windows ClipBoard Data via Get-ClipBoard
+id: windows-clipboard-data-get-clipboard-001
+version: 1
+schema_version: "1.0"
+date: "2026-02-23"
+author: SOCFortress LLC
+status: production
+type: Anomaly
+
+description: >
+  Detects execution of the PowerShell Get-Clipboard cmdlet via Script Block 
+  Logging (EventID 4104). This native cmdlet retrieves clipboard contents and 
+  is used by post-exploitation tools like WinPEAS to steal sensitive data such 
+  as passwords, tokens, or other information copied to the clipboard.
+
+data_source:
+  - PowerShell Script Block Logging EventID 4104
+
+search:
+  index_pattern: "${INDEX_PATTERN}"
+  size: 100
+  sort:
+    - timestamp: desc
+  query:
+    bool:
+      must:
+        - term:
+            agent_name: "${AGENT_NAME}"
+        - term:
+            agent_labels_customer: "${CUSTOMER_CODE}"
+        - wildcard:
+            data_win_eventdata_scriptBlockText: "*Get-Clipboard*"
+        - range:
+            timestamp:
+              gte: "${START_TIME}"
+              lte: "${END_TIME}"
+  _source:
+    - timestamp
+    - agent_name
+    - data_win_eventdata_scriptBlockText
+    - rule_id
+    - rule_description
+
+parameters:
+  AGENT_NAME:
+    description: "Target agent/host name"
+    type: string
+    required: true
+    example: "DESKTOP-AM0HLGE"
+  CUSTOMER_CODE:
+    description: "Customer label for filtering"
+    type: string
+    required: true
+    example: "lab"
+  START_TIME:
+    description: "Query start time (ISO 8601 or relative)"
+    type: datetime
+    required: false
+    default: "now-24h"
+    example: "2026-02-23 00:00:00.000"
+  END_TIME:
+    description: "Query end time (ISO 8601 or relative)"
+    type: datetime
+    required: false
+    default: "now"
+    example: "2026-02-23 23:59:59.999"
+
+how_to_implement: >
+  This detection requires PowerShell Script Block Logging (EventID 4104) enabled 
+  on Windows endpoints and Wazuh custom rule 100610 deployed to detect 
+  Get-Clipboard in script block text. Add rule to 
+  /var/ossec/etc/rules/powershell_scriptblock_rules.xml and restart wazuh-manager.
+
+known_false_positives: >
+  Administrators or scripts may legitimately use Get-Clipboard for automation. 
+  Correlate with other post-exploitation indicators on the same host.
+
+references:
+  - https://attack.mitre.org/techniques/T1115/
+  - https://github.com/carlospolop/PEASS-ng/tree/master/winPEAS
+
+response:
+  message: >
+    Get-Clipboard execution detected on $agent_name$. 
+    Script: $data_win_eventdata_scriptBlockText$. 
+    Possible clipboard data theft. MITRE ATT&CK: T1115
+  risk_score: 36
+  severity: medium
+  risk_objects:
+    - field: agent_name
+      type: system
+      score: 36
+  threat_objects: []
+
+tags:
+  analytic_story:
+    - Windows Post-Exploitation
+    - Prestige Ransomware
+  asset_type: Endpoint
+  mitre_attack_id:
+    - T1115
+  custom_tags:
+    - clipboard
+    - data_theft
+    - winpeas
+    - powershell_4104
+  product:
+    - Wazuh
+  security_domain: endpoint
