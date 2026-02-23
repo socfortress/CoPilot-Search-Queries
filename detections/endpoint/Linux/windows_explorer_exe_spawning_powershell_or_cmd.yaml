@@ -1,0 +1,125 @@
+name: Windows Explorer Spawning PowerShell or Cmd
+id: windows-explorer-spawning-powershell-cmd-001
+version: 1
+schema_version: "1.0"
+date: "2026-02-23"
+author: SOCFortress LLC
+status: production
+type: Hunting
+
+description: >
+  Detects Windows Explorer.exe spawning PowerShell or cmd.exe, associated with 
+  ZDI-CAN-25373 Windows shortcut zero-day vulnerability. Specially crafted LNK 
+  files trigger malicious code execution through cmd.exe or powershell.exe. 
+  Actively exploited by multiple APT groups via HTTP and SMB delivery.
+
+data_source:
+  - Sysmon EventID 1
+
+search:
+  index_pattern: "${INDEX_PATTERN}"
+  size: 100
+  sort:
+    - timestamp: desc
+  query:
+    bool:
+      must:
+        - term:
+            agent_name: "${AGENT_NAME}"
+        - term:
+            agent_labels_customer: "${CUSTOMER_CODE}"
+        - term:
+            data_win_system_eventID: "1"
+        - wildcard:
+            data_win_eventdata_parentImage: "*\\\\explorer.exe"
+        - bool:
+            should:
+              - wildcard:
+                  data_win_eventdata_image: "*\\\\powershell.exe"
+              - wildcard:
+                  data_win_eventdata_image: "*\\\\cmd.exe"
+              - wildcard:
+                  data_win_eventdata_image: "*\\\\pwsh.exe"
+            minimum_should_match: 1
+        - range:
+            timestamp:
+              gte: "${START_TIME}"
+              lte: "${END_TIME}"
+  _source:
+    - timestamp
+    - agent_name
+    - data_win_system_eventID
+    - data_win_eventdata_image
+    - data_win_eventdata_commandLine
+    - data_win_eventdata_parentImage
+    - data_win_eventdata_user
+
+parameters:
+  AGENT_NAME:
+    description: "Target agent/host name"
+    type: string
+    required: true
+    example: "DESKTOP-AM0HLGE"
+  CUSTOMER_CODE:
+    description: "Customer label for filtering"
+    type: string
+    required: true
+    example: "lab"
+  START_TIME:
+    description: "Query start time (ISO 8601 or relative)"
+    type: datetime
+    required: false
+    default: "now-24h"
+    example: "2026-02-23 00:00:00.000"
+  END_TIME:
+    description: "Query end time (ISO 8601 or relative)"
+    type: datetime
+    required: false
+    default: "now"
+    example: "2026-02-23 23:59:59.999"
+
+how_to_implement: >
+  This detection requires Wazuh agents deployed on Windows endpoints with Sysmon 
+  installed and configured to log process creation events (EventID 1) with full 
+  command-line arguments. Hunting detection — expect false positives.
+
+known_false_positives: >
+  Users opening PowerShell or cmd from Start menu, right-click context menus, or 
+  running scripts from Explorer. Filter by command-line content to reduce noise. 
+  Focus on encoded commands, unusual scripts, or execution policy bypasses.
+
+references:
+  - https://www.zerodayinitiative.com/advisories/ZDI-CAN-25373/
+  - https://www.trendmicro.com/en_us/research/25/c/windows-shortcut-zero-day-exploit.html
+
+response:
+  message: >
+    Explorer.exe spawned shell process on $agent_name$. 
+    Child: $data_win_eventdata_image$. 
+    Command: $data_win_eventdata_commandLine$. 
+    User: $data_win_eventdata_user$. 
+    Possible LNK exploit. MITRE ATT&CK: T1059.001
+  risk_score: 25
+  severity: low
+  risk_objects:
+    - field: agent_name
+      type: system
+      score: 25
+  threat_objects: []
+
+tags:
+  analytic_story:
+    - ZDI-CAN-25373 Windows Shortcut Exploit Abused as Zero-Day
+    - Compromised Windows Host
+  asset_type: Endpoint
+  mitre_attack_id:
+    - T1059.001
+    - T1204.002
+  custom_tags:
+    - explorer
+    - lnk_exploit
+    - hunting
+    - shell_spawn
+  product:
+    - Wazuh
+  security_domain: endpoint
