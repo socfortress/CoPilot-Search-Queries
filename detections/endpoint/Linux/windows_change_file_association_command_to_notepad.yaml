@@ -1,0 +1,128 @@
+name: Windows Change File Association Command To Notepad
+id: windows-change-file-association-notepad-001
+version: 1
+schema_version: "1.0"
+date: "2026-02-23"
+author: SOCFortress LLC
+status: production
+type: TTP
+
+description: >
+  Detects attempts to change file association commands to open with Notepad.exe 
+  via registry modification of HKCR shell\open\command keys. Prestige ransomware 
+  uses this technique after encrypting files — changing the association of the 
+  new extension to display a ransom note via Notepad.
+
+data_source:
+  - Sysmon EventID 1
+
+search:
+  index_pattern: "${INDEX_PATTERN}"
+  size: 100
+  sort:
+    - timestamp: desc
+  query:
+    bool:
+      must:
+        - term:
+            agent_name: "${AGENT_NAME}"
+        - term:
+            agent_labels_customer: "${CUSTOMER_CODE}"
+        - term:
+            data_win_system_eventID: "1"
+        - bool:
+            should:
+              - wildcard:
+                  data_win_eventdata_commandLine: "*HKCR*"
+              - wildcard:
+                  data_win_eventdata_commandLine: "*HKEY_CLASSES_ROOT*"
+            minimum_should_match: 1
+        - wildcard:
+            data_win_eventdata_commandLine: "*open*command*"
+        - wildcard:
+            data_win_eventdata_commandLine: "*Notepad*"
+        - range:
+            timestamp:
+              gte: "${START_TIME}"
+              lte: "${END_TIME}"
+      must_not:
+        - wildcard:
+            data_win_eventdata_commandLine: "*Applications\\\\notepad.exe*"
+        - wildcard:
+            data_win_eventdata_commandLine: "*WindowsApps\\\\Microsoft.WindowsNotepad*"
+  _source:
+    - timestamp
+    - agent_name
+    - data_win_system_eventID
+    - data_win_eventdata_image
+    - data_win_eventdata_commandLine
+    - data_win_eventdata_parentImage
+    - data_win_eventdata_user
+
+parameters:
+  AGENT_NAME:
+    description: "Target agent/host name"
+    type: string
+    required: true
+    example: "DESKTOP-AM0HLGE"
+  CUSTOMER_CODE:
+    description: "Customer label for filtering"
+    type: string
+    required: true
+    example: "lab"
+  START_TIME:
+    description: "Query start time (ISO 8601 or relative)"
+    type: datetime
+    required: false
+    default: "now-24h"
+    example: "2026-02-23 00:00:00.000"
+  END_TIME:
+    description: "Query end time (ISO 8601 or relative)"
+    type: datetime
+    required: false
+    default: "now"
+    example: "2026-02-23 23:59:59.999"
+
+how_to_implement: >
+  This detection requires Wazuh agents deployed on Windows endpoints with Sysmon 
+  installed and configured to log process creation events (EventID 1) with full 
+  command-line arguments.
+
+known_false_positives: >
+  Very unlikely. Default Notepad associations and Microsoft Store Notepad 
+  packages are excluded. Any other modification of file associations to 
+  Notepad.exe is highly suspicious.
+
+references:
+  - https://attack.mitre.org/techniques/T1546/001/
+  - https://www.microsoft.com/en-us/security/blog/2022/10/14/new-prestige-ransomware-impacts-organizations-in-ukraine-and-poland/
+
+response:
+  message: >
+    File association changed to Notepad.exe on $agent_name$. 
+    Command: $data_win_eventdata_commandLine$. 
+    User: $data_win_eventdata_user$. 
+    Possible ransomware ransom note display technique. MITRE ATT&CK: T1546.001
+  risk_score: 72
+  severity: high
+  risk_objects:
+    - field: agent_name
+      type: system
+      score: 72
+  threat_objects: []
+
+tags:
+  analytic_story:
+    - Prestige Ransomware
+    - Compromised Windows Host
+  asset_type: Endpoint
+  mitre_attack_id:
+    - T1546.001
+  custom_tags:
+    - ransomware
+    - file_association
+    - registry_modification
+    - ransom_note
+  product:
+    - Wazuh
+  security_domain: endpoint
