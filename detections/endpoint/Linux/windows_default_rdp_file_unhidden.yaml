@@ -1,0 +1,123 @@
+name: Windows Default RDP File Unhidden
+id: windows-default-rdp-file-unhidden-001
+version: 1
+schema_version: "1.0"
+date: "2026-02-23"
+author: SOCFortress LLC
+status: production
+type: Anomaly
+
+description: >
+  Detects attrib.exe removing hidden (-h) or system (-s) attributes from 
+  Default.rdp file. This file stores RDP session configuration and is hidden 
+  by default. Unhiding it may indicate reconnaissance of RDP connection history, 
+  credential reuse preparation, or anti-forensic manipulation by an attacker.
+
+data_source:
+  - Sysmon EventID 1
+
+search:
+  index_pattern: "${INDEX_PATTERN}"
+  size: 100
+  sort:
+    - timestamp: desc
+  query:
+    bool:
+      must:
+        - term:
+            agent_name: "${AGENT_NAME}"
+        - term:
+            agent_labels_customer: "${CUSTOMER_CODE}"
+        - term:
+            data_win_system_eventID: "1"
+        - wildcard:
+            data_win_eventdata_image: "*\\\\attrib.exe"
+        - wildcard:
+            data_win_eventdata_commandLine: "*default.rdp*"
+        - bool:
+            should:
+              - wildcard:
+                  data_win_eventdata_commandLine: "*-s*"
+              - wildcard:
+                  data_win_eventdata_commandLine: "*-h*"
+            minimum_should_match: 1
+        - range:
+            timestamp:
+              gte: "${START_TIME}"
+              lte: "${END_TIME}"
+  _source:
+    - timestamp
+    - agent_name
+    - data_win_system_eventID
+    - data_win_eventdata_image
+    - data_win_eventdata_commandLine
+    - data_win_eventdata_parentImage
+    - data_win_eventdata_user
+
+parameters:
+  AGENT_NAME:
+    description: "Target agent/host name"
+    type: string
+    required: true
+    example: "DESKTOP-AM0HLGE"
+  CUSTOMER_CODE:
+    description: "Customer label for filtering"
+    type: string
+    required: true
+    example: "lab"
+  START_TIME:
+    description: "Query start time (ISO 8601 or relative)"
+    type: datetime
+    required: false
+    default: "now-24h"
+    example: "2026-02-23 00:00:00.000"
+  END_TIME:
+    description: "Query end time (ISO 8601 or relative)"
+    type: datetime
+    required: false
+    default: "now"
+    example: "2026-02-23 23:59:59.999"
+
+how_to_implement: >
+  This detection requires Wazuh agents deployed on Windows endpoints with Sysmon 
+  installed and configured to log process creation events (EventID 1) with full 
+  command-line arguments.
+
+known_false_positives: >
+  Unknown. Unhiding Default.rdp is uncommon in normal user behavior.
+
+references:
+  - https://attack.mitre.org/techniques/T1021/001/
+  - https://medium.com/@bonguides25/how-to-clear-rdp-connections-history-in-windows-cf0ffb67f344
+
+response:
+  message: >
+    Default.rdp file unhidden on $agent_name$. 
+    Command: $data_win_eventdata_commandLine$. 
+    Parent: $data_win_eventdata_parentImage$. 
+    User: $data_win_eventdata_user$. 
+    Possible RDP reconnaissance or anti-forensics. MITRE ATT&CK: T1021.001
+  risk_score: 50
+  severity: medium
+  risk_objects:
+    - field: agent_name
+      type: system
+      score: 50
+  threat_objects: []
+
+tags:
+  analytic_story:
+    - Windows RDP Artifacts and Defense Evasion
+    - Compromised Windows Host
+  asset_type: Endpoint
+  mitre_attack_id:
+    - T1021.001
+  custom_tags:
+    - rdp
+    - attrib
+    - anti_forensics
+    - reconnaissance
+    - default_rdp
+  product:
+    - Wazuh
+  security_domain: endpoint
