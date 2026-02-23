@@ -1,0 +1,124 @@
+name: Windows Debugger Tool Execution
+id: windows-debugger-tool-execution-001
+version: 1
+schema_version: "1.0"
+date: "2026-02-23"
+author: SOCFortress LLC
+status: production
+type: Hunting
+
+description: >
+  Detects execution of debugger tools (x32dbg.exe, x64dbg.exe, windbg.exe) in 
+  production environments. While legitimate for development, these tools are 
+  abused by PlugX and DarkGate malware for DLL side-loading attacks. Unusual 
+  in non-developer environments.
+
+data_source:
+  - Sysmon EventID 1
+
+search:
+  index_pattern: "${INDEX_PATTERN}"
+  size: 100
+  sort:
+    - timestamp: desc
+  query:
+    bool:
+      must:
+        - term:
+            agent_name: "${AGENT_NAME}"
+        - term:
+            agent_labels_customer: "${CUSTOMER_CODE}"
+        - term:
+            data_win_system_eventID: "1"
+        - bool:
+            should:
+              - wildcard:
+                  data_win_eventdata_image: "*\\\\x32dbg.exe"
+              - wildcard:
+                  data_win_eventdata_image: "*\\\\x64dbg.exe"
+              - wildcard:
+                  data_win_eventdata_image: "*\\\\windbg.exe"
+            minimum_should_match: 1
+        - range:
+            timestamp:
+              gte: "${START_TIME}"
+              lte: "${END_TIME}"
+  _source:
+    - timestamp
+    - agent_name
+    - data_win_system_eventID
+    - data_win_eventdata_image
+    - data_win_eventdata_commandLine
+    - data_win_eventdata_parentImage
+    - data_win_eventdata_user
+
+parameters:
+  AGENT_NAME:
+    description: "Target agent/host name"
+    type: string
+    required: true
+    example: "DESKTOP-AM0HLGE"
+  CUSTOMER_CODE:
+    description: "Customer label for filtering"
+    type: string
+    required: true
+    example: "lab"
+  START_TIME:
+    description: "Query start time (ISO 8601 or relative)"
+    type: datetime
+    required: false
+    default: "now-24h"
+    example: "2026-02-23 00:00:00.000"
+  END_TIME:
+    description: "Query end time (ISO 8601 or relative)"
+    type: datetime
+    required: false
+    default: "now"
+    example: "2026-02-23 23:59:59.999"
+
+how_to_implement: >
+  This detection requires Wazuh agents deployed on Windows endpoints with Sysmon 
+  installed and configured to log process creation events (EventID 1) with full 
+  command-line arguments.
+
+known_false_positives: >
+  Developers and IT professionals may legitimately use debugger tools. Filter 
+  by user role and endpoint type. Focus on non-developer workstations.
+
+references:
+  - https://attack.mitre.org/techniques/T1036/
+  - https://www.splunk.com/en_us/blog/security/enter-the-gates-an-analysis-of-the-darkgate-autoit-loader.html
+  - https://www.trendmicro.com/en_us/research/23/b/investigating-the-plugx-trojan-disguised-as-a-legitimate-windows.html
+
+response:
+  message: >
+    Debugger tool execution on $agent_name$. 
+    Process: $data_win_eventdata_image$. 
+    Command: $data_win_eventdata_commandLine$. 
+    Parent: $data_win_eventdata_parentImage$. 
+    User: $data_win_eventdata_user$. MITRE ATT&CK: T1036
+  risk_score: 36
+  severity: medium
+  risk_objects:
+    - field: agent_name
+      type: system
+      score: 36
+  threat_objects: []
+
+tags:
+  analytic_story:
+    - DarkGate Malware
+    - PlugX
+    - Compromised Windows Host
+  asset_type: Endpoint
+  mitre_attack_id:
+    - T1036
+  custom_tags:
+    - debugger
+    - dll_sideloading
+    - hunting
+    - x64dbg
+    - windbg
+  product:
+    - Wazuh
+  security_domain: endpoint
