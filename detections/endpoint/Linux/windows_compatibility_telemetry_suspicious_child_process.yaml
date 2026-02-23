@@ -1,0 +1,122 @@
+name: Windows Compatibility Telemetry Suspicious Child Process
+id: windows-compattelrunner-suspicious-child-001
+version: 1
+schema_version: "1.0"
+date: "2026-02-23"
+author: SOCFortress LLC
+status: production
+type: TTP
+
+description: >
+  Detects CompatTelRunner.exe spawning child processes with -cv: parameter but 
+  without -m: parameter, indicating abuse of Windows Compatibility Telemetry for 
+  persistence or privilege escalation. CompatTelRunner.exe and the Microsoft 
+  Compatibility Appraiser task always run as SYSTEM, making this a high-value 
+  persistence mechanism.
+
+data_source:
+  - Sysmon EventID 1
+
+search:
+  index_pattern: "${INDEX_PATTERN}"
+  size: 100
+  sort:
+    - timestamp: desc
+  query:
+    bool:
+      must:
+        - term:
+            agent_name: "${AGENT_NAME}"
+        - term:
+            agent_labels_customer: "${CUSTOMER_CODE}"
+        - term:
+            data_win_system_eventID: "1"
+        - wildcard:
+            data_win_eventdata_parentImage: "*\\\\CompatTelRunner.exe"
+        - wildcard:
+            data_win_eventdata_commandLine: "*-cv:*"
+        - range:
+            timestamp:
+              gte: "${START_TIME}"
+              lte: "${END_TIME}"
+      must_not:
+        - wildcard:
+            data_win_eventdata_commandLine: "*-m:*"
+  _source:
+    - timestamp
+    - agent_name
+    - data_win_system_eventID
+    - data_win_eventdata_image
+    - data_win_eventdata_commandLine
+    - data_win_eventdata_parentImage
+    - data_win_eventdata_user
+
+parameters:
+  AGENT_NAME:
+    description: "Target agent/host name"
+    type: string
+    required: true
+    example: "DESKTOP-AM0HLGE"
+  CUSTOMER_CODE:
+    description: "Customer label for filtering"
+    type: string
+    required: true
+    example: "lab"
+  START_TIME:
+    description: "Query start time (ISO 8601 or relative)"
+    type: datetime
+    required: false
+    default: "now-24h"
+    example: "2026-02-23 00:00:00.000"
+  END_TIME:
+    description: "Query end time (ISO 8601 or relative)"
+    type: datetime
+    required: false
+    default: "now"
+    example: "2026-02-23 23:59:59.999"
+
+how_to_implement: >
+  This detection requires Wazuh agents deployed on Windows endpoints with Sysmon 
+  installed and configured to log process creation events (EventID 1) with full 
+  command-line arguments and parent process tracking.
+
+known_false_positives: >
+  None identified. Legitimate Microsoft Compatibility Appraiser always uses the 
+  -m: parameter alongside -cv:.
+
+references:
+  - https://attack.mitre.org/techniques/T1546/
+  - https://scythe.io/threat-thursday/windows-telemetry-persistence
+  - https://www.trustedsec.com/blog/abusing-windows-telemetry-for-persistence
+
+response:
+  message: >
+    CompatTelRunner.exe spawned suspicious process on $agent_name$. 
+    Child: $data_win_eventdata_image$. 
+    Command: $data_win_eventdata_commandLine$. 
+    User: $data_win_eventdata_user$. 
+    Possible telemetry persistence abuse. MITRE ATT&CK: T1546
+  risk_score: 72
+  severity: high
+  risk_objects:
+    - field: agent_name
+      type: system
+      score: 72
+  threat_objects: []
+
+tags:
+  analytic_story:
+    - Windows Persistence Techniques
+    - Compromised Windows Host
+  asset_type: Endpoint
+  mitre_attack_id:
+    - T1546
+    - T1053.005
+  custom_tags:
+    - compattelrunner
+    - persistence
+    - privilege_escalation
+    - system_process_abuse
+  product:
+    - Wazuh
+  security_domain: endpoint
