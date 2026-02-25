@@ -1,0 +1,120 @@
+name: Windows InstallUtil URL in Command Line
+id: windows-installutil-url-commandline-001
+version: 1
+schema_version: "1.0"
+date: "2026-02-23"
+author: SOCFortress LLC
+status: production
+type: TTP
+
+description: >
+  Detects InstallUtil.exe with HTTP/HTTPS URL in command line, indicating 
+  remote payload download and execution. InstallUtil is not typically used 
+  for remote file retrieval, making this highly suspicious LOLBIN abuse.
+
+data_source:
+  - Sysmon EventID 1
+
+search:
+  index_pattern: "${INDEX_PATTERN}"
+  size: 100
+  sort:
+    - timestamp: desc
+  query:
+    bool:
+      must:
+        - term:
+            agent_name: "${AGENT_NAME}"
+        - term:
+            agent_labels_customer: "${CUSTOMER_CODE}"
+        - term:
+            data_win_system_eventID: "1"
+        - wildcard:
+            data_win_eventdata_image: "*\\\\InstallUtil.exe"
+        - bool:
+            should:
+              - wildcard:
+                  data_win_eventdata_commandLine: "*http://*"
+              - wildcard:
+                  data_win_eventdata_commandLine: "*https://*"
+            minimum_should_match: 1
+        - range:
+            timestamp:
+              gte: "${START_TIME}"
+              lte: "${END_TIME}"
+  _source:
+    - timestamp
+    - agent_name
+    - data_win_system_eventID
+    - data_win_eventdata_image
+    - data_win_eventdata_commandLine
+    - data_win_eventdata_parentImage
+    - data_win_eventdata_user
+
+parameters:
+  AGENT_NAME:
+    description: "Target agent/host name"
+    type: string
+    required: true
+    example: "DESKTOP-AM0HLGE"
+  CUSTOMER_CODE:
+    description: "Customer label for filtering"
+    type: string
+    required: true
+    example: "lab"
+  START_TIME:
+    description: "Query start time (ISO 8601 or relative)"
+    type: datetime
+    required: false
+    default: "now-24h"
+    example: "2026-02-23 00:00:00.000"
+  END_TIME:
+    description: "Query end time (ISO 8601 or relative)"
+    type: datetime
+    required: false
+    default: "now"
+    example: "2026-02-23 23:59:59.999"
+
+how_to_implement: >
+  This detection requires Wazuh agents deployed on Windows endpoints with Sysmon 
+  installed and configured to log process creation events (EventID 1) with full 
+  command-line arguments.
+
+known_false_positives: >
+  InstallUtil is not typically used for remote downloads. Very few false 
+  positives expected.
+
+references:
+  - https://attack.mitre.org/techniques/T1218/004/
+  - https://github.com/redcanaryco/atomic-red-team/blob/master/atomics/T1218.004/T1218.004.md
+
+response:
+  message: >
+    InstallUtil.exe with URL on $agent_name$. 
+    Command: $data_win_eventdata_commandLine$. 
+    User: $data_win_eventdata_user$. 
+    Remote payload execution. MITRE ATT&CK: T1218.004
+  risk_score: 80
+  severity: critical
+  risk_objects:
+    - field: agent_name
+      type: system
+      score: 80
+  threat_objects: []
+
+tags:
+  analytic_story:
+    - Living Off The Land
+    - Signed Binary Proxy Execution InstallUtil
+    - Compromised Windows Host
+  asset_type: Endpoint
+  mitre_attack_id:
+    - T1218.004
+  custom_tags:
+    - installutil
+    - url_download
+    - lolbin
+    - remote_payload
+  product:
+    - Wazuh
+  security_domain: endpoint
