@@ -1,0 +1,111 @@
+name: Windows Modify Registry With MD5 Reg Key Name
+id: windows-modify-registry-md5-reg-key-name-001
+version: 1
+schema_version: "1.0"
+date: "2026-02-27"
+author: SOCFortress LLC
+status: production
+type: TTP
+
+description: >
+  Detects registry entries under SOFTWARE with 32-character hexadecimal 
+  value names (MD5-like) containing binary data. NjRAT uses this technique 
+  for fileless storage of keylogs and DLL plugins in the registry. The 
+  MD5-like naming pattern is a strong indicator of NjRAT activity.
+
+data_source:
+  - Sysmon EventID 13
+
+search:
+  index_pattern: "${INDEX_PATTERN}"
+  size: 100
+  sort:
+    - timestamp: desc
+  query:
+    bool:
+      must:
+        - term:
+            agent_name: "${AGENT_NAME}"
+        - term:
+            agent_labels_customer: "${CUSTOMER_CODE}"
+        - term:
+            data_win_system_eventID: "13"
+        - wildcard:
+            data_win_eventdata_targetObject: "*\\SOFTWARE\\*"
+        - term:
+            data_win_eventdata_details: "Binary Data"
+        - range:
+            timestamp:
+              gte: "${START_TIME}"
+              lte: "${END_TIME}"
+  _source:
+    - timestamp
+    - agent_name
+    - data_win_system_eventID
+    - data_win_eventdata_targetObject
+    - data_win_eventdata_details
+    - data_win_eventdata_image
+    - data_win_eventdata_user
+
+parameters:
+  AGENT_NAME:
+    description: "Target agent/host name"
+    type: string
+    required: true
+    example: "DESKTOP-AM0HLGE"
+  CUSTOMER_CODE:
+    description: "Customer label for filtering"
+    type: string
+    required: true
+    example: "lab"
+  START_TIME:
+    type: datetime
+    required: false
+    default: "now-24h"
+  END_TIME:
+    type: datetime
+    required: false
+    default: "now"
+
+how_to_implement: >
+  Requires Sysmon EventID 13 monitoring SOFTWARE registry paths. 
+  Post-processing required: extract registry value name from targetObject 
+  and validate 32-char hex pattern (MD5). Elasticsearch does not support 
+  inline regex — implement pattern matching in CoPilot backend.
+
+known_false_positives: >
+  Unknown. MD5-named binary registry values under SOFTWARE are rare.
+
+references:
+  - https://malpedia.caad.fkie.fraunhofer.de/details/win.njrat
+  - https://attack.mitre.org/techniques/T1112/
+
+response:
+  message: >
+    MD5-named binary registry entry on $agent_name$. 
+    Registry: $data_win_eventdata_targetObject$. 
+    Process: $data_win_eventdata_image$. 
+    Possible NjRAT fileless storage. MITRE ATT&CK: T1112
+  risk_score: 36
+  severity: medium
+  risk_objects:
+    - field: agent_name
+      type: system
+      score: 36
+  threat_objects: []
+
+tags:
+  analytic_story:
+    - NjRAT
+    - Compromised Windows Host
+  asset_type: Endpoint
+  mitre_attack_id:
+    - T1112
+  custom_tags:
+    - njrat
+    - md5_registry
+    - fileless_malware
+    - binary_data
+  product:
+    - Wazuh
+  security_domain: endpoint
