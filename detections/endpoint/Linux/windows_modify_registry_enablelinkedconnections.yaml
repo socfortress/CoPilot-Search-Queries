@@ -1,0 +1,120 @@
+name: Windows Modify Registry EnableLinkedConnections
+id: windows-modify-registry-enable-linked-connections-001
+version: 1
+schema_version: "1.0"
+date: "2026-02-27"
+author: SOCFortress LLC
+status: production
+type: TTP
+
+description: >
+  Detects modification of EnableLinkedConnections registry value to 1, which 
+  links elevated and non-elevated user sessions for network drive access. 
+  Ransomware operators enable this to access mapped network drives from 
+  elevated processes, maximizing encryption impact across network shares. 
+  Used by multiple ransomware families including ShrinkLocker.
+
+data_source:
+  - Sysmon EventID 13
+
+search:
+  index_pattern: "${INDEX_PATTERN}"
+  size: 100
+  sort:
+    - timestamp: desc
+  query:
+    bool:
+      must:
+        - term:
+            agent_name: "${AGENT_NAME}"
+        - term:
+            agent_labels_customer: "${CUSTOMER_CODE}"
+        - term:
+            data_win_system_eventID: "13"
+        - wildcard:
+            data_win_eventdata_targetObject: "*\\Policies\\System\\EnableLinkedConnections"
+        - term:
+            data_win_eventdata_details: "DWORD (0x00000001)"
+        - range:
+            timestamp:
+              gte: "${START_TIME}"
+              lte: "${END_TIME}"
+  _source:
+    - timestamp
+    - agent_name
+    - data_win_system_eventID
+    - data_win_eventdata_targetObject
+    - data_win_eventdata_details
+    - data_win_eventdata_image
+    - data_win_eventdata_user
+
+parameters:
+  AGENT_NAME:
+    description: "Target agent/host name"
+    type: string
+    required: true
+    example: "DESKTOP-AM0HLGE"
+  CUSTOMER_CODE:
+    description: "Customer label for filtering"
+    type: string
+    required: true
+    example: "lab"
+  START_TIME:
+    description: "Query start time (ISO 8601 or relative)"
+    type: datetime
+    required: false
+    default: "now-24h"
+    example: "2026-02-27 00:00:00.000"
+  END_TIME:
+    description: "Query end time (ISO 8601 or relative)"
+    type: datetime
+    required: false
+    default: "now"
+    example: "2026-02-27 23:59:59.999"
+
+how_to_implement: >
+  Requires Sysmon EventID 13 (Registry Value Set) configured to monitor 
+  Policies\System registry paths. This path is typically included in 
+  default Sysmon configurations.
+
+known_false_positives: >
+  Some organizations enable linked connections for legitimate administrative 
+  convenience. Investigate process making the change and whether it aligns 
+  with approved configuration management.
+
+references:
+  - https://www.bleepingcomputer.com/news/security/new-shrinklocker-ransomware-uses-bitlocker-to-encrypt-your-files/
+  - https://learn.microsoft.com/en-us/troubleshoot/windows-client/networking/mapped-drives-not-available-from-elevated-command
+  - https://attack.mitre.org/techniques/T1112/
+
+response:
+  message: >
+    EnableLinkedConnections enabled on $agent_name$. 
+    Registry: $data_win_eventdata_targetObject$. 
+    Process: $data_win_eventdata_image$. 
+    User: $data_win_eventdata_user$. 
+    Possible ransomware prep. MITRE ATT&CK: T1112
+  risk_score: 64
+  severity: high
+  risk_objects:
+    - field: agent_name
+      type: system
+      score: 64
+  threat_objects: []
+
+tags:
+  analytic_story:
+    - ShrinkLocker
+    - Ransomware
+    - Compromised Windows Host
+  asset_type: Endpoint
+  mitre_attack_id:
+    - T1112
+  custom_tags:
+    - linked_connections
+    - network_drives
+    - ransomware_prep
+    - lateral_movement
+  product:
+    - Wazuh
+  security_domain: endpoint
