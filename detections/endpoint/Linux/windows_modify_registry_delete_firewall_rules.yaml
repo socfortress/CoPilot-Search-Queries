@@ -1,0 +1,117 @@
+name: Windows Modify Registry Delete Firewall Rules
+id: windows-modify-registry-delete-firewall-rules-001
+version: 1
+schema_version: "1.0"
+date: "2026-02-27"
+author: SOCFortress LLC
+status: production
+type: TTP
+
+description: >
+  Detects deletion of firewall rules via registry, indicating potential security 
+  breach or unauthorized access attempt. Monitors Sysmon EventID 12 for DeleteValue 
+  events targeting FirewallRules registry path. Removing firewall rules exposes 
+  the network to external threats. Used by ShrinkLocker, NetSupport RAT.
+
+data_source:
+  - Sysmon EventID 12
+
+search:
+  index_pattern: "${INDEX_PATTERN}"
+  size: 100
+  sort:
+    - timestamp: desc
+  query:
+    bool:
+      must:
+        - term:
+            agent_name: "${AGENT_NAME}"
+        - term:
+            agent_labels_customer: "${CUSTOMER_CODE}"
+        - term:
+            data_win_system_eventID: "12"
+        - wildcard:
+            data_win_eventdata_targetObject: "*\\SharedAccess\\Parameters\\FirewallPolicy\\FirewallRules\\*"
+        - term:
+            data_win_eventdata_eventType: "DeleteValue"
+        - range:
+            timestamp:
+              gte: "${START_TIME}"
+              lte: "${END_TIME}"
+  _source:
+    - timestamp
+    - agent_name
+    - data_win_system_eventID
+    - data_win_eventdata_targetObject
+    - data_win_eventdata_eventType
+    - data_win_eventdata_image
+    - data_win_eventdata_user
+
+parameters:
+  AGENT_NAME:
+    description: "Target agent/host name"
+    type: string
+    required: true
+    example: "DESKTOP-AM0HLGE"
+  CUSTOMER_CODE:
+    description: "Customer label for filtering"
+    type: string
+    required: true
+    example: "lab"
+  START_TIME:
+    description: "Query start time (ISO 8601 or relative)"
+    type: datetime
+    required: false
+    default: "now-24h"
+    example: "2026-02-27 00:00:00.000"
+  END_TIME:
+    description: "Query end time (ISO 8601 or relative)"
+    type: datetime
+    required: false
+    default: "now"
+    example: "2026-02-27 23:59:59.999"
+
+how_to_implement: >
+  Requires Sysmon EventID 12 (Registry Key/Value Create/Delete) configured 
+  to monitor the FirewallPolicy registry path. Ensure Sysmon config includes 
+  FirewallPolicy\FirewallRules in EventID 12 TargetObject rules.
+
+known_false_positives: >
+  Network administrators may add/remove/modify firewall rules. Investigate 
+  the process making the change and volume of rules deleted.
+
+references:
+  - https://www.bleepingcomputer.com/news/security/new-shrinklocker-ransomware-uses-bitlocker-to-encrypt-your-files/
+  - https://attack.mitre.org/techniques/T1112/
+
+response:
+  message: >
+    Firewall rule deleted via registry on $agent_name$. 
+    Registry: $data_win_eventdata_targetObject$. 
+    Process: $data_win_eventdata_image$. 
+    User: $data_win_eventdata_user$. MITRE ATT&CK: T1112
+  risk_score: 64
+  severity: high
+  risk_objects:
+    - field: agent_name
+      type: system
+      score: 64
+  threat_objects: []
+
+tags:
+  analytic_story:
+    - ShrinkLocker
+    - CISA AA24-241A
+    - NetSupport RMM Tool Abuse
+    - Compromised Windows Host
+  asset_type: Endpoint
+  mitre_attack_id:
+    - T1112
+  custom_tags:
+    - firewall_rules
+    - registry_delete
+    - defense_evasion
+    - network_exposure
+  product:
+    - Wazuh
+  security_domain: endpoint
