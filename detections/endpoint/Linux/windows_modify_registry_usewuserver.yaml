@@ -1,0 +1,106 @@
+name: Windows Modify Registry UseWUServer
+id: windows-modify-registry-usewuserver-001
+version: 1
+schema_version: "1.0"
+date: "2026-02-27"
+author: SOCFortress LLC
+status: production
+type: Hunting
+
+description: >
+  Detects modification of UseWUServer registry value to 1 under Windows Update 
+  AU policy. Enabling this forces clients to use a WSUS server instead of 
+  Microsoft Update. Adversaries set this to redirect updates to attacker-controlled 
+  servers or block legitimate updates. Used by RedLine Stealer.
+
+data_source:
+  - Sysmon EventID 13
+
+search:
+  index_pattern: "${INDEX_PATTERN}"
+  size: 100
+  sort:
+    - timestamp: desc
+  query:
+    bool:
+      must:
+        - term:
+            agent_name: "${AGENT_NAME}"
+        - term:
+            agent_labels_customer: "${CUSTOMER_CODE}"
+        - term:
+            data_win_system_eventID: "13"
+        - wildcard:
+            data_win_eventdata_targetObject: "*\\WindowsUpdate\\AU\\UseWUServer"
+        - term:
+            data_win_eventdata_details: "DWORD (0x00000001)"
+        - range:
+            timestamp:
+              gte: "${START_TIME}"
+              lte: "${END_TIME}"
+  _source:
+    - timestamp
+    - agent_name
+    - data_win_system_eventID
+    - data_win_eventdata_targetObject
+    - data_win_eventdata_details
+    - data_win_eventdata_image
+    - data_win_eventdata_user
+
+parameters:
+  AGENT_NAME:
+    description: "Target agent/host name"
+    type: string
+    required: true
+    example: "DESKTOP-AM0HLGE"
+  CUSTOMER_CODE:
+    description: "Customer label for filtering"
+    type: string
+    required: true
+    example: "lab"
+  START_TIME:
+    type: datetime
+    required: false
+    default: "now-24h"
+  END_TIME:
+    type: datetime
+    required: false
+    default: "now"
+
+how_to_implement: >
+  Requires Sysmon EventID 13 monitoring WindowsUpdate\AU policy paths.
+
+known_false_positives: >
+  WSUS environments commonly set this via Group Policy. High FP in managed environments.
+
+references:
+  - https://learn.microsoft.com/de-de/security-updates/windowsupdateservices/18127499
+  - https://attack.mitre.org/techniques/T1112/
+
+response:
+  message: >
+    UseWUServer enabled on $agent_name$. 
+    Process: $data_win_eventdata_image$. 
+    User: $data_win_eventdata_user$. MITRE ATT&CK: T1112
+  risk_score: 9
+  severity: low
+  risk_objects:
+    - field: agent_name
+      type: system
+      score: 9
+  threat_objects: []
+
+tags:
+  analytic_story:
+    - RedLine Stealer
+    - Compromised Windows Host
+  asset_type: Endpoint
+  mitre_attack_id:
+    - T1112
+  custom_tags:
+    - windows_update
+    - wsus_server
+    - update_tampering
+  product:
+    - Wazuh
+  security_domain: endpoint
