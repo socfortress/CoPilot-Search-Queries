@@ -1,0 +1,150 @@
+name: Windows Modify Registry Configure BitLocker
+id: windows-modify-registry-configure-bitlocker-001
+version: 1
+schema_version: "1.0"
+date: "2026-02-27"
+author: SOCFortress LLC
+status: production
+type: TTP
+
+description: >
+  Detects suspicious registry modifications targeting BitLocker FVE settings 
+  to bypass TPM requirements, enable BitLocker without TPM, and enforce specific 
+  startup key/PIN configurations. ShrinkLocker ransomware alters these registry 
+  keys to weaken encryption, enabling unauthorized access and mass encryption.
+
+data_source:
+  - Sysmon EventID 13
+
+search:
+  index_pattern: "${INDEX_PATTERN}"
+  size: 100
+  sort:
+    - timestamp: desc
+  query:
+    bool:
+      must:
+        - term:
+            agent_name: "${AGENT_NAME}"
+        - term:
+            agent_labels_customer: "${CUSTOMER_CODE}"
+        - term:
+            data_win_system_eventID: "13"
+        - wildcard:
+            data_win_eventdata_targetObject: "*\\Policies\\Microsoft\\FVE\\*"
+        - range:
+            timestamp:
+              gte: "${START_TIME}"
+              lte: "${END_TIME}"
+      filter:
+        - bool:
+            should:
+              - bool:
+                  must:
+                    - bool:
+                        should:
+                          - wildcard:
+                              data_win_eventdata_targetObject: "*EnableBDEWithNoTPM"
+                          - wildcard:
+                              data_win_eventdata_targetObject: "*EnableNonTPM"
+                          - wildcard:
+                              data_win_eventdata_targetObject: "*UseAdvancedStartup"
+                        minimum_should_match: 1
+                    - term:
+                        data_win_eventdata_details: "DWORD (0x00000001)"
+              - bool:
+                  must:
+                    - bool:
+                        should:
+                          - wildcard:
+                              data_win_eventdata_targetObject: "*UsePIN"
+                          - wildcard:
+                              data_win_eventdata_targetObject: "*UsePartialEncryptionKey"
+                          - wildcard:
+                              data_win_eventdata_targetObject: "*UseTPM"
+                          - wildcard:
+                              data_win_eventdata_targetObject: "*UseTPMKey"
+                          - wildcard:
+                              data_win_eventdata_targetObject: "*UseTPMKeyPIN"
+                          - wildcard:
+                              data_win_eventdata_targetObject: "*UseTPMPIN"
+                        minimum_should_match: 1
+                    - term:
+                        data_win_eventdata_details: "DWORD (0x00000002)"
+            minimum_should_match: 1
+  _source:
+    - timestamp
+    - agent_name
+    - data_win_system_eventID
+    - data_win_eventdata_targetObject
+    - data_win_eventdata_details
+    - data_win_eventdata_image
+    - data_win_eventdata_user
+
+parameters:
+  AGENT_NAME:
+    description: "Target agent/host name"
+    type: string
+    required: true
+    example: "DESKTOP-AM0HLGE"
+  CUSTOMER_CODE:
+    description: "Customer label for filtering"
+    type: string
+    required: true
+    example: "lab"
+  START_TIME:
+    description: "Query start time (ISO 8601 or relative)"
+    type: datetime
+    required: false
+    default: "now-24h"
+    example: "2026-02-27 00:00:00.000"
+  END_TIME:
+    description: "Query end time (ISO 8601 or relative)"
+    type: datetime
+    required: false
+    default: "now"
+    example: "2026-02-27 23:59:59.999"
+
+how_to_implement: >
+  Requires Sysmon EventID 13 (Registry Value Set) configured to monitor 
+  the FVE BitLocker policy registry path. Ensure Sysmon config includes 
+  Policies\Microsoft\FVE in EventID 13 TargetObject rules.
+
+known_false_positives: >
+  Administrators may enable or disable BitLocker features via Group Policy. 
+  Verify user context and whether changes align with approved security policy.
+
+references:
+  - https://www.bleepingcomputer.com/news/security/new-shrinklocker-ransomware-uses-bitlocker-to-encrypt-your-files/
+  - https://attack.mitre.org/techniques/T1112/
+
+response:
+  message: >
+    BitLocker registry configuration modified on $agent_name$. 
+    Registry: $data_win_eventdata_targetObject$. 
+    Value: $data_win_eventdata_details$. 
+    Process: $data_win_eventdata_image$. 
+    Possible ShrinkLocker. MITRE ATT&CK: T1112
+  risk_score: 64
+  severity: high
+  risk_objects:
+    - field: agent_name
+      type: system
+      score: 64
+  threat_objects: []
+
+tags:
+  analytic_story:
+    - ShrinkLocker
+    - Compromised Windows Host
+  asset_type: Endpoint
+  mitre_attack_id:
+    - T1112
+  custom_tags:
+    - bitlocker
+    - fve_registry
+    - ransomware
+    - encryption_tampering
+  product:
+    - Wazuh
+  security_domain: endpoint
