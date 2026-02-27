@@ -1,0 +1,117 @@
+name: Windows Modify Registry Regedit Silent Reg Import
+id: windows-modify-registry-regedit-silent-import-001
+version: 1
+schema_version: "1.0"
+date: "2026-02-27"
+author: SOCFortress LLC
+status: production
+type: Anomaly
+
+description: >
+  Detects the use of regedit.exe with the /s (silent) parameter to import 
+  .reg files without user confirmation. Adversaries use silent mode to 
+  import malicious registry settings without triggering user prompts. 
+  Used by Azorult malware for stealthy registry modifications.
+
+data_source:
+  - Sysmon EventID 1
+
+search:
+  index_pattern: "${INDEX_PATTERN}"
+  size: 100
+  sort:
+    - timestamp: desc
+  query:
+    bool:
+      must:
+        - term:
+            agent_name: "${AGENT_NAME}"
+        - term:
+            agent_labels_customer: "${CUSTOMER_CODE}"
+        - term:
+            data_win_system_eventID: "1"
+        - wildcard:
+            data_win_eventdata_image: "*regedit.exe*"
+        - wildcard:
+            data_win_eventdata_commandLine: "*/s *"
+        - wildcard:
+            data_win_eventdata_commandLine: "*.reg*"
+        - range:
+            timestamp:
+              gte: "${START_TIME}"
+              lte: "${END_TIME}"
+  _source:
+    - timestamp
+    - agent_name
+    - data_win_system_eventID
+    - data_win_eventdata_commandLine
+    - data_win_eventdata_image
+    - data_win_eventdata_parentImage
+    - data_win_eventdata_user
+
+parameters:
+  AGENT_NAME:
+    description: "Target agent/host name"
+    type: string
+    required: true
+    example: "DESKTOP-AM0HLGE"
+  CUSTOMER_CODE:
+    description: "Customer label for filtering"
+    type: string
+    required: true
+    example: "lab"
+  START_TIME:
+    description: "Query start time (ISO 8601 or relative)"
+    type: datetime
+    required: false
+    default: "now-24h"
+    example: "2026-02-27 00:00:00.000"
+  END_TIME:
+    description: "Query end time (ISO 8601 or relative)"
+    type: datetime
+    required: false
+    default: "now"
+    example: "2026-02-27 23:59:59.999"
+
+how_to_implement: >
+  Requires Sysmon EventID 1 (ProcessCreate) capturing regedit.exe 
+  executions with full command-line logging.
+
+known_false_positives: >
+  Administrators may use silent reg imports for configuration deployment. 
+  Investigate parent process and reg file contents.
+
+references:
+  - https://app.any.run/tasks/a6f2ffe2-e6e2-4396-ae2e-04ea0143f2d8/
+  - https://www.techtarget.com/searchwindowsserver/tip/Command-line-options-for-Regeditexe
+  - https://attack.mitre.org/techniques/T1112/
+
+response:
+  message: >
+    Regedit silent import on $agent_name$. 
+    Command: $data_win_eventdata_commandLine$. 
+    Parent: $data_win_eventdata_parentImage$. 
+    User: $data_win_eventdata_user$. MITRE ATT&CK: T1112
+  risk_score: 49
+  severity: medium
+  risk_objects:
+    - field: agent_name
+      type: system
+      score: 49
+  threat_objects: []
+
+tags:
+  analytic_story:
+    - Azorult
+    - Compromised Windows Host
+  asset_type: Endpoint
+  mitre_attack_id:
+    - T1112
+  custom_tags:
+    - regedit_silent
+    - reg_import
+    - registry_modification
+    - defense_evasion
+  product:
+    - Wazuh
+  security_domain: endpoint
