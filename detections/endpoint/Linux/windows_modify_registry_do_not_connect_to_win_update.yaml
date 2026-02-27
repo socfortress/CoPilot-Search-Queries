@@ -1,0 +1,116 @@
+name: Windows Modify Registry DoNotConnectToWindowsUpdateInternetLocations
+id: windows-modify-registry-donotconnect-wsus-001
+version: 1
+schema_version: "1.0"
+date: "2026-02-27"
+author: SOCFortress LLC
+status: production
+type: TTP
+
+description: >
+  Detects modification of DoNotConnectToWindowsUpdateInternetLocations registry 
+  value to 1, preventing Windows from connecting to Windows Update servers. 
+  Adversaries disable Windows Update connectivity to prevent security patches 
+  from being downloaded, maintaining vulnerabilities for exploitation. Used by 
+  ransomware operators and referenced in CISA advisories.
+
+data_source:
+  - Sysmon EventID 13
+
+search:
+  index_pattern: "${INDEX_PATTERN}"
+  size: 100
+  sort:
+    - timestamp: desc
+  query:
+    bool:
+      must:
+        - term:
+            agent_name: "${AGENT_NAME}"
+        - term:
+            agent_labels_customer: "${CUSTOMER_CODE}"
+        - term:
+            data_win_system_eventID: "13"
+        - wildcard:
+            data_win_eventdata_targetObject: "*\\WindowsUpdate\\DoNotConnectToWindowsUpdateInternetLocations"
+        - term:
+            data_win_eventdata_details: "DWORD (0x00000001)"
+        - range:
+            timestamp:
+              gte: "${START_TIME}"
+              lte: "${END_TIME}"
+  _source:
+    - timestamp
+    - agent_name
+    - data_win_system_eventID
+    - data_win_eventdata_targetObject
+    - data_win_eventdata_details
+    - data_win_eventdata_image
+    - data_win_eventdata_user
+
+parameters:
+  AGENT_NAME:
+    description: "Target agent/host name"
+    type: string
+    required: true
+    example: "DESKTOP-AM0HLGE"
+  CUSTOMER_CODE:
+    description: "Customer label for filtering"
+    type: string
+    required: true
+    example: "lab"
+  START_TIME:
+    description: "Query start time (ISO 8601 or relative)"
+    type: datetime
+    required: false
+    default: "now-24h"
+    example: "2026-02-27 00:00:00.000"
+  END_TIME:
+    description: "Query end time (ISO 8601 or relative)"
+    type: datetime
+    required: false
+    default: "now"
+    example: "2026-02-27 23:59:59.999"
+
+how_to_implement: >
+  Requires Sysmon EventID 13 (Registry Value Set) configured to monitor 
+  WindowsUpdate policy registry paths. Ensure Sysmon config includes 
+  Policies\Microsoft\Windows\WindowsUpdate in EventID 13 TargetObject rules.
+
+known_false_positives: >
+  WSUS environments may configure this via Group Policy to force internal 
+  update servers. Investigate process and user context.
+
+references:
+  - https://attack.mitre.org/techniques/T1112/
+  - https://learn.microsoft.com/en-us/windows/deployment/update/waas-wu-settings
+
+response:
+  message: >
+    Windows Update internet connectivity disabled on $agent_name$. 
+    Registry: $data_win_eventdata_targetObject$. 
+    Process: $data_win_eventdata_image$. 
+    User: $data_win_eventdata_user$. MITRE ATT&CK: T1112
+  risk_score: 49
+  severity: medium
+  risk_objects:
+    - field: agent_name
+      type: system
+      score: 49
+  threat_objects: []
+
+tags:
+  analytic_story:
+    - Windows Defense Evasion Tactics
+    - Compromised Windows Host
+  asset_type: Endpoint
+  mitre_attack_id:
+    - T1112
+  custom_tags:
+    - windows_update
+    - update_tampering
+    - defense_evasion
+    - wsus_bypass
+  product:
+    - Wazuh
+  security_domain: endpoint
