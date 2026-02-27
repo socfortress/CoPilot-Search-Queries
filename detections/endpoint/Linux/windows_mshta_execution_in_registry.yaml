@@ -1,0 +1,110 @@
+name: Windows Mshta Execution In Registry
+id: windows-mshta-execution-in-registry-001
+version: 1
+schema_version: "1.0"
+date: "2026-02-27"
+author: SOCFortress LLC
+status: production
+type: TTP
+
+description: >
+  Detects registry entries containing mshta, javascript, vbscript, or 
+  WScript.Shell in their values. Kovter and other fileless malware store 
+  encoded scripts in registry values that execute via mshta.exe, enabling 
+  persistence without files on disk.
+
+data_source:
+  - Sysmon EventID 13
+
+search:
+  index_pattern: "${INDEX_PATTERN}"
+  size: 100
+  sort:
+    - timestamp: desc
+  query:
+    bool:
+      must:
+        - term:
+            agent_name: "${AGENT_NAME}"
+        - term:
+            agent_labels_customer: "${CUSTOMER_CODE}"
+        - term:
+            data_win_system_eventID: "13"
+        - bool:
+            should:
+              - wildcard:
+                  data_win_eventdata_details: "*mshta*"
+              - wildcard:
+                  data_win_eventdata_details: "*javascript:*"
+              - wildcard:
+                  data_win_eventdata_details: "*vbscript:*"
+              - wildcard:
+                  data_win_eventdata_details: "*WScript.Shell*"
+            minimum_should_match: 1
+        - range:
+            timestamp:
+              gte: "${START_TIME}"
+              lte: "${END_TIME}"
+  _source:
+    - timestamp
+    - agent_name
+    - data_win_eventdata_targetObject
+    - data_win_eventdata_details
+    - data_win_eventdata_image
+    - data_win_eventdata_user
+
+parameters:
+  AGENT_NAME:
+    type: string
+    required: true
+  CUSTOMER_CODE:
+    type: string
+    required: true
+  START_TIME:
+    type: datetime
+    default: "now-24h"
+  END_TIME:
+    type: datetime
+    default: "now"
+
+how_to_implement: >
+  Requires Sysmon EventID 13 with broad registry monitoring. Searches 
+  registry value data (details field) for script execution indicators.
+
+known_false_positives: >
+  Unknown. Registry values containing mshta or script references are rare 
+  in legitimate use.
+
+references:
+  - https://redcanary.com/threat-detection-report/techniques/mshta/
+  - https://learn.microsoft.com/en-us/microsoft-365/security/intelligence/fileless-threats
+
+response:
+  message: >
+    Mshta/script execution in registry on $agent_name$. 
+    Registry: $data_win_eventdata_targetObject$. 
+    Value: $data_win_eventdata_details$. 
+    Process: $data_win_eventdata_image$. 
+    Fileless malware indicator. MITRE ATT&CK: T1218.005
+  risk_score: 72
+  severity: high
+  risk_objects:
+    - field: agent_name
+      type: system
+      score: 72
+
+tags:
+  analytic_story:
+    - Suspicious Windows Registry Activities
+    - Windows Persistence Techniques
+  asset_type: Endpoint
+  mitre_attack_id:
+    - T1218.005
+  custom_tags:
+    - mshta
+    - fileless_malware
+    - kovter
+    - registry_persistence
+  product:
+    - Wazuh
+  security_domain: endpoint
