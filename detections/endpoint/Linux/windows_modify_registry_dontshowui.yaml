@@ -1,0 +1,115 @@
+name: Windows Modify Registry WER DontShowUI
+id: windows-modify-registry-wer-dontshowui-001
+version: 1
+schema_version: "1.0"
+date: "2026-02-27"
+author: SOCFortress LLC
+status: production
+type: Anomaly
+
+description: >
+  Detects modification of DontShowUI registry value to 1 under Windows Error 
+  Reporting settings. Suppressing WER UI prevents users from seeing crash 
+  dialogs, hiding evidence of malware crashes or exploitation attempts. Used 
+  by Azorult malware for defense evasion.
+
+data_source:
+  - Sysmon EventID 13
+
+search:
+  index_pattern: "${INDEX_PATTERN}"
+  size: 100
+  sort:
+    - timestamp: desc
+  query:
+    bool:
+      must:
+        - term:
+            agent_name: "${AGENT_NAME}"
+        - term:
+            agent_labels_customer: "${CUSTOMER_CODE}"
+        - term:
+            data_win_system_eventID: "13"
+        - wildcard:
+            data_win_eventdata_targetObject: "*\\Windows Error Reporting\\DontShowUI"
+        - term:
+            data_win_eventdata_details: "DWORD (0x00000001)"
+        - range:
+            timestamp:
+              gte: "${START_TIME}"
+              lte: "${END_TIME}"
+  _source:
+    - timestamp
+    - agent_name
+    - data_win_system_eventID
+    - data_win_eventdata_targetObject
+    - data_win_eventdata_details
+    - data_win_eventdata_image
+    - data_win_eventdata_user
+
+parameters:
+  AGENT_NAME:
+    description: "Target agent/host name"
+    type: string
+    required: true
+    example: "DESKTOP-AM0HLGE"
+  CUSTOMER_CODE:
+    description: "Customer label for filtering"
+    type: string
+    required: true
+    example: "lab"
+  START_TIME:
+    description: "Query start time (ISO 8601 or relative)"
+    type: datetime
+    required: false
+    default: "now-24h"
+    example: "2026-02-27 00:00:00.000"
+  END_TIME:
+    description: "Query end time (ISO 8601 or relative)"
+    type: datetime
+    required: false
+    default: "now"
+    example: "2026-02-27 23:59:59.999"
+
+how_to_implement: >
+  Requires Sysmon EventID 13 (Registry Value Set) configured to monitor 
+  Windows Error Reporting registry paths. This path is typically included 
+  in default Sysmon configurations.
+
+known_false_positives: >
+  Administrators may suppress WER dialogs in server environments. 
+  Investigate process and user context.
+
+references:
+  - https://app.any.run/tasks/a6f2ffe2-e6e2-4396-ae2e-04ea0143f2d8/
+  - https://attack.mitre.org/techniques/T1112/
+
+response:
+  message: >
+    WER UI suppressed on $agent_name$. 
+    Registry: $data_win_eventdata_targetObject$. 
+    Process: $data_win_eventdata_image$. 
+    User: $data_win_eventdata_user$. MITRE ATT&CK: T1112
+  risk_score: 36
+  severity: medium
+  risk_objects:
+    - field: agent_name
+      type: system
+      score: 36
+  threat_objects: []
+
+tags:
+  analytic_story:
+    - Azorult
+    - Compromised Windows Host
+  asset_type: Endpoint
+  mitre_attack_id:
+    - T1112
+  custom_tags:
+    - wer_dontshowui
+    - error_reporting
+    - defense_evasion
+    - ui_suppression
+  product:
+    - Wazuh
+  security_domain: endpoint
