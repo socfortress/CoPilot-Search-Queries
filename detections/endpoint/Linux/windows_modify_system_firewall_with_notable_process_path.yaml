@@ -1,0 +1,119 @@
+name: Windows Modify System Firewall with Notable Process Path
+id: windows-modify-firewall-notable-process-path-001
+version: 1
+schema_version: "1.0"
+date: "2026-02-27"
+author: SOCFortress LLC
+status: production
+type: TTP
+
+description: >
+  Detects firewall rule modifications that allow execution of applications 
+  from suspicious file paths such as \windows\temp, \users\public, 
+  \windows\fonts, Recycle.bin, and \PerfLogs. NjRAT and Medusa ransomware 
+  add firewall exceptions for malware in these locations.
+
+data_source:
+  - Sysmon EventID 1
+
+search:
+  index_pattern: "${INDEX_PATTERN}"
+  size: 100
+  sort:
+    - timestamp: desc
+  query:
+    bool:
+      must:
+        - term:
+            agent_name: "${AGENT_NAME}"
+        - term:
+            agent_labels_customer: "${CUSTOMER_CODE}"
+        - term:
+            data_win_system_eventID: "1"
+        - wildcard:
+            data_win_eventdata_commandLine: "*firewall*"
+        - wildcard:
+            data_win_eventdata_commandLine: "*allow*"
+        - wildcard:
+            data_win_eventdata_commandLine: "*add*"
+        - bool:
+            should:
+              - wildcard:
+                  data_win_eventdata_commandLine: "*\\windows\\temp\\*"
+              - wildcard:
+                  data_win_eventdata_commandLine: "*\\users\\public\\*"
+              - wildcard:
+                  data_win_eventdata_commandLine: "*\\windows\\fonts\\*"
+              - wildcard:
+                  data_win_eventdata_commandLine: "*\\windows\\debug\\*"
+              - wildcard:
+                  data_win_eventdata_commandLine: "*Recycle.bin*"
+              - wildcard:
+                  data_win_eventdata_commandLine: "*\\PerfLogs\\*"
+              - wildcard:
+                  data_win_eventdata_commandLine: "*\\temp\\*"
+              - wildcard:
+                  data_win_eventdata_commandLine: "*\\Users\\Default\\*"
+            minimum_should_match: 1
+        - range:
+            timestamp:
+              gte: "${START_TIME}"
+              lte: "${END_TIME}"
+  _source:
+    - timestamp
+    - agent_name
+    - data_win_eventdata_commandLine
+    - data_win_eventdata_image
+    - data_win_eventdata_parentImage
+    - data_win_eventdata_user
+
+parameters:
+  AGENT_NAME:
+    type: string
+    required: true
+  CUSTOMER_CODE:
+    type: string
+    required: true
+  START_TIME:
+    type: datetime
+    default: "now-24h"
+  END_TIME:
+    type: datetime
+    default: "now"
+
+how_to_implement: >
+  Requires Sysmon EventID 1 with full command-line logging.
+
+known_false_positives: >
+  Administrators may add firewall rules for applications in temp paths.
+
+references:
+  - https://www.splunk.com/en_us/blog/security/more-than-just-a-rat-unveiling-njrat-s-mbr-wiping-capabilities.html
+
+response:
+  message: >
+    Firewall rule allowing suspicious path on $agent_name$. 
+    Command: $data_win_eventdata_commandLine$. 
+    Process: $data_win_eventdata_image$. MITRE ATT&CK: T1562.004
+  risk_score: 64
+  severity: high
+  risk_objects:
+    - field: agent_name
+      type: system
+      score: 64
+
+tags:
+  analytic_story:
+    - Medusa Ransomware
+    - NjRAT
+    - Compromised Windows Host
+  asset_type: Endpoint
+  mitre_attack_id:
+    - T1562.004
+  custom_tags:
+    - firewall_modification
+    - notable_paths
+    - defense_evasion
+  product:
+    - Wazuh
+  security_domain: endpoint
