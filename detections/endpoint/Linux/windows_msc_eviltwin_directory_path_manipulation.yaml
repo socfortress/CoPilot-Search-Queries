@@ -1,0 +1,119 @@
+name: Windows MSC EvilTwin Directory Path Manipulation
+id: windows-msc-eviltwin-directory-path-manipulation-001
+version: 1
+schema_version: "1.0"
+date: "2026-02-27"
+author: SOCFortress LLC
+status: production
+type: TTP
+
+description: >
+  Detects potential MSC EvilTwin loader exploitation (CVE-2025-26633) which 
+  manipulates directory paths with spaces to bypass security controls. The 
+  technique involves crafting malicious MSC files that leverage MUIPath 
+  parameter manipulation to execute arbitrary code via mmc.exe with 
+  suspicious path patterns.
+
+data_source:
+  - Sysmon EventID 1
+
+search:
+  index_pattern: "${INDEX_PATTERN}"
+  size: 100
+  sort:
+    - timestamp: desc
+  query:
+    bool:
+      must:
+        - term:
+            agent_name: "${AGENT_NAME}"
+        - term:
+            agent_labels_customer: "${CUSTOMER_CODE}"
+        - term:
+            data_win_system_eventID: "1"
+        - wildcard:
+            data_win_eventdata_image: "*mmc.exe*"
+        - wildcard:
+            data_win_eventdata_commandLine: "*.msc*"
+        - bool:
+            should:
+              - wildcard:
+                  data_win_eventdata_commandLine: "*Windows  \\\\System32*"
+              - wildcard:
+                  data_win_eventdata_commandLine: "*Windows  System32*"
+              - wildcard:
+                  data_win_eventdata_commandLine: "*Program  Files*"
+              - wildcard:
+                  data_win_eventdata_commandLine: "*Progra~1*"
+            minimum_should_match: 1
+        - range:
+            timestamp:
+              gte: "${START_TIME}"
+              lte: "${END_TIME}"
+  _source:
+    - timestamp
+    - agent_name
+    - data_win_eventdata_commandLine
+    - data_win_eventdata_image
+    - data_win_eventdata_parentImage
+    - data_win_eventdata_user
+
+parameters:
+  AGENT_NAME:
+    type: string
+    required: true
+  CUSTOMER_CODE:
+    type: string
+    required: true
+  START_TIME:
+    type: datetime
+    default: "now-24h"
+  END_TIME:
+    type: datetime
+    default: "now"
+
+how_to_implement: >
+  Requires Sysmon EventID 1 with full command-line logging. Note: original 
+  Splunk detection uses regex for space patterns in paths. ES wildcard 
+  with double-space approximation catches common variants. CoPilot 
+  post-processing can add regex for full coverage.
+
+known_false_positives: >
+  Some legitimate system maintenance tools might use MSC files with 
+  unusual parameters.
+
+references:
+  - https://securityintelligence.com/posts/new-threat-actor-water-gamayun-targets-telecom-finance/
+  - https://www.ncsc.gov.uk/report/weekly-threat-report-12th-april-2024
+
+response:
+  message: >
+    MSC EvilTwin path manipulation on $agent_name$. 
+    Command: $data_win_eventdata_commandLine$. 
+    Parent: $data_win_eventdata_parentImage$. 
+    CVE-2025-26633 exploitation. MITRE ATT&CK: T1218
+  risk_score: 80
+  severity: high
+  risk_objects:
+    - field: agent_name
+      type: system
+      score: 80
+
+tags:
+  analytic_story:
+    - Water Gamayun
+    - Windows Defense Evasion Tactics
+    - Living Off The Land
+  asset_type: Endpoint
+  mitre_attack_id:
+    - T1218
+    - T1036.005
+    - T1203
+  custom_tags:
+    - msc_eviltwin
+    - cve_2025_26633
+    - path_manipulation
+    - mmc_abuse
+  product:
+    - Wazuh
+  security_domain: endpoint
