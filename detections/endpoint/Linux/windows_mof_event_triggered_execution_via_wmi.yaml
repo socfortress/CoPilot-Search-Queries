@@ -1,0 +1,109 @@
+name: Windows MOF Event Triggered Execution via WMI
+id: windows-mof-event-triggered-execution-wmi-001
+version: 1
+schema_version: "1.0"
+date: "2026-02-27"
+author: SOCFortress LLC
+status: production
+type: TTP
+
+description: >
+  Detects execution of mofcomp.exe loading a MOF file, especially when 
+  triggered by cmd.exe or powershell.exe, or from suspicious paths like 
+  AppData or Users\Public. WMI MOF compilation is used for persistence 
+  and lateral movement via event subscriptions.
+
+data_source:
+  - Sysmon EventID 1
+
+search:
+  index_pattern: "${INDEX_PATTERN}"
+  size: 100
+  sort:
+    - timestamp: desc
+  query:
+    bool:
+      must:
+        - term:
+            agent_name: "${AGENT_NAME}"
+        - term:
+            agent_labels_customer: "${CUSTOMER_CODE}"
+        - term:
+            data_win_system_eventID: "1"
+        - wildcard:
+            data_win_eventdata_image: "*mofcomp.exe*"
+        - bool:
+            should:
+              - wildcard:
+                  data_win_eventdata_parentImage: "*cmd.exe*"
+              - wildcard:
+                  data_win_eventdata_parentImage: "*powershell.exe*"
+              - wildcard:
+                  data_win_eventdata_commandLine: "*\\AppData\\Local\\*"
+              - wildcard:
+                  data_win_eventdata_commandLine: "*\\Users\\Public\\*"
+            minimum_should_match: 1
+        - range:
+            timestamp:
+              gte: "${START_TIME}"
+              lte: "${END_TIME}"
+  _source:
+    - timestamp
+    - agent_name
+    - data_win_eventdata_commandLine
+    - data_win_eventdata_image
+    - data_win_eventdata_parentImage
+    - data_win_eventdata_user
+
+parameters:
+  AGENT_NAME:
+    type: string
+    required: true
+  CUSTOMER_CODE:
+    type: string
+    required: true
+  START_TIME:
+    type: datetime
+    default: "now-24h"
+  END_TIME:
+    type: datetime
+    default: "now"
+
+how_to_implement: >
+  Requires Sysmon EventID 1 with full command-line and parent process logging.
+
+known_false_positives: >
+  SCCM and automation tools may use mofcomp.exe. Filter known paths.
+
+references:
+  - https://attack.mitre.org/techniques/T1546/003/
+  - https://thedfirreport.com/2022/07/11/select-xmrig-from-sqlserver/
+  - https://pentestlab.blog/2020/01/21/persistence-wmi-event-subscription/
+
+response:
+  message: >
+    MOFComp.exe execution on $agent_name$. 
+    Command: $data_win_eventdata_commandLine$. 
+    Parent: $data_win_eventdata_parentImage$. 
+    WMI persistence indicator. MITRE ATT&CK: T1546.003
+  risk_score: 64
+  severity: high
+  risk_objects:
+    - field: agent_name
+      type: system
+      score: 64
+
+tags:
+  analytic_story:
+    - Living Off The Land
+    - Compromised Windows Host
+  asset_type: Endpoint
+  mitre_attack_id:
+    - T1546.003
+  custom_tags:
+    - mofcomp
+    - wmi_persistence
+    - event_subscription
+  product:
+    - Wazuh
+  security_domain: endpoint
