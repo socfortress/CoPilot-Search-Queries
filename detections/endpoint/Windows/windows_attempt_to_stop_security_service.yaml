@@ -1,0 +1,164 @@
+name: Windows Attempt To Stop Security Service
+id: windows-attempt-stop-security-service-001
+version: 1
+schema_version: "1.0"
+date: "2026-03-03"
+author: SOCFortress LLC
+status: production
+type: TTP
+
+description: >
+  Detects attempts to stop security-related services using sc.exe, net.exe, 
+  or PowerShell Stop-Service. Disabling security services undermines endpoint 
+  protection, enabling malware execution and persistence. Used by WhisperGate, 
+  Azorult, Trickbot, and destructive wipers.
+
+data_source:
+  - Sysmon EventID 1
+
+search:
+  index_pattern: "${INDEX_PATTERN}"
+  size: 100
+  sort:
+    - timestamp: desc
+  query:
+    bool:
+      must:
+        - term:
+            agent_name: "${AGENT_NAME}"
+        - term:
+            agent_labels_customer: "${CUSTOMER_CODE}"
+        - term:
+            data_win_system_eventID: "1"
+        - bool:
+            should:
+              - bool:
+                  must:
+                    - wildcard:
+                        data_win_eventdata_image: "*\\sc.exe"
+                    - wildcard:
+                        data_win_eventdata_commandLine: "*stop*"
+              - bool:
+                  must:
+                    - wildcard:
+                        data_win_eventdata_image: "*\\net.exe"
+                    - wildcard:
+                        data_win_eventdata_commandLine: "*stop*"
+              - bool:
+                  must:
+                    - wildcard:
+                        data_win_eventdata_image: "*\\net1.exe"
+                    - wildcard:
+                        data_win_eventdata_commandLine: "*stop*"
+              - wildcard:
+                  data_win_eventdata_commandLine: "*Stop-Service*"
+            minimum_should_match: 1
+        - bool:
+            should:
+              - wildcard:
+                  data_win_eventdata_commandLine: "*WinDefend*"
+              - wildcard:
+                  data_win_eventdata_commandLine: "*MsMpSvc*"
+              - wildcard:
+                  data_win_eventdata_commandLine: "*McAfeeDLPAgentService*"
+              - wildcard:
+                  data_win_eventdata_commandLine: "*mfevtp*"
+              - wildcard:
+                  data_win_eventdata_commandLine: "*macmnsvc*"
+              - wildcard:
+                  data_win_eventdata_commandLine: "*masvc*"
+              - wildcard:
+                  data_win_eventdata_commandLine: "*WdNisSvc*"
+              - wildcard:
+                  data_win_eventdata_commandLine: "*Sense*"
+              - wildcard:
+                  data_win_eventdata_commandLine: "*wuauserv*"
+              - wildcard:
+                  data_win_eventdata_commandLine: "*SentinelAgent*"
+              - wildcard:
+                  data_win_eventdata_commandLine: "*CrowdStrike*"
+              - wildcard:
+                  data_win_eventdata_commandLine: "*CarbonBlack*"
+              - wildcard:
+                  data_win_eventdata_commandLine: "*cbdefense*"
+              - wildcard:
+                  data_win_eventdata_commandLine: "*Cylance*"
+              - wildcard:
+                  data_win_eventdata_commandLine: "*Tanium*"
+              - wildcard:
+                  data_win_eventdata_commandLine: "*WazuhSvc*"
+            minimum_should_match: 1
+        - range:
+            timestamp:
+              gte: "${START_TIME}"
+              lte: "${END_TIME}"
+  _source:
+    - timestamp
+    - agent_name
+    - data_win_eventdata_commandLine
+    - data_win_eventdata_image
+    - data_win_eventdata_parentImage
+    - data_win_eventdata_user
+
+parameters:
+  AGENT_NAME:
+    type: string
+    required: true
+    example: "DESKTOP-AM0HLGE"
+  CUSTOMER_CODE:
+    type: string
+    required: true
+    example: "lab"
+  START_TIME:
+    type: datetime
+    default: "now-24h"
+  END_TIME:
+    type: datetime
+    default: "now"
+
+how_to_implement: >
+  Requires Sysmon EventID 1 with full command-line logging. Customize 
+  the security service list to match your environment's security tools.
+
+known_false_positives: >
+  Administrators may stop services for maintenance. Investigate user 
+  context and timing.
+
+references:
+  - https://github.com/redcanaryco/atomic-red-team/blob/master/atomics/T1562.001/T1562.001.md
+  - https://www.microsoft.com/security/blog/2022/01/15/destructive-malware-targeting-ukrainian-organizations/
+  - https://attack.mitre.org/techniques/T1562/001/
+
+response:
+  message: >
+    Security service stop attempt on $agent_name$. 
+    Command: $data_win_eventdata_commandLine$. 
+    Parent: $data_win_eventdata_parentImage$. 
+    User: $data_win_eventdata_user$. MITRE ATT&CK: T1562.001
+  risk_score: 20
+  severity: medium
+  risk_objects:
+    - field: agent_name
+      type: system
+      score: 20
+  threat_objects: []
+
+tags:
+  analytic_story:
+    - WhisperGate
+    - Disabling Security Tools
+    - Azorult
+    - Trickbot
+    - Data Destruction
+    - Compromised Windows Host
+  asset_type: Endpoint
+  mitre_attack_id:
+    - T1562.001
+  custom_tags:
+    - security_service_stop
+    - defense_evasion
+    - sc_stop
+    - net_stop
+  product:
+    - Wazuh
+  security_domain: endpoint

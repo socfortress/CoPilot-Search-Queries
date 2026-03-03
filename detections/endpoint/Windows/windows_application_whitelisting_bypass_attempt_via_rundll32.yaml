@@ -1,0 +1,126 @@
+name: Windows Application Whitelisting Bypass Attempt via Rundll32
+id: windows-app-whitelisting-bypass-rundll32-001
+version: 1
+schema_version: "1.0"
+date: "2026-03-03"
+author: SOCFortress LLC
+status: production
+type: TTP
+
+description: >
+  Detects rundll32.exe calling advpack.dll, ieadvpack.dll, syssetup.dll, or 
+  setupapi.dll with LaunchINFSection, InstallHinfSection, or 
+  SetupInfObjectInstallAction functions. This technique bypasses application 
+  whitelisting to execute script code from INF files via trusted DLLs.
+
+data_source:
+  - Sysmon EventID 1
+
+search:
+  index_pattern: "${INDEX_PATTERN}"
+  size: 100
+  sort:
+    - timestamp: desc
+  query:
+    bool:
+      must:
+        - term:
+            agent_name: "${AGENT_NAME}"
+        - term:
+            agent_labels_customer: "${CUSTOMER_CODE}"
+        - term:
+            data_win_system_eventID: "1"
+        - wildcard:
+            data_win_eventdata_image: "*\\rundll32.exe"
+        - bool:
+            should:
+              - wildcard:
+                  data_win_eventdata_commandLine: "*advpack*"
+              - wildcard:
+                  data_win_eventdata_commandLine: "*ieadvpack*"
+              - wildcard:
+                  data_win_eventdata_commandLine: "*syssetup*"
+              - wildcard:
+                  data_win_eventdata_commandLine: "*setupapi*"
+            minimum_should_match: 1
+        - bool:
+            should:
+              - wildcard:
+                  data_win_eventdata_commandLine: "*LaunchINFSection*"
+              - wildcard:
+                  data_win_eventdata_commandLine: "*InstallHinfSection*"
+              - wildcard:
+                  data_win_eventdata_commandLine: "*SetupInfObjectInstallAction*"
+            minimum_should_match: 1
+        - range:
+            timestamp:
+              gte: "${START_TIME}"
+              lte: "${END_TIME}"
+  _source:
+    - timestamp
+    - agent_name
+    - data_win_eventdata_commandLine
+    - data_win_eventdata_image
+    - data_win_eventdata_parentImage
+    - data_win_eventdata_user
+    - data_win_eventdata_hashes
+
+parameters:
+  AGENT_NAME:
+    type: string
+    required: true
+    example: "DESKTOP-AM0HLGE"
+  CUSTOMER_CODE:
+    type: string
+    required: true
+    example: "lab"
+  START_TIME:
+    type: datetime
+    default: "now-24h"
+  END_TIME:
+    type: datetime
+    default: "now"
+
+how_to_implement: >
+  Requires Sysmon EventID 1 with full command-line logging.
+
+known_false_positives: >
+  Rare legitimate use of advpack.dll or syssetup.dll via rundll32. 
+  Investigate INF file content and parent process.
+
+references:
+  - https://lolbas-project.github.io/lolbas/Libraries/Advpack/
+  - https://lolbas-project.github.io/lolbas/Libraries/Syssetup/
+  - https://bohops.com/2018/02/26/leveraging-inf-sct-fetch-execute-techniques-for-bypass-evasion-persistence/
+  - https://attack.mitre.org/techniques/T1218/011/
+
+response:
+  message: >
+    Rundll32 whitelisting bypass on $agent_name$. 
+    Command: $data_win_eventdata_commandLine$. 
+    Parent: $data_win_eventdata_parentImage$. 
+    User: $data_win_eventdata_user$. MITRE ATT&CK: T1218.011
+  risk_score: 80
+  severity: high
+  risk_objects:
+    - field: agent_name
+      type: system
+      score: 80
+  threat_objects: []
+
+tags:
+  analytic_story:
+    - Suspicious Rundll32 Activity
+    - Living Off The Land
+    - Compromised Windows Host
+  asset_type: Endpoint
+  mitre_attack_id:
+    - T1218.011
+  custom_tags:
+    - rundll32
+    - advpack
+    - whitelisting_bypass
+    - lolbin
+  product:
+    - Wazuh
+  security_domain: endpoint

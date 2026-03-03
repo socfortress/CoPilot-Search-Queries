@@ -1,0 +1,132 @@
+name: Windows Access Token Manipulation SeDebugPrivilege
+id: windows-access-token-manipulation-sedebugprivilege-001
+version: 1
+schema_version: "1.0"
+date: "2026-02-27"
+author: SOCFortress LLC
+status: production
+type: Anomaly
+
+description: >
+  Detects a process enabling SeDebugPrivilege privilege token via Windows 
+  Security Event 4703. SeDebugPrivilege allows inspecting and modifying 
+  memory of other processes, enabling credential dumping and code injection. 
+  Used by AsyncRAT, DarkGate, ValleyRAT, PlugX, Brute Ratel C4, and many 
+  other threat actors.
+
+data_source:
+  - Windows Security Event 4703
+
+search:
+  index_pattern: "${INDEX_PATTERN}"
+  size: 100
+  sort:
+    - timestamp: desc
+  query:
+    bool:
+      must:
+        - term:
+            agent_name: "${AGENT_NAME}"
+        - term:
+            agent_labels_customer: "${CUSTOMER_CODE}"
+        - term:
+            data_win_system_eventID: "4703"
+        - wildcard:
+            data_win_eventdata_enabledPrivilegeList: "*SeDebugPrivilege*"
+        - range:
+            timestamp:
+              gte: "${START_TIME}"
+              lte: "${END_TIME}"
+      must_not:
+        - bool:
+            should:
+              - wildcard:
+                  data_win_eventdata_processName: "*\\Program File*"
+              - wildcard:
+                  data_win_eventdata_processName: "*\\System32\\lsass.exe*"
+              - wildcard:
+                  data_win_eventdata_processName: "*\\System32\\svchost.exe*"
+              - wildcard:
+                  data_win_eventdata_processName: "*\\SysWOW64\\lsass.exe*"
+              - wildcard:
+                  data_win_eventdata_processName: "*\\SysWOW64\\svchost.exe*"
+            minimum_should_match: 1
+  _source:
+    - timestamp
+    - agent_name
+    - data_win_system_eventID
+    - data_win_eventdata_processName
+    - data_win_eventdata_processId
+    - data_win_eventdata_subjectUserName
+    - data_win_eventdata_subjectDomainName
+    - data_win_eventdata_targetUserName
+    - data_win_eventdata_enabledPrivilegeList
+
+parameters:
+  AGENT_NAME:
+    description: "Target agent/host name"
+    type: string
+    required: true
+    example: "DESKTOP-AM0HLGE"
+  CUSTOMER_CODE:
+    description: "Customer label for filtering"
+    type: string
+    required: true
+    example: "lab"
+  START_TIME:
+    type: datetime
+    required: false
+    default: "now-24h"
+  END_TIME:
+    type: datetime
+    required: false
+    default: "now"
+
+how_to_implement: >
+  Requires Windows Security Event 4703 (Token Right Adjusted Events). 
+  Enable via: auditpol /set /subcategory:"Token Right Adjusted Events" /success:enable. 
+  Ensure Wazuh agent forwards Security channel events. Field names may 
+  vary — verify field mapping after enabling 4703 events.
+
+known_false_positives: >
+  Some native binaries and browser applications request SeDebugPrivilege. 
+  Common exclusions: Program Files, lsass.exe, svchost.exe. Filter as needed.
+
+references:
+  - https://docs.microsoft.com/en-us/windows/security/threat-protection/auditing/event-4703
+  - https://blog.palantir.com/windows-privilege-abuse-auditing-detection-and-defense-3078a403d74e
+  - https://attack.mitre.org/techniques/T1134/002/
+
+response:
+  message: >
+    SeDebugPrivilege enabled by $data_win_eventdata_processName$ on $agent_name$. 
+    User: $data_win_eventdata_subjectUserName$. 
+    Possible credential dumping or code injection. MITRE ATT&CK: T1134.002
+  risk_score: 36
+  severity: medium
+  risk_objects:
+    - field: agent_name
+      type: system
+      score: 36
+  threat_objects: []
+
+tags:
+  analytic_story:
+    - AsyncRAT
+    - DarkGate Malware
+    - ValleyRAT
+    - PlugX
+    - Brute Ratel C4
+    - CISA AA23-347A
+    - Compromised Windows Host
+  asset_type: Endpoint
+  mitre_attack_id:
+    - T1134.002
+  custom_tags:
+    - sedebugprivilege
+    - token_manipulation
+    - privilege_escalation
+    - credential_dumping
+  product:
+    - Wazuh
+  security_domain: endpoint

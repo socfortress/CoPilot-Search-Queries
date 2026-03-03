@@ -1,0 +1,137 @@
+name: Windows Alternate DataStream - Process Execution
+id: windows-alternate-datastream-process-execution-001
+version: 1
+schema_version: "1.0"
+date: "2026-03-03"
+author: SOCFortress LLC
+status: production
+type: TTP
+
+description: >
+  Detects when a known LOLBin process executes a file from an NTFS alternate 
+  data stream (ADS). ADS can conceal malicious payloads within legitimate 
+  files. The colon separator in file paths (e.g., file.txt:payload.exe) 
+  indicates ADS execution. Used by BitPaymer ransomware and APT groups.
+
+data_source:
+  - Sysmon EventID 1
+
+search:
+  index_pattern: "${INDEX_PATTERN}"
+  size: 100
+  sort:
+    - timestamp: desc
+  query:
+    bool:
+      must:
+        - term:
+            agent_name: "${AGENT_NAME}"
+        - term:
+            agent_labels_customer: "${CUSTOMER_CODE}"
+        - term:
+            data_win_system_eventID: "1"
+        - bool:
+            should:
+              - wildcard:
+                  data_win_eventdata_image: "*\\wscript.exe"
+              - wildcard:
+                  data_win_eventdata_image: "*\\cscript.exe"
+              - wildcard:
+                  data_win_eventdata_image: "*\\mshta.exe"
+              - wildcard:
+                  data_win_eventdata_image: "*\\rundll32.exe"
+              - wildcard:
+                  data_win_eventdata_image: "*\\powershell.exe"
+              - wildcard:
+                  data_win_eventdata_image: "*\\pwsh.exe"
+              - wildcard:
+                  data_win_eventdata_image: "*\\bitsadmin.exe"
+              - wildcard:
+                  data_win_eventdata_image: "*\\control.exe"
+              - wildcard:
+                  data_win_eventdata_image: "*\\forfiles.exe"
+              - wildcard:
+                  data_win_eventdata_image: "*\\ftp.exe"
+              - wildcard:
+                  data_win_eventdata_image: "*\\regsvr32.exe"
+              - wildcard:
+                  data_win_eventdata_image: "*\\wmic.exe"
+            minimum_should_match: 1
+        - wildcard:
+            data_win_eventdata_commandLine: "*:*.*"
+        - range:
+            timestamp:
+              gte: "${START_TIME}"
+              lte: "${END_TIME}"
+  _source:
+    - timestamp
+    - agent_name
+    - data_win_eventdata_commandLine
+    - data_win_eventdata_image
+    - data_win_eventdata_parentImage
+    - data_win_eventdata_user
+    - data_win_eventdata_hashes
+
+parameters:
+  AGENT_NAME:
+    type: string
+    required: true
+    example: "DESKTOP-AM0HLGE"
+  CUSTOMER_CODE:
+    type: string
+    required: true
+    example: "lab"
+  START_TIME:
+    type: datetime
+    default: "now-24h"
+  END_TIME:
+    type: datetime
+    default: "now"
+
+how_to_implement: >
+  Requires Sysmon EventID 1 with full command-line logging. The wildcard 
+  *:*.* catches ADS colon patterns but may produce false positives from 
+  drive letter colons (C:\). CoPilot post-processing should apply regex 
+  to validate true ADS patterns excluding drive letters.
+
+known_false_positives: >
+  Command lines containing drive letter colons (C:\) will match the 
+  wildcard. Post-processing regex recommended to filter: match only 
+  patterns like filename.ext:stream.ext (not drive letters).
+
+references:
+  - https://car.mitre.org/analytics/CAR-2020-08-001/
+  - https://blogs.juniper.net/en-us/threat-research/bitpaymer-ransomware-hides-behind-windows-alternate-data-streams
+  - https://blog.netwrix.com/2022/12/16/alternate_data_stream/
+  - https://attack.mitre.org/techniques/T1564/004/
+
+response:
+  message: >
+    ADS execution detected on $agent_name$. 
+    Process: $data_win_eventdata_image$. 
+    Command: $data_win_eventdata_commandLine$. 
+    Parent: $data_win_eventdata_parentImage$. 
+    User: $data_win_eventdata_user$. MITRE ATT&CK: T1564.004
+  risk_score: 80
+  severity: high
+  risk_objects:
+    - field: agent_name
+      type: system
+      score: 80
+  threat_objects: []
+
+tags:
+  analytic_story:
+    - Windows Defense Evasion Tactics
+    - Compromised Windows Host
+  asset_type: Endpoint
+  mitre_attack_id:
+    - T1564.004
+  custom_tags:
+    - alternate_data_stream
+    - ads_execution
+    - lolbin
+    - defense_evasion
+  product:
+    - Wazuh
+  security_domain: endpoint

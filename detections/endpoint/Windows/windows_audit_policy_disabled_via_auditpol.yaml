@@ -1,0 +1,121 @@
+name: Windows Audit Policy Subcategory Disabled via Auditpol
+id: windows-audit-policy-subcategory-disabled-via-auditpol-001
+version: 1
+schema_version: "1.0"
+date: "2026-03-03"
+author: SOCFortress LLC
+status: production
+type: Anomaly
+
+description: >
+  Detects auditpol.exe execution with /set and /success:disable or 
+  /failure:disable to disable specific audit policy categories or 
+  subcategories. Used by Solorigate and Prometei botnet to selectively 
+  disable auditing while maintaining the appearance of an active audit 
+  policy.
+
+data_source:
+  - Sysmon EventID 1
+
+search:
+  index_pattern: "${INDEX_PATTERN}"
+  size: 100
+  sort:
+    - timestamp: desc
+  query:
+    bool:
+      must:
+        - term:
+            agent_name: "${AGENT_NAME}"
+        - term:
+            agent_labels_customer: "${CUSTOMER_CODE}"
+        - term:
+            data_win_system_eventID: "1"
+        - wildcard:
+            data_win_eventdata_image: "*\\auditpol.exe"
+        - wildcard:
+            data_win_eventdata_commandLine: "*/set*"
+        - wildcard:
+            data_win_eventdata_commandLine: "*disable*"
+        - bool:
+            should:
+              - wildcard:
+                  data_win_eventdata_commandLine: "*/success:*"
+              - wildcard:
+                  data_win_eventdata_commandLine: "*/failure:*"
+            minimum_should_match: 1
+        - range:
+            timestamp:
+              gte: "${START_TIME}"
+              lte: "${END_TIME}"
+      must_not:
+        - bool:
+            should:
+              - wildcard:
+                  data_win_eventdata_commandLine: "*/?*"
+              - wildcard:
+                  data_win_eventdata_commandLine: "*/exclude*"
+            minimum_should_match: 1
+  _source:
+    - timestamp
+    - agent_name
+    - data_win_eventdata_commandLine
+    - data_win_eventdata_image
+    - data_win_eventdata_parentImage
+    - data_win_eventdata_user
+
+parameters:
+  AGENT_NAME:
+    type: string
+    required: true
+    example: "DESKTOP-AM0HLGE"
+  CUSTOMER_CODE:
+    type: string
+    required: true
+    example: "lab"
+  START_TIME:
+    type: datetime
+    default: "now-24h"
+  END_TIME:
+    type: datetime
+    default: "now"
+
+how_to_implement: >
+  Requires Sysmon EventID 1 with full command-line logging.
+
+known_false_positives: >
+  Rare. Investigate context and user performing the action.
+
+references:
+  - https://www.microsoft.com/en-us/security/blog/2021/01/20/deep-dive-into-the-solorigate-second-stage-activation-from-sunburst-to-teardrop-and-raindrop/
+  - https://learn.microsoft.com/en-us/windows-server/administration/windows-commands/auditpol-set
+  - https://attack.mitre.org/techniques/T1562/002/
+
+response:
+  message: >
+    Audit policy subcategory disabled on $agent_name$. 
+    Command: $data_win_eventdata_commandLine$. 
+    Parent: $data_win_eventdata_parentImage$. 
+    User: $data_win_eventdata_user$. MITRE ATT&CK: T1562.002
+  risk_score: 25
+  severity: medium
+  risk_objects:
+    - field: agent_name
+      type: system
+      score: 25
+  threat_objects: []
+
+tags:
+  analytic_story:
+    - Windows Audit Policy Tampering
+    - Compromised Windows Host
+  asset_type: Endpoint
+  mitre_attack_id:
+    - T1562.002
+  custom_tags:
+    - auditpol_disable
+    - audit_policy_tampering
+    - defense_evasion
+  product:
+    - Wazuh
+  security_domain: endpoint

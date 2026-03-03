@@ -1,0 +1,121 @@
+name: Windows Archive Collected Data via Rar
+id: windows-archive-collected-data-via-rar-001
+version: 1
+schema_version: "1.0"
+date: "2026-03-03"
+author: SOCFortress LLC
+status: production
+type: Anomaly
+
+description: >
+  Detects execution of Rar.exe with specific archiving flags (-ep1, -r, -y, 
+  -v5m, -m1) used for data collection and staging. DarkGate, Salt Typhoon, 
+  and APT37 use RAR to compress and exfiltrate collected data from 
+  compromised hosts to C2 servers.
+
+data_source:
+  - Sysmon EventID 1
+
+search:
+  index_pattern: "${INDEX_PATTERN}"
+  size: 100
+  sort:
+    - timestamp: desc
+  query:
+    bool:
+      must:
+        - term:
+            agent_name: "${AGENT_NAME}"
+        - term:
+            agent_labels_customer: "${CUSTOMER_CODE}"
+        - term:
+            data_win_system_eventID: "1"
+        - bool:
+            should:
+              - wildcard:
+                  data_win_eventdata_image: "*\\Rar.exe"
+              - term:
+                  data_win_eventdata_originalFileName: "Rar.exe"
+            minimum_should_match: 1
+        - wildcard:
+            data_win_eventdata_commandLine: "* a *"
+        - bool:
+            should:
+              - wildcard:
+                  data_win_eventdata_commandLine: "*-ep1*"
+              - wildcard:
+                  data_win_eventdata_commandLine: "*-r*"
+              - wildcard:
+                  data_win_eventdata_commandLine: "*-y*"
+            minimum_should_match: 2
+        - range:
+            timestamp:
+              gte: "${START_TIME}"
+              lte: "${END_TIME}"
+  _source:
+    - timestamp
+    - agent_name
+    - data_win_eventdata_commandLine
+    - data_win_eventdata_image
+    - data_win_eventdata_parentImage
+    - data_win_eventdata_user
+
+parameters:
+  AGENT_NAME:
+    type: string
+    required: true
+    example: "DESKTOP-AM0HLGE"
+  CUSTOMER_CODE:
+    type: string
+    required: true
+    example: "lab"
+  START_TIME:
+    type: datetime
+    default: "now-24h"
+  END_TIME:
+    type: datetime
+    default: "now"
+
+how_to_implement: >
+  Requires Sysmon EventID 1 with full command-line logging.
+
+known_false_positives: >
+  Users and administrators may use Rar.exe for legitimate archiving. 
+  Investigate context — bulk archiving from sensitive directories is suspicious.
+
+references:
+  - https://malpedia.caad.fkie.fraunhofer.de/details/win.darkgate
+  - https://attack.mitre.org/techniques/T1560/001/
+
+response:
+  message: >
+    RAR archiving detected on $agent_name$. 
+    Command: $data_win_eventdata_commandLine$. 
+    Parent: $data_win_eventdata_parentImage$. 
+    User: $data_win_eventdata_user$. 
+    Possible data exfiltration staging. MITRE ATT&CK: T1560.001
+  risk_score: 49
+  severity: medium
+  risk_objects:
+    - field: agent_name
+      type: system
+      score: 49
+  threat_objects: []
+
+tags:
+  analytic_story:
+    - DarkGate Malware
+    - Salt Typhoon
+    - APT37 Rustonotto and FadeStealer
+    - Compromised Windows Host
+  asset_type: Endpoint
+  mitre_attack_id:
+    - T1560.001
+  custom_tags:
+    - rar_archiving
+    - data_collection
+    - exfiltration_staging
+    - collection
+  product:
+    - Wazuh
+  security_domain: endpoint

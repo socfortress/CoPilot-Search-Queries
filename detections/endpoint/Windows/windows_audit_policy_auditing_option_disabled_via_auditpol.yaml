@@ -1,0 +1,116 @@
+name: Windows Audit Policy Auditing Option Disabled via Auditpol
+id: windows-audit-policy-disabled-via-auditpol-001
+version: 1
+schema_version: "1.0"
+date: "2026-03-03"
+author: SOCFortress LLC
+status: production
+type: TTP
+
+description: >
+  Detects auditpol.exe execution with /set /option /value:disable to disable 
+  specific auditing options (FullPrivilegeAuditing, AuditBaseObjects, 
+  AuditBaseDirectories). Adversaries disable auditing to evade detection 
+  and limit forensic evidence collection.
+
+data_source:
+  - Sysmon EventID 1
+
+search:
+  index_pattern: "${INDEX_PATTERN}"
+  size: 100
+  sort:
+    - timestamp: desc
+  query:
+    bool:
+      must:
+        - term:
+            agent_name: "${AGENT_NAME}"
+        - term:
+            agent_labels_customer: "${CUSTOMER_CODE}"
+        - term:
+            data_win_system_eventID: "1"
+        - wildcard:
+            data_win_eventdata_image: "*\\auditpol.exe"
+        - wildcard:
+            data_win_eventdata_commandLine: "*/set*"
+        - wildcard:
+            data_win_eventdata_commandLine: "*/option:*"
+        - wildcard:
+            data_win_eventdata_commandLine: "*/value:disable*"
+        - bool:
+            should:
+              - wildcard:
+                  data_win_eventdata_commandLine: "*FullPrivilegeAuditing*"
+              - wildcard:
+                  data_win_eventdata_commandLine: "*AuditBaseObjects*"
+              - wildcard:
+                  data_win_eventdata_commandLine: "*AuditBaseDirectories*"
+            minimum_should_match: 1
+        - range:
+            timestamp:
+              gte: "${START_TIME}"
+              lte: "${END_TIME}"
+  _source:
+    - timestamp
+    - agent_name
+    - data_win_eventdata_commandLine
+    - data_win_eventdata_image
+    - data_win_eventdata_parentImage
+    - data_win_eventdata_user
+
+parameters:
+  AGENT_NAME:
+    type: string
+    required: true
+    example: "DESKTOP-AM0HLGE"
+  CUSTOMER_CODE:
+    type: string
+    required: true
+    example: "lab"
+  START_TIME:
+    type: datetime
+    default: "now-24h"
+  END_TIME:
+    type: datetime
+    default: "now"
+
+how_to_implement: >
+  Requires Sysmon EventID 1 with full command-line logging.
+
+known_false_positives: >
+  None identified. Disabling audit options should always be investigated.
+
+references:
+  - https://learn.microsoft.com/en-us/windows-server/administration/windows-commands/auditpol-set
+  - https://attack.mitre.org/techniques/T1562/002/
+
+response:
+  message: >
+    Audit policy option disabled on $agent_name$. 
+    Command: $data_win_eventdata_commandLine$. 
+    Parent: $data_win_eventdata_parentImage$. 
+    User: $data_win_eventdata_user$. MITRE ATT&CK: T1562.002
+  risk_score: 60
+  severity: high
+  risk_objects:
+    - field: agent_name
+      type: system
+      score: 60
+  threat_objects: []
+
+tags:
+  analytic_story:
+    - Windows Audit Policy Tampering
+    - Compromised Windows Host
+  asset_type: Endpoint
+  mitre_attack_id:
+    - T1562.002
+  custom_tags:
+    - auditpol
+    - audit_policy_tampering
+    - defense_evasion
+    - logging_disabled
+  product:
+    - Wazuh
+  security_domain: endpoint

@@ -1,0 +1,109 @@
+name: Windows Access Token Manipulation Winlogon Duplicate Token Handle
+id: windows-access-token-winlogon-duplicate-handle-001
+version: 1
+schema_version: "1.0"
+date: "2026-03-03"
+author: SOCFortress LLC
+status: production
+type: Hunting
+
+description: >
+  Detects a process attempting to access winlogon.exe to duplicate its token 
+  handle (GrantedAccess 0x1040). Winlogon.exe runs with SYSTEM privileges and 
+  holds high-privilege security tokens. Brute Ratel C4 and other tools 
+  duplicate the winlogon token to escalate privileges.
+
+data_source:
+  - Sysmon EventID 10
+
+search:
+  index_pattern: "${INDEX_PATTERN}"
+  size: 100
+  sort:
+    - timestamp: desc
+  query:
+    bool:
+      must:
+        - term:
+            agent_name: "${AGENT_NAME}"
+        - term:
+            agent_labels_customer: "${CUSTOMER_CODE}"
+        - term:
+            data_win_system_eventID: "10"
+        - wildcard:
+            data_win_eventdata_targetImage: "*\\winlogon.exe*"
+        - term:
+            data_win_eventdata_grantedAccess: "0x1040"
+        - range:
+            timestamp:
+              gte: "${START_TIME}"
+              lte: "${END_TIME}"
+  _source:
+    - timestamp
+    - agent_name
+    - data_win_system_eventID
+    - data_win_eventdata_sourceImage
+    - data_win_eventdata_targetImage
+    - data_win_eventdata_grantedAccess
+    - data_win_eventdata_sourceProcessGUID
+    - data_win_eventdata_targetProcessGUID
+
+parameters:
+  AGENT_NAME:
+    type: string
+    required: true
+    example: "DESKTOP-AM0HLGE"
+  CUSTOMER_CODE:
+    type: string
+    required: true
+    example: "lab"
+  START_TIME:
+    type: datetime
+    default: "now-24h"
+  END_TIME:
+    type: datetime
+    default: "now"
+
+how_to_implement: >
+  Requires Sysmon EventID 10 (ProcessAccess) configured to capture access 
+  to winlogon.exe. Default Sysmon configs often exclude system processes 
+  as targets — ensure winlogon.exe is not excluded in TargetImage rules.
+
+known_false_positives: >
+  Some legitimate applications may access winlogon.exe. Filter known 
+  legitimate source processes.
+
+references:
+  - https://docs.microsoft.com/en-us/windows/win32/api/handleapi/nf-handleapi-duplicatehandle
+  - https://attack.mitre.org/techniques/T1134/001/
+
+response:
+  message: >
+    Winlogon token handle duplication on $agent_name$. 
+    Source: $data_win_eventdata_sourceImage$. 
+    Target: $data_win_eventdata_targetImage$. 
+    GrantedAccess: $data_win_eventdata_grantedAccess$. 
+    Possible privilege escalation. MITRE ATT&CK: T1134.001
+  risk_score: 64
+  severity: high
+  risk_objects:
+    - field: agent_name
+      type: system
+      score: 64
+  threat_objects: []
+
+tags:
+  analytic_story:
+    - Brute Ratel C4
+    - Compromised Windows Host
+  asset_type: Endpoint
+  mitre_attack_id:
+    - T1134.001
+  custom_tags:
+    - winlogon
+    - token_duplication
+    - privilege_escalation
+    - brute_ratel
+  product:
+    - Wazuh
+  security_domain: endpoint
