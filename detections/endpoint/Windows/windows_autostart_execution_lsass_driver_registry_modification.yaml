@@ -1,0 +1,101 @@
+name: Windows Autostart Execution LSASS Driver Registry Modification
+id: Windows-Autostart-Execution-LSASS-Driver-Registry-Modification
+version: 7
+schema_version: 1
+date: '2025-05-02'
+author: SOCFortress LLC
+status: production
+type: TTP
+description: >
+  Detects modifications to undocumented registry keys that instruct LSASS to load
+  an extension DLL — specifically DirectoryServiceExtPt and LsaDbExtPt under
+  HKLM\SYSTEM\CurrentControlSet\Services\NTDS. These keys are abused by attackers
+  to inject malicious DLLs into lsass.exe for credential harvesting (e.g., Mimikatz,
+  custom credential stealers). Associated with MITRE T1547.008 (LSASS Drivers) and
+  observed in APT campaigns targeting Active Directory environments.
+
+data_source:
+  - Sysmon EventID 13 (RegistryEvent - Value Set)
+
+search:
+  query:
+    bool:
+      must:
+        - term:
+            agent_name: "AGENT_NAME"
+        - term:
+            agent_labels_customer: "CUSTOMER_CODE"
+        - term:
+            data_win_system_eventID: "13"
+        - bool:
+            should:
+              - wildcard:
+                  data_win_eventdata_targetObject: "*\\Services\\NTDS\\DirectoryServiceExtPt"
+              - wildcard:
+                  data_win_eventdata_targetObject: "*\\Services\\NTDS\\LsaDbExtPt"
+            minimum_should_match: 1
+        - range:
+            timestamp:
+              gte: "START_TIME"
+              lte: "END_TIME"
+
+parameters:
+  - name: AGENT_NAME
+    default: "DESKTOP-AM0HLGE"
+  - name: CUSTOMER_CODE
+    default: "lab"
+  - name: START_TIME
+    default: "now-24h"
+  - name: END_TIME
+    default: "now"
+
+how_to_implement: >
+  Requires Sysmon EventID 13 (RegistryEvent - Value Set) flowing to the Wazuh
+  Indexer. The NTDS registry path must be monitored in your Sysmon configuration.
+  Validated on DESKTOP-AM0HLGE with reg.exe writing a DLL path to
+  HKLM\SYSTEM\CurrentControlSet\Services\NTDS\DirectoryServiceExtPt. Field names
+  confirmed: data_win_eventdata_targetObject, data_win_eventdata_details,
+  data_win_eventdata_image.
+
+known_false_positives: >
+  Legitimate domain controller software or Microsoft identity components may
+  occasionally write to these keys. Rare on standard workstations. Filter by
+  data_win_eventdata_image if noise is observed — unsigned or non-system process
+  paths are high confidence. Value data pointing to non-standard DLL paths
+  (temp, appdata, user-writable dirs) should be treated as high priority.
+
+references:
+  - https://blog.xpnsec.com/exploring-mimikatz-part-1/
+  - https://github.com/oxfemale/LogonCredentialsSteal/tree/master/lsass_lib
+  - https://attack.mitre.org/techniques/T1547/008/
+
+response:
+  message: >
+    LSASS driver registry key modified on $agent_name$. Registry path:
+    $data_win_eventdata_targetObject$. DLL path written:
+    $data_win_eventdata_details$. Modified by: $data_win_eventdata_image$.
+    This may indicate an attempt to load a malicious DLL into lsass.exe
+    for credential theft. MITRE ATT&CK: T1547.008
+  risk_score: 49
+  severity: high
+  risk_objects:
+    - field: agent_name
+      type: system
+      score: 49
+  threat_objects: []
+tags:
+  analytic_story:
+    - Windows Registry Abuse
+    - Credential Access
+    - Persistence via LSASS
+  asset_type: Endpoint
+  mitre_attack_id:
+    - T1547.008
+  custom_tags:
+    - lsass
+    - credential_theft
+    - registry_persistence
+    - ntds
+  product:
+    - Wazuh
+  security_domain: endpoint
