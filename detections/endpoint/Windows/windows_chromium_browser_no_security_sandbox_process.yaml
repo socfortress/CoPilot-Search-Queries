@@ -1,0 +1,122 @@
+name: Windows Chromium Browser No Security Sandbox Process
+id: 314cb263-7eeb-4d45-b693-bb21699c73d2
+version: 1
+schema_version: 1
+date: '2025-05-26'
+author: SOCFortress LLC
+status: production
+type: TTP
+description: >
+  Detects Chromium-based browsers (Chrome, Edge, Brave, Opera, Vivaldi) launched
+  with the --no-sandbox flag, which disables the browser's built-in security
+  sandbox. While occasionally used in development, this flag is abused by malware
+  droppers and loaders that embed Chromium components for command and control,
+  credential theft, or UI spoofing. Associated with Malicious Inno Setup Loader
+  campaigns. Any use from non-browser parent processes or in conjunction with
+  other suspicious flags should be treated as high priority.
+  MITRE ATT&CK: T1497 (Virtualization/Sandbox Evasion).
+
+data_source:
+  - Sysmon EventID 1 (ProcessCreate)
+
+search:
+  query:
+    bool:
+      must:
+        - term:
+            agent_name: "AGENT_NAME"
+        - term:
+            agent_labels_customer: "CUSTOMER_CODE"
+        - term:
+            data_win_system_eventID: "1"
+        - bool:
+            should:
+              - wildcard:
+                  data_win_eventdata_image: "*\\chrome.exe"
+              - wildcard:
+                  data_win_eventdata_image: "*\\msedge.exe"
+              - wildcard:
+                  data_win_eventdata_image: "*\\brave.exe"
+              - wildcard:
+                  data_win_eventdata_image: "*\\opera.exe"
+              - wildcard:
+                  data_win_eventdata_image: "*\\vivaldi.exe"
+            minimum_should_match: 1
+        - wildcard:
+            data_win_eventdata_commandLine: "*--no-sandbox*"
+        - range:
+            timestamp:
+              gte: "START_TIME"
+              lte: "END_TIME"
+
+parameters:
+  - name: AGENT_NAME
+    default: "DESKTOP-AM0HLGE"
+  - name: CUSTOMER_CODE
+    default: "lab"
+  - name: START_TIME
+    default: "now-24h"
+  - name: END_TIME
+    default: "now"
+
+how_to_implement: >
+  Requires Sysmon EventID 1 (ProcessCreate) flowing to the Wazuh Indexer.
+  Validated on DESKTOP-AM0HLGE with Chrome launched via PowerShell with
+  --no-sandbox. Note that Chrome may spawn child processes with the same
+  flag (parentImage = chrome.exe) — consider filtering on parentImage
+  to focus on non-browser parent launches for higher fidelity.
+  Confirmed field names: data_win_eventdata_image, data_win_eventdata_commandLine,
+  data_win_eventdata_parentImage, data_win_eventdata_user.
+
+known_false_positives: >
+  Chrome self-spawns child processes inheriting the --no-sandbox flag when
+  launched with it, which will generate multiple hits per launch. Developers
+  and automated testing pipelines may also use this flag legitimately.
+  Filter on data_win_eventdata_parentImage — launches from powershell.exe,
+  cmd.exe, or unknown binaries are higher priority than chrome.exe self-spawns.
+
+references:
+  - https://unix.stackexchange.com/questions/68832/what-does-the-chromium-option-no-sandbox-mean
+  - https://attack.mitre.org/techniques/T1497/
+
+response:
+  message: >
+    Chromium browser launched with --no-sandbox flag on $agent_name$.
+    Process: $data_win_eventdata_image$.
+    Command line: $data_win_eventdata_commandLine$.
+    Parent process: $data_win_eventdata_parentImage$.
+    User: $data_win_eventdata_user$.
+    Sandbox bypass may indicate malware loader or malicious Chromium embedding.
+    MITRE ATT&CK: T1497
+  risk_score: 60
+  severity: high
+  risk_objects:
+    - field: agent_name
+      type: system
+      score: 60
+    - field: data_win_eventdata_user
+      type: user
+      score: 60
+  threat_objects:
+    - field: data_win_eventdata_image
+      type: process_name
+    - field: data_win_eventdata_parentImage
+      type: parent_process_name
+
+tags:
+  analytic_story:
+    - Malicious Inno Setup Loader
+    - Browser Hijacking
+  asset_type: Endpoint
+  mitre_attack_id:
+    - T1497
+  custom_tags:
+    - chrome
+    - msedge
+    - no_sandbox
+    - sandbox_evasion
+    - browser_abuse
+    - inno_setup
+  product:
+    - Wazuh
+  security_domain: endpoint

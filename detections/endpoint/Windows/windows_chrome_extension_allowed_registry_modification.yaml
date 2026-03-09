@@ -1,0 +1,104 @@
+name: Windows Chrome Extension Allowed Registry Modification
+id: 2846089a-ffe9-4881-a2a2-43f3be2b8cc7
+version: 1
+schema_version: 1
+date: '2026-01-12'
+author: SOCFortress LLC
+status: production
+type: Anomaly
+description: >
+  Detects modifications to the Windows registry keys controlling the Chrome
+  Extension Install Allowlist policy (HKLM\SOFTWARE\Policies\Google\Chrome\
+  ExtensionInstallAllowlist). Attackers add malicious extension IDs to this
+  key to bypass Chrome enterprise extension restrictions, enabling silent
+  installation of credential-stealing or session-hijacking browser extensions.
+  Associated with browser hijacking campaigns. MITRE ATT&CK: T1185
+  (Browser Session Hijacking).
+
+data_source:
+  - Sysmon EventID 13 (RegistryEvent - Value Set)
+
+search:
+  query:
+    bool:
+      must:
+        - term:
+            agent_name: "AGENT_NAME"
+        - term:
+            agent_labels_customer: "CUSTOMER_CODE"
+        - term:
+            data_win_system_eventID: "13"
+        - wildcard:
+            data_win_eventdata_targetObject: "*\\Google\\Chrome\\ExtensionInstallAllowlist*"
+        - range:
+            timestamp:
+              gte: "START_TIME"
+              lte: "END_TIME"
+
+parameters:
+  - name: AGENT_NAME
+    default: "DESKTOP-AM0HLGE"
+  - name: CUSTOMER_CODE
+    default: "lab"
+  - name: START_TIME
+    default: "now-24h"
+  - name: END_TIME
+    default: "now"
+
+how_to_implement: >
+  Requires Sysmon EventID 13 (RegistryEvent - Value Set) flowing to the Wazuh
+  Indexer. Requires the following Sysmon RegistryEvent rule to be present in
+  your Sysmon config:
+  <Rule name="technique_id=T1185,technique_name=Chrome Extension Allowlist Modification" groupRelation="or">
+    <TargetObject condition="contains">SOFTWARE\Policies\Google\Chrome\ExtensionInstallAllowlist</TargetObject>
+  </Rule>
+  Validated on DESKTOP-AM0HLGE with reg.exe writing a value to
+  HKLM\SOFTWARE\Policies\Google\Chrome\ExtensionInstallAllowlist\1.
+  Confirmed field names: data_win_eventdata_targetObject (full registry path
+  including value index), data_win_eventdata_details (extension ID written),
+  data_win_eventdata_image.
+
+known_false_positives: >
+  Legitimate IT admin updates to Chrome extension allowlist via Group Policy
+  or enterprise management tools (SCCM, Intune) will trigger this detection.
+  Filter on data_win_eventdata_image for known management tool paths.
+  Any modification from user-space processes or unknown binaries should be
+  treated as high priority.
+
+references:
+  - https://www.gdatasoftware.com/blog/2025/11/38298-learning-about-browser-hijacking
+  - https://attack.mitre.org/techniques/T1185/
+
+response:
+  message: >
+    Chrome ExtensionInstallAllowlist registry key modified on $agent_name$.
+    Registry path: $data_win_eventdata_targetObject$.
+    Value written: $data_win_eventdata_details$.
+    Modified by: $data_win_eventdata_image$.
+    Possible attempt to allowlist a malicious Chrome extension.
+    MITRE ATT&CK: T1185
+  risk_score: 30
+  severity: medium
+  risk_objects:
+    - field: agent_name
+      type: system
+      score: 30
+  threat_objects:
+    - field: data_win_eventdata_image
+      type: process_name
+
+tags:
+  analytic_story:
+    - Browser Hijacking
+  asset_type: Endpoint
+  mitre_attack_id:
+    - T1185
+  custom_tags:
+    - chrome
+    - extension_allowlist
+    - registry
+    - browser_hijacking
+    - policy_abuse
+  product:
+    - Wazuh
+  security_domain: endpoint

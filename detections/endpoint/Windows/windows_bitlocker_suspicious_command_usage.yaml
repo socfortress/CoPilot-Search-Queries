@@ -1,0 +1,118 @@
+name: Windows BitLocker Suspicious Command Usage
+id: Windows-BitLocker-Suspicious-Command-Usage
+version: 3
+schema_version: 1
+date: '2025-05-02'
+author: SOCFortress LLC
+status: production
+type: TTP
+description: >
+  Detects execution of manage-bde.exe with arguments used to disable or tamper
+  with BitLocker protectors, force recovery mode, or lock drives. These commands
+  are associated with ShrinkLocker ransomware, which abuses the built-in BitLocker
+  utility to encrypt victim drives, disable TPM protectors, and prevent recovery.
+  Specific arguments monitored: -protectors -disable, -protectors -delete,
+  -forcerecovery, and -lock. MITRE ATT&CK: T1486 (Data Encrypted for Impact),
+  T1490 (Inhibit System Recovery).
+
+data_source:
+  - Sysmon EventID 1 (ProcessCreate)
+
+search:
+  query:
+    bool:
+      must:
+        - term:
+            agent_name: "AGENT_NAME"
+        - term:
+            agent_labels_customer: "CUSTOMER_CODE"
+        - term:
+            data_win_system_eventID: "1"
+        - wildcard:
+            data_win_eventdata_image: "*\\manage-bde.exe"
+        - bool:
+            should:
+              - wildcard:
+                  data_win_eventdata_commandLine: "*-protectors -disable*"
+              - wildcard:
+                  data_win_eventdata_commandLine: "*-protectors -delete*"
+              - wildcard:
+                  data_win_eventdata_commandLine: "*-forcerecovery*"
+              - wildcard:
+                  data_win_eventdata_commandLine: "*-lock *"
+            minimum_should_match: 1
+        - range:
+            timestamp:
+              gte: "START_TIME"
+              lte: "END_TIME"
+
+parameters:
+  - name: AGENT_NAME
+    default: "DESKTOP-AM0HLGE"
+  - name: CUSTOMER_CODE
+    default: "lab"
+  - name: START_TIME
+    default: "now-24h"
+  - name: END_TIME
+    default: "now"
+
+how_to_implement: >
+  Requires Sysmon EventID 1 (ProcessCreate) flowing to the Wazuh Indexer.
+  Validated on DESKTOP-AM0HLGE with manage-bde.exe -protectors -disable C:
+  executed from PowerShell. Confirmed field names: data_win_eventdata_image,
+  data_win_eventdata_commandLine, data_win_eventdata_parentImage,
+  data_win_eventdata_user.
+
+known_false_positives: >
+  Administrators may legitimately use manage-bde.exe to manage BitLocker
+  encryption in enterprise environments. Filter on data_win_eventdata_user
+  or data_win_eventdata_parentImage for known admin activity. The -lock
+  argument alone may appear during scheduled maintenance — correlate with
+  other ransomware indicators for higher confidence.
+
+references:
+  - https://attack.mitre.org/techniques/T1486/
+  - https://attack.mitre.org/techniques/T1490/
+  - https://www.nccgroup.com/us/research-blog/nameless-and-shameless-ransomware-encryption-via-bitlocker/
+  - https://www.bitdefender.com/en-us/blog/businessinsights/shrinklocker-decryptor-from-friend-to-foe-and-back-again
+  - https://www.bleepingcomputer.com/news/security/new-shrinklocker-ransomware-uses-bitlocker-to-encrypt-your-files/
+
+response:
+  message: >
+    Suspicious BitLocker command executed on $agent_name$.
+    Command line: $data_win_eventdata_commandLine$.
+    Parent process: $data_win_eventdata_parentImage$.
+    User: $data_win_eventdata_user$.
+    Possible ransomware (ShrinkLocker) or deliberate encryption sabotage.
+    MITRE ATT&CK: T1486, T1490
+  risk_score: 60
+  severity: high
+  risk_objects:
+    - field: agent_name
+      type: system
+      score: 60
+    - field: data_win_eventdata_user
+      type: user
+      score: 60
+  threat_objects:
+    - field: data_win_eventdata_image
+      type: process_name
+
+tags:
+  analytic_story:
+    - ShrinkLocker
+    - Ransomware
+    - Inhibit System Recovery
+  asset_type: Endpoint
+  mitre_attack_id:
+    - T1486
+    - T1490
+  custom_tags:
+    - bitlocker
+    - manage-bde
+    - ransomware
+    - shrinklocker
+    - encryption_abuse
+  product:
+    - Wazuh
+  security_domain: endpoint

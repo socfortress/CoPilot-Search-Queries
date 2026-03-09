@@ -1,0 +1,125 @@
+name: Windows Browser Process Launched with Unusual Flags
+id: 841e2abc-0442-4e7f-b445-b22680632a08
+version: 1
+schema_version: 1
+date: '2025-10-31'
+author: SOCFortress LLC
+status: production
+type: Anomaly
+description: >
+  Detects Chromium-based browsers (Chrome, Edge, Brave, Firefox) launched with
+  unusual flags such as --mute-audio, --no-de-elevate, or --do-not-de-elevate.
+  These flags are associated with Castle RAT, which silently launches a browser
+  for session hijacking and credential theft while suppressing audio and preventing
+  privilege de-elevation. Parent process exclusions filter out standard browser
+  self-spawning and system-level launches. Any browser launched with these flags
+  from a non-browser, non-system parent should be investigated.
+  MITRE ATT&CK: T1185 (Browser Session Hijacking).
+
+data_source:
+  - Sysmon EventID 1 (ProcessCreate)
+
+search:
+  query:
+    bool:
+      must:
+        - term:
+            agent_name: "AGENT_NAME"
+        - term:
+            agent_labels_customer: "CUSTOMER_CODE"
+        - term:
+            data_win_system_eventID: "1"
+        - bool:
+            should:
+              - wildcard:
+                  data_win_eventdata_image: "*\\chrome.exe"
+              - wildcard:
+                  data_win_eventdata_image: "*\\msedge.exe"
+              - wildcard:
+                  data_win_eventdata_image: "*\\brave.exe"
+              - wildcard:
+                  data_win_eventdata_image: "*\\firefox.exe"
+            minimum_should_match: 1
+        - bool:
+            should:
+              - wildcard:
+                  data_win_eventdata_commandLine: "*--mute-audio*"
+              - wildcard:
+                  data_win_eventdata_commandLine: "*--no-de-elevate*"
+              - wildcard:
+                  data_win_eventdata_commandLine: "*--do-not-de-elevate*"
+            minimum_should_match: 1
+        - range:
+            timestamp:
+              gte: "START_TIME"
+              lte: "END_TIME"
+
+parameters:
+  - name: AGENT_NAME
+    default: "DESKTOP-AM0HLGE"
+  - name: CUSTOMER_CODE
+    default: "lab"
+  - name: START_TIME
+    default: "now-24h"
+  - name: END_TIME
+    default: "now"
+
+how_to_implement: >
+  Requires Sysmon EventID 1 (ProcessCreate) flowing to the Wazuh Indexer.
+  Validated on DESKTOP-AM0HLGE with both Chrome and msedge launched via
+  PowerShell with --mute-audio --do-not-de-elevate. Confirmed field names:
+  data_win_eventdata_image, data_win_eventdata_commandLine,
+  data_win_eventdata_parentImage, data_win_eventdata_user.
+  Note: use cmd /c or & operator in PowerShell to pass flags directly to
+  the binary — Start-Process intercepts double-dash arguments.
+
+known_false_positives: >
+  Automated testing frameworks, CI/CD pipelines, and some legitimate admin
+  scripts may launch browsers with these flags. Filter on
+  data_win_eventdata_parentImage for known automation tooling paths.
+  In production environments without testing infrastructure, any hit
+  from a non-standard parent process should be treated as high priority.
+
+references:
+  - https://www.recordedfuture.com/research/from-castleloader-to-castlerat-tag-150-advances-operations
+  - https://peter.sh/experiments/chromium-command-line-switches/
+  - https://attack.mitre.org/techniques/T1185/
+
+response:
+  message: >
+    Browser launched with unusual flags on $agent_name$.
+    Process: $data_win_eventdata_image$.
+    Command line: $data_win_eventdata_commandLine$.
+    Parent process: $data_win_eventdata_parentImage$.
+    User: $data_win_eventdata_user$.
+    Possible Castle RAT browser session hijacking attempt.
+    MITRE ATT&CK: T1185
+  risk_score: 15
+  severity: low
+  risk_objects:
+    - field: agent_name
+      type: system
+      score: 15
+  threat_objects:
+    - field: data_win_eventdata_image
+      type: process_name
+    - field: data_win_eventdata_parentImage
+      type: parent_process_name
+
+tags:
+  analytic_story:
+    - Castle RAT
+    - Browser Session Hijacking
+  asset_type: Endpoint
+  mitre_attack_id:
+    - T1185
+  custom_tags:
+    - browser
+    - chrome
+    - msedge
+    - castle_rat
+    - session_hijacking
+    - unusual_flags
+  product:
+    - Wazuh
+  security_domain: endpoint
