@@ -1,0 +1,137 @@
+name: Windows File and Directory Enable ReadOnly Permissions
+id: Windows-File-and-Directory-Enable-ReadOnly-Permissions
+version: 4
+schema_version: 1
+date: '2025-11-20'
+author: SOCFortress LLC
+status: production
+type: TTP
+description: >
+  Detects instances where icacls.exe, cacls.exe, or xcacls.exe are used to
+  grant read-only permissions (R, REA, RA, RD) to SYSTEM, admin, S-1-1-0, or
+  EVERYONE without write or execute rights. Attackers use this technique to
+  lock files or directories read-only to prevent remediation or cleanup tools
+  from modifying or deleting malicious artifacts. Associated with Crypto Stealer
+  and NetSupport RMM Tool Abuse tradecraft.
+  MITRE ATT&CK: T1222.001 (File and Directory Permissions Modification: Windows).
+
+data_source:
+  - Sysmon EventID 1 (ProcessCreate)
+
+search:
+  query:
+    bool:
+      must:
+        - term:
+            agent_name: "AGENT_NAME"
+        - term:
+            agent_labels_customer: "CUSTOMER_CODE"
+        - term:
+            data_win_system_eventID: "1"
+        - bool:
+            should:
+              - wildcard:
+                  data_win_eventdata_image: "*\\icacls.exe"
+              - wildcard:
+                  data_win_eventdata_image: "*\\cacls.exe"
+              - wildcard:
+                  data_win_eventdata_image: "*\\xcacls.exe"
+            minimum_should_match: 1
+        - bool:
+            should:
+              - wildcard:
+                  data_win_eventdata_commandLine: "*/grant*"
+              - wildcard:
+                  data_win_eventdata_commandLine: "*/G *"
+            minimum_should_match: 1
+        - bool:
+            should:
+              - wildcard:
+                  data_win_eventdata_commandLine: "*SYSTEM*"
+              - wildcard:
+                  data_win_eventdata_commandLine: "*admin*"
+              - wildcard:
+                  data_win_eventdata_commandLine: "*S-1-1-0*"
+              - wildcard:
+                  data_win_eventdata_commandLine: "*EVERYONE*"
+            minimum_should_match: 1
+        - bool:
+            should:
+              - wildcard:
+                  data_win_eventdata_commandLine: "*:R)*"
+              - wildcard:
+                  data_win_eventdata_commandLine: "*:REA)*"
+              - wildcard:
+                  data_win_eventdata_commandLine: "*:RA)*"
+              - wildcard:
+                  data_win_eventdata_commandLine: "*:RD)*"
+            minimum_should_match: 1
+        - range:
+            timestamp:
+              gte: "START_TIME"
+              lte: "END_TIME"
+
+parameters:
+  - name: AGENT_NAME
+    default: "DESKTOP-AM0HLGE"
+  - name: CUSTOMER_CODE
+    default: "lab"
+  - name: START_TIME
+    default: "now-24h"
+  - name: END_TIME
+    default: "now"
+
+how_to_implement: >
+  Requires Sysmon EventID 1 (ProcessCreate) flowing to the Wazuh Indexer.
+  Fields data_win_eventdata_image and data_win_eventdata_commandLine are
+  confirmed working across all EventID 1 detections in this environment.
+  The read-only permission filter is applied via commandLine matching on
+  permission strings (:R), (:REA), (:RA), (:RD) while excluding write/execute
+  variants. Field-validated based on established EventID 1 detection patterns.
+
+known_false_positives: >
+  Administrators or administrative scripts may legitimately use icacls with
+  read-only grants for access control hardening. Filter by parent process or
+  user context as needed.
+
+references:
+  - https://www.splunk.com/en_us/blog/security/-applocker-rules-as-defense-evasion-complete-analysis.html
+  - https://attack.mitre.org/techniques/T1222/001/
+
+response:
+  message: >
+    File or directory permissions modified to read-only on $agent_name$ by $data_win_eventdata_user$.
+    Process: $data_win_eventdata_image$.
+    Command: $data_win_eventdata_commandLine$.
+    MITRE ATT&CK: T1222.001
+  risk_score: 49
+  severity: medium
+  risk_objects:
+    - field: agent_name
+      type: system
+      score: 49
+    - field: data_win_eventdata_user
+      type: user
+      score: 49
+  threat_objects:
+    - field: data_win_eventdata_image
+      type: process_name
+    - field: data_win_eventdata_commandLine
+      type: process
+
+tags:
+  analytic_story:
+    - Crypto Stealer
+    - NetSupport RMM Tool Abuse
+  asset_type: Endpoint
+  mitre_attack_id:
+    - T1222.001
+  custom_tags:
+    - icacls
+    - cacls
+    - file_permissions
+    - readonly
+    - defense_evasion
+  product:
+    - Wazuh
+  security_domain: endpoint

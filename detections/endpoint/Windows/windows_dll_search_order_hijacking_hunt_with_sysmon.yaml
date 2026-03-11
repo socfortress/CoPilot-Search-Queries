@@ -1,0 +1,123 @@
+name: Windows DLL Search Order Hijacking Hunt with Sysmon
+id: 79c7d1fc-64c7-91be-a616-ccda752efe81
+version: 11
+schema_version: 1
+date: '2025-05-26'
+author: SOCFortress LLC
+status: production
+type: Hunting
+description: >
+  Detects potential DLL search order hijacking or DLL sideloading by identifying
+  DLLs loaded from non-standard directories (outside system32, syswow64, winsxs,
+  wbem). Attackers place malicious DLLs with names matching legitimate Windows
+  libraries in directories that take precedence in the DLL search order, causing
+  vulnerable applications to load the malicious version instead. Associated with
+  Qakbot, Malicious Inno Setup Loader, and general defense evasion tradecraft.
+  Cross-reference imageLoaded values against hijacklibs.net for known hijackable
+  libraries. MITRE ATT&CK: T1574.001 (DLL Search Order Hijacking).
+
+data_source:
+  - Sysmon EventID 7 (ImageLoad)
+
+search:
+  query:
+    bool:
+      must:
+        - term:
+            agent_name: "AGENT_NAME"
+        - term:
+            agent_labels_customer: "CUSTOMER_CODE"
+        - term:
+            data_win_system_eventID: "7"
+        - range:
+            timestamp:
+              gte: "START_TIME"
+              lte: "END_TIME"
+      must_not:
+        - wildcard:
+            data_win_eventdata_imageLoaded: "*\\\\system32\\\\*"
+        - wildcard:
+            data_win_eventdata_imageLoaded: "*\\\\syswow64\\\\*"
+        - wildcard:
+            data_win_eventdata_imageLoaded: "*\\\\winsxs\\\\*"
+        - wildcard:
+            data_win_eventdata_imageLoaded: "*\\\\wbem\\\\*"
+        - wildcard:
+            data_win_eventdata_imageLoaded: "*\\\\Program Files\\\\*"
+        - wildcard:
+            data_win_eventdata_imageLoaded: "*\\\\Program Files (x86)\\\\*"
+
+parameters:
+  - name: AGENT_NAME
+    default: "DESKTOP-AM0HLGE"
+  - name: CUSTOMER_CODE
+    default: "lab"
+  - name: START_TIME
+    default: "now-24h"
+  - name: END_TIME
+    default: "now"
+
+how_to_implement: >
+  Requires Sysmon EventID 7 (ImageLoad) flowing to the Wazuh Indexer.
+  EventID 7 confirmed flowing on DESKTOP-AM0HLGE with 153+ events per 2h.
+  Confirmed field names: data_win_eventdata_image (loading process),
+  data_win_eventdata_imageLoaded (full DLL path). Real-world example confirmed
+  in lab: OneDrive.exe loading vcruntime140_1_app.dll and msvcp140_app.dll
+  from AppData\Local\Microsoft\OneDrive — known hijackable DLL names loaded
+  from non-standard paths. This detection is a hunting query — results should
+  be triaged manually against the hijacklibs.net database of known hijackable
+  Windows libraries. The must_not exclusions filter standard system paths to
+  reduce noise; tune additional exclusions (e.g. OneDrive AppData paths) based
+  on your environment baseline.
+
+known_false_positives: >
+  High false positive rate expected — many legitimate applications load DLLs
+  from non-standard paths (e.g. OneDrive, Teams, browser components loading
+  from AppData). This is a hunting detection intended for analyst triage.
+  Build an allowlist of known-good imageLoaded paths in your environment.
+  Focus on DLL names that match known Windows system DLL names (e.g.
+  version.dll, winmm.dll, cryptbase.dll) loaded from user-writable directories
+  such as AppData, Temp, Desktop, or application install directories.
+
+references:
+  - https://hijacklibs.net
+  - https://attack.mitre.org/techniques/T1574/001/
+
+response:
+  message: >
+    Possible DLL search order hijacking on $agent_name$.
+    Process: $data_win_eventdata_image$.
+    DLL loaded from non-standard path: $data_win_eventdata_imageLoaded$.
+    Verify the DLL name against hijacklibs.net and confirm whether the
+    loading process should be loading this library from this path.
+    MITRE ATT&CK: T1574.001
+  risk_score: 25
+  severity: low
+  risk_objects:
+    - field: agent_name
+      type: system
+      score: 25
+  threat_objects:
+    - field: data_win_eventdata_image
+      type: process_name
+    - field: data_win_eventdata_imageLoaded
+      type: file_name
+
+tags:
+  analytic_story:
+    - Qakbot
+    - Windows Defense Evasion Tactics
+    - Living Off The Land
+    - Malicious Inno Setup Loader
+  asset_type: Endpoint
+  mitre_attack_id:
+    - T1574.001
+  custom_tags:
+    - dll_hijacking
+    - dll_sideloading
+    - imageload
+    - defense_evasion
+    - hunting
+  product:
+    - Wazuh
+  security_domain: endpoint

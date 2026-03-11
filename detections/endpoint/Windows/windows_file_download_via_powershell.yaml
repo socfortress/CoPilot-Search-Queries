@@ -1,0 +1,133 @@
+name: Windows File Download Via PowerShell
+id: Windows-File-Download-Via-PowerShell
+version: 6
+schema_version: 1
+date: '2025-12-16'
+author: SOCFortress LLC
+status: production
+type: Anomaly
+description: >
+  Detects PowerShell download activity via WebClient methods (DownloadString,
+  DownloadData, DownloadFile) or Invoke-WebRequest and its aliases (IWR, wget,
+  curl). These methods are commonly abused in malicious PowerShell scripts to
+  fetch and execute remote payloads. Associated with APT37, IcedID, Hermetic
+  Wiper, XWorm, StealC, and numerous other threat actors performing ingress
+  tool transfer.
+  MITRE ATT&CK: T1059.001 (PowerShell), T1105 (Ingress Tool Transfer).
+
+data_source:
+  - Sysmon EventID 1 (ProcessCreate)
+
+search:
+  query:
+    bool:
+      must:
+        - term:
+            agent_name: "AGENT_NAME"
+        - term:
+            agent_labels_customer: "CUSTOMER_CODE"
+        - term:
+            data_win_system_eventID: "1"
+        - bool:
+            should:
+              - wildcard:
+                  data_win_eventdata_image: "*\\powershell.exe"
+              - wildcard:
+                  data_win_eventdata_image: "*\\pwsh.exe"
+            minimum_should_match: 1
+        - bool:
+            should:
+              - wildcard:
+                  data_win_eventdata_commandLine: "*iwr *"
+              - wildcard:
+                  data_win_eventdata_commandLine: "*Invoke-WebRequest*"
+              - wildcard:
+                  data_win_eventdata_commandLine: "*wget *"
+              - wildcard:
+                  data_win_eventdata_commandLine: "*.DownloadData*"
+              - wildcard:
+                  data_win_eventdata_commandLine: "*.DownloadFile*"
+              - wildcard:
+                  data_win_eventdata_commandLine: "*.DownloadString*"
+            minimum_should_match: 1
+        - range:
+            timestamp:
+              gte: "START_TIME"
+              lte: "END_TIME"
+
+parameters:
+  - name: AGENT_NAME
+    default: "DESKTOP-AM0HLGE"
+  - name: CUSTOMER_CODE
+    default: "lab"
+  - name: START_TIME
+    default: "now-24h"
+  - name: END_TIME
+    default: "now"
+
+how_to_implement: >
+  Requires Sysmon EventID 1 (ProcessCreate) flowing to the Wazuh Indexer.
+  Fields data_win_eventdata_image and data_win_eventdata_commandLine are
+  confirmed working across all EventID 1 detections in this environment.
+  Field-validated based on established EventID 1 detection patterns.
+  False positive tuning may be required by parent process or specific
+  command-line context (e.g. legitimate software updaters).
+
+known_false_positives: >
+  Legitimate software installations, update mechanisms, and administrative
+  scripts may use PowerShell download methods. Filter by parent process,
+  known software paths, or specific URLs as needed.
+
+references:
+  - https://learn.microsoft.com/en-us/dotnet/api/system.net.webclient?view=net-9.0#methods
+  - https://blog.malwarebytes.com/malwarebytes-news/2021/02/lazyscripter-from-empire-to-double-rat/
+  - https://github.com/redcanaryco/atomic-red-team/blob/master/atomics/T1059.001/T1059.001.md
+  - https://thedfirreport.com/2023/05/22/icedid-macro-ends-in-nokoyawa-ransomware/
+  - https://attack.mitre.org/techniques/T1059/001/
+  - https://attack.mitre.org/techniques/T1105/
+
+response:
+  message: >
+    PowerShell download activity detected on $agent_name$ by $data_win_eventdata_user$.
+    Process: $data_win_eventdata_image$.
+    Command: $data_win_eventdata_commandLine$.
+    MITRE ATT&CK: T1059.001, T1105
+  risk_score: 56
+  severity: medium
+  risk_objects:
+    - field: agent_name
+      type: system
+      score: 56
+    - field: data_win_eventdata_user
+      type: user
+      score: 56
+  threat_objects:
+    - field: data_win_eventdata_parentImage
+      type: parent_process_name
+    - field: data_win_eventdata_image
+      type: process_name
+
+tags:
+  analytic_story:
+    - Ingress Tool Transfer
+    - Malicious PowerShell
+    - IcedID
+    - Hermetic Wiper
+    - XWorm
+    - StealC Stealer
+    - APT37 Rustonotto and FadeStealer
+    - Winter Vivern
+    - NetSupport RMM Tool Abuse
+  asset_type: Endpoint
+  mitre_attack_id:
+    - T1059.001
+    - T1105
+  custom_tags:
+    - powershell
+    - download
+    - invoke_webrequest
+    - webclient
+    - ingress_tool_transfer
+  product:
+    - Wazuh
+  security_domain: endpoint
