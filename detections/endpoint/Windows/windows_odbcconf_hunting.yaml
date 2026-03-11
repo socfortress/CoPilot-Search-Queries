@@ -1,0 +1,99 @@
+name: Windows Odbcconf Hunting
+id: Windows-Odbcconf-Hunting
+version: 7
+schema_version: 1
+date: '2025-05-02'
+author: SOCFortress LLC
+status: production
+type: Hunting
+description: >
+  Detects any execution of odbcconf.exe on Windows endpoints. Odbcconf.exe is
+  a legitimate ODBC configuration utility that can be abused by attackers to
+  execute arbitrary commands or load malicious DLLs via its /A and /F flags,
+  bypassing application whitelisting. Any execution in non-administrative or
+  unexpected contexts should be investigated. Associated with Living Off The Land
+  tradecraft.
+  MITRE ATT&CK: T1218.008 (System Binary Proxy Execution: Odbcconf).
+
+data_source:
+  - Sysmon EventID 1 (ProcessCreate)
+
+search:
+  query:
+    bool:
+      must:
+        - term:
+            agent_name: "AGENT_NAME"
+        - term:
+            agent_labels_customer: "CUSTOMER_CODE"
+        - term:
+            data_win_system_eventID: "1"
+        - wildcard:
+            data_win_eventdata_image: "*\\odbcconf.exe"
+        - range:
+            timestamp:
+              gte: "START_TIME"
+              lte: "END_TIME"
+
+parameters:
+  - name: AGENT_NAME
+    default: "DESKTOP-AM0HLGE"
+  - name: CUSTOMER_CODE
+    default: "lab"
+  - name: START_TIME
+    default: "now-24h"
+  - name: END_TIME
+    default: "now"
+
+how_to_implement: >
+  Requires Sysmon EventID 1 (ProcessCreate) flowing to the Wazuh Indexer.
+  Field data_win_eventdata_image is confirmed working across all EventID 1
+  detections in this environment. Field-validated based on established EventID 1
+  detection patterns. This is a broad hunting detection — review commandLine
+  for /A REGSVR or /F flags loading DLLs to confirm malicious intent.
+
+known_false_positives: >
+  False positives will be present as odbcconf.exe may be invoked by legitimate
+  ODBC driver installations or database software. This detection is intended
+  for hunting and tuning purposes.
+
+references:
+  - https://strontic.github.io/xcyclopedia/library/odbcconf.exe-07FBA12552331355C103999806627314.html
+  - https://twitter.com/redcanary/status/1541838407894171650
+  - https://attack.mitre.org/techniques/T1218/008/
+
+response:
+  message: >
+    odbcconf.exe execution detected on $agent_name$ by $data_win_eventdata_user$.
+    Parent: $data_win_eventdata_parentImage$.
+    Command: $data_win_eventdata_commandLine$.
+    MITRE ATT&CK: T1218.008
+  risk_score: 20
+  severity: low
+  risk_objects:
+    - field: agent_name
+      type: system
+      score: 20
+    - field: data_win_eventdata_user
+      type: user
+      score: 20
+  threat_objects:
+    - field: data_win_eventdata_parentImage
+      type: parent_process_name
+    - field: data_win_eventdata_image
+      type: process_name
+
+tags:
+  analytic_story:
+    - Living Off The Land
+  asset_type: Endpoint
+  mitre_attack_id:
+    - T1218.008
+  custom_tags:
+    - odbcconf
+    - lolbas
+    - proxy_execution
+    - defense_evasion
+  product:
+    - Wazuh
+  security_domain: endpoint

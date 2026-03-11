@@ -1,0 +1,114 @@
+name: Windows New Default File Association Value Set
+id: Windows-New-Default-File-Association-Value-Set
+version: 3
+schema_version: 1
+date: '2025-05-02'
+author: SOCFortress LLC
+status: production
+type: Hunting
+description: >
+  Detects registry modifications to default file association handlers under
+  HKEY_CLASSES_ROOT\*\shell\open\command. Attackers modify these values to
+  execute arbitrary scripts or payloads when a user opens a file with a given
+  extension, enabling persistence and code execution. Associated with Hermetic
+  Wiper, Prestige Ransomware, Windows Privilege Escalation, and Windows
+  Persistence Techniques tradecraft.
+  MITRE ATT&CK: T1546.001 (Event Triggered Execution: Change Default File Association).
+
+data_source:
+  - Sysmon EventID 13 (RegistryEvent Value Set)
+
+search:
+  query:
+    bool:
+      must:
+        - term:
+            agent_name: "AGENT_NAME"
+        - term:
+            agent_labels_customer: "CUSTOMER_CODE"
+        - term:
+            data_win_system_eventID: "13"
+        - wildcard:
+            data_win_eventdata_targetObject: "*\\shell\\open\\command\\*"
+        - bool:
+            should:
+              - wildcard:
+                  data_win_eventdata_targetObject: "*HKCR\\*"
+              - wildcard:
+                  data_win_eventdata_targetObject: "*HKEY_CLASSES_ROOT\\*"
+              - wildcard:
+                  data_win_eventdata_targetObject: "*Classes\\*\\shell\\open\\command\\*"
+            minimum_should_match: 1
+        - range:
+            timestamp:
+              gte: "START_TIME"
+              lte: "END_TIME"
+
+parameters:
+  - name: AGENT_NAME
+    default: "DESKTOP-AM0HLGE"
+  - name: CUSTOMER_CODE
+    default: "lab"
+  - name: START_TIME
+    default: "now-24h"
+  - name: END_TIME
+    default: "now"
+
+how_to_implement: >
+  Requires Sysmon EventID 13 (RegistryEvent Value Set) flowing to the Wazuh Indexer.
+  Field data_win_eventdata_targetObject is confirmed working across all EventID 13
+  detections in this environment. Field-validated based on established EventID 13
+  detection patterns. Note: HKEY_CLASSES_ROOT paths may appear as HKCR or as
+  HKEY_LOCAL_MACHINE\SOFTWARE\Classes in Sysmon telemetry depending on the context
+  (system vs user hive). Consider also monitoring
+  *HKEY_LOCAL_MACHINE\SOFTWARE\Classes\*\shell\open\command* for broader coverage.
+
+known_false_positives: >
+  Windows and third-party software will create and modify file associations during
+  installation or upgrades. Additional filters should be applied to tune
+  environment-specific false positives, particularly around known software
+  installers and update processes.
+
+references:
+  - https://dmcxblue.gitbook.io/red-team-notes-2-0/red-team-techniques/privilege-escalation/untitled-3/accessibility-features
+  - https://attack.mitre.org/techniques/T1546/001/
+
+response:
+  message: >
+    Default file association registry value modified on $agent_name$ by $data_win_eventdata_user$.
+    Registry path: $data_win_eventdata_targetObject$.
+    Value set: $data_win_eventdata_details$.
+    MITRE ATT&CK: T1546.001
+  risk_score: 40
+  severity: medium
+  risk_objects:
+    - field: agent_name
+      type: system
+      score: 40
+    - field: data_win_eventdata_user
+      type: user
+      score: 40
+  threat_objects:
+    - field: data_win_eventdata_targetObject
+      type: registry_path
+
+tags:
+  analytic_story:
+    - Hermetic Wiper
+    - Windows Registry Abuse
+    - Prestige Ransomware
+    - Windows Privilege Escalation
+    - Windows Persistence Techniques
+    - Data Destruction
+  asset_type: Endpoint
+  mitre_attack_id:
+    - T1546.001
+  custom_tags:
+    - file_association
+    - shell_open_command
+    - hkcr
+    - persistence
+    - registry
+  product:
+    - Wazuh
+  security_domain: endpoint

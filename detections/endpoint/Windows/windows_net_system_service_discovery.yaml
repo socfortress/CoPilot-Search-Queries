@@ -1,0 +1,101 @@
+name: Windows Net System Service Discovery
+id: Windows-Net-System-Service-Discovery
+version: 1
+schema_version: 1
+date: '2025-08-25'
+author: SOCFortress LLC
+status: production
+type: Anomaly
+description: >
+  Detects enumeration of Windows services using the net start command. Adversaries
+  use this built-in utility during early reconnaissance to gain situational awareness
+  of running services, identify security software, and discover opportunities for
+  privilege escalation or lateral movement. Associated with LAMEHUG malware tradecraft.
+  MITRE ATT&CK: T1007 (System Service Discovery).
+
+data_source:
+  - Sysmon EventID 1 (ProcessCreate)
+
+search:
+  query:
+    bool:
+      must:
+        - term:
+            agent_name: "AGENT_NAME"
+        - term:
+            agent_labels_customer: "CUSTOMER_CODE"
+        - term:
+            data_win_system_eventID: "1"
+        - bool:
+            should:
+              - wildcard:
+                  data_win_eventdata_image: "*\\net.exe"
+              - wildcard:
+                  data_win_eventdata_image: "*\\net1.exe"
+            minimum_should_match: 1
+        - wildcard:
+            data_win_eventdata_commandLine: "* start*"
+        - range:
+            timestamp:
+              gte: "START_TIME"
+              lte: "END_TIME"
+
+parameters:
+  - name: AGENT_NAME
+    default: "DESKTOP-AM0HLGE"
+  - name: CUSTOMER_CODE
+    default: "lab"
+  - name: START_TIME
+    default: "now-24h"
+  - name: END_TIME
+    default: "now"
+
+how_to_implement: >
+  Requires Sysmon EventID 1 (ProcessCreate) flowing to the Wazuh Indexer.
+  Fields data_win_eventdata_image and data_win_eventdata_commandLine are
+  confirmed working across all EventID 1 detections in this environment.
+  Field-validated based on established EventID 1 detection patterns.
+
+known_false_positives: >
+  Administrators or power users may use net start for legitimate troubleshooting
+  or service management. Filter by parent process or user context as needed.
+
+references:
+  - https://cert.gov.ua/article/6284730
+  - https://attack.mitre.org/techniques/T1007/
+
+response:
+  message: >
+    Service enumeration via net start detected on $agent_name$ by $data_win_eventdata_user$.
+    Parent: $data_win_eventdata_parentImage$.
+    Command: $data_win_eventdata_commandLine$.
+    MITRE ATT&CK: T1007
+  risk_score: 3
+  severity: low
+  risk_objects:
+    - field: agent_name
+      type: system
+      score: 3
+    - field: data_win_eventdata_user
+      type: user
+      score: 3
+  threat_objects:
+    - field: data_win_eventdata_parentImage
+      type: parent_process_name
+    - field: data_win_eventdata_image
+      type: process_name
+
+tags:
+  analytic_story:
+    - LAMEHUG
+  asset_type: Endpoint
+  mitre_attack_id:
+    - T1007
+  custom_tags:
+    - net_start
+    - service_discovery
+    - reconnaissance
+    - living_off_the_land
+  product:
+    - Wazuh
+  security_domain: endpoint

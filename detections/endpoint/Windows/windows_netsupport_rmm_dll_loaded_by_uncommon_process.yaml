@@ -1,0 +1,117 @@
+name: Windows NetSupport RMM DLL Loaded By Uncommon Process
+id: Windows-NetSupport-RMM-DLL-Loaded-By-Uncommon-Process
+version: 1
+schema_version: 1
+date: '2025-11-20'
+author: SOCFortress LLC
+status: production
+type: Anomaly
+description: >
+  Detects loading of NetSupport Remote Manager DLLs (CryptPak.dll, HTCTL32.DLL,
+  pcicapi.dll, pcichek.dll, PCICL32.DLL, TCCTL32.DLL) by processes running outside
+  of the standard Program Files installation paths. Adversaries abuse the legitimate
+  NetSupport RMM tool as a RAT by deploying it from non-standard directories such
+  as Downloads, ProgramData, or user-specific folders. Associated with NetSupport
+  RMM Tool Abuse, Evalusion campaign, and domain compromise intrusions.
+  MITRE ATT&CK: T1036 (Masquerading).
+
+data_source:
+  - Sysmon EventID 7 (ImageLoad)
+
+search:
+  query:
+    bool:
+      must:
+        - term:
+            agent_name: "AGENT_NAME"
+        - term:
+            agent_labels_customer: "CUSTOMER_CODE"
+        - term:
+            data_win_system_eventID: "7"
+        - bool:
+            should:
+              - wildcard:
+                  data_win_eventdata_imageLoaded: "*\\CryptPak.dll"
+              - wildcard:
+                  data_win_eventdata_imageLoaded: "*\\HTCTL32.DLL"
+              - wildcard:
+                  data_win_eventdata_imageLoaded: "*\\pcicapi.dll"
+              - wildcard:
+                  data_win_eventdata_imageLoaded: "*\\pcichek.dll"
+              - wildcard:
+                  data_win_eventdata_imageLoaded: "*\\PCICL32.DLL"
+              - wildcard:
+                  data_win_eventdata_imageLoaded: "*\\TCCTL32.DLL"
+            minimum_should_match: 1
+        - range:
+            timestamp:
+              gte: "START_TIME"
+              lte: "END_TIME"
+      must_not:
+        - wildcard:
+            data_win_eventdata_image: "C:\\\\Program Files\\\\*"
+        - wildcard:
+            data_win_eventdata_image: "C:\\\\Program Files (x86)\\\\*"
+
+parameters:
+  - name: AGENT_NAME
+    default: "DESKTOP-AM0HLGE"
+  - name: CUSTOMER_CODE
+    default: "lab"
+  - name: START_TIME
+    default: "now-24h"
+  - name: END_TIME
+    default: "now"
+
+how_to_implement: >
+  Requires Sysmon EventID 7 (ImageLoad) flowing to the Wazuh Indexer.
+  Fields data_win_eventdata_imageLoaded and data_win_eventdata_image are
+  confirmed working (153+ events/2h observed in this environment).
+  Field-validated based on established EventID 7 detection patterns.
+  Note: Splunk's original detection also filters on DLL signature "NetSupport Ltd"
+  which is not available in Wazuh EventID 7 telemetry — the DLL name list plus
+  path exclusion provides equivalent coverage.
+
+known_false_positives: >
+  Legitimate NetSupport RMM installations outside of the standard Program Files
+  directory will trigger this detection. Apply filters to exclude known approved
+  installation paths.
+
+references:
+  - https://thedfirreport.com/2023/10/30/netsupport-intrusion-results-in-domain-compromise/
+  - https://www.esentire.com/blog/evalusion-campaign-delivers-amatera-stealer-and-netsupport-rat
+  - https://attack.mitre.org/techniques/T1036/
+
+response:
+  message: >
+    NetSupport RMM DLL loaded from non-standard path on $agent_name$.
+    DLL: $data_win_eventdata_imageLoaded$.
+    Loaded by: $data_win_eventdata_image$.
+    MITRE ATT&CK: T1036
+  risk_score: 30
+  severity: medium
+  risk_objects:
+    - field: agent_name
+      type: system
+      score: 30
+  threat_objects:
+    - field: data_win_eventdata_image
+      type: process_name
+    - field: data_win_eventdata_imageLoaded
+      type: process
+
+tags:
+  analytic_story:
+    - NetSupport RMM Tool Abuse
+  asset_type: Endpoint
+  mitre_attack_id:
+    - T1036
+  custom_tags:
+    - netsupport
+    - rmm
+    - rat
+    - dll_load
+    - masquerading
+  product:
+    - Wazuh
+  security_domain: endpoint

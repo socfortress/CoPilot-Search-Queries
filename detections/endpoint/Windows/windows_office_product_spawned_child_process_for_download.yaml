@@ -1,0 +1,143 @@
+name: Windows Office Product Spawned Child Process For Download
+id: Windows-Office-Product-Spawned-Child-Process-For-Download
+version: 6
+schema_version: 1
+date: '2025-09-18'
+author: SOCFortress LLC
+status: production
+type: TTP
+description: >
+  Detects Office applications (Word, Excel, PowerPoint, OneNote, etc.) spawning
+  child processes with HTTP/HTTPS URLs in the command line, excluding common
+  browsers. This pattern indicates malicious documents using LOLBins for payload
+  delivery — a core technique in spearphishing campaigns. Associated with
+  CVE-2023-36884, PlugX, NjRAT, APT37, and Formbook delivery via trojanized
+  OneNote documents.
+  MITRE ATT&CK: T1566.001 (Spearphishing Attachment).
+
+data_source:
+  - Sysmon EventID 1 (ProcessCreate)
+
+search:
+  query:
+    bool:
+      must:
+        - term:
+            agent_name: "AGENT_NAME"
+        - term:
+            agent_labels_customer: "CUSTOMER_CODE"
+        - term:
+            data_win_system_eventID: "1"
+        - bool:
+            should:
+              - wildcard:
+                  data_win_eventdata_parentImage: "*\\winword.exe"
+              - wildcard:
+                  data_win_eventdata_parentImage: "*\\excel.exe"
+              - wildcard:
+                  data_win_eventdata_parentImage: "*\\powerpnt.exe"
+              - wildcard:
+                  data_win_eventdata_parentImage: "*\\onenote.exe"
+              - wildcard:
+                  data_win_eventdata_parentImage: "*\\onenotem.exe"
+              - wildcard:
+                  data_win_eventdata_parentImage: "*\\outlook.exe"
+              - wildcard:
+                  data_win_eventdata_parentImage: "*\\msaccess.exe"
+              - wildcard:
+                  data_win_eventdata_parentImage: "*\\mspub.exe"
+              - wildcard:
+                  data_win_eventdata_parentImage: "*\\visio.exe"
+            minimum_should_match: 1
+        - bool:
+            should:
+              - wildcard:
+                  data_win_eventdata_commandLine: "*http:*"
+              - wildcard:
+                  data_win_eventdata_commandLine: "*https:*"
+            minimum_should_match: 1
+        - range:
+            timestamp:
+              gte: "START_TIME"
+              lte: "END_TIME"
+      must_not:
+        - bool:
+            should:
+              - wildcard:
+                  data_win_eventdata_image: "*\\firefox.exe"
+              - wildcard:
+                  data_win_eventdata_image: "*\\chrome.exe"
+              - wildcard:
+                  data_win_eventdata_image: "*\\iexplore.exe"
+              - wildcard:
+                  data_win_eventdata_image: "*\\msedge.exe"
+            minimum_should_match: 1
+
+parameters:
+  - name: AGENT_NAME
+    default: "DESKTOP-AM0HLGE"
+  - name: CUSTOMER_CODE
+    default: "lab"
+  - name: START_TIME
+    default: "now-24h"
+  - name: END_TIME
+    default: "now"
+
+how_to_implement: >
+  Requires Sysmon EventID 1 (ProcessCreate) flowing to the Wazuh Indexer.
+  Fields data_win_eventdata_parentImage, data_win_eventdata_image, and
+  data_win_eventdata_commandLine are confirmed working across all EventID 1
+  detections in this environment. Field-validated based on established
+  EventID 1 detection patterns. Add any additional browsers used in the
+  environment to the must_not exclusion list to reduce false positives.
+
+known_false_positives: >
+  Default browser not included in the exclusion list may trigger false positives.
+  Add any additional browsers present in the environment to the must_not clause.
+
+references:
+  - https://app.any.run/tasks/92d7ef61-bfd7-4c92-bc15-322172b4ebec/
+  - https://www.trustwave.com/en-us/resources/blogs/spiderlabs-blog/trojanized-onenote-document-leads-to-formbook-malware/
+  - https://attack.mitre.org/techniques/T1566/001/
+
+response:
+  message: >
+    Office application spawned child process with HTTP/HTTPS URL on $agent_name$.
+    Office parent: $data_win_eventdata_parentImage$.
+    Child process: $data_win_eventdata_image$.
+    Command: $data_win_eventdata_commandLine$.
+    MITRE ATT&CK: T1566.001
+  risk_score: 35
+  severity: medium
+  risk_objects:
+    - field: agent_name
+      type: system
+      score: 35
+    - field: data_win_eventdata_user
+      type: user
+      score: 35
+  threat_objects:
+    - field: data_win_eventdata_parentImage
+      type: parent_process_name
+    - field: data_win_eventdata_image
+      type: process_name
+
+tags:
+  analytic_story:
+    - Spearphishing Attachments
+    - CVE-2023-36884 Office and Windows HTML RCE Vulnerability
+    - PlugX
+    - NjRAT
+    - APT37 Rustonotto and FadeStealer
+  asset_type: Endpoint
+  mitre_attack_id:
+    - T1566.001
+  custom_tags:
+    - office_macro
+    - spearphishing
+    - lolbins
+    - download
+    - malicious_document
+  product:
+    - Wazuh
+  security_domain: endpoint

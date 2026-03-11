@@ -1,0 +1,112 @@
+name: Windows NirSoft AdvancedRun
+id: Windows-NirSoft-AdvancedRun
+version: 8
+schema_version: 1
+date: '2025-05-02'
+author: SOCFortress LLC
+status: production
+type: TTP
+description: >
+  Detects execution of AdvancedRun.exe (NirSoft), a tool with capabilities
+  similar to PsExec for remote code execution and configuration-based automation.
+  Detection focuses on common command-line arguments (EXEFilename, /cfg, RunAs,
+  WindowState) used in both legitimate and malicious contexts. Abused by destructive
+  malware including WhisperGate targeting Ukrainian organizations.
+  MITRE ATT&CK: T1588.002 (Obtain Capabilities: Tool).
+
+data_source:
+  - Sysmon EventID 1 (ProcessCreate)
+
+search:
+  query:
+    bool:
+      must:
+        - term:
+            agent_name: "AGENT_NAME"
+        - term:
+            agent_labels_customer: "CUSTOMER_CODE"
+        - term:
+            data_win_system_eventID: "1"
+        - wildcard:
+            data_win_eventdata_image: "*\\advancedrun.exe"
+        - bool:
+            should:
+              - wildcard:
+                  data_win_eventdata_commandLine: "*EXEFilename*"
+              - wildcard:
+                  data_win_eventdata_commandLine: "*/cfg*"
+              - wildcard:
+                  data_win_eventdata_commandLine: "*RunAs*"
+              - wildcard:
+                  data_win_eventdata_commandLine: "*WindowState*"
+            minimum_should_match: 1
+        - range:
+            timestamp:
+              gte: "START_TIME"
+              lte: "END_TIME"
+
+parameters:
+  - name: AGENT_NAME
+    default: "DESKTOP-AM0HLGE"
+  - name: CUSTOMER_CODE
+    default: "lab"
+  - name: START_TIME
+    default: "now-24h"
+  - name: END_TIME
+    default: "now"
+
+how_to_implement: >
+  Requires Sysmon EventID 1 (ProcessCreate) flowing to the Wazuh Indexer.
+  Fields data_win_eventdata_image and data_win_eventdata_commandLine are
+  confirmed working across all EventID 1 detections in this environment.
+  Field-validated based on established EventID 1 detection patterns.
+
+known_false_positives: >
+  False positives are limited given the specificity of AdvancedRun.exe.
+  Filter based on known legitimate administrative usage if present in
+  the environment.
+
+references:
+  - http://www.nirsoft.net/utils/advanced_run.html
+  - https://www.microsoft.com/security/blog/2022/01/15/destructive-malware-targeting-ukrainian-organizations/
+  - https://attack.mitre.org/techniques/T1588/002/
+
+response:
+  message: >
+    AdvancedRun.exe execution detected on $agent_name$ by $data_win_eventdata_user$.
+    Parent: $data_win_eventdata_parentImage$.
+    Command: $data_win_eventdata_commandLine$.
+    MITRE ATT&CK: T1588.002
+  risk_score: 60
+  severity: high
+  risk_objects:
+    - field: agent_name
+      type: system
+      score: 60
+    - field: data_win_eventdata_user
+      type: user
+      score: 60
+  threat_objects:
+    - field: data_win_eventdata_parentImage
+      type: parent_process_name
+    - field: data_win_eventdata_image
+      type: process_name
+
+tags:
+  analytic_story:
+    - Ransomware
+    - Unusual Processes
+    - Data Destruction
+    - WhisperGate
+  asset_type: Endpoint
+  mitre_attack_id:
+    - T1588.002
+  custom_tags:
+    - advancedrun
+    - nirsoft
+    - lolbins
+    - remote_execution
+    - tool_abuse
+  product:
+    - Wazuh
+  security_domain: endpoint
