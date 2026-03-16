@@ -1,0 +1,144 @@
+name: Windows ngrok Usage Observed
+id: Windows_ngrok_Usage_Observed
+version: 1
+schema_version: "1.0"
+date: "2026-03-16"
+author: SOCFortress LLC
+status: production
+type: TTP
+description: >
+  Detects any execution of ngrok.exe on Windows endpoints, identified by process
+  image name or OriginalFileName metadata. This is a broader companion to the
+  ngrok reverse proxy detection — it fires on any ngrok execution regardless of
+  arguments, providing maximum coverage. ngrok is a legitimate tunneling tool
+  increasingly abused by attackers for C2 communications, data exfiltration,
+  and bypassing network defenses.
+  MITRE ATT&CK: T1572 (Protocol Tunneling), T1090 (Proxy), T1102 (Web Service).
+
+data_source:
+  - Sysmon EventID 1 (ProcessCreate)
+
+search:
+  index_pattern: "${INDEX_PATTERN}"
+  size: 100
+  sort:
+    - timestamp: desc
+  query:
+    bool:
+      must:
+        - term:
+            agent_name: "${AGENT_NAME}"
+        - term:
+            agent_labels_customer: "${CUSTOMER_CODE}"
+        - term:
+            data_win_system_eventID: "1"
+        - bool:
+            should:
+              - wildcard:
+                  data_win_eventdata_image: "*\\ngrok.exe"
+              - term:
+                  data_win_eventdata_originalFileName: "ngrok.exe"
+            minimum_should_match: 1
+        - range:
+            timestamp:
+              gte: "${START_TIME}"
+              lte: "${END_TIME}"
+  _source:
+    - timestamp
+    - agent_name
+    - data_win_system_eventID
+    - data_win_eventdata_image
+    - data_win_eventdata_commandLine
+    - data_win_eventdata_originalFileName
+    - data_win_eventdata_parentImage
+    - data_win_eventdata_user
+
+parameters:
+  AGENT_NAME:
+    description: "Target agent/host name"
+    type: string
+    required: true
+    example: "DESKTOP-AM0HLGE"
+  CUSTOMER_CODE:
+    description: "Customer label for filtering"
+    type: string
+    required: true
+    example: "lab"
+  INDEX_PATTERN:
+    description: "Elasticsearch index pattern"
+    type: string
+    required: true
+    example: "wazuh-lab_*"
+  START_TIME:
+    description: "Query start time (ISO 8601 or relative)"
+    type: datetime
+    required: false
+    default: "now-24h"
+    example: "2026-03-16 00:00:00.000"
+  END_TIME:
+    description: "Query end time (ISO 8601 or relative)"
+    type: datetime
+    required: false
+    default: "now"
+    example: "2026-03-16 23:59:59.999"
+
+how_to_implement: >
+  This detection requires Wazuh agents deployed on Windows endpoints with Sysmon
+  installed and configured to log process creation events (EventID 1) with full
+  command-line arguments and file metadata (originalFileName).
+  VALIDATED — ngrok.exe simulation confirmed 3 hits via Sysmon EventID 1.
+  The originalFileName check catches renamed ngrok binaries.
+
+known_false_positives: >
+  Legitimate use of ngrok for development or authorized remote access will trigger
+  this detection. Filter by known approved users, machines, or parent processes
+  as needed. Consider allowlisting specific ngrok authtoken values if known.
+
+references:
+  - https://attack.mitre.org/techniques/T1572/
+  - https://attack.mitre.org/techniques/T1090/
+  - https://www.cisa.gov/uscert/ncas/alerts/TA18-201A
+
+response:
+  message: >
+    ngrok execution detected on $agent_name$ by $data_win_eventdata_user$.
+    Process: $data_win_eventdata_image$.
+    Parent: $data_win_eventdata_parentImage$.
+    Command: $data_win_eventdata_commandLine$.
+    MITRE ATT&CK: T1572, T1090, T1102
+  risk_score: 60
+  severity: high
+  risk_objects:
+    - field: agent_name
+      type: system
+      score: 60
+    - field: data_win_eventdata_user
+      type: user
+      score: 60
+  threat_objects:
+    - field: data_win_eventdata_image
+      type: process_name
+    - field: data_win_eventdata_parentImage
+      type: parent_process_name
+
+tags:
+  analytic_story:
+    - Reverse Network Proxy
+    - CISA AA22-320A
+  asset_type: Endpoint
+  mitre_attack_id:
+    - T1572
+    - T1090
+    - T1102
+  custom_tags:
+    - ngrok
+    - tunneling
+    - reverse_proxy
+    - defense_evasion
+    - c2
+  product:
+    - Wazuh
+  security_domain: endpoint
+
+graylog:
+  query: data_win_system_eventID:"1" AND (data_win_eventdata_image:/.*\\ngrok\.exe/ OR data_win_eventdata_originalFileName:"ngrok.exe")
