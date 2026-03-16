@@ -1,0 +1,147 @@
+name: Windows User Account Created
+id: Windows_User_Account_Created
+version: 1
+schema_version: "1.0"
+date: "2026-03-16"
+author: SOCFortress LLC
+status: production
+type: TTP
+description: >
+  Detects new local user account creation events via Windows Security EventID 4720.
+  Attackers create local accounts to maintain persistence, enable lateral movement,
+  or establish backdoor access. Excludes known legitimate temporary accounts created
+  by Lenovo, Windows setup (defaultuser), TempAdmin patterns, and WsiAccount.
+  Requires User Account Management auditing enabled:
+  auditpol /set /subcategory:"User Account Management" /success:enable
+  MITRE ATT&CK: T1136.001 (Create Account: Local Account).
+
+data_source:
+  - Windows Security EventID 4720 (User Account Created)
+
+search:
+  index_pattern: "${INDEX_PATTERN}"
+  size: 100
+  sort:
+    - timestamp: desc
+  query:
+    bool:
+      must:
+        - term:
+            agent_name: "${AGENT_NAME}"
+        - term:
+            agent_labels_customer: "${CUSTOMER_CODE}"
+        - term:
+            data_win_system_eventID: "4720"
+        - term:
+            data_win_system_providerName: "Microsoft-Windows-Security-Auditing"
+        - range:
+            timestamp:
+              gte: "${START_TIME}"
+              lte: "${END_TIME}"
+      must_not:
+        - bool:
+            should:
+              - wildcard:
+                  data_win_eventdata_targetUserName: "lenovo_tmp_????????"
+              - wildcard:
+                  data_win_eventdata_targetUserName: "defaultuser?"
+              - wildcard:
+                  data_win_eventdata_targetUserName: "TempAdmin-????????"
+              - term:
+                  data_win_eventdata_targetUserName: "WsiAccount"
+            minimum_should_match: 1
+  _source:
+    - timestamp
+    - agent_name
+    - data_win_system_eventID
+    - data_win_eventdata_targetUserName
+    - data_win_eventdata_targetDomainName
+    - data_win_eventdata_subjectUserName
+    - data_win_eventdata_subjectDomainName
+    - data_win_eventdata_targetSid
+
+parameters:
+  AGENT_NAME:
+    description: "Target agent/host name"
+    type: string
+    required: true
+    example: "DESKTOP-AM0HLGE"
+  CUSTOMER_CODE:
+    description: "Customer label for filtering"
+    type: string
+    required: true
+    example: "lab"
+  INDEX_PATTERN:
+    description: "Elasticsearch index pattern"
+    type: string
+    required: true
+    example: "wazuh-lab_*"
+  START_TIME:
+    description: "Query start time (ISO 8601 or relative)"
+    type: datetime
+    required: false
+    default: "now-24h"
+    example: "2026-03-16 00:00:00.000"
+  END_TIME:
+    description: "Query end time (ISO 8601 or relative)"
+    type: datetime
+    required: false
+    default: "now"
+    example: "2026-03-16 23:59:59.999"
+
+how_to_implement: >
+  This detection requires Windows Security Auditing enabled for User Account
+  Management. Enable with:
+  auditpol /set /subcategory:"User Account Management" /success:enable /failure:enable
+  Confirmed working in this environment after enabling auditing. Security channel
+  is configured in Wazuh agent ossec.conf and EventID 4720 is not excluded.
+  VALIDATED — TestAttacker and Tettacker creation confirmed via EventID 4720.
+  Exclusion pattern for lenovo_tmp_* verified working in Graylog.
+
+known_false_positives: >
+  Legitimate software installations or system tools may create local accounts.
+  Known patterns (Lenovo temp accounts, Windows setup defaultuser, TempAdmin,
+  WsiAccount) are excluded. Add additional patterns for environment-specific
+  known benign account names.
+
+references:
+  - https://attack.mitre.org/techniques/T1136/001/
+  - https://docs.microsoft.com/en-us/windows/security/threat-protection/auditing/event-4720
+
+response:
+  message: >
+    New local user account created on $agent_name$ by $data_win_eventdata_subjectUserName$.
+    New account: $data_win_eventdata_targetUserName$.
+    Domain: $data_win_eventdata_targetDomainName$.
+    MITRE ATT&CK: T1136.001
+  risk_score: 60
+  severity: high
+  risk_objects:
+    - field: agent_name
+      type: system
+      score: 60
+    - field: data_win_eventdata_subjectUserName
+      type: user
+      score: 60
+  threat_objects:
+    - field: data_win_eventdata_targetUserName
+      type: user
+
+tags:
+  analytic_story:
+    - Windows Persistence Techniques
+    - Compromised Windows Host
+  asset_type: Endpoint
+  mitre_attack_id:
+    - T1136.001
+  custom_tags:
+    - account_creation
+    - local_account
+    - persistence
+    - backdoor
+  product:
+    - Wazuh
+  security_domain: endpoint
+
+graylog:
+  query: data_win_system_eventID:"4720" AND NOT (data_win_eventdata_targetUserName:/lenovo_tmp_......../ OR data_win_eventdata_targetUserName:/defaultuser./ OR data_win_eventdata_targetUserName:/TempAdmin-......../ OR data_win_eventdata_targetUserName:"WsiAccount")
