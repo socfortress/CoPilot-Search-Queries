@@ -1,0 +1,164 @@
+name: Windows Torrent Activity
+id: Windows_Torrent_Activity
+version: 1
+schema_version: "1.0"
+date: "2026-03-16"
+author: SOCFortress LLC
+status: production
+type: TTP
+description: >
+  Detects execution of torrent client software on Windows endpoints by monitoring
+  for the word "torrent" (case-insensitive) in process image path, Product name,
+  Company name, or Description fields. Torrent clients may indicate data exfiltration,
+  policy violations, or malware distribution activity. The "Torrential" exclusion
+  prevents false positives from legitimate software with similar names.
+  VALIDATED against DESKTOP-AM0HLGE — confirmed torrent_client.exe simulation
+  captured via Sysmon EventID 1.
+  MITRE ATT&CK: T1048 (Exfiltration Over Alternative Protocol).
+
+data_source:
+  - Sysmon EventID 1 (ProcessCreate)
+
+search:
+  index_pattern: "${INDEX_PATTERN}"
+  size: 100
+  sort:
+    - timestamp: desc
+  query:
+    bool:
+      must:
+        - term:
+            agent_name: "${AGENT_NAME}"
+        - term:
+            agent_labels_customer: "${CUSTOMER_CODE}"
+        - term:
+            data_win_system_eventID: "1"
+        - bool:
+            should:
+              - wildcard:
+                  data_win_eventdata_image: "*orrent*"
+              - wildcard:
+                  data_win_eventdata_product: "*orrent*"
+              - wildcard:
+                  data_win_eventdata_company: "*orrent*"
+              - wildcard:
+                  data_win_eventdata_description: "*orrent*"
+            minimum_should_match: 1
+        - range:
+            timestamp:
+              gte: "${START_TIME}"
+              lte: "${END_TIME}"
+      must_not:
+        - bool:
+            should:
+              - bool:
+                  must:
+                    - wildcard:
+                        data_win_eventdata_image: "*orrent*"
+                    - wildcard:
+                        data_win_eventdata_image: "*orrential*"
+              - bool:
+                  must:
+                    - wildcard:
+                        data_win_eventdata_company: "*orrent*"
+                    - wildcard:
+                        data_win_eventdata_company: "*orrential*"
+            minimum_should_match: 1
+  _source:
+    - timestamp
+    - agent_name
+    - data_win_system_eventID
+    - data_win_eventdata_image
+    - data_win_eventdata_commandLine
+    - data_win_eventdata_company
+    - data_win_eventdata_product
+    - data_win_eventdata_description
+    - data_win_eventdata_parentImage
+    - data_win_eventdata_user
+
+parameters:
+  AGENT_NAME:
+    description: "Target agent/host name"
+    type: string
+    required: true
+    example: "DESKTOP-AM0HLGE"
+  CUSTOMER_CODE:
+    description: "Customer label for filtering"
+    type: string
+    required: true
+    example: "lab"
+  INDEX_PATTERN:
+    description: "Elasticsearch index pattern"
+    type: string
+    required: true
+    example: "wazuh-lab_*"
+  START_TIME:
+    description: "Query start time (ISO 8601 or relative)"
+    type: datetime
+    required: false
+    default: "now-24h"
+    example: "2026-03-16 00:00:00.000"
+  END_TIME:
+    description: "Query end time (ISO 8601 or relative)"
+    type: datetime
+    required: false
+    default: "now"
+    example: "2026-03-16 23:59:59.999"
+
+how_to_implement: >
+  This detection requires Wazuh agents deployed on Windows endpoints with Sysmon
+  installed and configured to log process creation events (EventID 1) with full
+  command-line arguments and file metadata (company, product, description).
+  VALIDATED — torrent_client.exe simulation confirmed via Sysmon EventID 1.
+  Note: The wildcard uses *orrent* (lowercase) — Elasticsearch wildcard queries
+  are case-sensitive on keyword fields, so the Graylog query uses case-insensitive
+  regex /.*[tT][oO][rR]{2}[eE][nN][tT].*/ for full coverage.
+
+known_false_positives: >
+  Software with "Torrential" in the name is excluded. Additional legitimate
+  software may trigger this detection if it contains "torrent" in metadata.
+  Review context and apply additional filters as needed.
+
+references:
+  - https://attack.mitre.org/techniques/T1048/
+
+response:
+  message: >
+    Torrent client activity detected on $agent_name$ by $data_win_eventdata_user$.
+    Process: $data_win_eventdata_image$.
+    Company: $data_win_eventdata_company$.
+    Command: $data_win_eventdata_commandLine$.
+    MITRE ATT&CK: T1048
+  risk_score: 40
+  severity: medium
+  risk_objects:
+    - field: agent_name
+      type: system
+      score: 40
+    - field: data_win_eventdata_user
+      type: user
+      score: 40
+  threat_objects:
+    - field: data_win_eventdata_image
+      type: process_name
+    - field: data_win_eventdata_parentImage
+      type: parent_process_name
+
+tags:
+  analytic_story:
+    - Policy Violation
+    - Data Exfiltration
+  asset_type: Endpoint
+  mitre_attack_id:
+    - T1048
+  custom_tags:
+    - torrent
+    - p2p
+    - policy_violation
+    - data_exfiltration
+  product:
+    - Wazuh
+  security_domain: endpoint
+
+graylog:
+  query: data_win_system_eventID:"1" AND ((data_win_eventdata_image:/.*[tT][oO][rR]{2}[eE][nN][tT].*/ AND NOT data_win_eventdata_image:/.*[tT]orrential.*/) OR data_win_eventdata_product:/.*[tT][oO][rR]{2}[eE][nN][tT].*/ OR (data_win_eventdata_company:/.*[tT][oO][rR]{2}[eE][nN][tT].*/ AND NOT data_win_eventdata_company:/.*[tT]orrential.*/) OR data_win_eventdata_description:/.*[tT][oO][rR]{2}[eE][nN][tT].*/)
