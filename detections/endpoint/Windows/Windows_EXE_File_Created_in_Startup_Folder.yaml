@@ -1,0 +1,165 @@
+name: Windows EXE File Created in Startup Folder
+id: Windows_EXE_File_Created_in_Startup_Folder
+version: 1
+schema_version: "1.0"
+date: "2026-03-16"
+author: SOCFortress LLC
+status: production
+type: TTP
+description: >
+  Detects .exe files created in Windows Startup folders (user or common).
+  Attackers drop executables into Startup directories to achieve persistence,
+  ensuring their payload executes on every user logon without requiring registry
+  modifications. Both the user-specific AppData Startup path and the common
+  ProgramData Startup path are monitored.
+  VALIDATED against DESKTOP-AM0HLGE — confirmed powershell.exe creating
+  evil.exe in C:\Users\amine\AppData\Roaming\Microsoft\Windows\Start Menu\Programs\Startup.
+  MITRE ATT&CK: T1547.001 (Boot or Logon Autostart Execution: Registry Run Keys / Startup Folder).
+
+data_source:
+  - Sysmon EventID 11 (FileCreate)
+
+search:
+  index_pattern: "${INDEX_PATTERN}"
+  size: 100
+  sort:
+    - timestamp: desc
+  query:
+    bool:
+      must:
+        - term:
+            agent_name: "${AGENT_NAME}"
+        - term:
+            agent_labels_customer: "${CUSTOMER_CODE}"
+        - term:
+            data_win_system_eventID: "11"
+        - bool:
+            should:
+              - wildcard:
+                  data_win_eventdata_targetFilename: "*AppData*Roaming*Microsoft*Windows*Start Menu*Programs*Startup*.exe"
+              - wildcard:
+                  data_win_eventdata_targetFilename: "*ProgramData*Microsoft*Windows*Start Menu*Programs*Startup*.exe"
+            minimum_should_match: 1
+        - range:
+            timestamp:
+              gte: "${START_TIME}"
+              lte: "${END_TIME}"
+      must_not:
+        - bool:
+            should:
+              - wildcard:
+                  data_win_eventdata_targetFilename: "*Printkey2000.exe*"
+              - wildcard:
+                  data_win_eventdata_targetFilename: "*SettingsRetainer.exe*"
+              - wildcard:
+                  data_win_eventdata_targetFilename: "*WUPOSStartup.exe*"
+              - wildcard:
+                  data_win_eventdata_targetFilename: "*iPclBridgeServiceTray.exe*"
+              - wildcard:
+                  data_win_eventdata_targetFilename: "*PangoBright.exe*"
+              - wildcard:
+                  data_win_eventdata_targetFilename: "*AutoUpdate.exe*"
+              - wildcard:
+                  data_win_eventdata_targetFilename: "*concentr.exe*"
+              - wildcard:
+                  data_win_eventdata_targetFilename: "*QuickShip.Windows.Client.exe*"
+              - wildcard:
+                  data_win_eventdata_targetFilename: "*Immybot-VisualStarting.exe*"
+              - wildcard:
+                  data_win_eventdata_targetFilename: "*TeamViewer*"
+              - wildcard:
+                  data_win_eventdata_targetFilename: "*ds_console.exe*"
+              - wildcard:
+                  data_win_eventdata_targetFilename: "*SII.iNovah2.Windows.Services.PrintingService.exe*"
+            minimum_should_match: 1
+  _source:
+    - timestamp
+    - agent_name
+    - data_win_system_eventID
+    - data_win_eventdata_image
+    - data_win_eventdata_targetFilename
+    - data_win_eventdata_user
+
+parameters:
+  AGENT_NAME:
+    description: "Target agent/host name"
+    type: string
+    required: true
+    example: "DESKTOP-AM0HLGE"
+  CUSTOMER_CODE:
+    description: "Customer label for filtering"
+    type: string
+    required: true
+    example: "lab"
+  INDEX_PATTERN:
+    description: "Elasticsearch index pattern"
+    type: string
+    required: true
+    example: "wazuh-lab_*"
+  START_TIME:
+    description: "Query start time (ISO 8601 or relative)"
+    type: datetime
+    required: false
+    default: "now-24h"
+    example: "2026-03-16 00:00:00.000"
+  END_TIME:
+    description: "Query end time (ISO 8601 or relative)"
+    type: datetime
+    required: false
+    default: "now"
+    example: "2026-03-16 23:59:59.999"
+
+how_to_implement: >
+  This detection requires Wazuh agents deployed on Windows endpoints with Sysmon
+  installed and configured to log file creation events (EventID 11). Field
+  data_win_eventdata_targetFilename is confirmed working (463 events/24h in
+  this environment). VALIDATED — simulation confirmed powershell.exe creating
+  evil.exe in the user Startup folder.
+
+known_false_positives: >
+  Legitimate software installers may drop executables into Startup folders.
+  An exclusion list covers known benign binaries. Additional filters may be
+  required for environment-specific software.
+
+references:
+  - https://attack.mitre.org/techniques/T1547/001/
+
+response:
+  message: >
+    EXE file created in Startup folder on $agent_name$ by $data_win_eventdata_user$.
+    Process: $data_win_eventdata_image$.
+    File: $data_win_eventdata_targetFilename$.
+    MITRE ATT&CK: T1547.001
+  risk_score: 60
+  severity: high
+  risk_objects:
+    - field: agent_name
+      type: system
+      score: 60
+    - field: data_win_eventdata_user
+      type: user
+      score: 60
+  threat_objects:
+    - field: data_win_eventdata_image
+      type: process_name
+    - field: data_win_eventdata_targetFilename
+      type: file_name
+
+tags:
+  analytic_story:
+    - Windows Persistence Techniques
+    - Startup Folder Abuse
+  asset_type: Endpoint
+  mitre_attack_id:
+    - T1547.001
+  custom_tags:
+    - startup_folder
+    - persistence
+    - file_create
+    - exe_drop
+  product:
+    - Wazuh
+  security_domain: endpoint
+
+graylog:
+  query: data_win_system_eventID:"11" AND (data_win_eventdata_targetFilename:/.*AppData.*Roaming.*Microsoft.*Windows.*Start Menu.*Programs.*Startup.*\.exe/ OR data_win_eventdata_targetFilename:/.*ProgramData.*Microsoft.*Windows.*Start Menu.*Programs.*Startup.*\.exe/) AND NOT (data_win_eventdata_targetFilename:/.*Printkey2000\.exe/ OR data_win_eventdata_targetFilename:/.*SettingsRetainer\.exe/ OR data_win_eventdata_targetFilename:/.*WUPOSStartup\.exe/ OR data_win_eventdata_targetFilename:/.*iPclBridgeServiceTray\.exe/ OR data_win_eventdata_targetFilename:/.*PangoBright\.exe/ OR data_win_eventdata_targetFilename:/.*AutoUpdate\.exe/ OR data_win_eventdata_targetFilename:/.*concentr\.exe/ OR data_win_eventdata_targetFilename:/.*QuickShip\.Windows\.Client\.exe/ OR data_win_eventdata_targetFilename:/.*Immybot-VisualStarting\.exe/ OR data_win_eventdata_targetFilename:/.*TeamViewer.*/ OR data_win_eventdata_targetFilename:/.*ds_console\.exe/ OR data_win_eventdata_targetFilename:/.*SII\.iNovah2\.Windows\.Services\.PrintingService\.exe/)
