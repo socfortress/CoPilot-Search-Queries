@@ -1,0 +1,195 @@
+name: Windows Splashtop Software Usage
+id: Windows_Splashtop_Software Usage
+version: 1
+schema_version: "1.0"
+date: "2026-03-16"
+author: SOCFortress LLC
+status: production
+type: TTP
+description: >
+  Detects execution of Splashtop remote access software binaries (SplashtopSOS.exe,
+  SRAgent.exe, SRService.exe, SrApp.exe) or processes running from Splashtop
+  installation paths. Splashtop is a legitimate RMM/remote access tool that is
+  increasingly abused by attackers for unauthorized remote access and lateral
+  movement. Detection covers both Sysmon EventID 1 (with company/originalFileName
+  enrichment) and Security EventID 4688 (process creation auditing).
+  Excludes legitimate Atera RMM-launched instances.
+  VALIDATED against DESKTOP-AM0HLGE — confirmed both EventID 1 and EventID 4688
+  firing for SplashtopSOS.exe simulation.
+  MITRE ATT&CK: T1219 (Remote Access Software).
+
+data_source:
+  - Sysmon EventID 1 (ProcessCreate)
+  - Windows Security EventID 4688 (Process Creation Auditing)
+
+search:
+  index_pattern: "${INDEX_PATTERN}"
+  size: 100
+  sort:
+    - timestamp: desc
+  query:
+    bool:
+      must:
+        - term:
+            agent_name: "${AGENT_NAME}"
+        - term:
+            agent_labels_customer: "${CUSTOMER_CODE}"
+        - bool:
+            should:
+              - bool:
+                  must:
+                    - term:
+                        data_win_system_eventID: "1"
+                    - bool:
+                        should:
+                          - wildcard:
+                              data_win_eventdata_image: "*\\SplashtopSOS.exe"
+                          - wildcard:
+                              data_win_eventdata_image: "*\\SRAgent.exe"
+                          - wildcard:
+                              data_win_eventdata_image: "*\\SRService.exe"
+                          - wildcard:
+                              data_win_eventdata_image: "*\\SrApp.exe"
+                          - wildcard:
+                              data_win_eventdata_image: "*Splashtop*"
+                          - term:
+                              data_win_eventdata_company: "Splashtop Inc."
+                          - wildcard:
+                              data_win_eventdata_originalFileName: "*SplashtopSOS.exe*"
+                          - wildcard:
+                              data_win_eventdata_originalFileName: "*SRAgent.exe*"
+                          - wildcard:
+                              data_win_eventdata_originalFileName: "*SRService.exe*"
+                        minimum_should_match: 1
+              - bool:
+                  must:
+                    - term:
+                        data_win_system_eventID: "4688"
+                    - bool:
+                        should:
+                          - wildcard:
+                              data_win_eventdata_newProcessName: "*\\SplashtopSOS.exe"
+                          - wildcard:
+                              data_win_eventdata_newProcessName: "*\\SRAgent.exe"
+                          - wildcard:
+                              data_win_eventdata_newProcessName: "*\\SRService.exe"
+                          - wildcard:
+                              data_win_eventdata_newProcessName: "*\\SrApp.exe"
+                          - wildcard:
+                              data_win_eventdata_newProcessName: "*Splashtop*"
+                        minimum_should_match: 1
+            minimum_should_match: 1
+        - range:
+            timestamp:
+              gte: "${START_TIME}"
+              lte: "${END_TIME}"
+      must_not:
+        - wildcard:
+            data_win_eventdata_image: "*ATERA*"
+        - wildcard:
+            data_win_eventdata_parentImage: "*ATERA*"
+        - wildcard:
+            data_win_eventdata_newProcessName: "*ATERA*"
+        - wildcard:
+            data_win_eventdata_parentProcessName: "*ATERA*"
+  _source:
+    - timestamp
+    - agent_name
+    - data_win_system_eventID
+    - data_win_eventdata_image
+    - data_win_eventdata_newProcessName
+    - data_win_eventdata_commandLine
+    - data_win_eventdata_parentImage
+    - data_win_eventdata_parentProcessName
+    - data_win_eventdata_company
+    - data_win_eventdata_originalFileName
+    - data_win_eventdata_user
+    - data_win_eventdata_subjectUserName
+
+parameters:
+  AGENT_NAME:
+    description: "Target agent/host name"
+    type: string
+    required: true
+    example: "DESKTOP-AM0HLGE"
+  CUSTOMER_CODE:
+    description: "Customer label for filtering"
+    type: string
+    required: true
+    example: "lab"
+  INDEX_PATTERN:
+    description: "Elasticsearch index pattern"
+    type: string
+    required: true
+    example: "wazuh-lab_*"
+  START_TIME:
+    description: "Query start time (ISO 8601 or relative)"
+    type: datetime
+    required: false
+    default: "now-24h"
+    example: "2026-03-16 00:00:00.000"
+  END_TIME:
+    description: "Query end time (ISO 8601 or relative)"
+    type: datetime
+    required: false
+    default: "now"
+    example: "2026-03-16 23:59:59.999"
+
+how_to_implement: >
+  This detection requires Wazuh agents deployed on Windows endpoints with:
+  1. Sysmon installed and configured to log process creation events (EventID 1)
+  2. Windows Security Auditing enabled for Process Creation (EventID 4688):
+     auditpol /set /subcategory:"Process Creation" /success:enable
+  Both event sources confirmed working in this environment.
+  VALIDATED — SplashtopSOS.exe simulation confirmed hits on both EventID 1
+  and EventID 4688. EventID 1 provides richer metadata (company, originalFileName)
+  while EventID 4688 provides Security channel coverage.
+
+known_false_positives: >
+  Legitimate Splashtop deployments managed through Atera RMM are excluded.
+  Additional filters may be required for other authorized RMM deployments
+  that use Splashtop. Review parent process context to distinguish authorized
+  from unauthorized usage.
+
+references:
+  - https://attack.mitre.org/techniques/T1219/
+
+response:
+  message: >
+    Splashtop remote access software detected on $agent_name$.
+    Process: $data_win_eventdata_image$$data_win_eventdata_newProcessName$.
+    User: $data_win_eventdata_user$$data_win_eventdata_subjectUserName$.
+    MITRE ATT&CK: T1219
+  risk_score: 50
+  severity: medium
+  risk_objects:
+    - field: agent_name
+      type: system
+      score: 50
+    - field: data_win_eventdata_user
+      type: user
+      score: 50
+  threat_objects:
+    - field: data_win_eventdata_image
+      type: process_name
+    - field: data_win_eventdata_newProcessName
+      type: process_name
+
+tags:
+  analytic_story:
+    - Remote Access Software Abuse
+    - Living Off The Land
+  asset_type: Endpoint
+  mitre_attack_id:
+    - T1219
+  custom_tags:
+    - splashtop
+    - remote_access
+    - rmm_abuse
+    - lateral_movement
+  product:
+    - Wazuh
+  security_domain: endpoint
+
+graylog:
+  query: (data_win_system_eventID:"1" AND (data_win_eventdata_image:/.*\\SplashtopSOS\.exe/ OR data_win_eventdata_image:/.*\\SRAgent\.exe/ OR data_win_eventdata_image:/.*\\SRService\.exe/ OR data_win_eventdata_image:/.*\\SrApp\.exe/ OR data_win_eventdata_image:/.*Splashtop.*/ OR data_win_eventdata_company:"Splashtop Inc." OR data_win_eventdata_originalFileName:/.*SplashtopSOS\.exe/ OR data_win_eventdata_originalFileName:/.*SRAgent\.exe/ OR data_win_eventdata_originalFileName:/.*SRService\.exe/)) OR (data_win_system_eventID:"4688" AND (data_win_eventdata_newProcessName:/.*\\SplashtopSOS\.exe/ OR data_win_eventdata_newProcessName:/.*\\SRAgent\.exe/ OR data_win_eventdata_newProcessName:/.*\\SRService\.exe/ OR data_win_eventdata_newProcessName:/.*\\SrApp\.exe/ OR data_win_eventdata_newProcessName:/.*Splashtop.*/))
