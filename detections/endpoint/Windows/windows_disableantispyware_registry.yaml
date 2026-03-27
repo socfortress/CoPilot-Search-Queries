@@ -1,0 +1,136 @@
+name: Windows DisableAntiSpyware Registry
+id: Windows_DisableAntiSpyware_Registry
+version: 1
+schema_version: "1.0"
+date: "2026-03-27"
+author: SOCFortress LLC
+status: production
+type: TTP
+description: >
+  Detects modification of the Windows Registry key DisableAntiSpyware set to
+  0x00000001, which disables Windows Defender antispyware protection. This
+  activity is commonly associated with ransomware families including Ryuk,
+  Azorult, and RedLine Stealer that disable security defenses before executing
+  their primary payload. Disabling Windows Defender facilitates further
+  malicious activities such as data encryption, credential theft, or exfiltration.
+
+data_source:
+  - Sysmon EventID 13 (RegistryEvent Value Set)
+
+search:
+  index_pattern: "${INDEX_PATTERN}"
+  size: 100
+  sort:
+    - timestamp: desc
+  query:
+    bool:
+      must:
+        - term:
+            agent_name: "${AGENT_NAME}"
+        - term:
+            agent_labels_customer: "${CUSTOMER_CODE}"
+        - term:
+            data_win_system_eventID: "13"
+        - wildcard:
+            data_win_eventdata_targetObject: "*DisableAntiSpyware*"
+        - term:
+            data_win_eventdata_details: "DWORD (0x00000001)"
+        - range:
+            timestamp:
+              gte: "${START_TIME}"
+              lte: "${END_TIME}"
+  _source:
+    - timestamp
+    - agent_name
+    - data_win_system_eventID
+    - data_win_eventdata_targetObject
+    - data_win_eventdata_details
+    - data_win_eventdata_image
+    - data_win_eventdata_user
+
+parameters:
+  AGENT_NAME:
+    description: "Target agent/host name"
+    type: string
+    required: true
+    example: "DESKTOP-AM0HLGE"
+  CUSTOMER_CODE:
+    description: "Customer label for filtering"
+    type: string
+    required: true
+    example: "lab"
+  INDEX_PATTERN:
+    description: "Elasticsearch index pattern"
+    type: string
+    required: true
+    example: "wazuh-lab_*"
+  START_TIME:
+    description: "Query start time (ISO 8601 or relative)"
+    type: datetime
+    required: false
+    default: "now-24h"
+    example: "2026-03-27 00:00:00.000"
+  END_TIME:
+    description: "Query end time (ISO 8601 or relative)"
+    type: datetime
+    required: false
+    default: "now"
+    example: "2026-03-27 23:59:59.999"
+
+how_to_implement: >
+  Requires Wazuh agents with Sysmon installed and configured to log registry
+  value set events (EventID 13). VALIDATED — DisableAntiSpyware = DWORD
+  (0x00000001) confirmed via Sysmon EventID 13 with 4 hits using reg.exe.
+
+known_false_positives: >
+  It is unusual to disable Windows Defender antispyware on a Windows system.
+  Some enterprise policies may disable it in favor of third-party solutions.
+  Verify the legitimacy of the change and the process making it.
+
+references:
+  - https://attack.mitre.org/techniques/T1562/001/
+  - https://blog.malwarebytes.com/malwarebytes-news/2021/02/lazyscripter-from-empire-to-double-rat/
+
+response:
+  message: >
+    Windows Defender DisableAntiSpyware set to disabled on $agent_name$ by
+    $data_win_eventdata_user$ via $data_win_eventdata_image$.
+    Registry: $data_win_eventdata_targetObject$.
+    MITRE ATT&CK: T1562.001
+  risk_score: 24
+  severity: medium
+  risk_objects:
+    - field: agent_name
+      type: system
+      score: 24
+  threat_objects:
+    - field: data_win_eventdata_image
+      type: process_name
+    - field: data_win_eventdata_targetObject
+      type: registry_path
+
+tags:
+  analytic_story:
+    - Azorult
+    - Ryuk Ransomware
+    - Windows Registry Abuse
+    - RedLine Stealer
+    - CISA AA22-264A
+    - Windows Defense Evasion Tactics
+    - CISA AA23-347A
+  asset_type: Endpoint
+  mitre_attack_id:
+    - T1562.001
+  custom_tags:
+    - windows_defender
+    - antispyware_disabled
+    - defense_evasion
+    - ryuk
+    - azorult
+    - redline
+  product:
+    - Wazuh
+  security_domain: endpoint
+
+graylog:
+  query: data_win_system_eventID:"13" AND data_win_eventdata_targetObject:/.*DisableAntiSpyware.*/ AND data_win_eventdata_details:"DWORD (0x00000001)"

@@ -1,0 +1,138 @@
+name: Windows Disable Memory Crash Dump
+id: Windows_Disable_Memory_Crash_Dump
+version: 1
+schema_version: "1.0"
+date: "2026-03-27"
+author: SOCFortress LLC
+status: production
+type: TTP
+description: >
+  Detects attempts to disable the Windows memory crash dump feature by setting
+  the CrashDumpEnabled registry value to 0 under
+  HKLM\SYSTEM\CurrentControlSet\Control\CrashControl\. Disabling crash dumps
+  hinders forensic analysis and incident response by preventing memory dump
+  collection after system crashes. This technique is used by destructive malware
+  such as HermeticWiper as part of data destruction and system destabilization
+  attacks.
+
+data_source:
+  - Sysmon EventID 13 (RegistryEvent Value Set)
+
+search:
+  index_pattern: "${INDEX_PATTERN}"
+  size: 100
+  sort:
+    - timestamp: desc
+  query:
+    bool:
+      must:
+        - term:
+            agent_name: "${AGENT_NAME}"
+        - term:
+            agent_labels_customer: "${CUSTOMER_CODE}"
+        - term:
+            data_win_system_eventID: "13"
+        - wildcard:
+            data_win_eventdata_targetObject: "*CrashControl*CrashDumpEnabled*"
+        - term:
+            data_win_eventdata_details: "DWORD (0x00000000)"
+        - range:
+            timestamp:
+              gte: "${START_TIME}"
+              lte: "${END_TIME}"
+  _source:
+    - timestamp
+    - agent_name
+    - data_win_system_eventID
+    - data_win_eventdata_targetObject
+    - data_win_eventdata_details
+    - data_win_eventdata_image
+    - data_win_eventdata_user
+
+parameters:
+  AGENT_NAME:
+    description: "Target agent/host name"
+    type: string
+    required: true
+    example: "DESKTOP-AM0HLGE"
+  CUSTOMER_CODE:
+    description: "Customer label for filtering"
+    type: string
+    required: true
+    example: "lab"
+  INDEX_PATTERN:
+    description: "Elasticsearch index pattern"
+    type: string
+    required: true
+    example: "wazuh-lab_*"
+  START_TIME:
+    description: "Query start time (ISO 8601 or relative)"
+    type: datetime
+    required: false
+    default: "now-24h"
+    example: "2026-03-27 00:00:00.000"
+  END_TIME:
+    description: "Query end time (ISO 8601 or relative)"
+    type: datetime
+    required: false
+    default: "now"
+    example: "2026-03-27 23:59:59.999"
+
+how_to_implement: >
+  Requires Wazuh agents with Sysmon installed and configured to log registry
+  value set events (EventID 13). VALIDATED — CrashDumpEnabled set to 0
+  confirmed via Sysmon EventID 13 with 2 hits using reg.exe.
+
+known_false_positives: >
+  Unknown. Disabling crash dumps is rarely a legitimate administrative action.
+  Any occurrence should be investigated immediately.
+
+references:
+  - https://attack.mitre.org/techniques/T1485/
+  - https://blog.talosintelligence.com/2022/02/threat-advisory-hermeticwiper.html
+  - https://docs.microsoft.com/en-us/troubleshoot/windows-server/performance/memory-dump-file-options
+
+response:
+  message: >
+    Memory crash dump disabled on $agent_name$ by $data_win_eventdata_user$
+    via $data_win_eventdata_image$.
+    Registry: $data_win_eventdata_targetObject$.
+    Value: $data_win_eventdata_details$.
+    MITRE ATT&CK: T1485
+  risk_score: 96
+  severity: critical
+  risk_objects:
+    - field: agent_name
+      type: system
+      score: 96
+    - field: data_win_eventdata_user
+      type: user
+      score: 96
+  threat_objects:
+    - field: data_win_eventdata_image
+      type: process_name
+    - field: data_win_eventdata_targetObject
+      type: registry_path
+
+tags:
+  analytic_story:
+    - Ransomware
+    - Data Destruction
+    - Windows Registry Abuse
+    - Hermetic Wiper
+  asset_type: Endpoint
+  mitre_attack_id:
+    - T1485
+  custom_tags:
+    - crash_dump
+    - data_destruction
+    - hermeticwiper
+    - ransomware
+    - defense_evasion
+    - forensic_obstruction
+  product:
+    - Wazuh
+  security_domain: endpoint
+
+graylog:
+  query: data_win_system_eventID:"13" AND data_win_eventdata_targetObject:/.*CrashControl.*CrashDumpEnabled.*/ AND data_win_eventdata_details:"DWORD (0x00000000)"

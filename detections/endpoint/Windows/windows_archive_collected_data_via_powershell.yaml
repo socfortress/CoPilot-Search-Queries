@@ -1,0 +1,131 @@
+name: Windows Archive Collected Data via Powershell
+id: Windows_Archive_Collected_Data_via_Powershell
+version: 1
+schema_version: "1.0"
+date: "2026-03-27"
+author: SOCFortress LLC
+status: production
+type: Anomaly
+description: >
+  Detects use of PowerShell Compress-Archive cmdlet targeting the Temp directory,
+  which may indicate an adversary collecting and compressing data for exfiltration.
+  Malware families including APT37 tools like FadeStealer use this technique to
+  stage compressed archives in temporary folders before exfiltrating sensitive data.
+
+data_source:
+  - PowerShell Script Block Logging EventID 4104
+
+search:
+  index_pattern: "${INDEX_PATTERN}"
+  size: 100
+  sort:
+    - timestamp: desc
+  query:
+    bool:
+      must:
+        - term:
+            agent_name: "${AGENT_NAME}"
+        - term:
+            agent_labels_customer: "${CUSTOMER_CODE}"
+        - term:
+            data_win_system_eventID: "4104"
+        - wildcard:
+            data_win_eventdata_scriptBlockText: "*Compress-Archive*"
+        - wildcard:
+            data_win_eventdata_scriptBlockText: "*Temp*"
+        - range:
+            timestamp:
+              gte: "${START_TIME}"
+              lte: "${END_TIME}"
+  _source:
+    - timestamp
+    - agent_name
+    - data_win_system_eventID
+    - data_win_eventdata_scriptBlockText
+    - data_win_eventdata_path
+    - data_win_eventdata_user
+
+parameters:
+  AGENT_NAME:
+    description: "Target agent/host name"
+    type: string
+    required: true
+    example: "DESKTOP-AM0HLGE"
+  CUSTOMER_CODE:
+    description: "Customer label for filtering"
+    type: string
+    required: true
+    example: "lab"
+  INDEX_PATTERN:
+    description: "Elasticsearch index pattern"
+    type: string
+    required: true
+    example: "wazuh-lab_*"
+  START_TIME:
+    description: "Query start time (ISO 8601 or relative)"
+    type: datetime
+    required: false
+    default: "now-24h"
+    example: "2026-03-27 00:00:00.000"
+  END_TIME:
+    description: "Query end time (ISO 8601 or relative)"
+    type: datetime
+    required: false
+    default: "now"
+    example: "2026-03-27 23:59:59.999"
+
+how_to_implement: >
+  Requires PowerShell Script Block Logging enabled on endpoints.
+  Enable via Group Policy: Computer Configuration → Administrative Templates
+  → Windows Components → Windows PowerShell → Turn on PowerShell Script Block
+  Logging. The Microsoft-Windows-PowerShell/Operational channel must be
+  forwarded by the Wazuh agent. Confirmed flowing in this environment.
+  VALIDATED — 15 hits confirmed for Compress-Archive targeting Temp directory.
+  Important: The ES wildcard uses *Temp* rather than *\\Temp\\* because
+  backslashes are stored escaped in the scriptBlockText field.
+
+known_false_positives: >
+  PowerShell may legitimately use Compress-Archive to archive data to temp
+  folders for backup or deployment purposes. Review the source path being
+  archived and the user context to determine if the activity is authorized.
+
+references:
+  - https://attack.mitre.org/techniques/T1560/
+  - https://www.cisa.gov/news-events/cybersecurity-advisories/aa23-347a
+
+response:
+  message: >
+    PowerShell Compress-Archive to Temp directory detected on $agent_name$
+    by $data_win_eventdata_user$.
+    Script: $data_win_eventdata_scriptBlockText$.
+    MITRE ATT&CK: T1560
+  risk_score: 49
+  severity: medium
+  risk_objects:
+    - field: agent_name
+      type: system
+      score: 49
+  threat_objects:
+    - field: data_win_eventdata_scriptBlockText
+      type: script_block
+
+tags:
+  analytic_story:
+    - APT37 Rustonotto and FadeStealer
+    - CISA AA23-347A
+    - Data Exfiltration
+  asset_type: Endpoint
+  mitre_attack_id:
+    - T1560
+  custom_tags:
+    - compress_archive
+    - data_collection
+    - exfiltration_staging
+    - powershell
+    - apt37
+  product:
+    - Wazuh
+  security_domain: endpoint
+
+graylog:
+  query: data_win_system_eventID:"4104" AND data_win_eventdata_scriptBlockText:/.*Compress-Archive.*/ AND data_win_eventdata_scriptBlockText:/.*Temp.*/

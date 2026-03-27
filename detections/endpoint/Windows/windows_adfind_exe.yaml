@@ -1,0 +1,193 @@
+name: Windows AdFind Exe
+id: Windows_AdFind_Exe
+version: 1
+schema_version: "1.0"
+date: "2026-03-27"
+author: SOCFortress LLC
+status: production
+type: TTP
+description: >
+  Detects execution of AdFind.exe standalone or with specific command-line
+  arguments related to Active Directory queries. AdFind is a powerful AD
+  enumeration tool frequently used by threat actors including Wizard Spider,
+  FIN6, and NOBELIUM to gather sensitive AD information such as domain trusts,
+  domain controllers, user accounts, and ACLs. Detection covers both direct
+  execution by image name/originalFileName and characteristic command-line
+  patterns including -f with objectcategory and -sc with known AD query targets.
+  VALIDATED against DESKTOP-AM0HLGE — confirmed AdFind.exe execution captured
+  via Sysmon EventID 1 (6 hits).
+  MITRE ATT&CK: T1018 (Remote System Discovery).
+
+data_source:
+  - Sysmon EventID 1 (ProcessCreate)
+
+search:
+  index_pattern: "${INDEX_PATTERN}"
+  size: 100
+  sort:
+    - timestamp: desc
+  query:
+    bool:
+      must:
+        - term:
+            agent_name: "${AGENT_NAME}"
+        - term:
+            agent_labels_customer: "${CUSTOMER_CODE}"
+        - term:
+            data_win_system_eventID: "1"
+        - bool:
+            should:
+              - wildcard:
+                  data_win_eventdata_image: "*\\AdFind.exe"
+              - term:
+                  data_win_eventdata_originalFileName: "AdFind.exe"
+              - bool:
+                  must:
+                    - wildcard:
+                        data_win_eventdata_commandLine: "*objectcategory=*"
+                    - bool:
+                        should:
+                          - wildcard:
+                              data_win_eventdata_commandLine: "* -f *"
+                          - wildcard:
+                              data_win_eventdata_commandLine: "* /f*"
+                        minimum_should_match: 1
+              - bool:
+                  must:
+                    - bool:
+                        should:
+                          - wildcard:
+                              data_win_eventdata_commandLine: "* -sc *"
+                          - wildcard:
+                              data_win_eventdata_commandLine: "* /sc *"
+                        minimum_should_match: 1
+                    - bool:
+                        should:
+                          - wildcard:
+                              data_win_eventdata_commandLine: "*trustdmp*"
+                          - wildcard:
+                              data_win_eventdata_commandLine: "*dclist*"
+                          - wildcard:
+                              data_win_eventdata_commandLine: "*dcdmp*"
+                          - wildcard:
+                              data_win_eventdata_commandLine: "*sdump*"
+                          - wildcard:
+                              data_win_eventdata_commandLine: "*domainlist*"
+                          - wildcard:
+                              data_win_eventdata_commandLine: "*getacl*"
+                          - wildcard:
+                              data_win_eventdata_commandLine: "*exchaddresses*"
+                          - wildcard:
+                              data_win_eventdata_commandLine: "*adobjcnt*"
+                          - wildcard:
+                              data_win_eventdata_commandLine: "*admincountdmp*"
+                          - wildcard:
+                              data_win_eventdata_commandLine: "*export_user*"
+                          - wildcard:
+                              data_win_eventdata_commandLine: "*export_group*"
+                        minimum_should_match: 1
+            minimum_should_match: 1
+        - range:
+            timestamp:
+              gte: "${START_TIME}"
+              lte: "${END_TIME}"
+  _source:
+    - timestamp
+    - agent_name
+    - data_win_system_eventID
+    - data_win_eventdata_image
+    - data_win_eventdata_commandLine
+    - data_win_eventdata_originalFileName
+    - data_win_eventdata_parentImage
+    - data_win_eventdata_user
+
+parameters:
+  AGENT_NAME:
+    description: "Target agent/host name"
+    type: string
+    required: true
+    example: "DESKTOP-AM0HLGE"
+  CUSTOMER_CODE:
+    description: "Customer label for filtering"
+    type: string
+    required: true
+    example: "lab"
+  INDEX_PATTERN:
+    description: "Elasticsearch index pattern"
+    type: string
+    required: true
+    example: "wazuh-lab_*"
+  START_TIME:
+    description: "Query start time (ISO 8601 or relative)"
+    type: datetime
+    required: false
+    default: "now-24h"
+    example: "2026-03-27 00:00:00.000"
+  END_TIME:
+    description: "Query end time (ISO 8601 or relative)"
+    type: datetime
+    required: false
+    default: "now"
+    example: "2026-03-27 23:59:59.999"
+
+how_to_implement: >
+  Requires Wazuh agents with Sysmon installed and configured to log process
+  creation events (EventID 1) with full command-line arguments and file metadata.
+  VALIDATED — AdFind.exe simulation confirmed 6 hits via Sysmon EventID 1.
+  The originalFileName check catches renamed AdFind binaries.
+
+known_false_positives: >
+  AdFind is a legitimate AD administration tool. Authorized administrators may
+  use it for AD management and troubleshooting. Review the user context, parent
+  process, and command-line arguments to determine if the activity is authorized.
+
+references:
+  - https://attack.mitre.org/techniques/T1018/
+  - https://www.volexity.com/blog/2020/12/14/dark-halo-leverages-solarwinds-compromise-to-breach-organizations/
+  - https://www.mandiant.com/resources/a-nasty-trick-from-credential-theft-malware-to-business-disruption
+  - https://www.joeware.net/freetools/tools/adfind/index.htm
+  - https://thedfirreport.com/2023/05/22/icedid-macro-ends-in-nokoyawa-ransomware/
+
+response:
+  message: >
+    AdFind.exe detected on $agent_name$ by $data_win_eventdata_user$.
+    Process: $data_win_eventdata_image$.
+    Command: $data_win_eventdata_commandLine$.
+    MITRE ATT&CK: T1018
+  risk_score: 25
+  severity: medium
+  risk_objects:
+    - field: agent_name
+      type: system
+      score: 25
+    - field: data_win_eventdata_user
+      type: user
+      score: 25
+  threat_objects:
+    - field: data_win_eventdata_image
+      type: process_name
+    - field: data_win_eventdata_parentImage
+      type: parent_process_name
+
+tags:
+  analytic_story:
+    - Domain Trust Discovery
+    - IcedID
+    - NOBELIUM Group
+    - BlackSuit Ransomware
+  asset_type: Endpoint
+  mitre_attack_id:
+    - T1018
+  custom_tags:
+    - adfind
+    - active_directory
+    - domain_discovery
+    - reconnaissance
+    - wizard_spider
+    - fin6
+  product:
+    - Wazuh
+  security_domain: endpoint
+
+graylog:
+  query: data_win_system_eventID:"1" AND (data_win_eventdata_image:/.*\\AdFind\.exe/ OR data_win_eventdata_originalFileName:"AdFind.exe" OR (data_win_eventdata_commandLine:/.*-f .*/ AND data_win_eventdata_commandLine:/.*objectcategory=.*/) OR (data_win_eventdata_commandLine:/.*-sc .*/ AND (data_win_eventdata_commandLine:/.*trustdmp.*/ OR data_win_eventdata_commandLine:/.*dclist.*/ OR data_win_eventdata_commandLine:/.*dcdmp.*/ OR data_win_eventdata_commandLine:/.*sdump.*/ OR data_win_eventdata_commandLine:/.*domainlist.*/ OR data_win_eventdata_commandLine:/.*getacl.*/ OR data_win_eventdata_commandLine:/.*exchaddresses.*/ OR data_win_eventdata_commandLine:/.*adobjcnt.*/ OR data_win_eventdata_commandLine:/.*admincountdmp.*/ OR data_win_eventdata_commandLine:/.*export_user.*/ OR data_win_eventdata_commandLine:/.*export_group.*/)))

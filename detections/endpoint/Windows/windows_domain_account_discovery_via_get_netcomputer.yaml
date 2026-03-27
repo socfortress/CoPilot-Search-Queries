@@ -1,0 +1,141 @@
+name: Windows Domain Account Discovery Via Get-NetComputer
+id: Windows_Domain_Account_Discovery_Via_Get-NetComputer
+version: 1
+schema_version: "1.0"
+date: "2026-03-27"
+author: SOCFortress LLC
+status: production
+type: Anomaly
+description: >
+  Detects execution of the PowerView PowerShell cmdlet Get-NetComputer with
+  AD attribute parameters including samaccountname, accountexpires, lastlogon,
+  lastlogoff, pwdlastset, or logoncount. This is a common reconnaissance
+  technique used by attackers to enumerate Active Directory computer accounts
+  and gather information for lateral movement or privilege escalation.
+
+data_source:
+  - PowerShell Script Block Logging EventID 4104
+
+search:
+  index_pattern: "${INDEX_PATTERN}"
+  size: 100
+  sort:
+    - timestamp: desc
+  query:
+    bool:
+      must:
+        - term:
+            agent_name: "${AGENT_NAME}"
+        - term:
+            agent_labels_customer: "${CUSTOMER_CODE}"
+        - term:
+            data_win_system_eventID: "4104"
+        - wildcard:
+            data_win_eventdata_scriptBlockText: "*Get-NetComputer*"
+        - bool:
+            should:
+              - wildcard:
+                  data_win_eventdata_scriptBlockText: "*samaccountname*"
+              - wildcard:
+                  data_win_eventdata_scriptBlockText: "*accountexpires*"
+              - wildcard:
+                  data_win_eventdata_scriptBlockText: "*lastlogon*"
+              - wildcard:
+                  data_win_eventdata_scriptBlockText: "*lastlogoff*"
+              - wildcard:
+                  data_win_eventdata_scriptBlockText: "*pwdlastset*"
+              - wildcard:
+                  data_win_eventdata_scriptBlockText: "*logoncount*"
+            minimum_should_match: 1
+        - range:
+            timestamp:
+              gte: "${START_TIME}"
+              lte: "${END_TIME}"
+  _source:
+    - timestamp
+    - agent_name
+    - data_win_system_eventID
+    - data_win_eventdata_scriptBlockText
+    - data_win_eventdata_path
+    - data_win_eventdata_user
+
+parameters:
+  AGENT_NAME:
+    description: "Target agent/host name"
+    type: string
+    required: true
+    example: "DESKTOP-AM0HLGE"
+  CUSTOMER_CODE:
+    description: "Customer label for filtering"
+    type: string
+    required: true
+    example: "lab"
+  INDEX_PATTERN:
+    description: "Elasticsearch index pattern"
+    type: string
+    required: true
+    example: "wazuh-lab_*"
+  START_TIME:
+    description: "Query start time (ISO 8601 or relative)"
+    type: datetime
+    required: false
+    default: "now-24h"
+    example: "2026-03-27 00:00:00.000"
+  END_TIME:
+    description: "Query end time (ISO 8601 or relative)"
+    type: datetime
+    required: false
+    default: "now"
+    example: "2026-03-27 23:59:59.999"
+
+how_to_implement: >
+  Requires PowerShell Script Block Logging enabled on endpoints.
+  Enable via Group Policy: Computer Configuration → Administrative Templates
+  → Windows Components → Windows PowerShell → Turn on PowerShell Script Block
+  Logging. Confirmed flowing in this environment.
+  VALIDATED — 6 hits confirmed for Get-NetComputer with AD attribute parameters.
+
+known_false_positives: >
+  Administrators may use PowerView or similar tools for legitimate AD
+  enumeration and auditing purposes. Review context and user account to
+  determine if the activity is authorized.
+
+references:
+  - https://attack.mitre.org/techniques/T1087/002/
+  - https://www.cisa.gov/news-events/cybersecurity-advisories/aa23-347a
+
+response:
+  message: >
+    PowerView Get-NetComputer AD enumeration detected on $agent_name$ by
+    $data_win_eventdata_user$.
+    Script: $data_win_eventdata_scriptBlockText$.
+    MITRE ATT&CK: T1087.002
+  risk_score: 15
+  severity: low
+  risk_objects:
+    - field: agent_name
+      type: system
+      score: 15
+  threat_objects:
+    - field: data_win_eventdata_scriptBlockText
+      type: script_block
+
+tags:
+  analytic_story:
+    - CISA AA23-347A
+    - Active Directory Discovery
+  asset_type: Endpoint
+  mitre_attack_id:
+    - T1087.002
+  custom_tags:
+    - powerview
+    - active_directory
+    - domain_discovery
+    - get_netcomputer
+    - reconnaissance
+  product:
+    - Wazuh
+  security_domain: endpoint
+
+graylog:
+  query: data_win_system_eventID:"4104" AND data_win_eventdata_scriptBlockText:/.*Get-NetComputer.*/ AND (data_win_eventdata_scriptBlockText:/.*samaccountname.*/ OR data_win_eventdata_scriptBlockText:/.*accountexpires.*/ OR data_win_eventdata_scriptBlockText:/.*lastlogon.*/ OR data_win_eventdata_scriptBlockText:/.*lastlogoff.*/ OR data_win_eventdata_scriptBlockText:/.*pwdlastset.*/ OR data_win_eventdata_scriptBlockText:/.*logoncount.*/)

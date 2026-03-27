@@ -1,0 +1,144 @@
+name: Windows Disable Shutdown Button Through Registry
+id: Windows_Disable_Shutdown_Button_Through_Registry
+version: 1
+schema_version: "1.0"
+date: "2026-03-27"
+author: SOCFortress LLC
+status: production
+type: Anomaly
+description: >
+  Detects suspicious registry modifications that disable the shutdown button
+  on a user's logon screen. Monitors two registry paths:
+  shutdownwithoutlogon set to 0x00000000 and NoClose set to 0x00000001.
+  This technique is used by ransomware like KillDisk and screenlocker malware
+  to hinder system usability and prevent users from restarting or shutting down
+  the machine to remove malicious changes.
+
+data_source:
+  - Sysmon EventID 13 (RegistryEvent Value Set)
+
+search:
+  index_pattern: "${INDEX_PATTERN}"
+  size: 100
+  sort:
+    - timestamp: desc
+  query:
+    bool:
+      must:
+        - term:
+            agent_name: "${AGENT_NAME}"
+        - term:
+            agent_labels_customer: "${CUSTOMER_CODE}"
+        - term:
+            data_win_system_eventID: "13"
+        - range:
+            timestamp:
+              gte: "${START_TIME}"
+              lte: "${END_TIME}"
+      should:
+        - bool:
+            must:
+              - wildcard:
+                  data_win_eventdata_targetObject: "*shutdownwithoutlogon*"
+              - term:
+                  data_win_eventdata_details: "DWORD (0x00000000)"
+        - bool:
+            must:
+              - wildcard:
+                  data_win_eventdata_targetObject: "*NoClose*"
+              - term:
+                  data_win_eventdata_details: "DWORD (0x00000001)"
+      minimum_should_match: 1
+  _source:
+    - timestamp
+    - agent_name
+    - data_win_system_eventID
+    - data_win_eventdata_targetObject
+    - data_win_eventdata_details
+    - data_win_eventdata_image
+    - data_win_eventdata_user
+
+parameters:
+  AGENT_NAME:
+    description: "Target agent/host name"
+    type: string
+    required: true
+    example: "DESKTOP-AM0HLGE"
+  CUSTOMER_CODE:
+    description: "Customer label for filtering"
+    type: string
+    required: true
+    example: "lab"
+  INDEX_PATTERN:
+    description: "Elasticsearch index pattern"
+    type: string
+    required: true
+    example: "wazuh-lab_*"
+  START_TIME:
+    description: "Query start time (ISO 8601 or relative)"
+    type: datetime
+    required: false
+    default: "now-24h"
+    example: "2026-03-27 00:00:00.000"
+  END_TIME:
+    description: "Query end time (ISO 8601 or relative)"
+    type: datetime
+    required: false
+    default: "now"
+    example: "2026-03-27 23:59:59.999"
+
+how_to_implement: >
+  Requires Wazuh agents with Sysmon installed and configured to log registry
+  value set events (EventID 13). VALIDATED — shutdownwithoutlogon set to 0
+  confirmed via Sysmon EventID 13 with 8 hits using reg.exe.
+
+known_false_positives: >
+  Administrators may configure these registry values on servers where
+  shutdown control is required. Filter by known administrative machines
+  and users if needed.
+
+references:
+  - https://attack.mitre.org/techniques/T1112/
+  - https://www.trendmicro.com/vinfo/us/threat-encyclopedia/malware/ransom.msil.screenlocker.a/
+
+response:
+  message: >
+    Shutdown button disabled via registry on $agent_name$ by
+    $data_win_eventdata_user$ via $data_win_eventdata_image$.
+    Registry: $data_win_eventdata_targetObject$.
+    Value: $data_win_eventdata_details$.
+    MITRE ATT&CK: T1112
+  risk_score: 49
+  severity: medium
+  risk_objects:
+    - field: agent_name
+      type: system
+      score: 49
+    - field: data_win_eventdata_user
+      type: user
+      score: 49
+  threat_objects:
+    - field: data_win_eventdata_image
+      type: process_name
+    - field: data_win_eventdata_targetObject
+      type: registry_path
+
+tags:
+  analytic_story:
+    - Ransomware
+    - Windows Registry Abuse
+  asset_type: Endpoint
+  mitre_attack_id:
+    - T1112
+  custom_tags:
+    - shutdown_disabled
+    - registry_tampering
+    - ransomware
+    - killdisk
+    - defense_evasion
+  product:
+    - Wazuh
+  security_domain: endpoint
+
+graylog:
+  query: data_win_system_eventID:"13" AND ((data_win_eventdata_targetObject:/.*shutdownwithoutlogon.*/ AND data_win_eventdata_details:"DWORD (0x00000000)") OR (data_win_eventdata_targetObject:/.*NoClose.*/ AND data_win_eventdata_details:"DWORD (0x00000001)"))

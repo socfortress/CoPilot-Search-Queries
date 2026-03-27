@@ -1,0 +1,162 @@
+name: Windows Disable Windows Group Policy Features Through Registry
+id: Windows_Disable_Windows_Group_Policy_Features_Through_Registry
+version: 1
+schema_version: "1.0"
+date: "2026-03-27"
+author: SOCFortress LLC
+status: production
+type: Anomaly
+description: >
+  Detects suspicious registry modifications that disable Windows Group Policy
+  features including NoDesktop, NoFind, NoControlPanel, NoFileMenu, NoSetTaskbar,
+  NoTrayContextMenu, TaskbarLockAll, NoThemesTab, NoVisualStyleChoice, NoColorChoice,
+  and NoPropertiesMyDocuments set to 0x00000001 under Policies\Explorer or
+  Policies\System. Ransomware and malware commonly use these modifications to
+  hinder mitigation and forensic response efforts by disabling key Windows
+  functionalities. Requires Sysmon config to include Policies\Explorer and
+  Policies\System registry paths in EventID 13 monitoring.
+data_source:
+  - Sysmon EventID 13 (RegistryEvent Value Set)
+
+search:
+  index_pattern: "${INDEX_PATTERN}"
+  size: 100
+  sort:
+    - timestamp: desc
+  query:
+    bool:
+      must:
+        - term:
+            agent_name: "${AGENT_NAME}"
+        - term:
+            agent_labels_customer: "${CUSTOMER_CODE}"
+        - term:
+            data_win_system_eventID: "13"
+        - term:
+            data_win_eventdata_details: "DWORD (0x00000001)"
+        - bool:
+            should:
+              - wildcard:
+                  data_win_eventdata_targetObject: "*Policies*Explorer*NoDesktop*"
+              - wildcard:
+                  data_win_eventdata_targetObject: "*Policies*Explorer*NoFind*"
+              - wildcard:
+                  data_win_eventdata_targetObject: "*Policies*Explorer*NoControlPanel*"
+              - wildcard:
+                  data_win_eventdata_targetObject: "*Policies*Explorer*NoFileMenu*"
+              - wildcard:
+                  data_win_eventdata_targetObject: "*Policies*Explorer*NoSetTaskbar*"
+              - wildcard:
+                  data_win_eventdata_targetObject: "*Policies*Explorer*NoTrayContextMenu*"
+              - wildcard:
+                  data_win_eventdata_targetObject: "*Policies*Explorer*TaskbarLockAll*"
+              - wildcard:
+                  data_win_eventdata_targetObject: "*Policies*Explorer*NoThemesTab*"
+              - wildcard:
+                  data_win_eventdata_targetObject: "*Policies*System*NoVisualStyleChoice*"
+              - wildcard:
+                  data_win_eventdata_targetObject: "*Policies*System*NoColorChoice*"
+              - wildcard:
+                  data_win_eventdata_targetObject: "*Policies*System*NoPropertiesMyDocuments*"
+            minimum_should_match: 1
+        - range:
+            timestamp:
+              gte: "${START_TIME}"
+              lte: "${END_TIME}"
+  _source:
+    - timestamp
+    - agent_name
+    - data_win_system_eventID
+    - data_win_eventdata_targetObject
+    - data_win_eventdata_details
+    - data_win_eventdata_image
+    - data_win_eventdata_user
+
+parameters:
+  AGENT_NAME:
+    description: "Target agent/host name"
+    type: string
+    required: true
+    example: "DESKTOP-AM0HLGE"
+  CUSTOMER_CODE:
+    description: "Customer label for filtering"
+    type: string
+    required: true
+    example: "lab"
+  INDEX_PATTERN:
+    description: "Elasticsearch index pattern"
+    type: string
+    required: true
+    example: "wazuh-lab_*"
+  START_TIME:
+    description: "Query start time (ISO 8601 or relative)"
+    type: datetime
+    required: false
+    default: "now-24h"
+    example: "2026-03-27 00:00:00.000"
+  END_TIME:
+    description: "Query end time (ISO 8601 or relative)"
+    type: datetime
+    required: false
+    default: "now"
+    example: "2026-03-27 23:59:59.999"
+
+how_to_implement: >
+  Requires Wazuh agents with Sysmon installed and configured to log registry
+  value set events (EventID 13). The Sysmon config must include the following
+  registry paths in the EventID 13 include block:
+  Policies\Explorer\NoControlPanel, NoFind, NoDesktop, NoFileMenu, NoSetTaskbar,
+  NoTrayContextMenu, TaskbarLockAll, NoThemesTab and Policies\System\NoVisualStyleChoice,
+  NoColorChoice, NoPropertiesMyDocuments.
+  VALIDATED — NoControlPanel = DWORD (0x00000001) confirmed after adding Sysmon rule.
+
+known_false_positives: >
+  Administrators may configure these registry values for legitimate purposes
+  such as kiosk machines or locked-down environments. Filter by known
+  administrative machines and users if needed.
+
+references:
+  - https://attack.mitre.org/techniques/T1112/
+  - https://hybrid-analysis.com/sample/ef1c427394c205580576d18ba68d5911089c7da0386f19d1ca126929d3e671ab
+  - https://www.sophos.com/en-us/threat-center/threat-analyses/viruses-and-spyware/Troj~Krotten-N/detailed-analysis
+
+response:
+  message: >
+    Windows Group Policy feature disabled via registry on $agent_name$ by
+    $data_win_eventdata_user$ via $data_win_eventdata_image$.
+    Registry: $data_win_eventdata_targetObject$.
+    Value: $data_win_eventdata_details$.
+    MITRE ATT&CK: T1112
+  risk_score: 49
+  severity: medium
+  risk_objects:
+    - field: agent_name
+      type: system
+      score: 49
+  threat_objects:
+    - field: data_win_eventdata_image
+      type: process_name
+    - field: data_win_eventdata_targetObject
+      type: registry_path
+
+tags:
+  analytic_story:
+    - Ransomware
+    - CISA AA23-347A
+    - Windows Defense Evasion Tactics
+    - Windows Registry Abuse
+  asset_type: Endpoint
+  mitre_attack_id:
+    - T1112
+  custom_tags:
+    - group_policy
+    - registry_tampering
+    - defense_evasion
+    - ransomware
+    - desktop_lockdown
+  product:
+    - Wazuh
+  security_domain: endpoint
+
+graylog:
+  query: data_win_system_eventID:"13" AND (data_win_eventdata_targetObject:/.*Policies.*Explorer.*NoDesktop.*/ OR data_win_eventdata_targetObject:/.*Policies.*Explorer.*NoFind.*/ OR data_win_eventdata_targetObject:/.*Policies.*Explorer.*NoControlPanel.*/ OR data_win_eventdata_targetObject:/.*Policies.*Explorer.*NoFileMenu.*/ OR data_win_eventdata_targetObject:/.*Policies.*Explorer.*NoSetTaskbar.*/ OR data_win_eventdata_targetObject:/.*Policies.*Explorer.*NoTrayContextMenu.*/ OR data_win_eventdata_targetObject:/.*Policies.*Explorer.*TaskbarLockAll.*/ OR data_win_eventdata_targetObject:/.*Policies.*Explorer.*NoThemesTab.*/ OR data_win_eventdata_targetObject:/.*Policies.*System.*NoVisualStyleChoice.*/ OR data_win_eventdata_targetObject:/.*Policies.*System.*NoColorChoice.*/ OR data_win_eventdata_targetObject:/.*Policies.*System.*NoPropertiesMyDocuments.*/) AND data_win_eventdata_details:"DWORD (0x00000001)"

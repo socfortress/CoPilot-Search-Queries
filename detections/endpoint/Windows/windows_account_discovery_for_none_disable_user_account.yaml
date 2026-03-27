@@ -1,0 +1,137 @@
+name: Windows Account Discovery for None Disable User Account
+id: Windows_Account_Discovery_For_None_Disable_User_Account
+version: 1
+schema_version: "1.0"
+date: "2026-03-27"
+author: SOCFortress LLC
+status: production
+type: Hunting
+description: >
+  Detects execution of the PowerView PowerShell cmdlet Get-NetUser with the
+  UACFilter parameter set to NOT_ACCOUNTDISABLE, indicating an attempt to
+  enumerate Active Directory user accounts that are not disabled. This is a
+  common reconnaissance technique used by attackers to identify active user
+  accounts for further exploitation including unauthorized access, privilege
+  escalation, or lateral movement.
+
+data_source:
+  - PowerShell Script Block Logging EventID 4104
+
+search:
+  index_pattern: "${INDEX_PATTERN}"
+  size: 100
+  sort:
+    - timestamp: desc
+  query:
+    bool:
+      must:
+        - term:
+            agent_name: "${AGENT_NAME}"
+        - term:
+            agent_labels_customer: "${CUSTOMER_CODE}"
+        - term:
+            data_win_system_eventID: "4104"
+        - wildcard:
+            data_win_eventdata_scriptBlockText: "*Get-NetUser*"
+        - wildcard:
+            data_win_eventdata_scriptBlockText: "*NOT_ACCOUNTDISABLE*"
+        - wildcard:
+            data_win_eventdata_scriptBlockText: "*-UACFilter*"
+        - range:
+            timestamp:
+              gte: "${START_TIME}"
+              lte: "${END_TIME}"
+  _source:
+    - timestamp
+    - agent_name
+    - data_win_system_eventID
+    - data_win_eventdata_scriptBlockText
+    - data_win_eventdata_path
+    - data_win_eventdata_user
+
+parameters:
+  AGENT_NAME:
+    description: "Target agent/host name"
+    type: string
+    required: true
+    example: "DESKTOP-AM0HLGE"
+  CUSTOMER_CODE:
+    description: "Customer label for filtering"
+    type: string
+    required: true
+    example: "lab"
+  INDEX_PATTERN:
+    description: "Elasticsearch index pattern"
+    type: string
+    required: true
+    example: "wazuh-lab_*"
+  START_TIME:
+    description: "Query start time (ISO 8601 or relative)"
+    type: datetime
+    required: false
+    default: "now-24h"
+    example: "2026-03-27 00:00:00.000"
+  END_TIME:
+    description: "Query end time (ISO 8601 or relative)"
+    type: datetime
+    required: false
+    default: "now"
+    example: "2026-03-27 23:59:59.999"
+
+how_to_implement: >
+  Requires PowerShell Script Block Logging enabled on endpoints.
+  Enable via Group Policy: Computer Configuration → Administrative Templates
+  → Windows Components → Windows PowerShell → Turn on PowerShell Script Block
+  Logging. The Microsoft-Windows-PowerShell/Operational channel must be
+  forwarded by the Wazuh agent. Confirmed flowing in this environment.
+  VALIDATED — 4 hits confirmed for Get-NetUser -UACFilter NOT_ACCOUNTDISABLE.
+
+known_false_positives: >
+  Administrators may use PowerView or similar tools for legitimate AD
+  enumeration and auditing purposes. Review context and user account to
+  determine if the activity is authorized.
+
+references:
+  - https://attack.mitre.org/techniques/T1087/001/
+  - https://www.cisa.gov/news-events/cybersecurity-advisories/aa23-347a
+  - https://powersploit.readthedocs.io/en/stable/Recon/README/
+  - https://book.hacktricks.xyz/windows-hardening/basic-powershell-for-pentesters/powerview
+
+response:
+  message: >
+    PowerView Get-NetUser with NOT_ACCOUNTDISABLE filter detected on
+    $agent_name$ by $data_win_eventdata_user$.
+    Script: $data_win_eventdata_scriptBlockText$.
+    MITRE ATT&CK: T1087.001
+  risk_score: 40
+  severity: medium
+  risk_objects:
+    - field: agent_name
+      type: system
+      score: 40
+    - field: data_win_eventdata_user
+      type: user
+      score: 40
+  threat_objects:
+    - field: data_win_eventdata_scriptBlockText
+      type: script_block
+
+tags:
+  analytic_story:
+    - CISA AA23-347A
+    - Active Directory Discovery
+  asset_type: Endpoint
+  mitre_attack_id:
+    - T1087.001
+  custom_tags:
+    - powerview
+    - active_directory
+    - account_discovery
+    - reconnaissance
+    - get_netuser
+  product:
+    - Wazuh
+  security_domain: endpoint
+
+graylog:
+  query: data_win_system_eventID:"4104" AND data_win_eventdata_scriptBlockText:/.*Get-NetUser.*/ AND data_win_eventdata_scriptBlockText:/.*NOT_ACCOUNTDISABLE.*/ AND data_win_eventdata_scriptBlockText:/.*-UACFilter.*/

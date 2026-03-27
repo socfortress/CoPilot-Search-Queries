@@ -1,0 +1,141 @@
+name: Windows DNS Query Request To TinyUrl
+id: Windows_DNS_Query_Request_To_TinyUrl
+version: 1
+schema_version: "1.0"
+date: "2026-03-27"
+author: SOCFortress LLC
+status: production
+type: Anomaly
+description: >
+  Detects processes running from suspicious locations (AppData, Temp, ProgramData,
+  Public, Tasks, Perflogs) making DNS queries to tinyurl.com. URL shorteners are
+  frequently used by threat actors to obfuscate malicious destinations including
+  phishing pages, malware distribution sites, or C2 endpoints. While tinyurl.com
+  is a legitimate service, its use by non-browser processes running from suspicious
+  paths is highly indicative of malicious activity such as malware downloading
+  additional payloads or beaconing to C2 infrastructure.
+data_source:
+  - Sysmon EventID 22 (DNSEvent)
+
+search:
+  index_pattern: "${INDEX_PATTERN}"
+  size: 100
+  sort:
+    - timestamp: desc
+  query:
+    bool:
+      must:
+        - term:
+            agent_name: "${AGENT_NAME}"
+        - term:
+            agent_labels_customer: "${CUSTOMER_CODE}"
+        - term:
+            data_win_system_eventID: "22"
+        - term:
+            data_win_eventdata_queryName: "tinyurl.com"
+        - bool:
+            should:
+              - wildcard:
+                  data_win_eventdata_image: "*\\AppData\\*"
+              - wildcard:
+                  data_win_eventdata_image: "*\\Perflogs\\*"
+              - wildcard:
+                  data_win_eventdata_image: "*\\ProgramData\\*"
+              - wildcard:
+                  data_win_eventdata_image: "*\\Temp\\*"
+              - wildcard:
+                  data_win_eventdata_image: "*\\Users\\Public\\*"
+              - wildcard:
+                  data_win_eventdata_image: "*\\Windows\\Tasks\\*"
+            minimum_should_match: 1
+        - range:
+            timestamp:
+              gte: "${START_TIME}"
+              lte: "${END_TIME}"
+  _source:
+    - timestamp
+    - agent_name
+    - data_win_system_eventID
+    - data_win_eventdata_queryName
+    - data_win_eventdata_queryResults
+    - data_win_eventdata_image
+    - data_win_eventdata_user
+
+parameters:
+  AGENT_NAME:
+    description: "Target agent/host name"
+    type: string
+    required: true
+    example: "DESKTOP-AM0HLGE"
+  CUSTOMER_CODE:
+    description: "Customer label for filtering"
+    type: string
+    required: true
+    example: "lab"
+  INDEX_PATTERN:
+    description: "Elasticsearch index pattern"
+    type: string
+    required: true
+    example: "wazuh-lab_*"
+  START_TIME:
+    description: "Query start time (ISO 8601 or relative)"
+    type: datetime
+    required: false
+    default: "now-24h"
+    example: "2026-03-27 00:00:00.000"
+  END_TIME:
+    description: "Query end time (ISO 8601 or relative)"
+    type: datetime
+    required: false
+    default: "now"
+    example: "2026-03-27 23:59:59.999"
+
+how_to_implement: >
+  Requires Wazuh agents with Sysmon installed and configured to log DNS query
+  events (EventID 22). VALIDATED — tinyurl.com DNS query from C:\Windows\Temp\update.exe
+  confirmed via Sysmon EventID 22 with 1 hit.
+
+known_false_positives: >
+  Instant messaging or collaboration tools running from user AppData paths may
+  legitimately query URL shorteners. Filter known legitimate applications if needed.
+
+references:
+  - https://attack.mitre.org/techniques/T1105/
+  - https://x.com/Unit42_Intel/status/1919418143476199869
+
+response:
+  message: >
+    Suspicious process $data_win_eventdata_image$ made a DNS query for tinyurl.com
+    on $agent_name$ by $data_win_eventdata_user$.
+    MITRE ATT&CK: T1105
+  risk_score: 40
+  severity: medium
+  risk_objects:
+    - field: agent_name
+      type: system
+      score: 40
+  threat_objects:
+    - field: data_win_eventdata_image
+      type: process_name
+    - field: data_win_eventdata_queryName
+      type: domain
+
+tags:
+  analytic_story:
+    - Malicious Inno Setup Loader
+    - Ingress Tool Transfer
+  asset_type: Endpoint
+  mitre_attack_id:
+    - T1105
+  custom_tags:
+    - tinyurl
+    - url_shortener
+    - dns
+    - c2
+    - suspicious_path
+  product:
+    - Wazuh
+  security_domain: endpoint
+
+graylog:
+  query: data_win_system_eventID:"22" AND data_win_eventdata_queryName:"tinyurl.com" AND (data_win_eventdata_image:/.*\\AppData\\.*/ OR data_win_eventdata_image:/.*\\Perflogs\\.*/ OR data_win_eventdata_image:/.*\\ProgramData\\.*/ OR data_win_eventdata_image:/.*\\Temp\\.*/ OR data_win_eventdata_image:/.*\\Users\\Public\\.*/ OR data_win_eventdata_image:/.*\\Windows\\Tasks\\.*/)

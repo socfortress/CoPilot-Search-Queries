@@ -1,0 +1,146 @@
+name: Windows Audit Policy Auditing Option Modified - Registry
+id: Windows_Audit_Policy_Auditing_Option_Modified_-_Registry
+version: 1
+schema_version: "1.0"
+date: "2026-03-27"
+author: SOCFortress LLC
+status: production
+type: Anomaly
+description: >
+  Detects modifications to Audit Policy auditing options registry values under
+  HKLM\System\CurrentControlSet\Control\Lsa\. Specifically monitors for changes
+  to CrashOnAuditFail, FullPrivilegeAuditing, AuditBaseObjects, and
+  AuditBaseDirectories values. Threat actors may modify these values to tamper
+  with audit policy configuration and disable SACL-based logging, allowing them
+  to bypass defenses and evade detection during further attacks.
+
+data_source:
+  - Sysmon EventID 13 (RegistryEvent Value Set)
+
+search:
+  index_pattern: "${INDEX_PATTERN}"
+  size: 100
+  sort:
+    - timestamp: desc
+  query:
+    bool:
+      must:
+        - term:
+            agent_name: "${AGENT_NAME}"
+        - term:
+            agent_labels_customer: "${CUSTOMER_CODE}"
+        - term:
+            data_win_system_eventID: "13"
+        - wildcard:
+            data_win_eventdata_targetObject: "*Control*Lsa*"
+        - bool:
+            should:
+              - wildcard:
+                  data_win_eventdata_targetObject: "*CrashOnAuditFail*"
+              - wildcard:
+                  data_win_eventdata_targetObject: "*FullPrivilegeAuditing*"
+              - wildcard:
+                  data_win_eventdata_targetObject: "*AuditBaseObjects*"
+              - wildcard:
+                  data_win_eventdata_targetObject: "*AuditBaseDirectories*"
+            minimum_should_match: 1
+        - range:
+            timestamp:
+              gte: "${START_TIME}"
+              lte: "${END_TIME}"
+  _source:
+    - timestamp
+    - agent_name
+    - data_win_system_eventID
+    - data_win_eventdata_targetObject
+    - data_win_eventdata_details
+    - data_win_eventdata_image
+    - data_win_eventdata_user
+
+parameters:
+  AGENT_NAME:
+    description: "Target agent/host name"
+    type: string
+    required: true
+    example: "DESKTOP-AM0HLGE"
+  CUSTOMER_CODE:
+    description: "Customer label for filtering"
+    type: string
+    required: true
+    example: "lab"
+  INDEX_PATTERN:
+    description: "Elasticsearch index pattern"
+    type: string
+    required: true
+    example: "wazuh-lab_*"
+  START_TIME:
+    description: "Query start time (ISO 8601 or relative)"
+    type: datetime
+    required: false
+    default: "now-24h"
+    example: "2026-03-27 00:00:00.000"
+  END_TIME:
+    description: "Query end time (ISO 8601 or relative)"
+    type: datetime
+    required: false
+    default: "now"
+    example: "2026-03-27 23:59:59.999"
+
+how_to_implement: >
+  Requires Wazuh agents with Sysmon installed and configured to log registry
+  value set events (EventID 13). The data_win_eventdata_targetObject field
+  is confirmed working for registry path matching. VALIDATED — CrashOnAuditFail
+  and AuditBaseObjects modifications confirmed with 24 hits via reg.exe.
+  Note: Use *Control*Lsa* wildcard (not *\\Control\\Lsa*) due to double-escaped
+  backslash storage in the targetObject field.
+
+known_false_positives: >
+  Active setup installer may add or modify these registry values during
+  legitimate Windows configuration. Review the process image and context
+  to determine if the modification is authorized.
+
+references:
+  - https://attack.mitre.org/techniques/T1547/014/
+  - https://learn.microsoft.com/en-us/openspecs/windows_protocols/ms-gpac/262a2bed-93d4-4c04-abec-cf06e9ec72fd
+  - https://learn.microsoft.com/en-us/windows-server/administration/windows-commands/auditpol-set
+
+response:
+  message: >
+    Audit Policy auditing option $data_win_eventdata_targetObject$ modified
+    on $agent_name$ by $data_win_eventdata_user$ via $data_win_eventdata_image$.
+    Value set to: $data_win_eventdata_details$.
+    MITRE ATT&CK: T1547.014
+  risk_score: 64
+  severity: high
+  risk_objects:
+    - field: agent_name
+      type: system
+      score: 64
+    - field: data_win_eventdata_user
+      type: user
+      score: 64
+  threat_objects:
+    - field: data_win_eventdata_image
+      type: process_name
+    - field: data_win_eventdata_targetObject
+      type: registry_path
+
+tags:
+  analytic_story:
+    - Windows Audit Policy Tampering
+    - Defense Evasion
+  asset_type: Endpoint
+  mitre_attack_id:
+    - T1547.014
+  custom_tags:
+    - audit_policy
+    - registry_tampering
+    - defense_evasion
+    - lsa
+    - sacl
+  product:
+    - Wazuh
+  security_domain: endpoint
+
+graylog:
+  query: data_win_system_eventID:"13" AND data_win_eventdata_targetObject:/.*Control.*Lsa.*/ AND (data_win_eventdata_targetObject:/.*CrashOnAuditFail.*/ OR data_win_eventdata_targetObject:/.*FullPrivilegeAuditing.*/ OR data_win_eventdata_targetObject:/.*AuditBaseObjects.*/ OR data_win_eventdata_targetObject:/.*AuditBaseDirectories.*/)
