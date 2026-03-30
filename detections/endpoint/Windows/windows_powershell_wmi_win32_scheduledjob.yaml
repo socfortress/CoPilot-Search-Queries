@@ -1,0 +1,129 @@
+name: Windows PowerShell WMI Win32 ScheduledJob
+id: 47c69803-2c09-408b-b40a-063c064cbb16
+version: 1
+schema_version: "1.0"
+date: "2026-03-30"
+author: SOCFortress LLC
+status: production
+type: TTP
+description: >
+  Detects use of the Win32_ScheduledJob WMI class via PowerShell to create
+  scheduled tasks. This WMI class is disabled by default due to security concerns
+  and must be explicitly enabled through registry modifications. Its use may
+  indicate malicious intent, particularly if the class was enabled by an attacker
+  as a prerequisite. Attackers use Win32_ScheduledJob for persistence and remote
+  execution via DCOM/RPC infrastructure, which can bypass traditional scheduled
+  task monitoring.
+
+data_source:
+  - PowerShell Script Block Logging EventID 4104
+
+search:
+  index_pattern: "${INDEX_PATTERN}"
+  size: 100
+  sort:
+    - timestamp: desc
+  query:
+    bool:
+      must:
+        - term:
+            agent_name: "${AGENT_NAME}"
+        - term:
+            agent_labels_customer: "${CUSTOMER_CODE}"
+        - term:
+            data_win_system_eventID: "4104"
+        - wildcard:
+            data_win_eventdata_scriptBlockText: "*Win32_ScheduledJob*"
+        - range:
+            timestamp:
+              gte: "${START_TIME}"
+              lte: "${END_TIME}"
+  _source:
+    - timestamp
+    - agent_name
+    - data_win_system_eventID
+    - data_win_eventdata_scriptBlockText
+    - data_win_eventdata_path
+    - data_win_eventdata_user
+
+parameters:
+  AGENT_NAME:
+    description: "Target agent/host name"
+    type: string
+    required: true
+    example: "DESKTOP-AM0HLGE"
+  CUSTOMER_CODE:
+    description: "Customer label for filtering"
+    type: string
+    required: true
+    example: "lab"
+  INDEX_PATTERN:
+    description: "Elasticsearch index pattern"
+    type: string
+    required: true
+    example: "wazuh-lab_*"
+  START_TIME:
+    description: "Query start time (ISO 8601 or relative)"
+    type: datetime
+    required: false
+    default: "now-24h"
+    example: "2026-03-30 00:00:00.000"
+  END_TIME:
+    description: "Query end time (ISO 8601 or relative)"
+    type: datetime
+    required: false
+    default: "now"
+    example: "2026-03-30 23:59:59.999"
+
+how_to_implement: >
+  Requires PowerShell Script Block Logging enabled on endpoints.
+  Enable via Group Policy: Computer Configuration → Administrative Templates
+  → Windows Components → Windows PowerShell → Turn on PowerShell Script Block
+  Logging.
+
+known_false_positives: >
+  False positives may be present based on legacy applications or utilities that
+  use Win32_ScheduledJob for legitimate scheduling. The RPC service must be
+  running on both local and remote computers for this to work. Review the task
+  being created and user context to determine legitimacy.
+
+references:
+  - https://attack.mitre.org/techniques/T1059/001/
+  - https://securityonline.info/wmiexec-regout-get-outputdata-response-from-registry/
+  - https://learn.microsoft.com/en-us/windows/win32/cimwin32prov/win32-scheduledjob
+
+response:
+  message: >
+    PowerShell Win32_ScheduledJob WMI task creation detected on $agent_name$
+    by $data_win_eventdata_user$.
+    Script: $data_win_eventdata_scriptBlockText$.
+    MITRE ATT&CK: T1059.001
+  risk_score: 40
+  severity: medium
+  risk_objects:
+    - field: agent_name
+      type: system
+      score: 40
+  threat_objects:
+    - field: data_win_eventdata_scriptBlockText
+      type: script_block
+
+tags:
+  analytic_story:
+    - Active Directory Lateral Movement
+  asset_type: Endpoint
+  mitre_attack_id:
+    - T1059.001
+  custom_tags:
+    - win32_scheduledjob
+    - wmi
+    - scheduled_task
+    - lateral_movement
+    - persistence
+    - dcom
+  product:
+    - Wazuh
+  security_domain: endpoint
+
+graylog:
+  query: data_win_system_eventID:"4104" AND data_win_eventdata_scriptBlockText:/.*Win32_ScheduledJob.*/

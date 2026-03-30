@@ -1,0 +1,136 @@
+name: Windows PowerShell Invoke-RestMethod IP Information Collection
+id: 8db47e12-9c3e-4f5a-b0d6-e42a1895cd4f
+version: 1
+schema_version: "1.0"
+date: "2026-03-30"
+author: SOCFortress LLC
+status: production
+type: Anomaly
+description: >
+  Detects use of PowerShell's Invoke-RestMethod cmdlet to collect geolocation
+  data from ipinfo.io or external IP information from api.ipify.org. This
+  behavior is commonly observed in malware and post-exploitation toolkits
+  performing reconnaissance to determine the geographical location or network
+  details of a compromised system. Water Gamayun threat actors use this technique
+  as part of their initial reconnaissance phase.
+
+data_source:
+  - PowerShell Script Block Logging EventID 4104
+
+search:
+  index_pattern: "${INDEX_PATTERN}"
+  size: 100
+  sort:
+    - timestamp: desc
+  query:
+    bool:
+      must:
+        - term:
+            agent_name: "${AGENT_NAME}"
+        - term:
+            agent_labels_customer: "${CUSTOMER_CODE}"
+        - term:
+            data_win_system_eventID: "4104"
+        - wildcard:
+            data_win_eventdata_scriptBlockText: "*Invoke-RestMethod*"
+        - bool:
+            should:
+              - wildcard:
+                  data_win_eventdata_scriptBlockText: "*ipinfo.io*"
+              - wildcard:
+                  data_win_eventdata_scriptBlockText: "*api.ipify.org*"
+            minimum_should_match: 1
+        - range:
+            timestamp:
+              gte: "${START_TIME}"
+              lte: "${END_TIME}"
+  _source:
+    - timestamp
+    - agent_name
+    - data_win_system_eventID
+    - data_win_eventdata_scriptBlockText
+    - data_win_eventdata_path
+    - data_win_eventdata_user
+
+parameters:
+  AGENT_NAME:
+    description: "Target agent/host name"
+    type: string
+    required: true
+    example: "DESKTOP-AM0HLGE"
+  CUSTOMER_CODE:
+    description: "Customer label for filtering"
+    type: string
+    required: true
+    example: "lab"
+  INDEX_PATTERN:
+    description: "Elasticsearch index pattern"
+    type: string
+    required: true
+    example: "wazuh-lab_*"
+  START_TIME:
+    description: "Query start time (ISO 8601 or relative)"
+    type: datetime
+    required: false
+    default: "now-24h"
+    example: "2026-03-30 00:00:00.000"
+  END_TIME:
+    description: "Query end time (ISO 8601 or relative)"
+    type: datetime
+    required: false
+    default: "now"
+    example: "2026-03-30 23:59:59.999"
+
+how_to_implement: >
+  Requires PowerShell Script Block Logging enabled on endpoints.
+  Enable via Group Policy: Computer Configuration → Administrative Templates
+  → Windows Components → Windows PowerShell → Turn on PowerShell Script Block
+  Logging. Confirmed flowing in this environment.
+
+known_false_positives: >
+  Some legitimate applications or administrative scripts may use ipinfo.io
+  or api.ipify.org for IP validation or geolocation purposes. Review the
+  user context and surrounding activity to determine legitimacy.
+
+references:
+  - https://attack.mitre.org/techniques/T1082/
+  - https://attack.mitre.org/techniques/T1016/
+  - https://attack.mitre.org/techniques/T1059/001/
+  - https://securityintelligence.com/posts/new-threat-actor-water-gamayun-targets-telecom-finance/
+
+response:
+  message: >
+    PowerShell Invoke-RestMethod IP information collection detected on
+    $agent_name$ by $data_win_eventdata_user$.
+    Script: $data_win_eventdata_scriptBlockText$.
+    MITRE ATT&CK: T1082, T1016, T1059.001
+  risk_score: 45
+  severity: medium
+  risk_objects:
+    - field: agent_name
+      type: system
+      score: 45
+  threat_objects:
+    - field: data_win_eventdata_scriptBlockText
+      type: script_block
+
+tags:
+  analytic_story:
+    - Water Gamayun
+  asset_type: Endpoint
+  mitre_attack_id:
+    - T1082
+    - T1016
+    - T1059.001
+  custom_tags:
+    - invoke_restmethod
+    - ip_geolocation
+    - reconnaissance
+    - ipinfo
+    - water_gamayun
+  product:
+    - Wazuh
+  security_domain: endpoint
+
+graylog:
+  query: data_win_system_eventID:"4104" AND data_win_eventdata_scriptBlockText:/.*Invoke-RestMethod.*/ AND (data_win_eventdata_scriptBlockText:/.*ipinfo\.io.*/ OR data_win_eventdata_scriptBlockText:/.*api\.ipify\.org.*/)
