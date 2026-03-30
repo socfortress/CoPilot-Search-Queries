@@ -1,0 +1,134 @@
+name: Windows Enable PowerShell Web Access
+id: 175bb2de-6227-416b-9678-9b61999cd21f
+version: 1
+schema_version: "1.0"
+date: "2026-03-30"
+author: SOCFortress LLC
+status: production
+type: TTP
+description: >
+  Detects the enabling of PowerShell Web Access via PowerShell commands including
+  Install-WindowsFeature WindowsPowerShellWebAccess, Install-PswaWebApplication,
+  or Add-PswaAuthorizationRule. PowerShell Web Access provides a web-based
+  PowerShell console that allows remote execution of PowerShell commands through
+  a browser. Threat actors may enable this feature to establish persistent remote
+  access to compromised systems, bypassing traditional remote access controls.
+
+data_source:
+  - PowerShell Script Block Logging EventID 4104
+
+search:
+  index_pattern: "${INDEX_PATTERN}"
+  size: 100
+  sort:
+    - timestamp: desc
+  query:
+    bool:
+      must:
+        - term:
+            agent_name: "${AGENT_NAME}"
+        - term:
+            agent_labels_customer: "${CUSTOMER_CODE}"
+        - term:
+            data_win_system_eventID: "4104"
+        - bool:
+            should:
+              - wildcard:
+                  data_win_eventdata_scriptBlockText: "*Install-WindowsFeature*WindowsPowerShellWebAccess*"
+              - wildcard:
+                  data_win_eventdata_scriptBlockText: "*Install-PswaWebApplication*"
+              - wildcard:
+                  data_win_eventdata_scriptBlockText: "*Add-PswaAuthorizationRule*"
+            minimum_should_match: 1
+        - range:
+            timestamp:
+              gte: "${START_TIME}"
+              lte: "${END_TIME}"
+  _source:
+    - timestamp
+    - agent_name
+    - data_win_system_eventID
+    - data_win_eventdata_scriptBlockText
+    - data_win_eventdata_path
+    - data_win_eventdata_user
+
+parameters:
+  AGENT_NAME:
+    description: "Target agent/host name"
+    type: string
+    required: true
+    example: "DESKTOP-AM0HLGE"
+  CUSTOMER_CODE:
+    description: "Customer label for filtering"
+    type: string
+    required: true
+    example: "lab"
+  INDEX_PATTERN:
+    description: "Elasticsearch index pattern"
+    type: string
+    required: true
+    example: "wazuh-lab_*"
+  START_TIME:
+    description: "Query start time (ISO 8601 or relative)"
+    type: datetime
+    required: false
+    default: "now-24h"
+    example: "2026-03-30 00:00:00.000"
+  END_TIME:
+    description: "Query end time (ISO 8601 or relative)"
+    type: datetime
+    required: false
+    default: "now"
+    example: "2026-03-30 23:59:59.999"
+
+how_to_implement: >
+  Requires PowerShell Script Block Logging enabled on endpoints.
+  Enable via Group Policy: Computer Configuration → Administrative Templates
+  → Windows Components → Windows PowerShell → Turn on PowerShell Script Block
+  Logging.
+
+known_false_positives: >
+  Legitimate scripts or network administrators may enable PowerShell Web Access
+  for authorized remote management purposes. Monitor and escalate as needed,
+  verifying the user context and business justification.
+
+references:
+  - https://attack.mitre.org/techniques/T1059/001/
+  - https://www.cisa.gov/news-events/cybersecurity-advisories/aa24-241a
+  - https://gist.github.com/MHaggis/7e67b659af9148fa593cf2402edebb41
+
+response:
+  message: >
+    PowerShell Web Access enabled on $agent_name$ by $data_win_eventdata_user$.
+    Script: $data_win_eventdata_scriptBlockText$.
+    MITRE ATT&CK: T1059.001
+  risk_score: 72
+  severity: high
+  risk_objects:
+    - field: agent_name
+      type: system
+      score: 72
+  threat_objects:
+    - field: data_win_eventdata_scriptBlockText
+      type: script_block
+
+tags:
+  analytic_story:
+    - CISA AA24-241A
+    - Malicious PowerShell
+    - Persistence
+  asset_type: Endpoint
+  mitre_attack_id:
+    - T1059.001
+  custom_tags:
+    - powershell_web_access
+    - pswa
+    - remote_access
+    - persistence
+    - defense_evasion
+  product:
+    - Wazuh
+  security_domain: endpoint
+
+graylog:
+  query: data_win_system_eventID:"4104" AND (data_win_eventdata_scriptBlockText:/.*Install-WindowsFeature.*WindowsPowerShellWebAccess.*/ OR data_win_eventdata_scriptBlockText:/.*Install-PswaWebApplication.*/ OR data_win_eventdata_scriptBlockText:/.*Add-PswaAuthorizationRule.*/)

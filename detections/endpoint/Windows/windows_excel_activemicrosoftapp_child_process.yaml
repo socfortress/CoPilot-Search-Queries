@@ -1,0 +1,143 @@
+name: Windows Excel ActiveMicrosoftApp Child Process
+id: 4dfd6a58-93b2-4012-bb33-038bb63652b3
+version: 1
+schema_version: "1.0"
+date: "2026-03-30"
+author: SOCFortress LLC
+status: production
+type: Anomaly
+description: >
+  Detects execution of legacy Microsoft Office processes (WINPROJ.EXE, FOXPROW.exe,
+  SCHDPLUS.exe) as child processes of Microsoft Excel (EXCEL.EXE). These are
+  discontinued legacy applications that have no legitimate use in modern enterprise
+  environments (Microsoft Project discontinued January 2010). Adversaries may abuse
+  DCOM/Excel to spawn these processes for lateral movement, code execution, or to
+  bypass application control mechanisms as documented in PathWiper attacks.
+
+data_source:
+  - Sysmon EventID 1 (ProcessCreate)
+
+search:
+  index_pattern: "${INDEX_PATTERN}"
+  size: 100
+  sort:
+    - timestamp: desc
+  query:
+    bool:
+      must:
+        - term:
+            agent_name: "${AGENT_NAME}"
+        - term:
+            agent_labels_customer: "${CUSTOMER_CODE}"
+        - term:
+            data_win_system_eventID: "1"
+        - wildcard:
+            data_win_eventdata_parentImage: "*\\EXCEL.EXE"
+        - bool:
+            should:
+              - wildcard:
+                  data_win_eventdata_image: "*\\WINPROJ.EXE"
+              - wildcard:
+                  data_win_eventdata_image: "*\\FOXPROW.exe"
+              - wildcard:
+                  data_win_eventdata_image: "*\\SCHDPLUS.exe"
+            minimum_should_match: 1
+        - range:
+            timestamp:
+              gte: "${START_TIME}"
+              lte: "${END_TIME}"
+  _source:
+    - timestamp
+    - agent_name
+    - data_win_system_eventID
+    - data_win_eventdata_image
+    - data_win_eventdata_parentImage
+    - data_win_eventdata_commandLine
+    - data_win_eventdata_originalFileName
+    - data_win_eventdata_user
+
+parameters:
+  AGENT_NAME:
+    description: "Target agent/host name"
+    type: string
+    required: true
+    example: "DESKTOP-AM0HLGE"
+  CUSTOMER_CODE:
+    description: "Customer label for filtering"
+    type: string
+    required: true
+    example: "lab"
+  INDEX_PATTERN:
+    description: "Elasticsearch index pattern"
+    type: string
+    required: true
+    example: "wazuh-lab_*"
+  START_TIME:
+    description: "Query start time (ISO 8601 or relative)"
+    type: datetime
+    required: false
+    default: "now-24h"
+    example: "2026-03-30 00:00:00.000"
+  END_TIME:
+    description: "Query end time (ISO 8601 or relative)"
+    type: datetime
+    required: false
+    default: "now"
+    example: "2026-03-30 23:59:59.999"
+
+how_to_implement: >
+  Requires Wazuh agents with Sysmon installed and configured to log process
+  creation events (EventID 1) with parent process information.
+
+known_false_positives: >
+  Microsoft Project has been discontinued since January 2010, so its presence
+  is unlikely in modern environments. If a related child process is observed,
+  verify its legitimacy to rule out potential misuse.
+
+references:
+  - https://attack.mitre.org/techniques/T1021/003/
+  - https://specterops.io/blog/2023/10/30/lateral-movement-abuse-the-power-of-dcom-excel-application/
+  - https://blog.talosintelligence.com/pathwiper-targets-ukraine/
+  - https://www.trellix.com/blogs/research/dcom-abuse-and-network-erasure-with-trellix-ndr/
+
+response:
+  message: >
+    Excel spawned legacy ActiveMicrosoftApp process on $agent_name$ by
+    $data_win_eventdata_user$.
+    Parent: $data_win_eventdata_parentImage$.
+    Child: $data_win_eventdata_image$.
+    MITRE ATT&CK: T1021.003
+  risk_score: 10
+  severity: medium
+  risk_objects:
+    - field: agent_name
+      type: system
+      score: 10
+    - field: data_win_eventdata_user
+      type: user
+      score: 10
+  threat_objects:
+    - field: data_win_eventdata_image
+      type: process_name
+    - field: data_win_eventdata_parentImage
+      type: parent_process_name
+
+tags:
+  analytic_story:
+    - PathWiper
+    - DCOM Lateral Movement
+  asset_type: Endpoint
+  mitre_attack_id:
+    - T1021.003
+  custom_tags:
+    - excel
+    - dcom
+    - lateral_movement
+    - legacy_process
+    - pathwiper
+  product:
+    - Wazuh
+  security_domain: endpoint
+
+graylog:
+  query: data_win_system_eventID:"1" AND data_win_eventdata_parentImage:/.*\\EXCEL\.EXE/ AND (data_win_eventdata_image:/.*\\WINPROJ\.EXE/ OR data_win_eventdata_image:/.*\\FOXPROW\.exe/ OR data_win_eventdata_image:/.*\\SCHDPLUS\.exe/)

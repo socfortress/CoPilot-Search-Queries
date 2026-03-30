@@ -1,0 +1,141 @@
+name: Windows Eventlog Cleared Via Wevtutil
+id: fdb829a8-db84-4832-b64b-3e964cd44f01
+version: 1
+schema_version: "1.0"
+date: "2026-03-30"
+author: SOCFortress LLC
+status: production
+type: Anomaly
+description: >
+  Detects the usage of wevtutil.exe with the "cl" or "clear-log" parameter
+  to clear the contents of Windows event logs. Clearing event logs is a common
+  anti-forensic technique used by threat actors to cover their tracks after
+  malicious actions, hindering incident response and forensic investigations.
+  This technique is used by ransomware families including Rhysida, Clop,
+  and ShrinkLocker.
+
+data_source:
+  - Sysmon EventID 1 (ProcessCreate)
+
+search:
+  index_pattern: "${INDEX_PATTERN}"
+  size: 100
+  sort:
+    - timestamp: desc
+  query:
+    bool:
+      must:
+        - term:
+            agent_name: "${AGENT_NAME}"
+        - term:
+            agent_labels_customer: "${CUSTOMER_CODE}"
+        - term:
+            data_win_system_eventID: "1"
+        - wildcard:
+            data_win_eventdata_image: "*\\wevtutil.exe"
+        - bool:
+            should:
+              - wildcard:
+                  data_win_eventdata_commandLine: "* cl *"
+              - wildcard:
+                  data_win_eventdata_commandLine: "*clear-log*"
+            minimum_should_match: 1
+        - range:
+            timestamp:
+              gte: "${START_TIME}"
+              lte: "${END_TIME}"
+  _source:
+    - timestamp
+    - agent_name
+    - data_win_system_eventID
+    - data_win_eventdata_image
+    - data_win_eventdata_commandLine
+    - data_win_eventdata_parentImage
+    - data_win_eventdata_user
+
+parameters:
+  AGENT_NAME:
+    description: "Target agent/host name"
+    type: string
+    required: true
+    example: "DESKTOP-AM0HLGE"
+  CUSTOMER_CODE:
+    description: "Customer label for filtering"
+    type: string
+    required: true
+    example: "lab"
+  INDEX_PATTERN:
+    description: "Elasticsearch index pattern"
+    type: string
+    required: true
+    example: "wazuh-lab_*"
+  START_TIME:
+    description: "Query start time (ISO 8601 or relative)"
+    type: datetime
+    required: false
+    default: "now-24h"
+    example: "2026-03-30 00:00:00.000"
+  END_TIME:
+    description: "Query end time (ISO 8601 or relative)"
+    type: datetime
+    required: false
+    default: "now"
+    example: "2026-03-30 23:59:59.999"
+
+how_to_implement: >
+  Requires Wazuh agents with Sysmon installed and configured to log process
+  creation events (EventID 1) with full command-line arguments.
+
+known_false_positives: >
+  The wevtutil.exe application is a legitimate Windows event log utility.
+  Administrators may use it to manage Windows event logs. Review the user
+  context and frequency of log clearing to determine if the activity is
+  authorized.
+
+references:
+  - https://attack.mitre.org/techniques/T1070/001/
+  - https://github.com/redcanaryco/atomic-red-team/blob/master/atomics/T1070.001/T1070.001.md
+
+response:
+  message: >
+    Event log cleared via wevtutil.exe on $agent_name$ by $data_win_eventdata_user$.
+    Command: $data_win_eventdata_commandLine$.
+    MITRE ATT&CK: T1070.001
+  risk_score: 28
+  severity: medium
+  risk_objects:
+    - field: agent_name
+      type: system
+      score: 28
+    - field: data_win_eventdata_user
+      type: user
+      score: 28
+  threat_objects:
+    - field: data_win_eventdata_image
+      type: process_name
+    - field: data_win_eventdata_commandLine
+      type: command_line
+
+tags:
+  analytic_story:
+    - Windows Log Manipulation
+    - Ransomware
+    - Rhysida Ransomware
+    - Clop Ransomware
+    - CISA AA23-347A
+    - ShrinkLocker
+  asset_type: Endpoint
+  mitre_attack_id:
+    - T1070.001
+  custom_tags:
+    - wevtutil
+    - log_clearing
+    - anti_forensics
+    - defense_evasion
+    - ransomware
+  product:
+    - Wazuh
+  security_domain: endpoint
+
+graylog:
+  query: data_win_system_eventID:"1" AND data_win_eventdata_image:/.*\\wevtutil\.exe/ AND (data_win_eventdata_commandLine:/.*\ cl\ .*/ OR data_win_eventdata_commandLine:/.*clear-log.*/)

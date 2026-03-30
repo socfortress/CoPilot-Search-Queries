@@ -1,0 +1,130 @@
+name: Windows Get Local Admin with FindLocalAdminAccess
+id: d2988160-3ce9-4310-b59d-905334920cdd
+version: 1
+schema_version: "1.0"
+date: "2026-03-30"
+author: SOCFortress LLC
+status: production
+type: TTP
+description: >
+  Detects execution of the Find-LocalAdminAccess cmdlet from the PowerView
+  toolkit, used to identify machines where the current user has local
+  administrator access. Attackers use this to find lateral movement targets
+  where they can execute code with elevated privileges. This is a common
+  post-exploitation recon step preceding lateral movement or privilege escalation
+  in Active Directory environments.
+
+data_source:
+  - PowerShell Script Block Logging EventID 4104
+
+search:
+  index_pattern: "${INDEX_PATTERN}"
+  size: 100
+  sort:
+    - timestamp: desc
+  query:
+    bool:
+      must:
+        - term:
+            agent_name: "${AGENT_NAME}"
+        - term:
+            agent_labels_customer: "${CUSTOMER_CODE}"
+        - term:
+            data_win_system_eventID: "4104"
+        - wildcard:
+            data_win_eventdata_scriptBlockText: "*Find-LocalAdminAccess*"
+        - range:
+            timestamp:
+              gte: "${START_TIME}"
+              lte: "${END_TIME}"
+  _source:
+    - timestamp
+    - agent_name
+    - data_win_system_eventID
+    - data_win_eventdata_scriptBlockText
+    - data_win_eventdata_path
+    - data_win_eventdata_user
+
+parameters:
+  AGENT_NAME:
+    description: "Target agent/host name"
+    type: string
+    required: true
+    example: "DESKTOP-AM0HLGE"
+  CUSTOMER_CODE:
+    description: "Customer label for filtering"
+    type: string
+    required: true
+    example: "lab"
+  INDEX_PATTERN:
+    description: "Elasticsearch index pattern"
+    type: string
+    required: true
+    example: "wazuh-lab_*"
+  START_TIME:
+    description: "Query start time (ISO 8601 or relative)"
+    type: datetime
+    required: false
+    default: "now-24h"
+    example: "2026-03-30 00:00:00.000"
+  END_TIME:
+    description: "Query end time (ISO 8601 or relative)"
+    type: datetime
+    required: false
+    default: "now"
+    example: "2026-03-30 23:59:59.999"
+
+how_to_implement: >
+  Requires PowerShell Script Block Logging enabled on endpoints.
+  Enable via Group Policy: Computer Configuration → Administrative Templates
+  → Windows Components → Windows PowerShell → Turn on PowerShell Script Block
+  Logging.
+
+known_false_positives: >
+  Administrators may leverage PowerSploit tools for legitimate AD security
+  auditing and system management. Filter known authorized security assessment
+  activity as needed.
+
+references:
+  - https://attack.mitre.org/techniques/T1087/002/
+  - https://powersploit.readthedocs.io/en/latest/Recon/Find-LocalAdminAccess/
+  - https://book.hacktricks.xyz/windows-hardening/basic-powershell-for-pentesters/powerview
+
+response:
+  message: >
+    PowerView Find-LocalAdminAccess local admin discovery detected on $agent_name$
+    by $data_win_eventdata_user$.
+    Script: $data_win_eventdata_scriptBlockText$.
+    MITRE ATT&CK: T1087.002
+  risk_score: 25
+  severity: medium
+  risk_objects:
+    - field: agent_name
+      type: system
+      score: 25
+    - field: data_win_eventdata_user
+      type: user
+      score: 25
+  threat_objects:
+    - field: data_win_eventdata_scriptBlockText
+      type: script_block
+
+tags:
+  analytic_story:
+    - Active Directory Discovery
+  asset_type: Endpoint
+  mitre_attack_id:
+    - T1087.002
+  custom_tags:
+    - powerview
+    - find_localadminaccess
+    - lateral_movement
+    - active_directory
+    - privilege_escalation
+    - reconnaissance
+  product:
+    - Wazuh
+  security_domain: endpoint
+
+graylog:
+  query: data_win_system_eventID:"4104" AND data_win_eventdata_scriptBlockText:/.*Find-LocalAdminAccess.*/

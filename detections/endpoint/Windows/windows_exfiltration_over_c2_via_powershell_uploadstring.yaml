@@ -1,0 +1,131 @@
+name: Windows Exfiltration Over C2 Via Powershell UploadString
+id: 59e8bf41-7472-412a-90d3-00f3afa452e9
+version: 1
+schema_version: "1.0"
+date: "2026-03-30"
+author: SOCFortress LLC
+status: production
+type: TTP
+description: >
+  Detects potential data exfiltration using PowerShell's Net.webclient with
+  the UploadString method to transfer data to an external URI. This technique
+  is used by malware families including Winter Vivern and APT37/FadeStealer to
+  upload sensitive data such as desktop screenshots, credentials, or files to
+  attacker-controlled infrastructure. The combination of Net.webclient and
+  UploadString in a script block is a strong indicator of malicious exfiltration
+  activity.
+
+data_source:
+  - PowerShell Script Block Logging EventID 4104
+
+search:
+  index_pattern: "${INDEX_PATTERN}"
+  size: 100
+  sort:
+    - timestamp: desc
+  query:
+    bool:
+      must:
+        - term:
+            agent_name: "${AGENT_NAME}"
+        - term:
+            agent_labels_customer: "${CUSTOMER_CODE}"
+        - term:
+            data_win_system_eventID: "4104"
+        - wildcard:
+            data_win_eventdata_scriptBlockText: "*Net.webclient*"
+        - wildcard:
+            data_win_eventdata_scriptBlockText: "*.UploadString*"
+        - range:
+            timestamp:
+              gte: "${START_TIME}"
+              lte: "${END_TIME}"
+  _source:
+    - timestamp
+    - agent_name
+    - data_win_system_eventID
+    - data_win_eventdata_scriptBlockText
+    - data_win_eventdata_path
+    - data_win_eventdata_user
+
+parameters:
+  AGENT_NAME:
+    description: "Target agent/host name"
+    type: string
+    required: true
+    example: "DESKTOP-AM0HLGE"
+  CUSTOMER_CODE:
+    description: "Customer label for filtering"
+    type: string
+    required: true
+    example: "lab"
+  INDEX_PATTERN:
+    description: "Elasticsearch index pattern"
+    type: string
+    required: true
+    example: "wazuh-lab_*"
+  START_TIME:
+    description: "Query start time (ISO 8601 or relative)"
+    type: datetime
+    required: false
+    default: "now-24h"
+    example: "2026-03-30 00:00:00.000"
+  END_TIME:
+    description: "Query end time (ISO 8601 or relative)"
+    type: datetime
+    required: false
+    default: "now"
+    example: "2026-03-30 23:59:59.999"
+
+how_to_implement: >
+  Requires PowerShell Script Block Logging enabled on endpoints.
+  Enable via Group Policy: Computer Configuration → Administrative Templates
+  → Windows Components → Windows PowerShell → Turn on PowerShell Script Block
+
+known_false_positives: >
+  False positives should be limited. Legitimate use of Net.webclient
+  UploadString for API integrations or automation may occur in some
+  environments. Review the destination URI and data being uploaded.
+
+references:
+  - https://attack.mitre.org/techniques/T1041/
+  - https://twitter.com/_CERT_UA/status/1620781684257091584
+  - https://cert.gov.ua/article/3761104
+
+response:
+  message: >
+    PowerShell Net.webclient UploadString exfiltration detected on $agent_name$
+    by $data_win_eventdata_user$.
+    Script: $data_win_eventdata_scriptBlockText$.
+    MITRE ATT&CK: T1041
+  risk_score: 49
+  severity: medium
+  risk_objects:
+    - field: agent_name
+      type: system
+      score: 49
+  threat_objects:
+    - field: data_win_eventdata_scriptBlockText
+      type: script_block
+
+tags:
+  analytic_story:
+    - APT37 Rustonotto and FadeStealer
+    - Winter Vivern
+  asset_type: Endpoint
+  mitre_attack_id:
+    - T1041
+  custom_tags:
+    - net_webclient
+    - uploadstring
+    - exfiltration
+    - c2
+    - powershell
+    - winter_vivern
+    - apt37
+  product:
+    - Wazuh
+  security_domain: endpoint
+
+graylog:
+  query: data_win_system_eventID:"4104" AND data_win_eventdata_scriptBlockText:/.*Net\.webclient.*/ AND data_win_eventdata_scriptBlockText:/.*\.UploadString.*/

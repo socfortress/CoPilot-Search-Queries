@@ -1,0 +1,129 @@
+name: Windows File Share Discovery With Powerview
+id: a44c0be1-d7ab-41e4-92fd-aa9af4fe232c
+version: 1
+schema_version: "1.0"
+date: "2026-03-30"
+author: SOCFortress LLC
+status: production
+type: TTP
+description: >
+  Detects execution of the Invoke-ShareFinder PowerShell cmdlet from PowerView,
+  used to enumerate network file shares across a domain. Network shares often
+  contain sensitive information including backups, scripts, and credentials.
+  This technique is commonly used by threat actors for lateral movement and
+  privilege escalation. Invoke-ShareFinder is a well-known PowerView function
+  documented in DFIR reports as a precursor to data theft and ransomware deployment.
+
+data_source:
+  - PowerShell Script Block Logging EventID 4104
+
+search:
+  index_pattern: "${INDEX_PATTERN}"
+  size: 100
+  sort:
+    - timestamp: desc
+  query:
+    bool:
+      must:
+        - term:
+            agent_name: "${AGENT_NAME}"
+        - term:
+            agent_labels_customer: "${CUSTOMER_CODE}"
+        - term:
+            data_win_system_eventID: "4104"
+        - wildcard:
+            data_win_eventdata_scriptBlockText: "*Invoke-ShareFinder*"
+        - range:
+            timestamp:
+              gte: "${START_TIME}"
+              lte: "${END_TIME}"
+  _source:
+    - timestamp
+    - agent_name
+    - data_win_system_eventID
+    - data_win_eventdata_scriptBlockText
+    - data_win_eventdata_path
+    - data_win_eventdata_user
+
+parameters:
+  AGENT_NAME:
+    description: "Target agent/host name"
+    type: string
+    required: true
+    example: "DESKTOP-AM0HLGE"
+  CUSTOMER_CODE:
+    description: "Customer label for filtering"
+    type: string
+    required: true
+    example: "lab"
+  INDEX_PATTERN:
+    description: "Elasticsearch index pattern"
+    type: string
+    required: true
+    example: "wazuh-lab_*"
+  START_TIME:
+    description: "Query start time (ISO 8601 or relative)"
+    type: datetime
+    required: false
+    default: "now-24h"
+    example: "2026-03-30 00:00:00.000"
+  END_TIME:
+    description: "Query end time (ISO 8601 or relative)"
+    type: datetime
+    required: false
+    default: "now"
+    example: "2026-03-30 23:59:59.999"
+
+how_to_implement: >
+  Requires PowerShell Script Block Logging enabled on endpoints.
+  Enable via Group Policy: Computer Configuration → Administrative Templates
+  → Windows Components → Windows PowerShell → Turn on PowerShell Script Block
+
+known_false_positives: >
+  Security teams may leverage PowerView proactively to identify and remediate
+  sensitive file shares. Filter known authorized security assessment activity
+  as needed.
+
+references:
+  - https://attack.mitre.org/techniques/T1135/
+  - https://github.com/PowerShellEmpire/PowerTools/blob/master/PowerView/powerview.ps1
+  - https://thedfirreport.com/2023/01/23/sharefinder-how-threat-actors-discover-file-shares/
+
+response:
+  message: >
+    Invoke-ShareFinder network share enumeration detected on $agent_name$
+    by $data_win_eventdata_user$.
+    Script: $data_win_eventdata_scriptBlockText$.
+    MITRE ATT&CK: T1135
+  risk_score: 48
+  severity: medium
+  risk_objects:
+    - field: agent_name
+      type: system
+      score: 48
+    - field: data_win_eventdata_user
+      type: user
+      score: 48
+  threat_objects:
+    - field: data_win_eventdata_scriptBlockText
+      type: script_block
+
+tags:
+  analytic_story:
+    - Active Directory Privilege Escalation
+    - Active Directory Discovery
+  asset_type: Endpoint
+  mitre_attack_id:
+    - T1135
+  custom_tags:
+    - powerview
+    - invoke_sharefinder
+    - network_share_discovery
+    - lateral_movement
+    - reconnaissance
+  product:
+    - Wazuh
+  security_domain: endpoint
+
+graylog:
+  query: data_win_system_eventID:"4104" AND data_win_eventdata_scriptBlockText:/.*Invoke-ShareFinder.*/

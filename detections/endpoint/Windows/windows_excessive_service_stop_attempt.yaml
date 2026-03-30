@@ -1,0 +1,141 @@
+name: Windows Excessive Service Stop Attempt
+id: 8f3a614f-6b98-4f7d-82dd-d0df38452a8b
+version: 1
+schema_version: "1.0"
+date: "2026-03-30"
+author: SOCFortress LLC
+status: production
+type: TTP
+description: >
+  Detects multiple attempts to stop or delete services using net.exe, net1.exe,
+  or sc.exe. Ransomware families including XMRig, BlackByte, and others
+  commonly stop or delete security and backup services before encryption to
+  prevent recovery and disable defenses.
+
+data_source:
+  - Sysmon EventID 1 (ProcessCreate)
+
+search:
+  index_pattern: "${INDEX_PATTERN}"
+  size: 100
+  sort:
+    - timestamp: desc
+  query:
+    bool:
+      must:
+        - term:
+            agent_name: "${AGENT_NAME}"
+        - term:
+            agent_labels_customer: "${CUSTOMER_CODE}"
+        - term:
+            data_win_system_eventID: "1"
+        - bool:
+            should:
+              - wildcard:
+                  data_win_eventdata_image: "*\\net.exe"
+              - wildcard:
+                  data_win_eventdata_image: "*\\net1.exe"
+              - wildcard:
+                  data_win_eventdata_image: "*\\sc.exe"
+            minimum_should_match: 1
+        - bool:
+            should:
+              - wildcard:
+                  data_win_eventdata_commandLine: "*stop*"
+              - wildcard:
+                  data_win_eventdata_commandLine: "*delete*"
+            minimum_should_match: 1
+        - range:
+            timestamp:
+              gte: "${START_TIME}"
+              lte: "${END_TIME}"
+  _source:
+    - timestamp
+    - agent_name
+    - data_win_system_eventID
+    - data_win_eventdata_image
+    - data_win_eventdata_commandLine
+    - data_win_eventdata_parentImage
+    - data_win_eventdata_user
+
+parameters:
+  AGENT_NAME:
+    description: "Target agent/host name"
+    type: string
+    required: true
+    example: "DESKTOP-AM0HLGE"
+  CUSTOMER_CODE:
+    description: "Customer label for filtering"
+    type: string
+    required: true
+    example: "lab"
+  INDEX_PATTERN:
+    description: "Elasticsearch index pattern"
+    type: string
+    required: true
+    example: "wazuh-lab_*"
+  START_TIME:
+    description: "Query start time (ISO 8601 or relative)"
+    type: datetime
+    required: false
+    default: "now-24h"
+    example: "2026-03-30 00:00:00.000"
+  END_TIME:
+    description: "Query end time (ISO 8601 or relative)"
+    type: datetime
+    required: false
+    default: "now"
+    example: "2026-03-30 23:59:59.999"
+
+how_to_implement: >
+  Requires Wazuh agents with Sysmon installed and configured to log process
+  creation events (EventID 1) with full command-line arguments.
+
+known_false_positives: >
+  Administrators may legitimately stop or delete services using net.exe or
+  sc.exe. Review the services being stopped and the user context to determine
+  if the activity is authorized. High frequency of service stops in a short
+  time window is a stronger indicator of malicious activity.
+
+references:
+  - https://attack.mitre.org/techniques/T1489/
+  - https://thedfirreport.com/2020/04/20/sqlserver-or-the-miner-in-the-basement/
+
+response:
+  message: >
+    Service stop/delete attempt via $data_win_eventdata_image$ detected on
+    $agent_name$ by $data_win_eventdata_user$.
+    Command: $data_win_eventdata_commandLine$.
+    MITRE ATT&CK: T1489
+  risk_score: 80
+  severity: high
+  risk_objects:
+    - field: agent_name
+      type: system
+      score: 80
+  threat_objects:
+    - field: data_win_eventdata_image
+      type: process_name
+    - field: data_win_eventdata_commandLine
+      type: command_line
+
+tags:
+  analytic_story:
+    - XMRig
+    - Ransomware
+    - BlackByte Ransomware
+  asset_type: Endpoint
+  mitre_attack_id:
+    - T1489
+  custom_tags:
+    - service_stop
+    - net_exe
+    - sc_exe
+    - ransomware
+    - defense_evasion
+  product:
+    - Wazuh
+  security_domain: endpoint
+
+graylog:
+  query: data_win_system_eventID:"1" AND (data_win_eventdata_image:/.*\\net\.exe/ OR data_win_eventdata_image:/.*\\net1\.exe/ OR data_win_eventdata_image:/.*\\sc\.exe/) AND (data_win_eventdata_commandLine:/.*stop.*/ OR data_win_eventdata_commandLine:/.*delete.*/)
