@@ -1,0 +1,137 @@
+name: Windows PowerShell IIS Components WebGlobalModule Usage
+id: 33fc9f6f-0ce7-4696-924e-a69ec61a3d57
+version: 1
+schema_version: "1.0"
+date: "2026-03-30"
+author: SOCFortress LLC
+status: production
+type: Anomaly
+description: >
+  Detects use of PowerShell cmdlets New-WebGlobalModule, Enable-WebGlobalModule,
+  or Set-WebGlobalModule to create, enable, or modify IIS Global Modules.
+  Adversaries may use these lesser-known cmdlets to install malicious IIS modules
+  for persistence, web shell deployment, or traffic interception. This technique
+  is used by threat actors including GhostRedirector, OilRig, and IcedApple
+  post-exploitation framework to bypass traditional defenses and maintain
+  persistent access to IIS web servers.
+
+data_source:
+  - PowerShell Script Block Logging EventID 4104
+
+search:
+  index_pattern: "${INDEX_PATTERN}"
+  size: 100
+  sort:
+    - timestamp: desc
+  query:
+    bool:
+      must:
+        - term:
+            agent_name: "${AGENT_NAME}"
+        - term:
+            agent_labels_customer: "${CUSTOMER_CODE}"
+        - term:
+            data_win_system_eventID: "4104"
+        - bool:
+            should:
+              - wildcard:
+                  data_win_eventdata_scriptBlockText: "*New-WebGlobalModule*"
+              - wildcard:
+                  data_win_eventdata_scriptBlockText: "*Enable-WebGlobalModule*"
+              - wildcard:
+                  data_win_eventdata_scriptBlockText: "*Set-WebGlobalModule*"
+            minimum_should_match: 1
+        - range:
+            timestamp:
+              gte: "${START_TIME}"
+              lte: "${END_TIME}"
+  _source:
+    - timestamp
+    - agent_name
+    - data_win_system_eventID
+    - data_win_eventdata_scriptBlockText
+    - data_win_eventdata_path
+    - data_win_eventdata_user
+
+parameters:
+  AGENT_NAME:
+    description: "Target agent/host name"
+    type: string
+    required: true
+    example: "DESKTOP-AM0HLGE"
+  CUSTOMER_CODE:
+    description: "Customer label for filtering"
+    type: string
+    required: true
+    example: "lab"
+  INDEX_PATTERN:
+    description: "Elasticsearch index pattern"
+    type: string
+    required: true
+    example: "wazuh-lab_*"
+  START_TIME:
+    description: "Query start time (ISO 8601 or relative)"
+    type: datetime
+    required: false
+    default: "now-24h"
+    example: "2026-03-30 00:00:00.000"
+  END_TIME:
+    description: "Query end time (ISO 8601 or relative)"
+    type: datetime
+    required: false
+    default: "now"
+    example: "2026-03-30 23:59:59.999"
+
+how_to_implement: >
+  Requires PowerShell Script Block Logging enabled on endpoints.
+  Enable via Group Policy: Computer Configuration → Administrative Templates
+  → Windows Components → Windows PowerShell → Turn on PowerShell Script Block
+  Logging.
+
+known_false_positives: >
+  Administrators or scripts may legitimately use these cmdlets to manage IIS
+  modules for web application deployment. Review the module name, image path,
+  and user context to determine legitimacy.
+
+references:
+  - https://attack.mitre.org/techniques/T1505/004/
+  - https://learn.microsoft.com/en-us/powershell/module/webadministration/new-webglobalmodule
+  - https://www.microsoft.com/en-us/security/blog/2022/12/12/iis-modules-the-evolution-of-web-shells-and-how-to-detect-them/
+  - https://www.crowdstrike.com/wp-content/uploads/2022/05/crowdstrike-iceapple-a-novel-internet-information-services-post-exploitation-framework-1.pdf
+
+response:
+  message: >
+    PowerShell IIS WebGlobalModule manipulation detected on $agent_name$
+    by $data_win_eventdata_user$.
+    Script: $data_win_eventdata_scriptBlockText$.
+    MITRE ATT&CK: T1505.004
+  risk_score: 64
+  severity: high
+  risk_objects:
+    - field: agent_name
+      type: system
+      score: 64
+  threat_objects:
+    - field: data_win_eventdata_scriptBlockText
+      type: script_block
+
+tags:
+  analytic_story:
+    - GhostRedirector IIS Module and Rungan Backdoor
+    - IIS Components
+  asset_type: Endpoint
+  mitre_attack_id:
+    - T1505.004
+  custom_tags:
+    - iis
+    - webglobalmodule
+    - persistence
+    - web_shell
+    - ghostredirector
+    - oilrig
+  product:
+    - Wazuh
+  security_domain: endpoint
+
+graylog:
+  query: data_win_system_eventID:"4104" AND (data_win_eventdata_scriptBlockText:/.*New-WebGlobalModule.*/ OR data_win_eventdata_scriptBlockText:/.*Enable-WebGlobalModule.*/ OR data_win_eventdata_scriptBlockText:/.*Set-WebGlobalModule.*/)
