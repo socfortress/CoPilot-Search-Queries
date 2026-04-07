@@ -1,0 +1,125 @@
+name: PowerShell Get LocalGroup Discovery
+id: windows-powershell-get-localgroup-discovery-001
+version: 1
+schema_version: "1.0"
+date: "2026-02-25"
+author: SOCFortress LLC
+status: production
+type: Hunting
+
+description: >
+  Detects the use of the Get-LocalGroup command executed via PowerShell or cmd.exe 
+  to enumerate local groups on an endpoint. This detection leverages Sysmon EventID 1 
+  (process creation) data, focusing on process names and command-line arguments. 
+  Monitoring this activity is significant as it may indicate an attacker attempting 
+  to gather information about local group memberships, which can be a precursor to 
+  privilege escalation. If confirmed malicious, this activity could allow an attacker 
+  to identify and target privileged accounts, potentially leading to unauthorized 
+  access and control over the system.
+
+data_source:
+  - Sysmon EventID 1
+
+search:
+  index_pattern: "${INDEX_PATTERN}"
+  size: 100
+  sort:
+    - timestamp: desc
+  query:
+    bool:
+      must:
+        - term:
+            agent_name: "${AGENT_NAME}"
+        - term:
+            agent_labels_customer: "${CUSTOMER_CODE}"
+        - term:
+            data_win_system_eventID: "1"
+        - bool:
+            should:
+              - wildcard:
+                  data_win_eventdata_image: "*powershell*"
+              - wildcard:
+                  data_win_eventdata_image: "*cmd*"
+            minimum_should_match: 1
+        - wildcard:
+            data_win_eventdata_commandLine: "*get-localgroup*"
+        - range:
+            timestamp:
+              gte: "${START_TIME}"
+              lte: "${END_TIME}"
+  _source:
+    - timestamp
+    - agent_name
+    - data_win_system_eventID
+    - data_win_eventdata_image
+    - data_win_eventdata_commandLine
+    - data_win_eventdata_parentImage
+    - data_win_eventdata_user
+
+parameters:
+  AGENT_NAME:
+    description: "Target agent/host name"
+    type: string
+    required: true
+    example: "DESKTOP-AM0HLGE"
+  CUSTOMER_CODE:
+    description: "Customer label for filtering"
+    type: string
+    required: true
+    example: "lab"
+  START_TIME:
+    description: "Query start time (ISO 8601 or relative)"
+    type: datetime
+    required: false
+    default: "now-24h"
+    example: "2026-02-25 00:00:00.000"
+  END_TIME:
+    description: "Query end time (ISO 8601 or relative)"
+    type: datetime
+    required: false
+    default: "now"
+    example: "2026-02-25 23:59:59.999"
+
+how_to_implement: >
+  This detection requires Wazuh agents deployed on Windows endpoints with Sysmon 
+  installed and configured to log process creation events (EventID 1) with full 
+  command-line arguments. The index pattern should match your Wazuh index naming 
+  convention.
+
+known_false_positives: >
+  False positives may be present from legitimate administrative scripts that enumerate 
+  local groups. Filter based on user context, source process, and frequency of 
+  execution to identify anomalies.
+
+references:
+  - https://attack.mitre.org/techniques/T1069/001/
+  - https://github.com/redcanaryco/atomic-red-team/blob/master/atomics/T1069.001/T1069.001.md
+  - https://www.splunk.com/en_us/blog/security/powershell-detections-threat-research-release-august-2021.html
+
+response:
+  message: >
+    Local group enumeration detected via process execution on $agent_name$. 
+    Command line: $data_win_eventdata_commandLine$. 
+    Parent process: $data_win_eventdata_parentImage$. 
+    User: $data_win_eventdata_user$. MITRE ATT&CK: T1069.001
+  risk_score: 30
+  severity: low
+  risk_objects:
+    - field: agent_name
+      type: system
+      score: 30
+  threat_objects: []
+
+tags:
+  analytic_story:
+    - Active Directory Discovery
+    - Compromised Windows Host
+  asset_type: Endpoint
+  mitre_attack_id:
+    - T1069.001
+  product:
+    - Wazuh
+  security_domain: endpoint
+
+graylog:
+  query: data_win_system_eventID:"1" AND (data_win_eventdata_image:/.*powershell.*/ OR data_win_eventdata_image:/.*cmd.*/) AND data_win_eventdata_commandLine:/.*Get-LocalGroup.*/

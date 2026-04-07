@@ -1,0 +1,158 @@
+name: Windows Create Local Administrator Account Via Net
+id: 2c568c34-bb57-4b43-9d75-19c605b98e70
+version: 1
+schema_version: "1.0"
+date: "2026-04-07"
+author: SOCFortress LLC
+status: production
+type: Anomaly
+
+description: >
+  The following analytic detects the creation of a local administrator account using the "net.exe"
+  command. It leverages Endpoint Detection and Response (EDR) data to identify processes named "net.exe"
+  with the "/add" parameter and keywords related to administrator accounts in multiple languages. This
+  activity is significant as it may indicate an attacker attempting to gain persistent access or escalate
+  privileges. If confirmed malicious, this could lead to unauthorized access, data theft, or further
+  system compromise. Review the process details, user context, and related artifacts to determine the
+  legitimacy of the activity.
+
+data_source:
+  - Sysmon EventID 1
+
+search:
+  index_pattern: "${INDEX_PATTERN}"
+  size: 100
+  sort:
+    - timestamp: desc
+  query:
+    bool:
+      must:
+        - term:
+            agent_name: "${AGENT_NAME}"
+        - term:
+            agent_labels_customer: "${CUSTOMER_CODE}"
+        - term:
+            data_win_system_eventID: "1"
+        - wildcard:
+            data_win_eventdata_image: "*net.exe"
+        - wildcard:
+            data_win_eventdata_commandLine: "*localgroup*"
+        - wildcard:
+            data_win_eventdata_commandLine: "*add*"
+        - bool:
+            should:
+              - wildcard:
+                  data_win_eventdata_commandLine: "*administrators*"
+              - wildcard:
+                  data_win_eventdata_commandLine: "*administratoren*"
+              - wildcard:
+                  data_win_eventdata_commandLine: "*administrateurs*"
+              - wildcard:
+                  data_win_eventdata_commandLine: "*administrador*"
+              - wildcard:
+                  data_win_eventdata_commandLine: "*amministratori*"
+              - wildcard:
+                  data_win_eventdata_commandLine: "*administratorer*"
+              - wildcard:
+                  data_win_eventdata_commandLine: "*Rendszergazda*"
+              - wildcard:
+                  data_win_eventdata_commandLine: "*Администратор*"
+              - wildcard:
+                  data_win_eventdata_commandLine: "*Administratör*"
+            minimum_should_match: 1
+        - range:
+            timestamp:
+              gte: "${START_TIME}"
+              lte: "${END_TIME}"
+  _source:
+    - timestamp
+    - data_win_eventdata_commandLine
+    - data_win_eventdata_image
+    - data_win_eventdata_parentImage
+    - data_win_eventdata_user
+    - data_win_system_computer
+
+parameters:
+  AGENT_NAME:
+    description: "Target agent/host name"
+    type: string
+    required: true
+    example: "DESKTOP-AM0HLGE"
+  CUSTOMER_CODE:
+    description: "Customer label for filtering"
+    type: string
+    required: true
+    example: "lab"
+  INDEX_PATTERN:
+    description: "Elasticsearch index pattern"
+    type: string
+    required: true
+    example: "wazuh-lab_*"
+  START_TIME:
+    description: "Query start time (ISO 8601 or relative)"
+    type: datetime
+    required: false
+    default: "now-24h"
+    example: "YYYY-MM-DD 00:00:00.000"
+  END_TIME:
+    description: "Query end time (ISO 8601 or relative)"
+    type: datetime
+    required: false
+    default: "now"
+    example: "YYYY-MM-DD 23:59:59.999"
+
+how_to_implement: >
+  The detection is based on data that originates from Endpoint Detection and Response (EDR) agents.
+  These agents are designed to provide security-related telemetry from the endpoints where the agent
+  is installed. To implement this search, you must ingest logs that contain the process GUID, process
+  name, and parent process. Additionally, you must ingest complete command-line executions. These logs
+  must be processed using the appropriate Splunk Technology Add-ons that are specific to the EDR product.
+  The logs must also be mapped to the Processes node of the Endpoint data model. Ensure Sysmon EventID 1
+  is enabled and configured to capture process creation events with full command-line arguments.
+
+known_false_positives: >
+  Administrators often leverage net.exe to create admin accounts. Verify the context and user performing
+  the action. Consider whitelisting known administrative accounts and scripts that legitimately perform
+  this action.
+
+references: []
+
+response:
+  message: >
+    Process $data_win_eventdata_image$ was executed on $data_win_system_computer$ by user $data_win_eventdata_user$
+    with command line: $data_win_eventdata_commandLine$. This may indicate unauthorized local administrator
+    account creation.
+  risk_score: 30
+  severity: medium
+  risk_objects:
+    - field: data_win_eventdata_user
+      type: user
+      score: 30
+    - field: data_win_system_computer
+      type: system
+      score: 30
+  threat_objects:
+    - field: data_win_eventdata_image
+      type: process
+    - field: data_win_eventdata_parentImage
+      type: parent_process
+
+tags:
+  analytic_story:
+    - Active Directory Privilege Escalation
+    - Lateral Movement
+    - Account Manipulation
+  asset_type: Endpoint
+  mitre_attack_id:
+    - T1136.001
+  custom_tags:
+    - admin_account_creation
+    - net_exe
+    - privilege_escalation
+    - persistence
+  product:
+    - Wazuh
+  security_domain: endpoint
+
+graylog:
+  query: data_win_system_eventID:"1" AND data_win_eventdata_image:/.*net\.exe/ AND data_win_eventdata_commandLine:/.*localgroup.*/ AND data_win_eventdata_commandLine:/.*administrators.*/ AND data_win_eventdata_commandLine:/.*add.*/

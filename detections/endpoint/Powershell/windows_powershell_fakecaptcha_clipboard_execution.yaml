@@ -1,0 +1,144 @@
+name: Windows PowerShell FakeCAPTCHA Clipboard Execution
+id: d81d4d3d-76b5-4f21-ab51-b17d5164c106
+version: 1
+schema_version: "1.0"
+date: "2026-04-07"
+author: SOCFortress LLC
+status: production
+type: TTP
+
+description: >
+  Detects potential FakeCAPTCHA/ClickFix clipboard hijacking campaigns by looking
+  for PowerShell execution with hidden window parameters and distinctive strings
+  related to fake CAPTCHA verification. These campaigns use social engineering to
+  trick users into pasting malicious PowerShell commands from their clipboard,
+  typically delivering information stealers or remote access trojans.
+
+data_source:
+  - Sysmon EventID 1
+
+search:
+  index_pattern: "${INDEX_PATTERN}"
+  size: 100
+  sort:
+    - timestamp: desc
+  query:
+    bool:
+      must:
+        - term:
+            agent_name: "${AGENT_NAME}"
+        - term:
+            agent_labels_customer: "${CUSTOMER_CODE}"
+        - term:
+            data_win_system_eventID: "1"
+        - wildcard:
+            data_win_eventdata_commandLine: "*-w*hidden*"
+        - wildcard:
+            data_win_eventdata_commandLine: "*Clipboard*"
+        - wildcard:
+            data_win_eventdata_commandLine: "*iex*"
+        - range:
+            timestamp:
+              gte: "${START_TIME}"
+              lte: "${END_TIME}"
+  _source:
+    - timestamp
+    - agent_name
+    - data_win_system_eventID
+    - data_win_eventdata_commandLine
+    - data_win_eventdata_image
+    - data_win_eventdata_parentImage
+    - data_win_eventdata_user
+
+parameters:
+  AGENT_NAME:
+    description: "Target agent/host name"
+    type: string
+    required: true
+    example: "DESKTOP-AM0HLGE"
+  CUSTOMER_CODE:
+    description: "Customer label for filtering"
+    type: string
+    required: true
+    example: "lab"
+  INDEX_PATTERN:
+    description: "Elasticsearch index pattern"
+    type: string
+    required: true
+    example: "wazuh-lab_*"
+  START_TIME:
+    description: "Query start time (ISO 8601 or relative)"
+    type: datetime
+    required: false
+    default: "now-24h"
+    example: "2026-04-07 00:00:00.000"
+  END_TIME:
+    description: "Query end time (ISO 8601 or relative)"
+    type: datetime
+    required: false
+    default: "now"
+    example: "2026-04-07 23:59:59.999"
+
+how_to_implement: >
+  Requires Sysmon EventID 1 (Process Creation) logging enabled on endpoints.
+  Ensure Sysmon version 6.0.4 or later is configured with process command-line
+  arguments captured in full. Configure via Sysmon configuration file with:
+  <ProcessCreate onmatch="include"> and capture all CommandLine events.
+
+known_false_positives: >
+  Legitimate PowerShell commands that use hidden windows for automation tasks
+  may trigger this detection. Review the actual command being executed and user
+  context to determine if the activity is authorized. Administrative clipboard
+  manipulation scripts may also generate false positives.
+
+references:
+  - https://urlhaus.abuse.ch/
+  - https://www.proofpoint.com/us/blog/threat-insight/security-brief-clickfix-social-engineering-technique-floods-threat-landscape
+  - https://reliaquest.com/blog/using-captcha-for-compromise/
+  - https://attack.mitre.org/techniques/T1204/001/
+  - https://github.com/MHaggis/ClickGrab
+
+response:
+  message: >
+    Potential FakeCAPTCHA/ClickFix clipboard hijacking execution detected on
+    $agent_name$ by $data_win_eventdata_user$.
+    Process: $data_win_eventdata_image$.
+    Command: $data_win_eventdata_commandLine$.
+    MITRE ATT&CK: T1059.001, T1204.001
+  risk_score: 72
+  severity: high
+  risk_objects:
+    - field: agent_name
+      type: system
+      score: 50
+    - field: data_win_eventdata_user
+      type: user
+      score: 22
+  threat_objects:
+    - field: data_win_eventdata_commandLine
+      type: process_command
+
+tags:
+  analytic_story:
+    - Scattered Lapsus$ Hunters
+    - Fake CAPTCHA Campaigns
+    - Interlock Ransomware
+    - NetSupport RMM Tool Abuse
+  asset_type: Endpoint
+  mitre_attack_id:
+    - T1059.001
+    - T1204.001
+    - T1059.003
+  custom_tags:
+    - fakecaptcha
+    - clickfix
+    - clipboard_hijacking
+    - social_engineering
+    - infostealer
+    - rat
+  product:
+    - Wazuh
+  security_domain: endpoint
+
+graylog:
+  query: data_win_system_eventID:"1" AND data_win_eventdata_commandLine:/.*-w.*hidden.*/ AND data_win_eventdata_commandLine:/.*Clipboard.*/ AND data_win_eventdata_commandLine:/.*iex.*/

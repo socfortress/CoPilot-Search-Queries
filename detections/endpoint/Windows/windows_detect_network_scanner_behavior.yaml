@@ -1,0 +1,130 @@
+name: Windows Detect Network Scanner Behavior
+id: 78e678d2-bf64-4fe6-aa52-2f7b11dddee7
+version: 1
+schema_version: "1.0"
+date: "2026-04-07"
+author: SOCFortress LLC
+status: production
+type: Anomaly
+
+description: >
+  The following analytic detects when an application is used to connect a large number of unique
+  ports/targets within a short time frame. Network enumeration may be used by adversaries as a method
+  of discovery, lateral movement, or remote execution. This analytic leverages Sysmon EventID 3
+  (network connections) to identify suspicious scanning behavior. By monitoring for processes that
+  establish connections to multiple unique ports or destinations within a 5-minute window, this detection
+  can identify potential network reconnaissance activities. This activity is significant as it may
+  indicate lateral movement or system discovery by an attacker. If confirmed malicious, this could
+  allow an attacker to map the network, identify vulnerable systems, and plan further attacks.
+
+data_source:
+  - Sysmon EventID 3
+
+search:
+  index_pattern: "${INDEX_PATTERN}"
+  size: 100
+  sort:
+    - timestamp: desc
+  query:
+    bool:
+      must:
+        - term:
+            agent_name: "${AGENT_NAME}"
+        - term:
+            agent_labels_customer: "${CUSTOMER_CODE}"
+        - term:
+            data_win_system_eventID: "3"
+        - range:
+            timestamp:
+              gte: "${START_TIME}"
+              lte: "${END_TIME}"
+  _source:
+    - timestamp
+    - data_win_eventdata_destinationPort
+    - data_win_eventdata_destinationIp
+    - data_win_eventdata_image
+    - data_win_eventdata_sourcePort
+    - data_win_eventdata_sourceIp
+    - data_win_system_computer
+
+parameters:
+  AGENT_NAME:
+    description: "Target agent/host name"
+    type: string
+    required: true
+    example: "DESKTOP-AM0HLGE"
+  CUSTOMER_CODE:
+    description: "Customer label for filtering"
+    type: string
+    required: true
+    example: "lab"
+  INDEX_PATTERN:
+    description: "Elasticsearch index pattern"
+    type: string
+    required: true
+    example: "wazuh-lab_*"
+  START_TIME:
+    description: "Query start time (ISO 8601 or relative)"
+    type: datetime
+    required: false
+    default: "now-5m"
+    example: "YYYY-MM-DD 00:00:00.000"
+  END_TIME:
+    description: "Query end time (ISO 8601 or relative)"
+    type: datetime
+    required: false
+    default: "now"
+    example: "YYYY-MM-DD 23:59:59.999"
+
+how_to_implement: >
+  This detection relies on Sysmon EventID 3 events being ingested and tagged into the network traffic
+  data model. Ensure that Sysmon is configured to log network connections (EventID 3) and that these
+  logs are properly ingested into Elasticsearch with complete command-line arguments and process information.
+  The detection works by aggregating unique destination ports and IPs per process over a 5-minute
+  time window and alerting when thresholds are exceeded (>10 unique ports OR >10 unique destinations).
+  Configure exclusions for known scanners and legitimate applications that perform network enumeration.
+
+known_false_positives: >
+  Various applications may legitimately trigger this detection through their normal operation.
+  Network monitoring tools, vulnerability scanners, patch management systems, and load balancers
+  commonly make connections to multiple ports. The lookup file browser_app_list may not contain all
+  legitimate applications that perform network enumeration. Consider tuning port/dest count thresholds
+  based on your environment and excluding known legitimate scanning tools.
+
+references:
+  - https://attack.mitre.org/techniques/T1595
+
+response:
+  message: >
+    Process $data_win_eventdata_image$ on $data_win_system_computer$ exhibited network scanning
+    behavior with connections to multiple ports/destinations. This may indicate network reconnaissance
+    or lateral movement activity.
+  risk_score: 40
+  severity: medium
+  risk_objects:
+    - field: data_win_system_computer
+      type: system
+      score: 40
+  threat_objects:
+    - field: data_win_eventdata_image
+      type: process
+
+tags:
+  analytic_story:
+    - Network Discovery
+    - Lateral Movement
+    - Network Reconnaissance
+  asset_type: Endpoint
+  mitre_attack_id:
+    - T1595.001
+    - T1595.002
+  custom_tags:
+    - network_scanning
+    - lateral_movement
+    - discovery
+  product:
+    - Wazuh
+  security_domain: network
+
+graylog:
+  query: data_win_system_eventID:"3" AND (data_win_eventdata_destinationPort:"4444" OR data_win_eventdata_destinationPort:"31337" OR data_win_eventdata_destinationPort:"5555" OR data_win_eventdata_destinationPort:"6667" OR data_win_eventdata_destinationPort:"8081" OR data_win_eventdata_destinationPort:"1080" OR data_win_eventdata_destinationPort:"3128" OR data_win_eventdata_destinationPort:"8080")

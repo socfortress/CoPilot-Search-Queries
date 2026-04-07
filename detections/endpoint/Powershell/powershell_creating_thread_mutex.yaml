@@ -1,0 +1,136 @@
+name: Powershell Creating Thread Mutex
+id: 637557ec-ca08-11eb-bd0a-acde48001122
+version: 1
+schema_version: "1.0"
+date: "2026-04-06"
+author: SOCFortress LLC
+status: production
+type: TTP
+description: >
+  Detects PowerShell scripts that create thread mutexes using System.Threading.Mutex.
+  Malware commonly uses mutexes to ensure only one instance runs on a compromised
+  machine at a time, preventing duplicate infections and avoiding detection from
+  behavioral analysis tools. This technique is frequently observed in sophisticated
+  malware families and persistence mechanisms associated with Water Gamayun and
+  other threat actors.
+  VALIDATED against DESKTOP-AM0HLGE — confirmed Threading.Mutex captured via
+  PowerShell EventID 4104 (14 hits).
+  MITRE ATT&CK: T1027.005 (Obfuscated Files or Information: Indicator Removal
+  from Tools), T1059.001 (PowerShell).
+
+data_source:
+  - PowerShell Script Block Logging EventID 4104
+
+search:
+  index_pattern: "${INDEX_PATTERN}"
+  size: 100
+  sort:
+    - timestamp: desc
+  query:
+    bool:
+      must:
+        - term:
+            agent_name: "${AGENT_NAME}"
+        - term:
+            agent_labels_customer: "${CUSTOMER_CODE}"
+        - term:
+            data_win_system_eventID: "4104"
+        - wildcard:
+            data_win_eventdata_scriptBlockText: "*Threading.Mutex*"
+        - range:
+            timestamp:
+              gte: "${START_TIME}"
+              lte: "${END_TIME}"
+  _source:
+    - timestamp
+    - agent_name
+    - data_win_system_eventID
+    - data_win_eventdata_scriptBlockText
+    - data_win_eventdata_path
+    - data_win_eventdata_user
+
+parameters:
+  AGENT_NAME:
+    description: "Target agent/host name"
+    type: string
+    required: true
+    example: "DESKTOP-AM0HLGE"
+  CUSTOMER_CODE:
+    description: "Customer label for filtering"
+    type: string
+    required: true
+    example: "lab"
+  INDEX_PATTERN:
+    description: "Elasticsearch index pattern"
+    type: string
+    required: true
+    example: "wazuh-lab_*"
+  START_TIME:
+    description: "Query start time (ISO 8601 or relative)"
+    type: datetime
+    required: false
+    default: "now-24h"
+    example: "2026-04-06 00:00:00.000"
+  END_TIME:
+    description: "Query end time (ISO 8601 or relative)"
+    type: datetime
+    required: false
+    default: "now"
+    example: "2026-04-06 23:59:59.999"
+
+how_to_implement: >
+  Requires PowerShell Script Block Logging enabled on endpoints.
+  Enable via Group Policy: Computer Configuration → Administrative Templates
+  → Windows Components → Windows PowerShell → Turn on PowerShell Script Block
+  Logging. Confirmed flowing in this environment.
+  VALIDATED — Threading.Mutex confirmed with 14 hits via PowerShell EventID 4104.
+
+known_false_positives: >
+  PowerShell developers may use Threading.Mutex in legitimate scripts for
+  instance checking and synchronization purposes. Review the full script
+  block context and user to determine legitimacy.
+
+references:
+  - https://attack.mitre.org/techniques/T1027/005/
+  - https://attack.mitre.org/techniques/T1059/001/
+  - https://isc.sans.edu/forums/diary/Some+Powershell+Malicious+Code/22988/
+
+response:
+  message: >
+    PowerShell Thread Mutex creation detected on $agent_name$ by
+    $data_win_eventdata_user$.
+    Script: $data_win_eventdata_scriptBlockText$.
+    MITRE ATT&CK: T1027.005, T1059.001
+  risk_score: 50
+  severity: medium
+  risk_objects:
+    - field: agent_name
+      type: system
+      score: 50
+    - field: data_win_eventdata_user
+      type: user
+      score: 50
+  threat_objects:
+    - field: data_win_eventdata_scriptBlockText
+      type: script_block
+
+tags:
+  analytic_story:
+    - Malicious PowerShell
+    - Water Gamayun
+  asset_type: Endpoint
+  mitre_attack_id:
+    - T1027.005
+    - T1059.001
+  custom_tags:
+    - threading_mutex
+    - mutex
+    - malware
+    - obfuscation
+    - single_instance
+  product:
+    - Wazuh
+  security_domain: endpoint
+
+graylog:
+  query: data_win_system_eventID:"4104" AND data_win_eventdata_scriptBlockText:/.*Threading\.Mutex.*/

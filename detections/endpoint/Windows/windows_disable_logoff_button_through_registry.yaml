@@ -1,0 +1,145 @@
+name: Windows Disable LogOff Button Through Registry
+id: b2fb6830-9ed1-11ec-9fcb-acde48001122
+version: 1
+schema_version: "1.0"
+date: "2026-04-07"
+author: SOCFortress LLC
+status: production
+type: Anomaly
+
+description: >
+  The following analytic detects a suspicious registry modification that disables the logoff feature
+  on a Windows host. It leverages Sysmon EventID 13 to identify changes to specific registry values
+  associated with logoff functionality, specifically monitoring for modifications to the registry paths
+  containing "NoLogOff" or "StartMenuLogOff" values set to "0x00000001". This activity is significant
+  because it can indicate ransomware attempting to make the compromised host unusable and hinder
+  remediation efforts. If confirmed malicious, this action could prevent users from logging off,
+  complicate incident response, and allow attackers to maintain persistence and control over the
+  affected system.
+
+data_source:
+  - Sysmon EventID 13
+
+search:
+  index_pattern: "${INDEX_PATTERN}"
+  size: 100
+  sort:
+    - timestamp: desc
+  query:
+    bool:
+      must:
+        - term:
+            agent_name: "${AGENT_NAME}"
+        - term:
+            agent_labels_customer: "${CUSTOMER_CODE}"
+        - term:
+            data_win_system_eventID: "13"
+        - bool:
+            should:
+              - wildcard:
+                  data_win_eventdata_targetObject: "*NoLogOff"
+              - wildcard:
+                  data_win_eventdata_targetObject: "*StartMenuLogOff"
+            minimum_should_match: 1
+        - term:
+            data_win_eventdata_details: "DWORD (0x00000001)"
+        - range:
+            timestamp:
+              gte: "${START_TIME}"
+              lte: "${END_TIME}"
+  _source:
+    - timestamp
+    - data_win_eventdata_targetObject
+    - data_win_eventdata_details
+    - data_win_eventdata_image
+    - data_win_eventdata_user
+    - data_win_system_computer
+
+parameters:
+  AGENT_NAME:
+    description: "Target agent/host name"
+    type: string
+    required: true
+    example: "DESKTOP-AM0HLGE"
+  CUSTOMER_CODE:
+    description: "Customer label for filtering"
+    type: string
+    required: true
+    example: "lab"
+  INDEX_PATTERN:
+    description: "Elasticsearch index pattern"
+    type: string
+    required: true
+    example: "wazuh-lab_*"
+  START_TIME:
+    description: "Query start time (ISO 8601 or relative)"
+    type: datetime
+    required: false
+    default: "now-24h"
+    example: "YYYY-MM-DD 00:00:00.000"
+  END_TIME:
+    description: "Query end time (ISO 8601 or relative)"
+    type: datetime
+    required: false
+    default: "now"
+    example: "YYYY-MM-DD 23:59:59.999"
+
+how_to_implement: >
+  To successfully implement this search, you need to be ingesting logs with the registry value name,
+  registry path, and registry value data from your endpoints. Sysmon EventID 13 captures registry
+  modifications (SetValue operations). Ensure that Sysmon is configured to log registry operations
+  and that these logs are properly ingested into Elasticsearch with complete registry path and value
+  information. The detection specifically looks for modifications to either the NoLogOff or StartMenuLogOff
+  registry values being set to 0x00000001 (enabled/true), which prevents users from logging off their
+  workstations. Add the following TargetObject conditions to your Sysmon registry monitoring rules:
+  "Policies\Explorer\NoLogOff" and "Policies\Explorer\StartMenuLogOff".
+
+known_false_positives: >
+  This Windows feature may be legitimately implemented by administrators in some server environments
+  where logoff is critical to prevent accidental disconnections. In such scenarios, filtering of machines
+  and users that can modify this registry is necessary. Organizations should establish baseline behavior
+  for administrative registry modifications and create whitelist exceptions for approved management tools.
+
+references:
+  - https://www.hybrid-analysis.com/sample/e2d4018fd3bd541c153af98ef7c25b2bf4a66bc3bfb89e437cde89fd08a9dd7b/5b1f4d947ca3e10f22714774
+  - https://malwiki.org/index.php?title=DigiPop.xp
+  - https://www.trendmicro.com/vinfo/be/threat-encyclopedia/search/js_noclose.e/2
+
+response:
+  message: >
+    Registry modification detected on $data_win_system_computer$. Process $data_win_eventdata_image$
+    by user $data_win_eventdata_user$ modified logoff-related registry key to value
+    $data_win_eventdata_details$. This may indicate ransomware or malicious activity attempting to
+    prevent user logoff and maintain control.
+  risk_score: 50
+  severity: high
+  risk_objects:
+    - field: data_win_system_computer
+      type: system
+      score: 50
+    - field: data_win_eventdata_user
+      type: user
+      score: 50
+  threat_objects:
+    - field: data_win_eventdata_image
+      type: process
+
+tags:
+  analytic_story:
+    - Ransomware
+    - Defense Evasion
+    - Windows Policy Abuse
+  asset_type: Endpoint
+  mitre_attack_id:
+    - T1112
+  custom_tags:
+    - registry_modification
+    - ransomware
+    - defense_evasion
+    - persistence
+  product:
+    - Wazuh
+  security_domain: endpoint
+
+graylog:
+  query: data_win_system_eventID:"13" AND data_win_eventdata_targetObject:HKLM\\\\SOFTWARE\\\\Microsoft\\\\Windows\\\\CurrentVersion\\\\Policies\\\\Explorer\\\\NoLogOff

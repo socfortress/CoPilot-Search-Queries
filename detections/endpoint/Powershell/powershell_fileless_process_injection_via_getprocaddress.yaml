@@ -1,0 +1,122 @@
+name: Powershell Fileless Process Injection via GetProcAddress
+id: windows-powershell-fileless-process-injection-via-getprocaddress-001
+version: 1
+schema_version: "1.0"
+date: "2026-03-10"
+author: SOCFortress LLC
+status: production
+type: TTP
+
+description: >
+  Detects the use of GetProcAddress in PowerShell script blocks, leveraging PowerShell 
+  Script Block Logging (EventCode 4104). This method captures the full command sent to 
+  PowerShell, which is then logged in Windows event logs. The presence of GetProcAddress 
+  is unusual for typical PowerShell scripts and often indicates malicious activity, as 
+  many attack toolkits use it to achieve fileless code execution. If confirmed malicious, 
+  this activity could allow an attacker to execute arbitrary code, potentially leading 
+  to system compromise.
+
+data_source:
+  - PowerShell Script Block Logging 4104
+
+search:
+  index_pattern: "${INDEX_PATTERN}"
+  size: 100
+  sort:
+    - timestamp: desc
+  query:
+    bool:
+      must:
+        - term:
+            agent_name: "${AGENT_NAME}"
+        - term:
+            agent_labels_customer: "${CUSTOMER_CODE}"
+        - term:
+            data_win_system_eventID: "4104"
+        - wildcard:
+            data_win_eventdata_scriptBlockText: "*GetProcAddress*"
+        - range:
+            timestamp:
+              gte: "${START_TIME}"
+              lte: "${END_TIME}"
+  _source:
+    - timestamp
+    - agent_name
+    - data_win_system_eventID
+    - data_win_eventdata_scriptBlockText
+    - data_win_eventdata_scriptBlockId
+    - data_win_system_computer
+    - data_win_eventdata_user
+
+parameters:
+  AGENT_NAME:
+    description: "Target agent/host name"
+    type: string
+    required: true
+    example: "DESKTOP-AM0HLGE"
+  CUSTOMER_CODE:
+    description: "Customer label for filtering"
+    type: string
+    required: true
+    example: "lab"
+  START_TIME:
+    description: "Query start time (ISO 8601 or relative)"
+    type: datetime
+    required: false
+    default: "now-24h"
+    example: "2026-03-10 00:00:00.000"
+  END_TIME:
+    description: "Query end time (ISO 8601 or relative)"
+    type: datetime
+    required: false
+    default: "now"
+    example: "2026-03-10 23:59:59.999"
+
+how_to_implement: >
+  This detection requires PowerShell Script Block Logging (EventCode 4104) enabled 
+  on Windows endpoints. Enable via registry: HKLM\SOFTWARE\Policies\Microsoft\Windows\
+  PowerShell\ScriptBlockLogging\EnableScriptBlockLogging = 1. The Wazuh agent 
+  ossec.conf must include the Microsoft-Windows-PowerShell/Operational event channel. 
+  The index pattern should match your Wazuh index naming convention.
+
+known_false_positives: >
+  Limited false positives. GetProcAddress usage in PowerShell is highly unusual and 
+  typically indicates malicious intent for process injection or fileless code execution. 
+  Review the full script block context and parent process for confirmation.
+
+references:
+  - https://attack.mitre.org/techniques/T1055/
+  - https://attack.mitre.org/techniques/T1059/001/
+  - https://blog.palantir.com/tampering-with-windows-event-tracing-background-offense-and-defense-4be7ac62ac63
+  - https://www.splunk.com/en_us/blog/security/hunting-for-malicious-powershell-using-script-block-logging.html
+
+response:
+  message: >
+    Fileless process injection via GetProcAddress detected on $agent_name$. 
+    Script block: $data_win_eventdata_scriptBlockText$. 
+    User: $data_win_eventdata_user$. MITRE ATT&CK: T1055, T1059.001
+  risk_score: 72
+  severity: high
+  risk_objects:
+    - field: agent_name
+      type: system
+      score: 72
+  threat_objects: []
+
+tags:
+  analytic_story:
+    - Hellcat Ransomware
+    - Malicious PowerShell
+    - Hermetic Wiper
+    - Data Destruction
+    - Compromised Windows Host
+  asset_type: Endpoint
+  mitre_attack_id:
+    - T1055
+    - T1059.001
+  product:
+    - Wazuh
+  security_domain: endpoint
+
+graylog:
+  query: data_win_system_eventID:"4104" AND data_win_eventdata_scriptBlockText:/.*GetProcAddress.*/

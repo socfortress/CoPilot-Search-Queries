@@ -1,0 +1,149 @@
+name: Windows PowerShell Process Implementing Manual Base64 Decoder
+id: 08d67349-0808-4f55-b431-1037269fa517
+version: 1
+schema_version: "1.0"
+date: "2026-04-07"
+author: SOCFortress LLC
+status: production
+type: Anomaly
+
+description: >
+  Detects Windows PowerShell processes that implement a manual Base64 decoder.
+  Threat actors often use Base64 encoding to obfuscate malicious payloads or
+  commands within PowerShell scripts. By manually decoding Base64 strings,
+  attackers can evade detection mechanisms that look for standard decoding
+  functions like using the "-enc" flag or the "FromBase64String" function.
+  This detection focuses on PowerShell processes that exhibit characteristics
+  of manual Base64 decoding, such as the presence of specific string manipulation
+  methods (Substring, GetString, IndexOf) and bitwise operations.
+
+data_source:
+  - Sysmon EventID 1
+
+search:
+  index_pattern: "${INDEX_PATTERN}"
+  size: 100
+  sort:
+    - timestamp: desc
+  query:
+    bool:
+      must:
+        - term:
+            agent_name: "${AGENT_NAME}"
+        - term:
+            agent_labels_customer: "${CUSTOMER_CODE}"
+        - term:
+            data_win_system_eventID: "1"
+        - wildcard:
+            data_win_eventdata_commandLine: "*ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789*"
+        - wildcard:
+            data_win_eventdata_commandLine: "*.IndexOf*"
+        - bool:
+            should:
+              - wildcard:
+                  data_win_eventdata_commandLine: "*-shr*"
+              - wildcard:
+                  data_win_eventdata_commandLine: "*-shl*"
+            minimum_should_match: 1
+        - range:
+            timestamp:
+              gte: "${START_TIME}"
+              lte: "${END_TIME}"
+  _source:
+    - timestamp
+    - agent_name
+    - data_win_system_eventID
+    - data_win_eventdata_commandLine
+    - data_win_eventdata_image
+    - data_win_eventdata_parentImage
+    - data_win_eventdata_user
+
+parameters:
+  AGENT_NAME:
+    description: "Target agent/host name"
+    type: string
+    required: true
+    example: "DESKTOP-AM0HLGE"
+  CUSTOMER_CODE:
+    description: "Customer label for filtering"
+    type: string
+    required: true
+    example: "lab"
+  INDEX_PATTERN:
+    description: "Elasticsearch index pattern"
+    type: string
+    required: true
+    example: "wazuh-lab_*"
+  START_TIME:
+    description: "Query start time (ISO 8601 or relative)"
+    type: datetime
+    required: false
+    default: "now-24h"
+    example: "2026-04-07 00:00:00.000"
+  END_TIME:
+    description: "Query end time (ISO 8601 or relative)"
+    type: datetime
+    required: false
+    default: "now"
+    example: "2026-04-07 23:59:59.999"
+
+how_to_implement: >
+  Requires Sysmon EventID 1 (Process Creation) logging enabled on endpoints.
+  Ensure Sysmon version 6.0.4 or later is configured with complete command-line
+  argument capture. Configure via Sysmon configuration file with:
+  <ProcessCreate onmatch="include"> and capture full CommandLine events.
+  The detection is based on data that originates from Endpoint Detection
+  and Response (EDR) agents.
+
+known_false_positives: >
+  Legitimate use of PowerShell for decoding Base64 strings by administrators
+  or power users may trigger this detection. It is essential to review the
+  context of the PowerShell execution to determine if it is malicious,
+  suspicious or authorized activity. Administrative scripts that perform
+  Base64 decoding may also generate false positives.
+
+references:
+  - https://www.virustotal.com/gui/file/4b3ab4d9f2332da6b6cd8d9d0f4910a5eb85ac8c969108acb3ad49631812f998/behavior
+  - https://attack.mitre.org/techniques/T1027/010/
+  - https://attack.mitre.org/techniques/T1059/001/
+
+response:
+  message: >
+    PowerShell manual Base64 decoder execution detected on $agent_name$
+    by $data_win_eventdata_user$.
+    Process: $data_win_eventdata_image$.
+    Command: $data_win_eventdata_commandLine$.
+    MITRE ATT&CK: T1027.010, T1059.001
+  risk_score: 65
+  severity: high
+  risk_objects:
+    - field: agent_name
+      type: system
+      score: 35
+    - field: data_win_eventdata_user
+      type: user
+      score: 30
+  threat_objects:
+    - field: data_win_eventdata_commandLine
+      type: process_command
+
+tags:
+  analytic_story:
+    - Compromised Windows Host
+    - Deobfuscate-Decode Files or Information
+  asset_type: Endpoint
+  mitre_attack_id:
+    - T1027.010
+    - T1059.001
+  custom_tags:
+    - base64_decoder
+    - deobfuscation
+    - obfuscated_payload
+    - bitwise_operations
+    - manual_decoding
+  product:
+    - Wazuh
+  security_domain: endpoint
+
+graylog:
+  query: data_win_system_eventID:"1" AND data_win_eventdata_commandLine:/.*ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789.*/ AND data_win_eventdata_commandLine:/.*IndexOf.*/ AND (data_win_eventdata_commandLine:/.*-shr.*/ OR data_win_eventdata_commandLine:/.*-shl.*/)

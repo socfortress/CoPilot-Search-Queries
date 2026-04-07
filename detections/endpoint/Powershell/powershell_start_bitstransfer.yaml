@@ -1,0 +1,138 @@
+name: PowerShell Start-BitsTransfer
+id: windows-powershell-start-bitstransfer-001
+version: 1
+schema_version: "1.0"
+date: "2026-03-10"
+author: SOCFortress LLC
+status: production
+type: TTP
+
+description: >
+  Detects the execution of the PowerShell command Start-BitsTransfer, which can be 
+  used for file transfers, including potential data exfiltration. It leverages data 
+  from process creation events (Sysmon EventID 1) and PowerShell Script Block Logging 
+  (EventID 4104) to identify command-line arguments containing Start-BitsTransfer. 
+  This activity is significant because Start-BitsTransfer can be abused by adversaries 
+  to upload sensitive files to remote locations, posing a risk of data loss. If 
+  confirmed malicious, this could lead to unauthorized data exfiltration, compromising 
+  sensitive information and potentially leading to further exploitation of the network.
+
+data_source:
+  - Sysmon EventID 1
+  - PowerShell Script Block Logging 4104
+
+search:
+  index_pattern: "${INDEX_PATTERN}"
+  size: 100
+  sort:
+    - timestamp: desc
+  query:
+    bool:
+      must:
+        - term:
+            agent_name: "${AGENT_NAME}"
+        - term:
+            agent_labels_customer: "${CUSTOMER_CODE}"
+        - bool:
+            should:
+              - term:
+                  data_win_system_eventID: "1"
+              - term:
+                  data_win_system_eventID: "4104"
+            minimum_should_match: 1
+        - bool:
+            should:
+              - wildcard:
+                  data_win_eventdata_image: "*powershell*"
+              - wildcard:
+                  data_win_eventdata_image: "*powershell_ise*"
+              - wildcard:
+                  data_win_eventdata_scriptBlockText: "*start-bitstransfer*"
+            minimum_should_match: 1
+        - wildcard:
+            data_win_eventdata_commandLine: "*start-bitstransfer*"
+        - range:
+            timestamp:
+              gte: "${START_TIME}"
+              lte: "${END_TIME}"
+  _source:
+    - timestamp
+    - agent_name
+    - data_win_system_eventID
+    - data_win_eventdata_image
+    - data_win_eventdata_commandLine
+    - data_win_eventdata_parentImage
+    - data_win_eventdata_scriptBlockText
+    - data_win_eventdata_user
+
+parameters:
+  AGENT_NAME:
+    description: "Target agent/host name"
+    type: string
+    required: true
+    example: "DESKTOP-AM0HLGE"
+  CUSTOMER_CODE:
+    description: "Customer label for filtering"
+    type: string
+    required: true
+    example: "lab"
+  START_TIME:
+    description: "Query start time (ISO 8601 or relative)"
+    type: datetime
+    required: false
+    default: "now-24h"
+    example: "2026-03-10 00:00:00.000"
+  END_TIME:
+    description: "Query end time (ISO 8601 or relative)"
+    type: datetime
+    required: false
+    default: "now"
+    example: "2026-03-10 23:59:59.999"
+
+how_to_implement: >
+  This detection requires Wazuh agents deployed on Windows endpoints with Sysmon 
+  installed (EventID 1) and PowerShell Script Block Logging (EventID 4104) enabled. 
+  For Script Block Logging, enable via registry: HKLM\SOFTWARE\Policies\Microsoft\Windows\
+  PowerShell\ScriptBlockLogging\EnableScriptBlockLogging = 1. The index pattern 
+  should match your Wazuh index naming convention.
+
+known_false_positives: >
+  Limited false positives. It is possible administrators will utilize Start-BitsTransfer 
+  for legitimate administrative tasks such as downloading updates or transferring files 
+  within the organization. Filter based on parent process, user context, and source/destination 
+  URLs to identify anomalies.
+
+references:
+  - https://attack.mitre.org/techniques/T1197/
+  - https://isc.sans.edu/diary/Investigating+Microsoft+BITS+Activity/23281
+  - https://docs.microsoft.com/en-us/windows/win32/bits/using-windows-powershell-to-create-bits-transfer-jobs
+
+response:
+  message: >
+    BITS Transfer activity detected on $agent_name$. 
+    Command line: $data_win_eventdata_commandLine$. 
+    Parent process: $data_win_eventdata_parentImage$. 
+    User: $data_win_eventdata_user$. MITRE ATT&CK: T1197
+  risk_score: 50
+  severity: medium
+  risk_objects:
+    - field: agent_name
+      type: system
+      score: 50
+  threat_objects: []
+
+tags:
+  analytic_story:
+    - BITS Jobs
+    - Gozi Malware
+    - Data Exfiltration
+    - Compromised Windows Host
+  asset_type: Endpoint
+  mitre_attack_id:
+    - T1197
+  product:
+    - Wazuh
+  security_domain: endpoint
+
+graylog:
+  query: data_win_system_eventID:"4104" OR data_win_system_eventID:"1" AND (data_win_eventdata_image:/.*powershell.*/ OR data_win_eventdata_image:/.*powershell_ise.*/) AND data_win_eventdata_commandLine:/.*Start-BitsTransfer.*/

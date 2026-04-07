@@ -1,0 +1,127 @@
+name: Windows Create Local Account
+id: 3fb2e8e3-7bc0-4567-9722-c5ab9f8595eb
+version: 1
+schema_version: "1.0"
+date: "2026-04-07"
+author: SOCFortress LLC
+status: production
+type: Anomaly
+
+description: >
+  The following analytic detects the creation of a new local user account on a Windows system.
+  It leverages Windows Security Audit logs, specifically event ID 4720, to identify this activity.
+  Monitoring the creation of local accounts is crucial for a SOC as it can indicate unauthorized
+  access or lateral movement within the network. If confirmed malicious, this activity could allow
+  an attacker to establish persistence, escalate privileges, or gain unauthorized access to sensitive
+  systems and data.
+
+data_source:
+  - Windows Security Event Log EventID 4720
+
+search:
+  index_pattern: "${INDEX_PATTERN}"
+  size: 100
+  sort:
+    - timestamp: desc
+  query:
+    bool:
+      must:
+        - term:
+            agent_name: "${AGENT_NAME}"
+        - term:
+            agent_labels_customer: "${CUSTOMER_CODE}"
+        - term:
+            data_win_system_eventID: "4720"
+        - range:
+            timestamp:
+              gte: "${START_TIME}"
+              lte: "${END_TIME}"
+  _source:
+    - timestamp
+    - data_win_eventdata_targetUserName
+    - data_win_eventdata_subjectUserName
+    - data_win_system_computer
+    - data_win_system_eventID
+
+parameters:
+  AGENT_NAME:
+    description: "Target agent/host name"
+    type: string
+    required: true
+    example: "DESKTOP-AM0HLGE"
+  CUSTOMER_CODE:
+    description: "Customer label for filtering"
+    type: string
+    required: true
+    example: "lab"
+  INDEX_PATTERN:
+    description: "Elasticsearch index pattern"
+    type: string
+    required: true
+    example: "wazuh-lab_*"
+  START_TIME:
+    description: "Query start time (ISO 8601 or relative)"
+    type: datetime
+    required: false
+    default: "now-24h"
+    example: "YYYY-MM-DD 00:00:00.000"
+  END_TIME:
+    description: "Query end time (ISO 8601 or relative)"
+    type: datetime
+    required: false
+    default: "now"
+    example: "YYYY-MM-DD 23:59:59.999"
+
+how_to_implement: >
+  This search requires you to have enabled Windows Security Audit Logs with Group Management
+  Audit enabled in your Local Windows Security Policy and be ingesting those logs. Event ID 4720
+  is logged when a user account is created on the system. Ensure your Wazuh agents have the Security
+  channel configured to collect these events and that logs are being ingested into Elasticsearch
+  with proper field mapping.
+
+known_false_positives: >
+  It is possible that an administrator created the account. Verifying activity with an administrator
+  is advised. Accounts created on Domain Controllers will trigger this too. Exclude if it becomes
+  too noisy. This analytic is set to anomaly to allow for risk to be added. Filter and tune as needed.
+  Restrict to critical infrastructure to reduce any volume.
+
+references:
+  - https://thedfirreport.com/2022/03/21/apt35-automates-initial-access-using-proxyshell/
+  - https://learn.microsoft.com/en-us/windows/security/threat-protection/auditing/event-4720
+
+response:
+  message: >
+    Local user account $data_win_eventdata_targetUserName$ was created on $data_win_system_computer$
+    by user $data_win_eventdata_subjectUserName$. This may indicate unauthorized account creation
+    or lateral movement activity.
+  risk_score: 20
+  severity: medium
+  risk_objects:
+    - field: data_win_eventdata_subjectUserName
+      type: user
+      score: 20
+    - field: data_win_system_computer
+      type: system
+      score: 20
+  threat_objects:
+    - field: data_win_eventdata_targetUserName
+      type: account
+
+tags:
+  analytic_story:
+    - Active Directory Password Spraying
+    - Lateral Movement
+    - Account Manipulation
+  asset_type: Endpoint
+  mitre_attack_id:
+    - T1136.001
+  custom_tags:
+    - account_creation
+    - persistence
+    - lateral_movement
+  product:
+    - Wazuh
+  security_domain: endpoint
+
+graylog:
+  query: data_win_system_eventID:"4720"

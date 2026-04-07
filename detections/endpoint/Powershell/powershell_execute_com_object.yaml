@@ -1,0 +1,119 @@
+name: PowerShell Execute COM Object
+id: windows-powershell-com-clsid-execution-001
+version: 1
+schema_version: "1.0"
+date: "2026-04-06"
+author: SOCFortress LLC
+status: production
+type: TTP
+
+description: >
+  Detects the execution of a COM CLSID through PowerShell via Script Block Logging 
+  (EventCode 4104). This technique uses [type]::GetTypeFromCLSID to instantiate COM 
+  objects and is commonly employed by adversaries and malware such as Conti ransomware 
+  for command execution, privilege escalation, and User Account Control (UAC) bypass. 
+  If confirmed malicious, this could allow attackers to gain elevated privileges or 
+  persist within the environment.
+
+data_source:
+  - PowerShell Script Block Logging 4104
+
+search:
+  index_pattern: "${INDEX_PATTERN}"
+  size: 100
+  sort:
+    - timestamp: desc
+  query:
+    bool:
+      must:
+        - term:
+            agent_name: "${AGENT_NAME}"
+        - term:
+            agent_labels_customer: "${CUSTOMER_CODE}"
+        - term:
+            data_win_system_eventID: "4104"
+        - wildcard:
+            data_win_eventdata_scriptBlockText: "*CreateInstance*CLSID*"
+        - range:
+            timestamp:
+              gte: "${START_TIME}"
+              lte: "${END_TIME}"
+  _source:
+    - timestamp
+    - agent_name
+    - data_win_system_eventID
+    - data_win_eventdata_scriptBlockText
+    - data_win_eventdata_scriptBlockId
+    - data_win_system_computer
+
+parameters:
+  AGENT_NAME:
+    description: "Target agent/host name"
+    type: string
+    required: true
+    example: "DESKTOP-AM0HLGE"
+  CUSTOMER_CODE:
+    description: "Customer label for filtering"
+    type: string
+    required: true
+    example: "lab"
+  START_TIME:
+    description: "Query start time (ISO 8601 or relative)"
+    type: datetime
+    required: false
+    default: "now-24h"
+  END_TIME:
+    description: "Query end time (ISO 8601 or relative)"
+    type: datetime
+    required: false
+    default: "now"
+
+how_to_implement: >
+  This detection requires PowerShell Script Block Logging (EventCode 4104) enabled 
+  on Windows endpoints via registry: HKLM\SOFTWARE\Policies\Microsoft\Windows\
+  PowerShell\ScriptBlockLogging\EnableScriptBlockLogging = 1. The Wazuh agent 
+  ossec.conf must include the Microsoft-Windows-PowerShell/Operational event channel 
+  configured as an eventchannel source.
+
+known_false_positives: >
+  Legitimate automation frameworks or administrative tools may use COM object 
+  instantiation. Filter based on user context, source script path, and specific 
+  COM CLSIDs being invoked. Focus on high-risk CLSIDs commonly associated with 
+  credential theft or system execution.
+
+references:
+  - https://attack.mitre.org/techniques/T1546/015/
+  - https://attack.mitre.org/techniques/T1059/001/
+  - https://www.splunk.com/en_us/blog/security/hunting-for-malicious-powershell-using-script-block-logging.html
+
+response:
+  message: >
+    PowerShell COM CLSID execution detected on $agent_name$. 
+    Script block: $data_win_eventdata_scriptBlockText$. 
+    User: $data_win_system_user$. 
+    MITRE ATT&CK: T1546.015, T1059.001
+  risk_score: 85
+  severity: high
+  risk_objects:
+    - field: agent_name
+      type: system
+      score: 85
+  threat_objects: []
+
+tags:
+  analytic_story:
+    - Data Destruction
+    - Ransomware
+    - WhisperGate
+    - Malicious PowerShell
+    - Hermetic Wiper
+  asset_type: Endpoint
+  mitre_attack_id:
+    - T1546.015
+    - T1059.001
+  product:
+    - Wazuh
+  security_domain: endpoint
+
+graylog:
+  query: data_win_system_eventID:"4104" AND data_win_eventdata_scriptBlockText:/.*GetTypeFromCLSID.*/

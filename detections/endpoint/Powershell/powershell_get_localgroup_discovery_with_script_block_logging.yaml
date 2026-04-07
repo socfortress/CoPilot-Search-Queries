@@ -1,0 +1,118 @@
+name: Powershell Get LocalGroup Discovery with Script Block Logging
+id: windows-powershell-get-localgroup-discovery-with-script-block-logging-001
+version: 1
+schema_version: "1.0"
+date: "2026-02-25"
+author: SOCFortress LLC
+status: production
+type: Hunting
+
+description: >
+  Detects the execution of the PowerShell cmdlet Get-LocalGroup using PowerShell 
+  Script Block Logging (EventCode 4104). This method captures the full command sent 
+  to PowerShell, providing detailed visibility into script execution. Monitoring this 
+  activity is significant as it can indicate an attempt to enumerate local groups, 
+  which may be a precursor to privilege escalation or lateral movement. If confirmed 
+  malicious, an attacker could gain insights into group memberships, potentially 
+  leading to unauthorized access or privilege abuse.
+
+data_source:
+  - PowerShell Script Block Logging 4104
+
+search:
+  index_pattern: "${INDEX_PATTERN}"
+  size: 100
+  sort:
+    - timestamp: desc
+  query:
+    bool:
+      must:
+        - term:
+            agent_name: "${AGENT_NAME}"
+        - term:
+            agent_labels_customer: "${CUSTOMER_CODE}"
+        - term:
+            data_win_system_eventID: "4104"
+        - wildcard:
+            data_win_eventdata_scriptBlockText: "*get-localgroup*"
+        - range:
+            timestamp:
+              gte: "${START_TIME}"
+              lte: "${END_TIME}"
+  _source:
+    - timestamp
+    - agent_name
+    - data_win_system_eventID
+    - data_win_eventdata_scriptBlockText
+    - data_win_eventdata_scriptBlockId
+    - data_win_system_computer
+    - data_win_eventdata_user
+
+parameters:
+  AGENT_NAME:
+    description: "Target agent/host name"
+    type: string
+    required: true
+    example: "DESKTOP-AM0HLGE"
+  CUSTOMER_CODE:
+    description: "Customer label for filtering"
+    type: string
+    required: true
+    example: "lab"
+  START_TIME:
+    description: "Query start time (ISO 8601 or relative)"
+    type: datetime
+    required: false
+    default: "now-24h"
+    example: "2026-02-25 00:00:00.000"
+  END_TIME:
+    description: "Query end time (ISO 8601 or relative)"
+    type: datetime
+    required: false
+    default: "now"
+    example: "2026-02-25 23:59:59.999"
+
+how_to_implement: >
+  This detection requires PowerShell Script Block Logging (EventCode 4104) enabled 
+  on Windows endpoints. Enable via registry: HKLM\SOFTWARE\Policies\Microsoft\Windows\
+  PowerShell\ScriptBlockLogging\EnableScriptBlockLogging = 1. The Wazuh agent 
+  ossec.conf must include the Microsoft-Windows-PowerShell/Operational event channel. 
+  The index pattern should match your Wazuh index naming convention.
+
+known_false_positives: >
+  False positives may be present from legitimate administrative scripts that enumerate 
+  local groups. Filter based on user context, source script path, and frequency of 
+  execution to identify anomalies.
+
+references:
+  - https://attack.mitre.org/techniques/T1069/001/
+  - https://www.splunk.com/en_us/blog/security/powershell-detections-threat-research-release-august-2021.html
+  - https://github.com/redcanaryco/atomic-red-team/blob/master/atomics/T1069.001/T1069.001.md
+  - https://www.splunk.com/en_us/blog/security/hunting-for-malicious-powershell-using-script-block-logging.html
+
+response:
+  message: >
+    Local group enumeration detected via PowerShell on $agent_name$. 
+    Script block: $data_win_eventdata_scriptBlockText$. 
+    User: $data_win_eventdata_user$. MITRE ATT&CK: T1069.001
+  risk_score: 30
+  severity: low
+  risk_objects:
+    - field: agent_name
+      type: system
+      score: 30
+  threat_objects: []
+
+tags:
+  analytic_story:
+    - Active Directory Discovery
+    - Compromised Windows Host
+  asset_type: Endpoint
+  mitre_attack_id:
+    - T1069.001
+  product:
+    - Wazuh
+  security_domain: endpoint
+
+graylog:
+  query: data_win_system_eventID:"4104" AND data_win_eventdata_scriptBlockText:/.*Get-LocalGroup.*/
