@@ -1,0 +1,152 @@
+name: Windows Execute Arbitrary Commands with MSDT
+id: e1d5145f-38fe-42b9-a5d5-457796715f97
+version: 1
+schema_version: "1.0"
+date: "2026-04-07"
+author: SOCFortress LLC
+status: production
+type: TTP
+
+description: >
+  The following analytic detects arbitrary command execution using Windows msdt.exe, a Diagnostics
+  Troubleshooting Wizard. It leverages Sysmon EventID 1 to identify instances where msdt.exe is
+  invoked with suspicious parameters like /id PCWDiagnostic, /af (answer file), IT_BrowseForFile,
+  or IT_RebrowseForFile. This activity is significant as it can indicate an exploitation attempt
+  leveraging msdt.exe (CVE-2022-30190 - Follina) to execute arbitrary commands and retrieve remote
+  payloads. If confirmed malicious, this could allow an attacker to execute arbitrary code, escalate
+  privileges, or persist within the environment, posing a severe security risk.
+
+data_source:
+  - Sysmon EventID 1
+
+search:
+  index_pattern: "${INDEX_PATTERN}"
+  size: 100
+  sort:
+    - timestamp: desc
+  query:
+    bool:
+      must:
+        - term:
+            agent_name: "${AGENT_NAME}"
+        - term:
+            agent_labels_customer: "${CUSTOMER_CODE}"
+        - term:
+            data_win_system_eventID: "1"
+        - wildcard:
+            data_win_eventdata_image: "*msdt.exe"
+        - bool:
+            should:
+              - wildcard:
+                  data_win_eventdata_commandLine: "*PCWDiagnostic*"
+              - wildcard:
+                  data_win_eventdata_commandLine: "*IT_BrowseForFile*"
+              - wildcard:
+                  data_win_eventdata_commandLine: "*IT_RebrowseForFile*"
+              - wildcard:
+                  data_win_eventdata_commandLine: "*.xml*"
+            minimum_should_match: 1
+        - range:
+            timestamp:
+              gte: "${START_TIME}"
+              lte: "${END_TIME}"
+  _source:
+    - timestamp
+    - data_win_eventdata_commandLine
+    - data_win_eventdata_image
+    - data_win_eventdata_parentImage
+    - data_win_eventdata_parentProcessId
+    - data_win_eventdata_user
+    - data_win_system_computer
+
+parameters:
+  AGENT_NAME:
+    description: "Target agent/host name"
+    type: string
+    required: true
+    example: "DESKTOP-AM0HLGE"
+  CUSTOMER_CODE:
+    description: "Customer label for filtering"
+    type: string
+    required: true
+    example: "lab"
+  INDEX_PATTERN:
+    description: "Elasticsearch index pattern"
+    type: string
+    required: true
+    example: "wazuh-lab_*"
+  START_TIME:
+    description: "Query start time (ISO 8601 or relative)"
+    type: datetime
+    required: false
+    default: "now-24h"
+    example: "YYYY-MM-DD 00:00:00.000"
+  END_TIME:
+    description: "Query end time (ISO 8601 or relative)"
+    type: datetime
+    required: false
+    default: "now"
+    example: "YYYY-MM-DD 23:59:59.999"
+
+how_to_implement: >
+  To successfully implement this search, you need to be ingesting logs with process execution data
+  from your endpoints. Sysmon EventID 1 captures process creation events. Ensure that Sysmon is
+  configured to log all process creation events and that these logs are properly ingested into
+  Elasticsearch with complete command-line information. The detection specifically looks for msdt.exe
+  invocations with parameters like /id PCWDiagnostic, /af (answer file), IT_BrowseForFile, or
+  IT_RebrowseForFile, which are indicators of exploitation attempts leveraging CVE-2022-30190 (Follina).
+
+known_false_positives: >
+  False positives may occur if legitimate administrative tasks use msdt.exe with these parameters.
+  However, msdt.exe is typically executed through the GUI and rarely invoked with command-line
+  parameters from scripts or command shells. Investigate all instances of msdt.exe with these
+  suspicious parameters immediately.
+
+references:
+  - https://isc.sans.edu/diary/rss/28694
+  - https://doublepulsar.com/follina-a-microsoft-office-code-execution-vulnerability-1a47fce5629e
+  - https://twitter.com/nao_sec/status/1530196847679401984?s=20&t=ZiXYI4dQuA-0_dzQzSUb3A
+  - https://app.any.run/tasks/713f05d2-fe78-4b9d-a744-f7c133e3fafb/
+  - https://strontic.github.io/xcyclopedia/library/msdt.exe-152D4C9F63EFB332CCB134C6953C0104.html
+
+response:
+  message: >
+    msdt.exe was executed with suspicious parameters on $data_win_system_computer$. Process: $data_win_eventdata_image$
+    CommandLine: $data_win_eventdata_commandLine$ Parent Process: $data_win_eventdata_parentImage$
+    User: $data_win_eventdata_user$. This is indicative of CVE-2022-30190 (Follina) exploitation attempts.
+  risk_score: 90
+  severity: critical
+  risk_objects:
+    - field: data_win_system_computer
+      type: system
+      score: 90
+    - field: data_win_eventdata_user
+      type: user
+      score: 80
+  threat_objects:
+    - field: data_win_eventdata_image
+      type: process
+    - field: data_win_eventdata_parentImage
+      type: process
+
+tags:
+  analytic_story:
+    - Compromised Windows Host
+    - Microsoft Support Diagnostic Tool Vulnerability CVE-2022-30190
+    - Follina
+  asset_type: Endpoint
+  cve:
+    - CVE-2022-30190
+  mitre_attack_id:
+    - T1218
+  custom_tags:
+    - msdt
+    - follina
+    - diagnostic_tool_abuse
+    - command_execution
+  product:
+    - Wazuh
+  security_domain: endpoint
+
+graylog:
+  query: data_win_system_eventID:"1" AND data_win_eventdata_image:"C:\\\\Windows\\\\System32\\\\msdt.exe" AND data_win_eventdata_commandLine:/.*PCWDiagnostic.*/

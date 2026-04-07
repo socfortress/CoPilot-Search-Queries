@@ -1,0 +1,180 @@
+name: Windows Execution of Microsoft MSC File In Suspicious Path
+id: ac30858b-7c25-4f0a-a7fa-bef036e49dc3
+version: 1
+schema_version: "1.0"
+date: "2026-04-07"
+author: SOCFortress LLC
+status: production
+type: Anomaly
+
+description: >
+  The following analytic detects when a Microsoft Management Console (MMC) process executes an .msc
+  file in a suspicious path on a Windows system. While .msc files are legitimate components used for
+  system administration, unexpected execution of these files from unusual locations like Temp, Downloads,
+  PerfLogs, Recycle.bin, or Windows subdirectories (Prefetch, Cursors, INF, debug, fonts, Media, repair,
+  servicing) can indicate malicious activity such as living-off-the-land attacks, persistence mechanisms,
+  or automated administrative abuse. This detection monitors process creation events, command-line arguments,
+  and execution paths to help distinguish normal administrative usage from potential threats.
+
+data_source:
+  - Sysmon EventID 1
+
+search:
+  index_pattern: "${INDEX_PATTERN}"
+  size: 100
+  sort:
+    - timestamp: desc
+  query:
+    bool:
+      must:
+        - term:
+            agent_name: "${AGENT_NAME}"
+        - term:
+            agent_labels_customer: "${CUSTOMER_CODE}"
+        - term:
+            data_win_system_eventID: "1"
+        - wildcard:
+            data_win_eventdata_image: "*mmc.exe"
+        - wildcard:
+            data_win_eventdata_commandLine: "*.msc*"
+        - bool:
+            should:
+              - wildcard:
+                  data_win_eventdata_commandLine: "*\\PerfLogs\\*"
+              - wildcard:
+                  data_win_eventdata_commandLine: "*\\programdata\\*"
+              - wildcard:
+                  data_win_eventdata_commandLine: "*Recycle.bin*"
+              - wildcard:
+                  data_win_eventdata_commandLine: "*\\Download*"
+              - wildcard:
+                  data_win_eventdata_commandLine: "*\\temp\\*"
+              - wildcard:
+                  data_win_eventdata_commandLine: "*\\Users\\Administrator\\Music\\*"
+              - wildcard:
+                  data_win_eventdata_commandLine: "*\\Users\\Default\\*"
+              - wildcard:
+                  data_win_eventdata_commandLine: "*\\Users\\Public\\*"
+              - wildcard:
+                  data_win_eventdata_commandLine: "*:\\Windows\\Prefetch\\*"
+              - wildcard:
+                  data_win_eventdata_commandLine: "*:\\Windows\\Cursors\\*"
+              - wildcard:
+                  data_win_eventdata_commandLine: "*:\\Windows\\INF\\*"
+              - wildcard:
+                  data_win_eventdata_commandLine: "*:\\Windows\\debug\\*"
+              - wildcard:
+                  data_win_eventdata_commandLine: "*:\\Windows\\fonts\\*"
+              - wildcard:
+                  data_win_eventdata_commandLine: "*:\\Windows\\Media\\*"
+              - wildcard:
+                  data_win_eventdata_commandLine: "*:\\Windows\\repair\\*"
+              - wildcard:
+                  data_win_eventdata_commandLine: "*:\\Windows\\servicing\\*"
+            minimum_should_match: 1
+        - bool:
+            must_not:
+              - wildcard:
+                  data_win_eventdata_commandLine: "*C:\\Windows\\System32\\eventvwr.msc*"
+              - wildcard:
+                  data_win_eventdata_commandLine: "*C:\\Windows\\System32\\certmgr.msc*"
+        - range:
+            timestamp:
+              gte: "${START_TIME}"
+              lte: "${END_TIME}"
+  _source:
+    - timestamp
+    - data_win_eventdata_commandLine
+    - data_win_eventdata_image
+    - data_win_eventdata_parentImage
+    - data_win_eventdata_parentProcessId
+    - data_win_eventdata_user
+    - data_win_system_computer
+
+parameters:
+  AGENT_NAME:
+    description: "Target agent/host name"
+    type: string
+    required: true
+    example: "DESKTOP-AM0HLGE"
+  CUSTOMER_CODE:
+    description: "Customer label for filtering"
+    type: string
+    required: true
+    example: "lab"
+  INDEX_PATTERN:
+    description: "Elasticsearch index pattern"
+    type: string
+    required: true
+    example: "wazuh-lab_*"
+  START_TIME:
+    description: "Query start time (ISO 8601 or relative)"
+    type: datetime
+    required: false
+    default: "now-24h"
+    example: "YYYY-MM-DD 00:00:00.000"
+  END_TIME:
+    description: "Query end time (ISO 8601 or relative)"
+    type: datetime
+    required: false
+    default: "now"
+    example: "YYYY-MM-DD 23:59:59.999"
+
+how_to_implement: >
+  To successfully implement this search, you need to be ingesting logs with process execution data
+  from your endpoints. Sysmon EventID 1 captures process creation events. Ensure that Sysmon is
+  configured to log all process creation events and that these logs are properly ingested into
+  Elasticsearch with complete command-line information. The detection specifically looks for mmc.exe
+  executing .msc files from suspicious paths including Temp, Downloads, PerfLogs, Recycle.bin, and
+  various Windows system subdirectories.
+
+known_false_positives: >
+  A possible false positive for the execution of .msc files is legitimate administrative activity,
+  since .msc files are standard Microsoft Management Console snap-ins used for system administration.
+  However, legitimate administrative tasks typically execute .msc files from C:\Windows\System32,
+  not from Temp, Downloads, or other suspicious paths. Investigate all instances where mmc.exe
+  executes .msc files from unusual locations.
+
+references:
+  - https://www.securonix.com/blog/analyzing-fluxconsole-using-tax-themed-lures-threat-actors-exploit-windows-management-console-to-deliver-backdoor-payloads/
+  - https://research.checkpoint.com/2019/microsoft-management-console-mmc-vulnerabilities/
+
+response:
+  message: >
+    Microsoft Management Console (mmc.exe) executed an .msc file from a suspicious path on $data_win_system_computer$.
+    Process: $data_win_eventdata_image$ CommandLine: $data_win_eventdata_commandLine$
+    Parent Process: $data_win_eventdata_parentImage$ User: $data_win_eventdata_user$.
+    This may indicate malicious activity or living-off-the-land abuse.
+  risk_score: 70
+  severity: high
+  risk_objects:
+    - field: data_win_system_computer
+      type: system
+      score: 70
+    - field: data_win_eventdata_user
+      type: user
+      score: 60
+  threat_objects:
+    - field: data_win_eventdata_image
+      type: process
+    - field: data_win_eventdata_parentImage
+      type: process
+
+tags:
+  analytic_story:
+    - XML Runner Loader
+    - Suspicious Windows MMC Execution
+  asset_type: Endpoint
+  mitre_attack_id:
+    - T1218.014
+  custom_tags:
+    - mmc
+    - msc_file
+    - suspicious_path
+    - living_off_the_land
+  product:
+    - Wazuh
+  security_domain: endpoint
+
+graylog:
+  query: data_win_system_eventID:"1" AND data_win_eventdata_image:"C:\\\\Windows\\\\System32\\\\mmc.exe" AND data_win_eventdata_commandLine:/.*\.msc.*/

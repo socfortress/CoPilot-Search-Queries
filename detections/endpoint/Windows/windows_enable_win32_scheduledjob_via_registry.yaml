@@ -1,0 +1,139 @@
+name: Windows Enable Win32 ScheduledJob via Registry
+id: 12c80db8-ef62-4456-92df-b23e1b3219f6
+version: 1
+schema_version: "1.0"
+date: "2026-04-07"
+author: SOCFortress LLC
+status: production
+type: Anomaly
+
+description: >
+  The following analytic detects the creation of a new DWORD value named "EnableAt" in the registry
+  path "HKLM:\SOFTWARE\Microsoft\Windows NT\CurrentVersion\Schedule\Configuration". This modification
+  enables the use of the at.exe or wmi Win32_ScheduledJob commands to add scheduled tasks on a Windows
+  endpoint. The detection leverages Sysmon EventID 13 registry event data. This activity is significant
+  because it may indicate that an attacker is enabling the ability to schedule tasks, potentially to
+  execute malicious code at specific times or intervals. If confirmed malicious, this could allow
+  persistent code execution on the system.
+
+data_source:
+  - Sysmon EventID 13
+
+search:
+  index_pattern: "${INDEX_PATTERN}"
+  size: 100
+  sort:
+    - timestamp: desc
+  query:
+    bool:
+      must:
+        - term:
+            agent_name: "${AGENT_NAME}"
+        - term:
+            agent_labels_customer: "${CUSTOMER_CODE}"
+        - term:
+            data_win_system_eventID: "13"
+        - wildcard:
+            data_win_eventdata_targetObject: "*Schedule\\Configuration*EnableAt"
+        - term:
+            data_win_eventdata_details: "DWORD (0x00000001)"
+        - range:
+            timestamp:
+              gte: "${START_TIME}"
+              lte: "${END_TIME}"
+  _source:
+    - timestamp
+    - data_win_eventdata_targetObject
+    - data_win_eventdata_details
+    - data_win_eventdata_image
+    - data_win_eventdata_user
+    - data_win_system_computer
+
+parameters:
+  AGENT_NAME:
+    description: "Target agent/host name"
+    type: string
+    required: true
+    example: "DESKTOP-AM0HLGE"
+  CUSTOMER_CODE:
+    description: "Customer label for filtering"
+    type: string
+    required: true
+    example: "lab"
+  INDEX_PATTERN:
+    description: "Elasticsearch index pattern"
+    type: string
+    required: true
+    example: "wazuh-lab_*"
+  START_TIME:
+    description: "Query start time (ISO 8601 or relative)"
+    type: datetime
+    required: false
+    default: "now-24h"
+    example: "YYYY-MM-DD 00:00:00.000"
+  END_TIME:
+    description: "Query end time (ISO 8601 or relative)"
+    type: datetime
+    required: false
+    default: "now"
+    example: "YYYY-MM-DD 23:59:59.999"
+
+how_to_implement: >
+  To successfully implement this search you need to be ingesting information on process that include
+  the name of the process responsible for the changes from your endpoints into the Endpoint datamodel
+  in the Registry node. Sysmon EventID 13 captures registry modifications (SetValue operations).
+  Ensure that Sysmon is configured to log registry operations and that these logs are properly ingested
+  into Elasticsearch with complete registry path and value information. The detection specifically looks
+  for modifications to the EnableAt registry value being set to 0x00000001 in the Schedule Configuration
+  path, which enables Windows scheduled task execution via at.exe and WMI Win32_ScheduledJob.
+
+known_false_positives: >
+  In some cases, an automated script or system may enable this setting continuously, leading to false
+  positives. To avoid such situations, it is recommended to monitor the frequency and context of the
+  registry modification and modify or filter the detection rules as needed. This can help reduce false
+  positives and ensure that only genuine threats are identified. Additionally, investigate any detected
+  instances of this modification and analyze them in the broader context of the system and network to
+  determine if further action is necessary.
+
+references:
+  - https://securityonline.info/wmiexec-regout-get-outputdata-response-from-registry/
+  - https://learn.microsoft.com/en-us/windows/win32/cimwin32prov/win32-scheduledjob
+
+response:
+  message: >
+    Registry modification detected on $data_win_system_computer$. Process $data_win_eventdata_image$
+    by user $data_win_eventdata_user$ modified EnableAt registry key to value $data_win_eventdata_details$.
+    This may indicate an attempt to enable scheduled task execution via at.exe or WMI Win32_ScheduledJob
+    for persistent code execution.
+  risk_score: 65
+  severity: high
+  risk_objects:
+    - field: data_win_system_computer
+      type: system
+      score: 65
+    - field: data_win_eventdata_user
+      type: user
+      score: 65
+  threat_objects:
+    - field: data_win_eventdata_image
+      type: process
+
+tags:
+  analytic_story:
+    - Active Directory Lateral Movement
+    - Scheduled Tasks
+    - Persistence
+  asset_type: Endpoint
+  mitre_attack_id:
+    - T1053.005
+  custom_tags:
+    - registry_modification
+    - scheduled_tasks
+    - persistence
+    - lateral_movement
+  product:
+    - Wazuh
+  security_domain: endpoint
+
+graylog:
+  query: data_win_system_eventID:"13" AND data_win_eventdata_targetObject:"HKLM\\\\SOFTWARE\\\\Microsoft\\\\Windows NT\\\\CurrentVersion\\\\Schedule\\\\Configuration\\\\EnableAt"

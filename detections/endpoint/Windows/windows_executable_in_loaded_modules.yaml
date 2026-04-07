@@ -1,0 +1,133 @@
+name: Windows Executable in Loaded Modules
+id: 3e27af56-fcf0-4113-988d-24969b062be7
+version: 1
+schema_version: "1.0"
+date: "2026-04-07"
+author: SOCFortress LLC
+status: production
+type: TTP
+
+description: >
+  The following analytic identifies instances where executable files (.exe) are loaded as modules,
+  detected through 'ImageLoaded' events in Sysmon logs. This method leverages Sysmon EventCode 7
+  to track unusual module loading behavior, which is significant as it deviates from the norm of
+  loading .dll files. This activity is crucial for SOC monitoring because it can indicate the presence
+  of malware like NjRAT, which uses this technique to load malicious modules. If confirmed malicious,
+  this behavior could allow attackers to execute arbitrary code, maintain persistence, and further
+  compromise the host system.
+
+data_source:
+  - Sysmon EventID 7
+
+search:
+  index_pattern: "${INDEX_PATTERN}"
+  size: 100
+  sort:
+    - timestamp: desc
+  query:
+    bool:
+      must:
+        - term:
+            agent_name: "${AGENT_NAME}"
+        - term:
+            agent_labels_customer: "${CUSTOMER_CODE}"
+        - term:
+            data_win_system_eventID: "7"
+        - wildcard:
+            data_win_eventdata_imageLoaded: "*.exe"
+        - term:
+            data_win_eventdata_signed: "false"
+        - range:
+            timestamp:
+              gte: "${START_TIME}"
+              lte: "${END_TIME}"
+  _source:
+    - timestamp
+    - data_win_eventdata_imageLoaded
+    - data_win_eventdata_image
+    - data_win_eventdata_signed
+    - data_win_eventdata_hashes
+    - data_win_system_computer
+
+parameters:
+  AGENT_NAME:
+    description: "Target agent/host name"
+    type: string
+    required: true
+    example: "DESKTOP-AM0HLGE"
+  CUSTOMER_CODE:
+    description: "Customer label for filtering"
+    type: string
+    required: true
+    example: "lab"
+  INDEX_PATTERN:
+    description: "Elasticsearch index pattern"
+    type: string
+    required: true
+    example: "wazuh-lab_*"
+  START_TIME:
+    description: "Query start time (ISO 8601 or relative)"
+    type: datetime
+    required: false
+    default: "now-24h"
+    example: "YYYY-MM-DD 00:00:00.000"
+  END_TIME:
+    description: "Query end time (ISO 8601 or relative)"
+    type: datetime
+    required: false
+    default: "now"
+    example: "YYYY-MM-DD 23:59:59.999"
+
+how_to_implement: >
+  To successfully implement this search, you need to be ingesting logs with the process name and
+  imageloaded executions from your endpoints. Sysmon EventID 7 captures DLL/module load events.
+  Ensure that Sysmon is configured to log module loading events and that these logs are properly
+  ingested into Elasticsearch with complete module path and signing information. The detection
+  specifically looks for instances where .exe files (instead of normal .dll files) are being loaded
+  as modules and are unsigned, which is highly suspicious and indicative of malware like NjRAT.
+
+known_false_positives: >
+  No false positives have been identified at this time. Loading executable files as modules is
+  highly abnormal behavior and should be investigated immediately. Legitimate applications do not
+  typically load .exe files as modules; they load .dll files instead.
+
+references:
+  - https://malpedia.caad.fkie.fraunhofer.de/details/win.njrat
+
+response:
+  message: >
+    An unsigned executable file $data_win_eventdata_imageLoaded$ was loaded as a module by process
+    $data_win_eventdata_image$ on $data_win_system_computer$. This is highly suspicious behavior
+    indicative of malware like NjRAT attempting to load malicious modules for code execution and
+    persistence.
+  risk_score: 80
+  severity: critical
+  risk_objects:
+    - field: data_win_system_computer
+      type: system
+      score: 80
+  threat_objects:
+    - field: data_win_eventdata_image
+      type: process
+    - field: data_win_eventdata_imageLoaded
+      type: file
+
+tags:
+  analytic_story:
+    - NjRAT
+    - Lokibot
+    - Malware
+  asset_type: Endpoint
+  mitre_attack_id:
+    - T1129
+  custom_tags:
+    - module_loading
+    - executable_as_module
+    - malware
+    - code_execution
+  product:
+    - Wazuh
+  security_domain: endpoint
+
+graylog:
+  query: data_win_system_eventID:"7" AND data_win_eventdata_imageLoaded:/.*\.exe$/ AND data_win_eventdata_signed:"false"
