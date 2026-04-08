@@ -1,0 +1,146 @@
+name: Windows Modify Registry Auto Update Notif
+id: 4d1409df-40c7-4b11-aec4-bd0e709dfc12
+version: 1
+schema_version: "1.0"
+date: "2026-04-08"
+author: SOCFortress LLC
+status: production
+type: Anomaly
+
+description: >
+  The following analytic detects a suspicious modification to the Windows registry that changes the auto-update
+  notification setting to "Notify before download" (AUOptions value 0x00000002). This detection leverages Sysmon
+  EventID 13 (registry modification) to identify changes to the Windows Update automatic update policy. This activity
+  is significant because it is a known evasion technique used by adversaries, including malware like RedLine Stealer,
+  to bypass automatic security updates and delay patch deployment. By disabling automatic updates or changing notification
+  settings, attackers can maintain a window of vulnerability on the target host, preventing critical security patches
+  from being installed automatically. If confirmed malicious, this modification could allow attackers to maintain
+  exploitable vulnerabilities on the system, establish persistence, deploy additional payloads without system reboot
+  interruption, and evade detection mechanisms that rely on current system patches.
+
+data_source:
+  - Sysmon EventID 13
+
+search:
+  index_pattern: "${INDEX_PATTERN}"
+  size: 100
+  sort:
+    - timestamp: desc
+  query:
+    bool:
+      must:
+        - term:
+            agent_name: "${AGENT_NAME}"
+        - term:
+            agent_labels_customer: "${CUSTOMER_CODE}"
+        - term:
+            data_win_system_eventID: "13"
+        - wildcard:
+            data_win_eventdata_targetObject: "*WindowsUpdate*AU*AUOptions*"
+        - wildcard:
+            data_win_eventdata_details: "*0x00000002*"
+        - range:
+            timestamp:
+              gte: "${START_TIME}"
+              lte: "${END_TIME}"
+  _source:
+    - timestamp
+    - data_win_eventdata_targetObject
+    - data_win_eventdata_details
+    - data_win_eventdata_valueName
+    - data_win_eventdata_image
+    - data_win_eventdata_user
+    - data_win_system_computer
+
+parameters:
+  AGENT_NAME:
+    description: "Target agent/host name"
+    type: string
+    required: true
+    example: "DESKTOP-AM0HLGE"
+  CUSTOMER_CODE:
+    description: "Customer label for filtering"
+    type: string
+    required: true
+    example: "lab"
+  INDEX_PATTERN:
+    description: "Elasticsearch index pattern"
+    type: string
+    required: true
+    example: "wazuh-lab_*"
+  START_TIME:
+    description: "Query start time (ISO 8601 or relative)"
+    type: datetime
+    required: false
+    default: "now-24h"
+    example: "YYYY-MM-DD 00:00:00.000"
+  END_TIME:
+    description: "Query end time (ISO 8601 or relative)"
+    type: datetime
+    required: false
+    default: "now"
+    example: "YYYY-MM-DD 23:59:59.999"
+
+how_to_implement: >
+  To successfully implement this search, you need to be ingesting logs with registry modification data from your endpoints.
+  Sysmon EventID 13 captures registry set value events including the registry path, value name, and value data. Ensure that
+  Sysmon is configured to monitor registry changes in the Windows\WindowsUpdate path. The detection targets the AUOptions
+  registry value which controls Windows Update behavior: 0x00000002 means "Notify before download", 0x00000003 means
+  "Auto-download and notify before install", 0x00000004 means "Auto-download and auto-install", and 0x00000005 means
+  "Allow local administrator to choose". The value 0x00000002 is suspicious as it disables automatic patching while
+  maintaining user awareness, allowing attackers to delay critical updates indefinitely.
+
+known_false_positives: >
+  Administrators may legitimately modify Windows Update settings for organizational policy reasons. System administrators
+  may enable or disable automatic updates based on organizational requirements or deployment schedules. However, this
+  modification on non-domain-controller systems should be investigated as it may indicate compromise. Filter based on
+  known legitimate administrative accounts and expected Windows Update management activities. Legitimate Group Policy
+  deployments may also trigger this detection, so correlate with legitimate administrative activity.
+
+references:
+  - https://learn.microsoft.com/de-de/security-updates/windowsupdateservices/18127499
+  - https://learn.microsoft.com/en-us/windows/deployment/update/waas-wu-settings
+  - https://www.malwarebytes.com/redline-stealer
+
+response:
+  message: >
+    Windows Update auto-update notification modification detected on $data_win_system_computer$ by user $data_win_eventdata_user$.
+    Registry Path: $data_win_eventdata_targetObject$. Value: $data_win_eventdata_details$.
+    Process: $data_win_eventdata_image$. This may indicate evasion of security updates.
+  risk_score: 65
+  severity: medium
+  risk_objects:
+    - field: data_win_system_computer
+      type: system
+      score: 65
+    - field: data_win_eventdata_user
+      type: user
+      score: 40
+  threat_objects:
+    - field: data_win_eventdata_targetObject
+      type: registry_path
+    - field: data_win_eventdata_image
+      type: process
+
+tags:
+  analytic_story:
+    - RedLine Stealer
+    - Defense Evasion
+    - Windows Update Evasion
+  asset_type: Endpoint
+  mitre_attack_id:
+    - T1112
+  custom_tags:
+    - windows_update
+    - automatic_update
+    - aua_options
+    - registry_modification
+    - redline_stealer
+    - defense_evasion
+    - update_bypass
+  product:
+    - Wazuh
+  security_domain: endpoint
+
+graylog:
+  query: data_win_system_eventID:"13" AND data_win_eventdata_targetObject:/.*WindowsUpdate.*AU.*AUOptions.*/ AND data_win_eventdata_details:/.*0x00000002.*/

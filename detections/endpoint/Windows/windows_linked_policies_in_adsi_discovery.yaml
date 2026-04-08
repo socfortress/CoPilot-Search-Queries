@@ -1,0 +1,143 @@
+name: Windows Linked Policies In ADSI Discovery
+id: 510ea428-4731-4d2f-8829-a28293e427aa
+version: 1
+schema_version: "1.0"
+date: "2026-04-08"
+author: SOCFortress LLC
+status: production
+type: Anomaly
+
+description: >
+  The following analytic detects the use of the `[adsisearcher]` type accelerator in PowerShell to query Active Directory
+  for domain organizational units. This detection leverages PowerShell Script Block Logging (EventID 4104) to identify script
+  blocks containing the combination of `[adsisearcher]`, `objectcategory=organizationalunit`, and `findAll()`. This activity
+  is significant as it indicates potential reconnaissance efforts by adversaries to gain situational awareness of the domain
+  structure, including organizational hierarchy and policy-linked containers. The ADSI searcher is a powerful tool for
+  querying Active Directory programmatically, and this specific pattern targets organizational units which are critical for
+  understanding domain policy structure. If confirmed malicious, this reconnaissance could lead to further exploitation, such
+  as identifying high-value targets for lateral movement, privilege escalation, or targeted policy manipulation attacks.
+
+data_source:
+  - PowerShell Script Block Logging EventID 4104
+
+search:
+  index_pattern: "${INDEX_PATTERN}"
+  size: 100
+  sort:
+    - timestamp: desc
+  query:
+    bool:
+      must:
+        - term:
+            agent_name: "${AGENT_NAME}"
+        - term:
+            agent_labels_customer: "${CUSTOMER_CODE}"
+        - term:
+            data_win_system_eventID: "4104"
+        - wildcard:
+            data_win_eventdata_scriptBlockText: "*adsisearcher*"
+        - wildcard:
+            data_win_eventdata_scriptBlockText: "*objectcategory=organizationalunit*"
+        - wildcard:
+            data_win_eventdata_scriptBlockText: "*findAll*"
+        - range:
+            timestamp:
+              gte: "${START_TIME}"
+              lte: "${END_TIME}"
+  _source:
+    - timestamp
+    - data_win_eventdata_scriptBlockText
+    - data_win_eventdata_user
+    - data_win_system_computer
+    - data_win_eventdata_processId
+    - data_win_eventdata_engineVersion
+
+parameters:
+  AGENT_NAME:
+    description: "Target agent/host name"
+    type: string
+    required: true
+    example: "DESKTOP-AM0HLGE"
+  CUSTOMER_CODE:
+    description: "Customer label for filtering"
+    type: string
+    required: true
+    example: "lab"
+  INDEX_PATTERN:
+    description: "Elasticsearch index pattern"
+    type: string
+    required: true
+    example: "wazuh-lab_*"
+  START_TIME:
+    description: "Query start time (ISO 8601 or relative)"
+    type: datetime
+    required: false
+    default: "now-24h"
+    example: "YYYY-MM-DD 00:00:00.000"
+  END_TIME:
+    description: "Query end time (ISO 8601 or relative)"
+    type: datetime
+    required: false
+    default: "now"
+    example: "YYYY-MM-DD 23:59:59.999"
+
+how_to_implement: >
+  To successfully implement this search, you need PowerShell Script Block Logging (EventID 4104) enabled on your endpoints.
+  PowerShell Script Block Logging captures the content of PowerShell script blocks as they are executed. Ensure that the
+  appropriate Group Policy settings are configured to enable PowerShell logging. The detection monitors for the specific
+  combination of three PowerShell constructs: the [adsisearcher] type accelerator which enables LDAP queries, the LDAP filter
+  for organizational units (objectcategory=organizationalunit), and the findAll() method which returns all matching results.
+  This combination is used for Active Directory reconnaissance to enumerate domain organizational units and policies.
+
+known_false_positives: >
+  Administrators or power users may legitimately use ADSI searcher for Active Directory troubleshooting, reporting, or
+  management tasks. System administrators performing domain discovery or documentation may execute similar commands.
+  Filter based on known legitimate administrative accounts and expected ADSI usage patterns in your environment.
+  Review the full script block text to determine if the query represents legitimate administrative activity or
+  reconnaissance by unauthorized users.
+
+references:
+  - https://www.welivesecurity.com/2022/04/12/industroyer2-industroyer-reloaded/
+  - https://medium.com/@pentesttas/discover-hidden-gpo-s-on-active-directory-using-ps-adsi-a284b6814c81
+  - https://docs.microsoft.com/en-us/powershell/module/activedirectory/
+
+response:
+  message: >
+    ADSI organizational unit discovery detected on $data_win_system_computer$ by user $data_win_eventdata_user$.
+    PowerShell Script: $data_win_eventdata_scriptBlockText$. This may indicate Active Directory reconnaissance activity.
+  risk_score: 60
+  severity: medium
+  risk_objects:
+    - field: data_win_system_computer
+      type: system
+      score: 60
+    - field: data_win_eventdata_user
+      type: user
+      score: 40
+  threat_objects:
+    - field: data_win_eventdata_scriptBlockText
+      type: powershell_script
+
+tags:
+  analytic_story:
+    - Active Directory Discovery
+    - Data Destruction
+    - Industroyer2
+    - Domain Reconnaissance
+  asset_type: Endpoint
+  mitre_attack_id:
+    - T1087.002
+  custom_tags:
+    - adsisearcher
+    - active_directory
+    - organizational_unit
+    - ldap_query
+    - powershell
+    - reconnaissance
+    - domain_discovery
+  product:
+    - Wazuh
+  security_domain: endpoint
+
+graylog:
+  query: data_win_system_eventID:"4104" AND data_win_eventdata_scriptBlockText:/.*adsisearcher.*/ AND data_win_eventdata_scriptBlockText:/.*objectcategory=organizationalunit.*/ AND data_win_eventdata_scriptBlockText:/.*findAll.*/
