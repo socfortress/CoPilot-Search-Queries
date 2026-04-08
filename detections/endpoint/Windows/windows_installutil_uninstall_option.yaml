@@ -1,0 +1,158 @@
+name: Windows InstallUtil Uninstall Option
+id: cfa7b9ac-43f0-11ec-9b48-acde48001122
+version: 1
+schema_version: "1.0"
+date: "2026-04-08"
+author: SOCFortress LLC
+status: production
+type: TTP
+
+description: >
+  The following analytic detects the use of the Windows InstallUtil.exe binary with the `/u` (uninstall) switch or
+  `uninstall` parameter, which can be exploited to execute arbitrary code while bypassing application control mechanisms.
+  This detection leverages Sysmon EventID 1 (process creation) to identify InstallUtil.exe execution with uninstall
+  parameters. This activity is significant because InstallUtil.exe is a legitimate .NET Framework utility that can be
+  abused as a Living Off The Land technique to execute malicious code without administrative privileges or triggering
+  traditional security alerts. The `/u` switch is used to uninstall assemblies and can be leveraged to execute
+  InstallUtil class constructors containing malicious code. If confirmed malicious, an attacker could achieve code
+  execution with user privileges, potentially leading to further system compromise, persistence establishment, or
+  lateral movement within the network.
+
+data_source:
+  - Sysmon EventID 1
+
+search:
+  index_pattern: "${INDEX_PATTERN}"
+  size: 100
+  sort:
+    - timestamp: desc
+  query:
+    bool:
+      must:
+        - term:
+            agent_name: "${AGENT_NAME}"
+        - term:
+            agent_labels_customer: "${CUSTOMER_CODE}"
+        - term:
+            data_win_system_eventID: "1"
+        - wildcard:
+            data_win_eventdata_image: "*InstallUtil.exe"
+        - bool:
+            should:
+              - wildcard:
+                  data_win_eventdata_commandLine: "*/u*"
+              - wildcard:
+                  data_win_eventdata_commandLine: "*uninstall*"
+            minimum_should_match: 1
+        - range:
+            timestamp:
+              gte: "${START_TIME}"
+              lte: "${END_TIME}"
+      must_not:
+        - wildcard:
+            data_win_eventdata_commandLine: "*C:\\\\WINDOWS\\\\CCM\\\\*"
+        - wildcard:
+            data_win_eventdata_parentImage: "*Microsoft.SharePoint.Migration.ClientInstaller.exe"
+  _source:
+    - timestamp
+    - data_win_eventdata_image
+    - data_win_eventdata_commandLine
+    - data_win_eventdata_parentImage
+    - data_win_eventdata_user
+    - data_win_eventdata_processId
+    - data_win_system_computer
+
+parameters:
+  AGENT_NAME:
+    description: "Target agent/host name"
+    type: string
+    required: true
+    example: "DESKTOP-AM0HLGE"
+  CUSTOMER_CODE:
+    description: "Customer label for filtering"
+    type: string
+    required: true
+    example: "lab"
+  INDEX_PATTERN:
+    description: "Elasticsearch index pattern"
+    type: string
+    required: true
+    example: "wazuh-lab_*"
+  START_TIME:
+    description: "Query start time (ISO 8601 or relative)"
+    type: datetime
+    required: false
+    default: "now-24h"
+    example: "YYYY-MM-DD 00:00:00.000"
+  END_TIME:
+    description: "Query end time (ISO 8601 or relative)"
+    type: datetime
+    required: false
+    default: "now"
+    example: "YYYY-MM-DD 23:59:59.999"
+
+how_to_implement: >
+  To successfully implement this search, you need to be ingesting logs with process creation data from your endpoints.
+  Sysmon EventID 1 captures process creation events including complete command-line arguments. Ensure that Sysmon is
+  configured to capture the full command line when InstallUtil.exe is executed. InstallUtil.exe is located at
+  C:\Windows\Microsoft.NET\Framework\vX.X.XXXXX\InstallUtil.exe and is a legitimate .NET Framework utility. The detection
+  monitors for InstallUtil.exe execution with the `/u` or `uninstall` parameters, which can be used to execute arbitrary
+  code through custom assembly classes. Legitimate uninstalls are excluded by filtering out known administrative paths
+  like C:\WINDOWS\CCM\ and legitimate SharePoint migration tools. Monitor the parent process and the full command line
+  to understand the execution context.
+
+known_false_positives: >
+  Limited false positives should be present as InstallUtil.exe with uninstall parameters is not commonly used. However,
+  legitimate administrators or Microsoft tools may use InstallUtil.exe for legitimate component uninstallation. System
+  Center Configuration Manager (SCCM) and SharePoint migration tools may legitimately use InstallUtil. Filter based on
+  known legitimate parent processes and expected InstallUtil usage patterns in your environment. Review the specific
+  assembly being uninstalled to determine if it represents a known legitimate component or a suspicious payload.
+
+references:
+  - https://evi1cg.me/archives/AppLocker_Bypass_Techniques.html#menu_index_12
+  - https://github.com/api0cradle/UltimateAppLockerByPassList/blob/master/md/Installutil.exe.md
+  - https://github.com/redcanaryco/atomic-red-team/blob/master/atomics/T1218.004/T1218.004.md
+  - https://lolbas-project.github.io/lolbas/Binaries/Installutil/
+
+response:
+  message: >
+    InstallUtil uninstall execution detected on $data_win_system_computer$ by user $data_win_eventdata_user$.
+    Process: $data_win_eventdata_image$. CommandLine: $data_win_eventdata_commandLine$.
+    Parent Process: $data_win_eventdata_parentImage$. This may indicate malicious code execution via InstallUtil /u.
+  risk_score: 70
+  severity: high
+  risk_objects:
+    - field: data_win_system_computer
+      type: system
+      score: 70
+    - field: data_win_eventdata_user
+      type: user
+      score: 50
+  threat_objects:
+    - field: data_win_eventdata_commandLine
+      type: command_line
+    - field: data_win_eventdata_parentImage
+      type: parent_process
+
+tags:
+  analytic_story:
+    - Living Off The Land
+    - Signed Binary Proxy Execution InstallUtil
+    - Compromised Windows Host
+  asset_type: Endpoint
+  mitre_attack_id:
+    - T1218.004
+  custom_tags:
+    - installutil
+    - lolbas
+    - signed_binary_proxy
+    - uninstall_switch
+    - .net_framework
+    - code_execution
+    - appliaction_control_bypass
+  product:
+    - Wazuh
+  security_domain: endpoint
+
+graylog:
+  query: data_win_system_eventID:"1" AND data_win_eventdata_image:/.*InstallUtil.exe.*/ AND (data_win_eventdata_commandLine:/.*\/u.*/ OR data_win_eventdata_commandLine:/.*uninstall.*/) AND NOT (data_win_eventdata_commandLine:/.*C:\\Windows\\CCM.*/ OR data_win_eventdata_parentImage:/.*Microsoft.SharePoint.Migration.ClientInstaller.exe.*/)

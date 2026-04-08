@@ -1,0 +1,143 @@
+name: Windows Global Object Access Audit List Cleared Via Auditpol
+id: 802a0930-0a4a-4451-bf6c-6366c6b6d9e7
+version: 1
+schema_version: "1.0"
+date: "2026-04-08"
+author: SOCFortress LLC
+status: production
+type: TTP
+
+description: >
+  The following analytic identifies the execution of `auditpol.exe` with the "/resourceSACL" flag
+  combined with either the "/clear" or "/remove" command-line arguments used to remove or clear the
+  global object access audit policy. It leverages Sysmon EventID 1 to detect process creation events.
+  This activity is significant as it indicates potential defense evasion by adversaries or Red Teams,
+  aiming to limit data that can be leveraged for detections and audits. If confirmed malicious, this
+  behavior could allow attackers to bypass defenses, evade detection, and plan further attacks,
+  potentially leading to full machine compromise or lateral movement.
+
+data_source:
+  - Sysmon EventID 1
+
+search:
+  index_pattern: "${INDEX_PATTERN}"
+  size: 100
+  sort:
+    - timestamp: desc
+  query:
+    bool:
+      must:
+        - term:
+            agent_name: "${AGENT_NAME}"
+        - term:
+            agent_labels_customer: "${CUSTOMER_CODE}"
+        - term:
+            data_win_system_eventID: "1"
+        - wildcard:
+            data_win_eventdata_image: "*auditpol.exe"
+        - wildcard:
+            data_win_eventdata_commandLine: "*/resourceSACL*"
+        - bool:
+            should:
+              - wildcard:
+                  data_win_eventdata_commandLine: "*/clear*"
+              - wildcard:
+                  data_win_eventdata_commandLine: "*/remove*"
+            minimum_should_match: 1
+        - range:
+            timestamp:
+              gte: "${START_TIME}"
+              lte: "${END_TIME}"
+  _source:
+    - timestamp
+    - data_win_eventdata_commandLine
+    - data_win_eventdata_image
+    - data_win_eventdata_parentImage
+    - data_win_eventdata_user
+    - data_win_system_computer
+
+parameters:
+  AGENT_NAME:
+    description: "Target agent/host name"
+    type: string
+    required: true
+    example: "DESKTOP-AM0HLGE"
+  CUSTOMER_CODE:
+    description: "Customer label for filtering"
+    type: string
+    required: true
+    example: "lab"
+  INDEX_PATTERN:
+    description: "Elasticsearch index pattern"
+    type: string
+    required: true
+    example: "wazuh-lab_*"
+  START_TIME:
+    description: "Query start time (ISO 8601 or relative)"
+    type: datetime
+    required: false
+    default: "now-24h"
+    example: "YYYY-MM-DD 00:00:00.000"
+  END_TIME:
+    description: "Query end time (ISO 8601 or relative)"
+    type: datetime
+    required: false
+    default: "now"
+    example: "YYYY-MM-DD 23:59:59.999"
+
+how_to_implement: >
+  To successfully implement this search, you need to be ingesting logs with process execution data
+  from your endpoints. Sysmon EventID 1 captures process creation events. Ensure that Sysmon is
+  configured to log all process creation events and that these logs are properly ingested into
+  Elasticsearch with complete command-line information. The detection specifically looks for auditpol.exe
+  executions with /resourceSACL combined with /clear or /remove flags, which are strong indicators of
+  audit policy tampering for defense evasion purposes.
+
+known_false_positives: >
+  False positives should be rare to non-existent. Any activity detected by this analytic should be
+  investigated and approved or denied. Legitimate audit policy management typically goes through
+  Group Policy or administrative procedures, not direct command-line execution of auditpol.exe
+  with /resourceSACL /clear or /remove flags.
+
+references:
+  - https://learn.microsoft.com/en-us/windows-server/administration/windows-commands/auditpol-resourcesacl
+
+response:
+  message: >
+    An instance of $data_win_eventdata_parentImage$ spawning $data_win_eventdata_image$ was identified
+    attempting to clear the global object access audit policy on endpoint $data_win_system_computer$
+    by user $data_win_eventdata_user$. CommandLine: $data_win_eventdata_commandLine$.
+    This is indicative of audit policy tampering for defense evasion.
+  risk_score: 85
+  severity: critical
+  risk_objects:
+    - field: data_win_system_computer
+      type: system
+      score: 85
+    - field: data_win_eventdata_user
+      type: user
+      score: 80
+  threat_objects:
+    - field: data_win_eventdata_image
+      type: process
+    - field: data_win_eventdata_parentImage
+      type: process
+
+tags:
+  analytic_story:
+    - Windows Audit Policy Tampering
+    - Defense Evasion
+  asset_type: Endpoint
+  mitre_attack_id:
+    - T1562.002
+  custom_tags:
+    - auditpol
+    - audit_tampering
+    - defense_evasion
+    - resourcesacl
+  product:
+    - Wazuh
+  security_domain: endpoint
+
+graylog:
+  query: data_win_system_eventID:"1" AND data_win_eventdata_image:"C:\\\\Windows\\\\System32\\\\auditpol.exe" AND data_win_eventdata_commandLine:/.*\/resourceSACL.*/

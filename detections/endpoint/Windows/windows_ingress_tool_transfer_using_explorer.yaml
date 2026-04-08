@@ -1,0 +1,151 @@
+name: Windows Ingress Tool Transfer Using Explorer
+id: 76753bab-f116-4ea3-8fb9-89b638be58a9
+version: 1
+schema_version: "1.0"
+date: "2026-04-08"
+author: SOCFortress LLC
+status: production
+type: Anomaly
+
+description: >
+  The following analytic identifies instances where the Windows Explorer process (explorer.exe) is executed with a URL
+  in its command line. This detection leverages Sysmon EventID 1 (process creation) to identify this suspicious behavior.
+  This activity is significant because explorer.exe is typically used for file browsing and should not be invoked with
+  URLs in the command line. Adversaries, such as those using DarkCrystal RAT (DCRat) malware, may abuse explorer.exe to
+  open URLs with the default browser, which facilitates downloading and executing malicious payloads. This technique can
+  bypass traditional network monitoring and appear as legitimate browser activity. If confirmed malicious, this technique
+  could allow attackers to download and execute malicious software, leading to system compromise, persistence, and further
+  malicious activities within the environment.
+
+data_source:
+  - Sysmon EventID 1
+
+search:
+  index_pattern: "${INDEX_PATTERN}"
+  size: 100
+  sort:
+    - timestamp: desc
+  query:
+    bool:
+      must:
+        - term:
+            agent_name: "${AGENT_NAME}"
+        - term:
+            agent_labels_customer: "${CUSTOMER_CODE}"
+        - term:
+            data_win_system_eventID: "1"
+        - wildcard:
+            data_win_eventdata_image: "*explorer.exe"
+        - bool:
+            should:
+              - wildcard:
+                  data_win_eventdata_commandLine: "*http://*"
+              - wildcard:
+                  data_win_eventdata_commandLine: "*https://*"
+            minimum_should_match: 1
+        - range:
+            timestamp:
+              gte: "${START_TIME}"
+              lte: "${END_TIME}"
+      must_not:
+        - wildcard:
+            data_win_eventdata_parentImage: "*userinit.exe"
+        - wildcard:
+            data_win_eventdata_parentImage: "*svchost.exe"
+  _source:
+    - timestamp
+    - data_win_eventdata_image
+    - data_win_eventdata_commandLine
+    - data_win_eventdata_parentImage
+    - data_win_eventdata_user
+    - data_win_eventdata_processId
+    - data_win_system_computer
+
+parameters:
+  AGENT_NAME:
+    description: "Target agent/host name"
+    type: string
+    required: true
+    example: "DESKTOP-AM0HLGE"
+  CUSTOMER_CODE:
+    description: "Customer label for filtering"
+    type: string
+    required: true
+    example: "lab"
+  INDEX_PATTERN:
+    description: "Elasticsearch index pattern"
+    type: string
+    required: true
+    example: "wazuh-lab_*"
+  START_TIME:
+    description: "Query start time (ISO 8601 or relative)"
+    type: datetime
+    required: false
+    default: "now-24h"
+    example: "YYYY-MM-DD 00:00:00.000"
+  END_TIME:
+    description: "Query end time (ISO 8601 or relative)"
+    type: datetime
+    required: false
+    default: "now"
+    example: "YYYY-MM-DD 23:59:59.999"
+
+how_to_implement: >
+  To successfully implement this search, you need to be ingesting logs with process creation data from your endpoints.
+  Sysmon EventID 1 captures process creation events including complete command-line arguments. Ensure that Sysmon is
+  configured to capture the full command line when explorer.exe is executed. The detection monitors for explorer.exe
+  process execution with HTTP or HTTPS URLs in the command line, while excluding legitimate startup scenarios where
+  explorer.exe is spawned by userinit.exe or svchost.exe. This combination is highly suspicious as explorer.exe is
+  designed for file system browsing, not URL handling. Monitor the parent process to understand the execution context.
+
+known_false_positives: >
+  False positives may be present based on legitimate applications or third-party utilities that may invoke explorer.exe
+  with URLs. However, this is uncommon behavior. Legitimate shell extensions or utilities may spawn explorer.exe with
+  URLs in specific scenarios. Filter based on known legitimate parent processes and expected usage patterns in your
+  environment. Review individual cases to determine if they represent legitimate administrative activity.
+
+references:
+  - https://www.mandiant.com/resources/analyzing-dark-crystal-rat-backdoor
+  - https://lolbas-project.github.io/lolbas/Binaries/Explorer/
+
+response:
+  message: >
+    Suspicious explorer.exe URL execution detected on $data_win_system_computer$ by user $data_win_eventdata_user$.
+    Process: $data_win_eventdata_image$. CommandLine: $data_win_eventdata_commandLine$.
+    Parent Process: $data_win_eventdata_parentImage$. This may indicate malware attempting to download payloads.
+  risk_score: 70
+  severity: high
+  risk_objects:
+    - field: data_win_system_computer
+      type: system
+      score: 70
+    - field: data_win_eventdata_user
+      type: user
+      score: 50
+  threat_objects:
+    - field: data_win_eventdata_commandLine
+      type: command_line
+    - field: data_win_eventdata_parentImage
+      type: parent_process
+
+tags:
+  analytic_story:
+    - DarkCrystal RAT
+    - Ingress Tool Transfer
+    - Malware Download
+  asset_type: Endpoint
+  mitre_attack_id:
+    - T1105
+  custom_tags:
+    - explorer
+    - url_execution
+    - dcrat
+    - malware_download
+    - ingress_transfer
+    - payload_delivery
+  product:
+    - Wazuh
+  security_domain: endpoint
+
+graylog:
+  query: data_win_system_eventID:"1" AND data_win_eventdata_image:"C:\\\\Windows\\\\explorer.exe" AND (data_win_eventdata_commandLine:/.*https.*/ OR data_win_eventdata_commandLine:/.*http.*/) AND NOT (data_win_eventdata_parentImage:"C:\\\\Windows\\\\System32\\\\userinit.exe" OR data_win_eventdata_parentImage:"C:\\\\Windows\\\\System32\\\\svchost.exe")

@@ -2,19 +2,21 @@ name: Windows Forest Discovery with GetForestDomain
 id: a14803b2-4bd9-4c08-8b57-c37980edebe8
 version: 1
 schema_version: "1.0"
-date: "2026-03-30"
+date: "2026-04-08"
 author: SOCFortress LLC
 status: production
 type: TTP
+
 description: >
-  Detects execution of the Get-ForestDomain cmdlet from the PowerView toolkit,
-  used to enumerate Active Directory forest and domain configurations. Attackers
-  and Red Teams use this to gather detailed information about domain trust
-  relationships, forest structure, and domain controllers to facilitate lateral
-  movement or privilege escalation across domain boundaries.
+  The following analytic detects the execution of the `Get-ForestDomain` cmdlet, a component of the
+  PowerView toolkit used for Windows domain enumeration. It leverages PowerShell Script Block Logging
+  (EventCode=4104) to identify this activity. Detecting `Get-ForestDomain` is significant because
+  adversaries and Red Teams use it to gather detailed information about Active Directory forest and
+  domain configurations. If confirmed malicious, this activity could enable attackers to understand
+  the domain structure, facilitating lateral movement or privilege escalation within the environment.
 
 data_source:
-  - PowerShell Script Block Logging EventID 4104
+  - PowerShell Script Block Logging 4104
 
 search:
   index_pattern: "${INDEX_PATTERN}"
@@ -38,11 +40,10 @@ search:
               lte: "${END_TIME}"
   _source:
     - timestamp
-    - agent_name
-    - data_win_system_eventID
     - data_win_eventdata_scriptBlockText
-    - data_win_eventdata_path
     - data_win_eventdata_user
+    - data_win_system_computer
+    - data_win_eventdata_processId
 
 parameters:
   AGENT_NAME:
@@ -65,61 +66,65 @@ parameters:
     type: datetime
     required: false
     default: "now-24h"
-    example: "2026-03-30 00:00:00.000"
+    example: "YYYY-MM-DD 00:00:00.000"
   END_TIME:
     description: "Query end time (ISO 8601 or relative)"
     type: datetime
     required: false
     default: "now"
-    example: "2026-03-30 23:59:59.999"
+    example: "YYYY-MM-DD 23:59:59.999"
 
 how_to_implement: >
-  Requires PowerShell Script Block Logging enabled on endpoints.
-  Enable via Group Policy: Computer Configuration → Administrative Templates
-  → Windows Components → Windows PowerShell → Turn on PowerShell Script Block
-  Logging.
+  To successfully implement this search, you need to be ingesting PowerShell Script Block Logging
+  events from your endpoints. PowerShell EventID 4104 captures script block execution. Ensure that
+  PowerShell Script Block Logging is enabled on monitored endpoints and that these logs are properly
+  ingested into Elasticsearch with complete script block text information. The detection specifically
+  looks for the execution of the `Get-ForestDomain` cmdlet, which is part of the PowerView toolkit
+  used for Active Directory reconnaissance and enumeration. This activity is typically indicative of
+  adversaries or Red Teams performing domain discovery and lateral movement planning.
+
 known_false_positives: >
-  Administrators may leverage PowerSploit tools for legitimate AD management
-  and auditing purposes. Filter known authorized security assessment activity
-  as needed.
+  Administrators may leverage PowerSploit/PowerView tools for legitimate reasons, such as automated
+  domain audits or authorized penetration testing. Filter as needed based on your organization's
+  legitimate use of these tools. However, Get-ForestDomain execution outside of authorized security
+  testing should be investigated immediately.
 
 references:
-  - https://attack.mitre.org/techniques/T1087/002/
   - https://powersploit.readthedocs.io/en/latest/Recon/Get-ForestDomain/
+  - https://attack.mitre.org/techniques/T1087/002/
   - https://book.hacktricks.xyz/windows-hardening/basic-powershell-for-pentesters/powerview
 
 response:
   message: >
-    PowerView Get-ForestDomain forest enumeration detected on $agent_name$
-    by $data_win_eventdata_user$.
-    Script: $data_win_eventdata_scriptBlockText$.
-    MITRE ATT&CK: T1087.002
-  risk_score: 25
-  severity: medium
+    Suspicious PowerShell Get-ForestDomain cmdlet was identified on endpoint $data_win_system_computer$
+    by user $data_win_eventdata_user$. ScriptBlockText: $data_win_eventdata_scriptBlockText$.
+    This activity is indicative of Active Directory forest enumeration, commonly used for lateral movement
+    and privilege escalation planning.
+  risk_score: 70
+  severity: high
   risk_objects:
-    - field: agent_name
+    - field: data_win_system_computer
       type: system
-      score: 25
+      score: 70
     - field: data_win_eventdata_user
       type: user
-      score: 25
+      score: 70
   threat_objects:
     - field: data_win_eventdata_scriptBlockText
-      type: script_block
+      type: powershell_script
 
 tags:
   analytic_story:
     - Active Directory Discovery
+    - Domain Enumeration
   asset_type: Endpoint
   mitre_attack_id:
     - T1087.002
   custom_tags:
     - powerview
     - get_forestdomain
-    - active_directory
-    - forest_enumeration
-    - domain_trust
-    - reconnaissance
+    - domain_discovery
+    - ad_enumeration
   product:
     - Wazuh
   security_domain: endpoint

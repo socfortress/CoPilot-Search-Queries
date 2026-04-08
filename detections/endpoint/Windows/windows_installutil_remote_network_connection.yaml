@@ -1,0 +1,148 @@
+name: Windows InstallUtil Remote Network Connection
+id: 4fbf9270-43da-11ec-9486-acde48001122
+version: 1
+schema_version: "1.0"
+date: "2026-04-08"
+author: SOCFortress LLC
+status: production
+type: Anomaly
+
+description: >
+  The following analytic detects the Windows InstallUtil.exe binary being executed with URL parameters in the command line,
+  indicating potential attempts to download and execute malicious code. This detection leverages Sysmon EventID 1 (process
+  creation) to identify suspicious InstallUtil.exe execution patterns. This activity is significant because InstallUtil.exe
+  is a legitimate .NET Framework utility that can be exploited as a Living Off The Land technique to download and execute
+  arbitrary code while bypassing application control mechanisms and detection systems. Attackers abuse InstallUtil.exe to
+  retrieve malicious payloads from remote servers and execute them with the user's privileges. If confirmed malicious, an
+  attacker could achieve code execution, potentially leading to further system compromise, data exfiltration, lateral
+  movement within the network, or establishment of persistence mechanisms.
+
+data_source:
+  - Sysmon EventID 1
+
+search:
+  index_pattern: "${INDEX_PATTERN}"
+  size: 100
+  sort:
+    - timestamp: desc
+  query:
+    bool:
+      must:
+        - term:
+            agent_name: "${AGENT_NAME}"
+        - term:
+            agent_labels_customer: "${CUSTOMER_CODE}"
+        - term:
+            data_win_system_eventID: "1"
+        - wildcard:
+            data_win_eventdata_image: "*InstallUtil.exe"
+        - bool:
+            should:
+              - wildcard:
+                  data_win_eventdata_commandLine: "*http://*"
+              - wildcard:
+                  data_win_eventdata_commandLine: "*https://*"
+            minimum_should_match: 1
+        - range:
+            timestamp:
+              gte: "${START_TIME}"
+              lte: "${END_TIME}"
+  _source:
+    - timestamp
+    - data_win_eventdata_image
+    - data_win_eventdata_commandLine
+    - data_win_eventdata_parentImage
+    - data_win_eventdata_user
+    - data_win_eventdata_processId
+    - data_win_system_computer
+
+parameters:
+  AGENT_NAME:
+    description: "Target agent/host name"
+    type: string
+    required: true
+    example: "DESKTOP-AM0HLGE"
+  CUSTOMER_CODE:
+    description: "Customer label for filtering"
+    type: string
+    required: true
+    example: "lab"
+  INDEX_PATTERN:
+    description: "Elasticsearch index pattern"
+    type: string
+    required: true
+    example: "wazuh-lab_*"
+  START_TIME:
+    description: "Query start time (ISO 8601 or relative)"
+    type: datetime
+    required: false
+    default: "now-24h"
+    example: "YYYY-MM-DD 00:00:00.000"
+  END_TIME:
+    description: "Query end time (ISO 8601 or relative)"
+    type: datetime
+    required: false
+    default: "now"
+    example: "YYYY-MM-DD 23:59:59.999"
+
+how_to_implement: >
+  To successfully implement this search, you need to be ingesting logs with process creation data from your endpoints.
+  Sysmon EventID 1 captures process creation events including complete command-line arguments. Ensure that Sysmon is
+  configured to capture the full command line when InstallUtil.exe is executed. InstallUtil.exe is located at
+  C:\Windows\Microsoft.NET\Framework\vX.X.XXXXX\InstallUtil.exe and is a legitimate .NET Framework utility. The detection
+  monitors for InstallUtil.exe execution with HTTP or HTTPS URLs in the command line, which is highly suspicious as
+  InstallUtil is not typically used for remote file operations. Monitor the parent process and command-line arguments to
+  understand the execution context and identify the source of the malicious command.
+
+known_false_positives: >
+  Limited false positives should be present as InstallUtil.exe is not typically used to download remote files. However,
+  legitimate developers or system administrators may use InstallUtil for custom .NET component installation with URLs.
+  Filter based on known legitimate parent processes and expected InstallUtil usage patterns in your environment. Review
+  the specific URL being accessed to determine if it represents a trusted internal server or external malicious source.
+
+references:
+  - https://github.com/redcanaryco/atomic-red-team/blob/master/atomics/T1218.004/T1218.004.md
+  - https://lolbas-project.github.io/lolbas/Binaries/Installutil/
+  - https://docs.microsoft.com/en-us/dotnet/framework/tools/installutil-exe-installer-tool
+
+response:
+  message: >
+    InstallUtil remote network connection attempt detected on $data_win_system_computer$ by user $data_win_eventdata_user$.
+    Process: $data_win_eventdata_image$. CommandLine: $data_win_eventdata_commandLine$.
+    Parent Process: $data_win_eventdata_parentImage$. This may indicate malware download attempt via InstallUtil.
+  risk_score: 75
+  severity: high
+  risk_objects:
+    - field: data_win_system_computer
+      type: system
+      score: 75
+    - field: data_win_eventdata_user
+      type: user
+      score: 50
+  threat_objects:
+    - field: data_win_eventdata_commandLine
+      type: command_line
+    - field: data_win_eventdata_parentImage
+      type: parent_process
+
+tags:
+  analytic_story:
+    - Living Off The Land
+    - Signed Binary Proxy Execution InstallUtil
+    - Compromised Windows Host
+  asset_type: Endpoint
+  mitre_attack_id:
+    - T1218.004
+  custom_tags:
+    - installutil
+    - lolbas
+    - signed_binary_proxy
+    - remote_download
+    - .net_framework
+    - malware_delivery
+  product:
+    - Wazuh
+  security_domain: endpoint
+
+graylog:
+  query: data_win_system_eventID:"1" AND data_win_eventdata_image:/.*InstallUtil.exe.*/ AND (data_win_eventdata_commandLine:/.*http.*/ OR data_win_eventdata_commandLine:/.*https.*/)

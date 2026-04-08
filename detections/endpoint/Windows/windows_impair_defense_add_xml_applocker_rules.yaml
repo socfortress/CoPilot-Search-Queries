@@ -1,0 +1,147 @@
+name: Windows Impair Defense Add Xml Applocker Rules
+id: 467ed9d9-8035-470e-ad5e-ae5189283033
+version: 1
+schema_version: "1.0"
+date: "2026-04-08"
+author: SOCFortress LLC
+status: production
+type: Hunting
+
+description: >
+  The following analytic detects the use of PowerShell cmdlets to import an AppLocker XML policy, which is a strong
+  indicator of an attempt to disable or bypass security controls. This behavior is identified by monitoring PowerShell
+  process creation events that execute "Import-Module AppLocker" combined with "Set-AppLockerPolicy" and the "-XMLPolicy"
+  parameter. This activity is significant because AppLocker is a Windows security feature that restricts which programs
+  users can run. By importing a malicious or permissive XML policy, an attacker can disable or weaken AppLocker protections.
+  This technique has been observed in the Azorult malware family as a defense evasion tactic. If confirmed malicious, this
+  could allow an attacker to disable antivirus products, execute arbitrary code, or maintain persistence within the environment.
+
+data_source:
+  - Sysmon EventID 1
+
+search:
+  index_pattern: "${INDEX_PATTERN}"
+  size: 100
+  sort:
+    - timestamp: desc
+  query:
+    bool:
+      must:
+        - term:
+            agent_name: "${AGENT_NAME}"
+        - term:
+            agent_labels_customer: "${CUSTOMER_CODE}"
+        - term:
+            data_win_system_eventID: "1"
+        - wildcard:
+            data_win_eventdata_image: "*powershell.exe"
+        - bool:
+            must:
+              - wildcard:
+                  data_win_eventdata_commandLine: "*AppLocker*"
+              - wildcard:
+                  data_win_eventdata_commandLine: "*Set-AppLockerPolicy*"
+              - wildcard:
+                  data_win_eventdata_commandLine: "*XMLPolicy*"
+        - range:
+            timestamp:
+              gte: "${START_TIME}"
+              lte: "${END_TIME}"
+  _source:
+    - timestamp
+    - data_win_eventdata_image
+    - data_win_eventdata_commandLine
+    - data_win_eventdata_parentImage
+    - data_win_eventdata_user
+    - data_win_eventdata_processId
+    - data_win_system_computer
+
+parameters:
+  AGENT_NAME:
+    description: "Target agent/host name"
+    type: string
+    required: true
+    example: "DESKTOP-AM0HLGE"
+  CUSTOMER_CODE:
+    description: "Customer label for filtering"
+    type: string
+    required: true
+    example: "lab"
+  INDEX_PATTERN:
+    description: "Elasticsearch index pattern"
+    type: string
+    required: true
+    example: "wazuh-lab_*"
+  START_TIME:
+    description: "Query start time (ISO 8601 or relative)"
+    type: datetime
+    required: false
+    default: "now-24h"
+    example: "YYYY-MM-DD 00:00:00.000"
+  END_TIME:
+    description: "Query end time (ISO 8601 or relative)"
+    type: datetime
+    required: false
+    default: "now"
+    example: "YYYY-MM-DD 23:59:59.999"
+
+how_to_implement: >
+  To successfully implement this search, you need to be ingesting logs with process creation data from your endpoints.
+  Sysmon EventID 1 captures process creation events including full command-line arguments. Ensure that Sysmon is
+  configured to capture the complete command line when PowerShell processes are executed. The detection specifically
+  monitors for the combination of three PowerShell cmdlets/parameters: Import-Module AppLocker, Set-AppLockerPolicy,
+  and -XMLPolicy parameter. This combination is highly suspicious as it indicates an attempt to import an AppLocker
+  policy from an XML file, which is a known defense evasion technique.
+
+known_false_positives: >
+  Administrators may execute these PowerShell commands legitimately when managing AppLocker policies in the environment.
+  Filter based on trusted administrative accounts, expected administrative processes, and known legitimate AppLocker
+  management activities. Organizations with centralized AppLocker policy management may need to baseline expected
+  administrator behavior and create exceptions accordingly.
+
+references:
+  - https://app.any.run/tasks/a6f2ffe2-e6e2-4396-ae2e-04ea0143f2d8/
+  - https://github.com/redcanaryco/atomic-red-team/tree/master/atomics/T1562.001
+  - https://docs.microsoft.com/en-us/windows/security/threat-protection/windows-defender-application-control/applocker/applocker-overview
+
+response:
+  message: >
+    Suspicious AppLocker policy import detected on $data_win_system_computer$ by user $data_win_eventdata_user$.
+    PowerShell CommandLine: $data_win_eventdata_commandLine$. Parent Process: $data_win_eventdata_parentImage$.
+    This activity may indicate an attempt to disable AppLocker security controls.
+  risk_score: 75
+  severity: high
+  risk_objects:
+    - field: data_win_system_computer
+      type: system
+      score: 75
+    - field: data_win_eventdata_user
+      type: user
+      score: 40
+  threat_objects:
+    - field: data_win_eventdata_commandLine
+      type: command_line
+    - field: data_win_eventdata_parentImage
+      type: parent_process
+
+tags:
+  analytic_story:
+    - Azorult
+    - Defense Evasion
+    - AppLocker Bypass
+  asset_type: Endpoint
+  mitre_attack_id:
+    - T1562.001
+  custom_tags:
+    - applocker
+    - defense_evasion
+    - xml_policy
+    - azorult
+    - powershell
+    - malware
+  product:
+    - Wazuh
+  security_domain: endpoint
+
+graylog:
+  query: data_win_system_eventID:"1" AND data_win_eventdata_commandLine:/.*AppLocker.*/ AND data_win_eventdata_commandLine:/.*Set-AppLockerPolicy.*/ AND data_win_eventdata_image:C\:\\\\Windows\\\\System32\\\\WindowsPowerShell\\\\v1.0\\\\powershell.exe

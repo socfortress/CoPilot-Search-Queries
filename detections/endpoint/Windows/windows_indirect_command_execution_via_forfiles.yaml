@@ -1,0 +1,138 @@
+name: Windows Indirect Command Execution Via forfiles
+id: 1fdf31c9-ff4d-4c48-b799-0e8666e08787
+version: 1
+schema_version: "1.0"
+date: "2026-04-08"
+author: SOCFortress LLC
+status: production
+type: TTP
+
+description: >
+  The following analytic detects the execution of programs initiated by forfiles.exe, a legitimate Windows utility that
+  is commonly abused to indirectly execute commands and bypass command-line execution protections. This detection leverages
+  Sysmon EventID 1 (process creation) to identify instances where forfiles.exe is the parent process of child processes.
+  This activity is significant because forfiles.exe can be exploited as a Living Off The Land technique to execute arbitrary
+  commands on multiple files, often evading security monitoring and detection mechanisms. If confirmed malicious, this could
+  allow attackers to execute arbitrary commands, bypass application whitelisting, establish persistence, or further compromise
+  the system, potentially leading to unauthorized access or lateral movement within the environment.
+
+data_source:
+  - Sysmon EventID 1
+
+search:
+  index_pattern: "${INDEX_PATTERN}"
+  size: 100
+  sort:
+    - timestamp: desc
+  query:
+    bool:
+      must:
+        - term:
+            agent_name: "${AGENT_NAME}"
+        - term:
+            agent_labels_customer: "${CUSTOMER_CODE}"
+        - term:
+            data_win_system_eventID: "1"
+        - wildcard:
+            data_win_eventdata_parentImage: "*forfiles.exe"
+        - range:
+            timestamp:
+              gte: "${START_TIME}"
+              lte: "${END_TIME}"
+  _source:
+    - timestamp
+    - data_win_eventdata_image
+    - data_win_eventdata_commandLine
+    - data_win_eventdata_parentImage
+    - data_win_eventdata_user
+    - data_win_eventdata_processId
+    - data_win_system_computer
+
+parameters:
+  AGENT_NAME:
+    description: "Target agent/host name"
+    type: string
+    required: true
+    example: "DESKTOP-AM0HLGE"
+  CUSTOMER_CODE:
+    description: "Customer label for filtering"
+    type: string
+    required: true
+    example: "lab"
+  INDEX_PATTERN:
+    description: "Elasticsearch index pattern"
+    type: string
+    required: true
+    example: "wazuh-lab_*"
+  START_TIME:
+    description: "Query start time (ISO 8601 or relative)"
+    type: datetime
+    required: false
+    default: "now-24h"
+    example: "YYYY-MM-DD 00:00:00.000"
+  END_TIME:
+    description: "Query end time (ISO 8601 or relative)"
+    type: datetime
+    required: false
+    default: "now"
+    example: "YYYY-MM-DD 23:59:59.999"
+
+how_to_implement: >
+  To successfully implement this search, you need to be ingesting logs with process creation data from your endpoints.
+  Sysmon EventID 1 captures process creation events including parent process information. Ensure that Sysmon is configured
+  to capture the parent process name and image path when processes are executed. The detection monitors for any child process
+  spawned with forfiles.exe as the parent process, which is unusual since forfiles.exe is typically used for batch operations
+  on files and should not be spawning other processes in normal administrative usage. Monitor command-line arguments for
+  suspicious patterns such as /c flags with commands.
+
+known_false_positives: >
+  Some legacy applications and administrative scripts may legitimately use forfiles.exe to execute commands on multiple files
+  in batch operations. Additionally, system maintenance scripts or backup utilities may use forfiles.exe for file operations.
+  Filter results based on known legitimate administrative accounts and expected forfiles.exe usage patterns within your
+  organization. Review process execution chains to differentiate between legitimate batch operations and malicious abuse.
+
+references:
+  - https://twitter.com/KyleHanslovan/status/912659279806640128
+  - https://docs.microsoft.com/en-us/windows-server/administration/windows-commands/forfiles
+  - https://lolbas-project.github.io/lolbas/Binaries/Forfiles/
+
+response:
+  message: >
+    Indirect command execution via forfiles detected on $data_win_system_computer$ by user $data_win_eventdata_user$.
+    Child Process: $data_win_eventdata_image$. CommandLine: $data_win_eventdata_commandLine$.
+    Parent Process: forfiles.exe. This may indicate Living Off The Land technique abuse.
+  risk_score: 60
+  severity: medium
+  risk_objects:
+    - field: data_win_system_computer
+      type: system
+      score: 60
+    - field: data_win_eventdata_user
+      type: user
+      score: 40
+  threat_objects:
+    - field: data_win_eventdata_image
+      type: process
+    - field: data_win_eventdata_commandLine
+      type: command_line
+
+tags:
+  analytic_story:
+    - Living Off The Land
+    - Windows Post-Exploitation
+    - Indirect Command Execution
+  asset_type: Endpoint
+  mitre_attack_id:
+    - T1202
+  custom_tags:
+    - forfiles
+    - lolbas
+    - indirect_execution
+    - command_execution_bypass
+    - living_off_the_land
+  product:
+    - Wazuh
+  security_domain: endpoint
+
+graylog:
+  query: data_win_system_eventID:"1" AND data_win_eventdata_parentImage:"C:\\\\Windows\\\\System32\\\\forfiles.exe"

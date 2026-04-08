@@ -1,0 +1,157 @@
+name: Windows Information Discovery Fsutil
+id: 2181f261-93e6-4166-a5a9-47deac58feff
+version: 1
+schema_version: "1.0"
+date: "2026-04-08"
+author: SOCFortress LLC
+status: production
+type: Anomaly
+
+description: >
+  The following analytic identifies the execution of the Windows built-in tool FSUTIL with "FSINFO" or "Volume"
+  parameters to discover file system and disk information. This detection leverages Sysmon EventID 1 (process creation)
+  to monitor for FSUTIL execution with specific command-line parameters used for reconnaissance. This activity is
+  significant because FSUTIL can be abused by adversaries during post-exploitation phases to gather detailed information
+  about the file system, disk space, and volume configuration. This information aids attackers in understanding the target
+  environment layout, identifying valuable data locations, and planning subsequent malicious actions such as ransomware
+  deployment, data exfiltration, or privilege escalation. If confirmed malicious, this activity could enable attackers to
+  map the file system, identify high-value targets, and conduct further compromise of the environment.
+
+data_source:
+  - Sysmon EventID 1
+
+search:
+  index_pattern: "${INDEX_PATTERN}"
+  size: 100
+  sort:
+    - timestamp: desc
+  query:
+    bool:
+      must:
+        - term:
+            agent_name: "${AGENT_NAME}"
+        - term:
+            agent_labels_customer: "${CUSTOMER_CODE}"
+        - term:
+            data_win_system_eventID: "1"
+        - wildcard:
+            data_win_eventdata_image: "*fsutil.exe"
+        - bool:
+            should:
+              - wildcard:
+                  data_win_eventdata_commandLine: "*fsinfo*"
+              - bool:
+                  must:
+                    - wildcard:
+                        data_win_eventdata_commandLine: "*volume*"
+                    - bool:
+                        should:
+                          - wildcard:
+                              data_win_eventdata_commandLine: "*diskfree*"
+                          - wildcard:
+                              data_win_eventdata_commandLine: "*list*"
+                        minimum_should_match: 1
+            minimum_should_match: 1
+        - range:
+            timestamp:
+              gte: "${START_TIME}"
+              lte: "${END_TIME}"
+  _source:
+    - timestamp
+    - data_win_eventdata_image
+    - data_win_eventdata_commandLine
+    - data_win_eventdata_parentImage
+    - data_win_eventdata_user
+    - data_win_eventdata_processId
+    - data_win_system_computer
+
+parameters:
+  AGENT_NAME:
+    description: "Target agent/host name"
+    type: string
+    required: true
+    example: "DESKTOP-AM0HLGE"
+  CUSTOMER_CODE:
+    description: "Customer label for filtering"
+    type: string
+    required: true
+    example: "lab"
+  INDEX_PATTERN:
+    description: "Elasticsearch index pattern"
+    type: string
+    required: true
+    example: "wazuh-lab_*"
+  START_TIME:
+    description: "Query start time (ISO 8601 or relative)"
+    type: datetime
+    required: false
+    default: "now-24h"
+    example: "YYYY-MM-DD 00:00:00.000"
+  END_TIME:
+    description: "Query end time (ISO 8601 or relative)"
+    type: datetime
+    required: false
+    default: "now"
+    example: "YYYY-MM-DD 23:59:59.999"
+
+how_to_implement: >
+  To successfully implement this search, you need to be ingesting logs with process creation data from your endpoints.
+  Sysmon EventID 1 captures process creation events including command-line arguments. Ensure that Sysmon is configured
+  to capture the complete command line when FSUTIL is executed. The detection monitors for FSUTIL execution with specific
+  parameters: "fsinfo" for file system information discovery, or "volume" combined with "diskfree" or "list" for volume
+  and disk space enumeration. These command combinations are rarely used in normal administrative operations and are
+  commonly observed in post-exploitation reconnaissance activities performed by ransomware families like Prestige and
+  exploit frameworks like winPEAS.
+
+known_false_positives: >
+  Legitimate system administration scripts or backup utilities may use FSUTIL for file system querying. System
+  administrators performing maintenance or troubleshooting may execute these commands. Filter results based on known
+  legitimate administrative accounts and expected FSUTIL usage patterns within your environment. Review the parent process
+  to differentiate between legitimate administrative use and suspicious execution chains.
+
+references:
+  - https://learn.microsoft.com/en-us/windows-server/administration/windows-commands/fsutil
+  - https://learn.microsoft.com/en-us/windows-server/administration/windows-commands/fsutil-volume
+  - https://github.com/carlospolop/PEASS-ng/tree/master/winPEAS
+  - https://www.microsoft.com/en-us/security/blog/2022/10/14/new-prestige-ransomware-impacts-organizations-in-ukraine-and-poland/
+  - https://www.microsoft.com/en-us/security/blog/2021/01/20/deep-dive-into-the-solorigate-second-stage-activation-from-sunburst-to-teardrop-and-raindrop/
+
+response:
+  message: >
+    File system discovery via fsutil detected on $data_win_system_computer$ by user $data_win_eventdata_user$.
+    Process: $data_win_eventdata_image$. CommandLine: $data_win_eventdata_commandLine$.
+    Parent Process: $data_win_eventdata_parentImage$. This activity may indicate post-exploitation reconnaissance.
+  risk_score: 50
+  severity: medium
+  risk_objects:
+    - field: data_win_system_computer
+      type: system
+      score: 50
+    - field: data_win_eventdata_user
+      type: user
+      score: 30
+  threat_objects:
+    - field: data_win_eventdata_commandLine
+      type: command_line
+
+tags:
+  analytic_story:
+    - Windows Post-Exploitation
+    - Prestige Ransomware
+    - System Reconnaissance
+  asset_type: Endpoint
+  mitre_attack_id:
+    - T1082
+  custom_tags:
+    - fsutil
+    - file_system_discovery
+    - disk_enumeration
+    - post_exploitation
+    - ransomware
+    - reconnaissance
+  product:
+    - Wazuh
+  security_domain: endpoint
+
+graylog:
+  query: data_win_system_eventID:"1" AND data_win_eventdata_image:"C:\\\\Windows\\\\System32\\\\fsutil.exe" AND (data_win_eventdata_commandLine:/.*fsinfo.*/ OR data_win_eventdata_commandLine:/.*volume.*diskfree.*/)

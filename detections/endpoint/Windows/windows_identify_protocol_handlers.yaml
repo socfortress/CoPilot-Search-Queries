@@ -1,0 +1,163 @@
+name: Windows Identify Protocol Handlers
+id: bd5c311e-a6ea-48ae-a289-19a3398e3648
+version: 1
+schema_version: "1.0"
+date: "2026-04-08"
+author: SOCFortress LLC
+status: production
+type: Hunting
+
+description: >
+  The following analytic identifies the use of protocol handlers executed via the command line. It leverages Sysmon
+  EventID 1 (process creation) to detect instances where suspicious protocol handlers are invoked, such as ms-msdt:,
+  ms-settings:, ms-appinstaller:, and ms-windows-store:. This activity is significant because protocol handlers can be
+  exploited to execute arbitrary commands or launch applications, potentially leading to unauthorized actions. Notably,
+  the ms-msdt: protocol handler was leveraged in the Follina vulnerability (CVE-2022-30190) to achieve remote code
+  execution. If confirmed malicious, an attacker could use this technique to gain code execution, escalate privileges,
+  establish persistence, or conduct phishing attacks within the environment, posing a significant security risk.
+
+data_source:
+  - Sysmon EventID 1
+
+search:
+  index_pattern: "${INDEX_PATTERN}"
+  size: 100
+  sort:
+    - timestamp: desc
+  query:
+    bool:
+      must:
+        - term:
+            agent_name: "${AGENT_NAME}"
+        - term:
+            agent_labels_customer: "${CUSTOMER_CODE}"
+        - term:
+            data_win_system_eventID: "1"
+        - bool:
+            should:
+              - wildcard:
+                  data_win_eventdata_commandLine: "*ms-msdt:*"
+              - wildcard:
+                  data_win_eventdata_commandLine: "*ms-settings:*"
+              - wildcard:
+                  data_win_eventdata_commandLine: "*ms-appinstaller:*"
+              - wildcard:
+                  data_win_eventdata_commandLine: "*ms-windows-store:*"
+              - wildcard:
+                  data_win_eventdata_commandLine: "*ms-excel:*"
+              - wildcard:
+                  data_win_eventdata_commandLine: "*ms-word:*"
+              - wildcard:
+                  data_win_eventdata_commandLine: "*mailto:*"
+              - wildcard:
+                  data_win_eventdata_commandLine: "*vbscript:*"
+              - wildcard:
+                  data_win_eventdata_commandLine: "*javascript:*"
+            minimum_should_match: 1
+        - range:
+            timestamp:
+              gte: "${START_TIME}"
+              lte: "${END_TIME}"
+  _source:
+    - timestamp
+    - data_win_eventdata_image
+    - data_win_eventdata_commandLine
+    - data_win_eventdata_parentImage
+    - data_win_eventdata_user
+    - data_win_eventdata_processId
+    - data_win_system_computer
+
+parameters:
+  AGENT_NAME:
+    description: "Target agent/host name"
+    type: string
+    required: true
+    example: "DESKTOP-AM0HLGE"
+  CUSTOMER_CODE:
+    description: "Customer label for filtering"
+    type: string
+    required: true
+    example: "lab"
+  INDEX_PATTERN:
+    description: "Elasticsearch index pattern"
+    type: string
+    required: true
+    example: "wazuh-lab_*"
+  START_TIME:
+    description: "Query start time (ISO 8601 or relative)"
+    type: datetime
+    required: false
+    default: "now-24h"
+    example: "YYYY-MM-DD 00:00:00.000"
+  END_TIME:
+    description: "Query end time (ISO 8601 or relative)"
+    type: datetime
+    required: false
+    default: "now"
+    example: "YYYY-MM-DD 23:59:59.999"
+
+how_to_implement: >
+  To successfully implement this search, you need to be ingesting logs with process creation data from your endpoints.
+  Sysmon EventID 1 captures process creation events including full command-line arguments. Ensure that Sysmon is
+  configured to capture the complete command line when processes are executed. The detection monitors for common
+  protocol handlers that can be exploited for code execution, particularly the ms-msdt: handler used in the Follina
+  vulnerability. Monitor both direct execution of protocol handlers and indirect invocation through cmd.exe or
+  PowerShell with start/invoke commands.
+
+known_false_positives: >
+  False positives will be found. Legitimate use of protocol handlers such as http:// and https:// URLs passed through
+  command-line arguments may trigger alerts. Additionally, administrators may use ms-settings: or ms-appinstaller: for
+  legitimate system administration tasks. Filter on trusted internal processes, known administrative accounts, and
+  expected protocol handler usage patterns. Tune based on your organization's baseline usage of protocol handlers.
+
+references:
+  - https://gist.github.com/MHaggis/a0d3edb57d36e0916c94c0a464b2722e
+  - https://www.oreilly.com/library/view/learning-java/1565927184/apas02.html
+  - https://blogs.windows.com/msedgedev/2022/01/20/getting-started-url-protocol-handlers-microsoft-edge/
+  - https://github.com/Mr-Un1k0d3r/PoisonHandler
+  - https://www.mdsec.co.uk/2021/03/phishing-users-to-take-a-test/
+  - https://www.huntress.com/blog/microsoft-office-remote-code-execution-follina-msdt-bug
+  - https://parsiya.net/blog/2021-03-17-attack-surface-analysis-part-2-custom-protocol-handlers/
+
+response:
+  message: >
+    Protocol handler detected on $data_win_system_computer$ executed by user $data_win_eventdata_user$.
+    Process: $data_win_eventdata_image$. CommandLine: $data_win_eventdata_commandLine$.
+    Parent Process: $data_win_eventdata_parentImage$. Protocol handlers can be exploited for code execution.
+  risk_score: 65
+  severity: medium
+  risk_objects:
+    - field: data_win_system_computer
+      type: system
+      score: 65
+    - field: data_win_eventdata_user
+      type: user
+      score: 40
+  threat_objects:
+    - field: data_win_eventdata_commandLine
+      type: command_line
+    - field: data_win_eventdata_parentImage
+      type: parent_process
+
+tags:
+  analytic_story:
+    - Living Off The Land
+    - Follina MSDT Vulnerability
+    - Protocol Handler Abuse
+  asset_type: Endpoint
+  mitre_attack_id:
+    - T1059
+    - T1218
+  custom_tags:
+    - protocol_handler
+    - ms-msdt
+    - follina
+    - cve-2022-30190
+    - code_execution
+    - command_line_execution
+  product:
+    - Wazuh
+  security_domain: endpoint
+
+graylog:
+  query: data_win_system_eventID:"1" AND data_win_eventdata_commandLine:/.*ms-msdt.*/

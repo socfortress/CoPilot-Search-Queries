@@ -1,0 +1,148 @@
+name: Windows InProcServer32 New Outlook Form
+id: fedb49c4-4bd7-4d42-8fd9-f8c8538c73c4
+version: 1
+schema_version: "1.0"
+date: "2026-04-08"
+author: SOCFortress LLC
+status: production
+type: Anomaly
+
+description: >
+  The following analytic detects the creation or modification of registry keys associated with new Outlook form
+  installations, potentially indicating exploitation of CVE-2024-21378. This detection leverages Sysmon EventID 13
+  (registry modification) to identify suspicious registry changes involving InProcServer32 keys linked to Outlook forms.
+  This activity is significant as it may signify an attempt to achieve authenticated remote code execution via malicious
+  form objects. CVE-2024-21378 is a critical vulnerability in Microsoft Outlook that allows unauthenticated remote code
+  execution through specially crafted form objects. Attackers can exploit this vulnerability by creating malicious
+  registry entries that register custom DLL libraries as Outlook form handlers. If confirmed malicious, this could allow
+  an attacker to create arbitrary files and registry keys, execute arbitrary code with the user's privileges, and
+  potentially achieve full system compromise through Outlook form exploitation.
+
+data_source:
+  - Sysmon EventID 13
+
+search:
+  index_pattern: "${INDEX_PATTERN}"
+  size: 100
+  sort:
+    - timestamp: desc
+  query:
+    bool:
+      must:
+        - term:
+            agent_name: "${AGENT_NAME}"
+        - term:
+            agent_labels_customer: "${CUSTOMER_CODE}"
+        - term:
+            data_win_system_eventID: "13"
+        - wildcard:
+            data_win_eventdata_targetObject: "*InProcServer32*"
+        - wildcard:
+            data_win_eventdata_details: "*FORMS*"
+        - range:
+            timestamp:
+              gte: "${START_TIME}"
+              lte: "${END_TIME}"
+  _source:
+    - timestamp
+    - data_win_eventdata_targetObject
+    - data_win_eventdata_details
+    - data_win_eventdata_valueName
+    - data_win_eventdata_image
+    - data_win_eventdata_user
+    - data_win_system_computer
+
+parameters:
+  AGENT_NAME:
+    description: "Target agent/host name"
+    type: string
+    required: true
+    example: "DESKTOP-AM0HLGE"
+  CUSTOMER_CODE:
+    description: "Customer label for filtering"
+    type: string
+    required: true
+    example: "lab"
+  INDEX_PATTERN:
+    description: "Elasticsearch index pattern"
+    type: string
+    required: true
+    example: "wazuh-lab_*"
+  START_TIME:
+    description: "Query start time (ISO 8601 or relative)"
+    type: datetime
+    required: false
+    default: "now-24h"
+    example: "YYYY-MM-DD 00:00:00.000"
+  END_TIME:
+    description: "Query end time (ISO 8601 or relative)"
+    type: datetime
+    required: false
+    default: "now"
+    example: "YYYY-MM-DD 23:59:59.999"
+
+how_to_implement: >
+  To successfully implement this search, you need to be ingesting logs with registry modification data from your endpoints.
+  Sysmon EventID 13 captures registry set value events including the registry path, value name, and value data. Ensure that
+  Sysmon is configured to monitor registry changes. The detection specifically targets InProcServer32 registry keys that
+  contain paths referencing FORMS directories, which is a strong indicator of Outlook form-based exploitation. Monitor
+  registry paths under Software\Microsoft\Office and Software\Classes\CLSID for suspicious InProcServer32 modifications.
+  Legitimate Outlook form installations may occur, but DLL paths pointing to suspicious locations or referencing FORMS
+  directories with executable names should be investigated.
+
+known_false_positives: >
+  False positives are possible if the organization adds new forms to Outlook via an automated method or through legitimate
+  third-party Outlook extensions. Some legitimate Outlook add-ins may register custom form handlers in the registry. Filter
+  by process name, registry path, or DLL location to reduce false positives. Establish a baseline of legitimate Outlook
+  form registrations in your environment and create exceptions for known legitimate software. Review the source process
+  and DLL path to determine if the modification represents legitimate administrative activity.
+
+references:
+  - https://www.netspi.com/blog/technical/red-team-operations/microsoft-outlook-remote-code-execution-cve-2024-21378/
+  - https://msrc.microsoft.com/update-guide/vulnerability/CVE-2024-21378
+  - https://www.bleepingcomputer.com/news/security/microsoft-outlook-rce-vulnerability-cve-2024-21378-actively-exploited/
+
+response:
+  message: >
+    Outlook form InProcServer32 registry modification detected on $data_win_system_computer$ by user $data_win_eventdata_user$.
+    Registry Path: $data_win_eventdata_targetObject$. DLL Path: $data_win_eventdata_details$.
+    Process: $data_win_eventdata_image$. This may indicate CVE-2024-21378 exploitation.
+  risk_score: 80
+  severity: high
+  risk_objects:
+    - field: data_win_system_computer
+      type: system
+      score: 80
+    - field: data_win_eventdata_user
+      type: user
+      score: 60
+  threat_objects:
+    - field: data_win_eventdata_targetObject
+      type: registry_path
+    - field: data_win_eventdata_details
+      type: file_path
+
+tags:
+  analytic_story:
+    - Outlook RCE CVE-2024-21378
+    - Microsoft Outlook Exploitation
+  cve:
+    - CVE-2024-21378
+  asset_type: Endpoint
+  mitre_attack_id:
+    - T1566
+    - T1112
+  custom_tags:
+    - outlook
+    - inprocserver32
+    - form_exploitation
+    - registry_modification
+    - cve-2024-21378
+    - remote_code_execution
+    - outlook_forms
+  product:
+    - Wazuh
+  security_domain: endpoint
+
+graylog:
+  query: data_win_system_eventID:"13" AND data_win_eventdata_targetObject:/.*InProcServer32.*/ AND data_win_eventdata_details:/.*FORMS.*/

@@ -1,0 +1,140 @@
+name: Windows Indirect Command Execution Via pcalua
+id: 3428ac18-a410-4823-816c-ce697d26f7a8
+version: 1
+schema_version: "1.0"
+date: "2026-04-08"
+author: SOCFortress LLC
+status: production
+type: TTP
+
+description: >
+  The following analytic detects the execution of programs initiated by pcalua.exe, the Microsoft Windows Program
+  Compatibility Assistant. This detection leverages Sysmon EventID 1 (process creation) to identify instances where
+  pcalua.exe is the parent process of child processes. While pcalua.exe can be used to start legitimate programs,
+  attackers frequently abuse it as a Living Off The Land technique to bypass command-line execution protections and
+  application whitelisting controls. This activity is significant because pcalua.exe can execute programs with different
+  compatibility settings and privileges, making it useful for evasion. If confirmed malicious, this activity could allow
+  attackers to execute arbitrary commands, bypass security controls, escalate privileges, or establish persistence within
+  the environment.
+
+data_source:
+  - Sysmon EventID 1
+
+search:
+  index_pattern: "${INDEX_PATTERN}"
+  size: 100
+  sort:
+    - timestamp: desc
+  query:
+    bool:
+      must:
+        - term:
+            agent_name: "${AGENT_NAME}"
+        - term:
+            agent_labels_customer: "${CUSTOMER_CODE}"
+        - term:
+            data_win_system_eventID: "1"
+        - wildcard:
+            data_win_eventdata_parentImage: "*pcalua.exe"
+        - range:
+            timestamp:
+              gte: "${START_TIME}"
+              lte: "${END_TIME}"
+  _source:
+    - timestamp
+    - data_win_eventdata_image
+    - data_win_eventdata_commandLine
+    - data_win_eventdata_parentImage
+    - data_win_eventdata_user
+    - data_win_eventdata_processId
+    - data_win_system_computer
+
+parameters:
+  AGENT_NAME:
+    description: "Target agent/host name"
+    type: string
+    required: true
+    example: "DESKTOP-AM0HLGE"
+  CUSTOMER_CODE:
+    description: "Customer label for filtering"
+    type: string
+    required: true
+    example: "lab"
+  INDEX_PATTERN:
+    description: "Elasticsearch index pattern"
+    type: string
+    required: true
+    example: "wazuh-lab_*"
+  START_TIME:
+    description: "Query start time (ISO 8601 or relative)"
+    type: datetime
+    required: false
+    default: "now-24h"
+    example: "YYYY-MM-DD 00:00:00.000"
+  END_TIME:
+    description: "Query end time (ISO 8601 or relative)"
+    type: datetime
+    required: false
+    default: "now"
+    example: "YYYY-MM-DD 23:59:59.999"
+
+how_to_implement: >
+  To successfully implement this search, you need to be ingesting logs with process creation data from your endpoints.
+  Sysmon EventID 1 captures process creation events including parent process information. Ensure that Sysmon is configured
+  to capture the parent process name and image path when processes are executed. The detection monitors for any child process
+  spawned with pcalua.exe as the parent process. pcalua.exe is the Program Compatibility Assistant and is typically used to
+  run legacy applications with compatibility settings, but is rarely used for normal process execution and is commonly abused
+  for command execution evasion. Monitor command-line arguments passed to child processes for suspicious patterns.
+
+known_false_positives: >
+  Some legacy applications may be legitimately run using pcalua.exe with compatibility settings. System administrators may use
+  pcalua.exe to troubleshoot application compatibility issues. Filter results based on known legitimate applications that use
+  pcalua.exe within your environment. Review process execution chains and command-line arguments to differentiate between
+  legitimate compatibility assistance and malicious command execution abuse.
+
+references:
+  - https://twitter.com/KyleHanslovan/status/912659279806640128
+  - https://lolbas-project.github.io/lolbas/Binaries/Pcalua/
+  - https://docs.microsoft.com/en-us/windows-server/administration/windows-commands/pcalua
+
+response:
+  message: >
+    Indirect command execution via pcalua detected on $data_win_system_computer$ by user $data_win_eventdata_user$.
+    Child Process: $data_win_eventdata_image$. CommandLine: $data_win_eventdata_commandLine$.
+    Parent Process: pcalua.exe. This may indicate Program Compatibility Assistant abuse for command execution evasion.
+  risk_score: 60
+  severity: medium
+  risk_objects:
+    - field: data_win_system_computer
+      type: system
+      score: 60
+    - field: data_win_eventdata_user
+      type: user
+      score: 40
+  threat_objects:
+    - field: data_win_eventdata_image
+      type: process
+    - field: data_win_eventdata_commandLine
+      type: command_line
+
+tags:
+  analytic_story:
+    - Living Off The Land
+    - Indirect Command Execution
+    - Windows Post-Exploitation
+  asset_type: Endpoint
+  mitre_attack_id:
+    - T1202
+  custom_tags:
+    - pcalua
+    - lolbas
+    - indirect_execution
+    - command_execution_bypass
+    - living_off_the_land
+    - compatibility_assistant
+  product:
+    - Wazuh
+  security_domain: endpoint
+
+graylog:
+  query: data_win_system_eventID:"1" AND data_win_eventdata_parentImage:"C:\\\\Windows\\\\System32\\\\pcalua.exe"

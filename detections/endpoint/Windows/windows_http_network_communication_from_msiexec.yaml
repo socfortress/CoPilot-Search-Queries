@@ -1,0 +1,144 @@
+name: Windows HTTP Network Communication From MSIExec
+id: b0fd38c7-f71a-43a2-870e-f3ca06bcdd99
+version: 1
+schema_version: "1.0"
+date: "2026-04-08"
+author: SOCFortress LLC
+status: production
+type: Anomaly
+
+description: >
+  The following analytic detects MSIExec making HTTP or HTTPS network connections, typically over ports 80 or 443.
+  This behavior is identified by monitoring process creation events where MSIExec is launched with suspicious command-line
+  arguments containing URLs (http:// or https://). MSIExec is typically used for legitimate Windows Installer operations
+  and does not normally perform direct network communication to the internet. This activity is unusual and potentially
+  indicative of malicious behavior such as remote package installation, malware deployment, command and control (C2)
+  communication, or data exfiltration. If confirmed malicious, an attacker could be using MSIExec to download malicious
+  packages, communicate with external servers, or establish persistence on the target system.
+
+data_source:
+  - Sysmon EventID 1
+
+search:
+  index_pattern: "${INDEX_PATTERN}"
+  size: 100
+  sort:
+    - timestamp: desc
+  query:
+    bool:
+      must:
+        - term:
+            agent_name: "${AGENT_NAME}"
+        - term:
+            agent_labels_customer: "${CUSTOMER_CODE}"
+        - term:
+            data_win_system_eventID: "1"
+        - wildcard:
+            data_win_eventdata_image: "*msiexec.exe"
+        - bool:
+            should:
+              - wildcard:
+                  data_win_eventdata_commandLine: "*http://*"
+              - wildcard:
+                  data_win_eventdata_commandLine: "*https://*"
+            minimum_should_match: 1
+        - range:
+            timestamp:
+              gte: "${START_TIME}"
+              lte: "${END_TIME}"
+  _source:
+    - timestamp
+    - data_win_eventdata_image
+    - data_win_eventdata_commandLine
+    - data_win_eventdata_parentImage
+    - data_win_eventdata_user
+    - data_win_eventdata_processId
+    - data_win_system_computer
+
+parameters:
+  AGENT_NAME:
+    description: "Target agent/host name"
+    type: string
+    required: true
+    example: "DESKTOP-AM0HLGE"
+  CUSTOMER_CODE:
+    description: "Customer label for filtering"
+    type: string
+    required: true
+    example: "lab"
+  INDEX_PATTERN:
+    description: "Elasticsearch index pattern"
+    type: string
+    required: true
+    example: "wazuh-lab_*"
+  START_TIME:
+    description: "Query start time (ISO 8601 or relative)"
+    type: datetime
+    required: false
+    default: "now-24h"
+    example: "YYYY-MM-DD 00:00:00.000"
+  END_TIME:
+    description: "Query end time (ISO 8601 or relative)"
+    type: datetime
+    required: false
+    default: "now"
+    example: "YYYY-MM-DD 23:59:59.999"
+
+how_to_implement: >
+  To successfully implement this search, you need to be ingesting logs with process creation data from your endpoints.
+  Sysmon EventID 1 captures process creation events. Ensure that Sysmon is configured to capture the full command line
+  arguments when MSIExec is executed. The detection specifically monitors for MSIExec process execution with HTTP or
+  HTTPS URLs in the command line, which is a strong indicator of suspicious behavior. Monitor command-line arguments
+  for /i (install package) or /a (administrative install) flags combined with remote URLs.
+
+known_false_positives: >
+  Legitimate administrative use of MSIExec to install packages from internal package repositories or configuration
+  management systems may trigger this detection. Organizations using MSIExec for software distribution with HTTP/HTTPS
+  URLs should baseline expected behavior. Filter on trusted internal URLs and administrative user accounts as needed.
+
+references:
+  - https://thedfirreport.com/2022/06/06/will-the-real-msiexec-please-stand-up-exploit-leads-to-data-exfiltration/
+  - https://github.com/redcanaryco/atomic-red-team/blob/master/atomics/T1218.007/T1218.007.md
+  - https://lolbas-project.github.io/lolbas/Binaries/Msiexec/
+
+response:
+  message: >
+    MSIExec process detected performing network communication on $data_win_system_computer$ from user $data_win_eventdata_user$.
+    CommandLine: $data_win_eventdata_commandLine$. Parent Process: $data_win_eventdata_parentImage$.
+    This activity is suspicious and may indicate malware deployment or C2 communication.
+  risk_score: 80
+  severity: high
+  risk_objects:
+    - field: data_win_system_computer
+      type: system
+      score: 80
+    - field: data_win_eventdata_user
+      type: user
+      score: 40
+  threat_objects:
+    - field: data_win_eventdata_commandLine
+      type: command_line
+    - field: data_win_eventdata_parentImage
+      type: parent_process
+
+tags:
+  analytic_story:
+    - APT37 Rustonotto and FadeStealer
+    - Windows System Binary Proxy Execution MSIExec
+    - SolarWinds WHD RCE Post Exploitation
+    - Malicious Software Distribution
+  asset_type: Endpoint
+  mitre_attack_id:
+    - T1218.007
+  custom_tags:
+    - msiexec
+    - network_communication
+    - http_https
+    - signed_binary_proxy_execution
+    - malware_deployment
+  product:
+    - Wazuh
+  security_domain: endpoint
+
+graylog:
+  query: data_win_system_eventID:"1" AND data_win_eventdata_image:"C:\\\\Windows\\\\System32\\\\msiexec.exe" AND data_win_eventdata_commandLine:/.*https.*/

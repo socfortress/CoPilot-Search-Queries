@@ -1,0 +1,159 @@
+name: Windows Files and Dirs Access Rights Modification Via Icacls
+id: c76b796c-27e1-4520-91c4-4a58695c749e
+version: 1
+schema_version: "1.0"
+date: "2026-04-08"
+author: SOCFortress LLC
+status: production
+type: TTP
+
+description: >
+  The following analytic identifies the modification of security permissions on files or directories
+  using tools like icacls.exe, cacls.exe, or xcacls.exe. It leverages Sysmon EventID 1 to detect
+  process creation events with specific command-line arguments that modify access control lists (ACLs).
+  This activity is significant as it is commonly used by Advanced Persistent Threats (APTs) and coinminer
+  scripts to evade detection, maintain control over compromised systems, and hinder investigation efforts.
+  The use of these tools with permission modification flags (:R, :W, :F, :C, :N, /P, /E) is a strong
+  indicator of malicious activity. If confirmed malicious, this behavior could allow attackers to prevent
+  remediation efforts and maintain persistent access to the compromised environment.
+
+data_source:
+  - Sysmon EventID 1
+
+search:
+  index_pattern: "${INDEX_PATTERN}"
+  size: 100
+  sort:
+    - timestamp: desc
+  query:
+    bool:
+      must:
+        - term:
+            agent_name: "${AGENT_NAME}"
+        - term:
+            agent_labels_customer: "${CUSTOMER_CODE}"
+        - term:
+            data_win_system_eventID: "1"
+        - bool:
+            should:
+              - wildcard:
+                  data_win_eventdata_image: "*icacls.exe"
+              - wildcard:
+                  data_win_eventdata_image: "*cacls.exe"
+              - wildcard:
+                  data_win_eventdata_image: "*xcacls.exe"
+            minimum_should_match: 1
+        - bool:
+            should:
+              - wildcard:
+                  data_win_eventdata_commandLine: "*:R*"
+              - wildcard:
+                  data_win_eventdata_commandLine: "*:W*"
+              - wildcard:
+                  data_win_eventdata_commandLine: "*:F*"
+              - wildcard:
+                  data_win_eventdata_commandLine: "*:C*"
+              - wildcard:
+                  data_win_eventdata_commandLine: "*:N*"
+              - wildcard:
+                  data_win_eventdata_commandLine: "*/P*"
+              - wildcard:
+                  data_win_eventdata_commandLine: "*/E*"
+            minimum_should_match: 1
+        - range:
+            timestamp:
+              gte: "${START_TIME}"
+              lte: "${END_TIME}"
+  _source:
+    - timestamp
+    - data_win_eventdata_commandLine
+    - data_win_eventdata_image
+    - data_win_eventdata_parentImage
+    - data_win_eventdata_user
+    - data_win_system_computer
+
+parameters:
+  AGENT_NAME:
+    description: "Target agent/host name"
+    type: string
+    required: true
+    example: "DESKTOP-AM0HLGE"
+  CUSTOMER_CODE:
+    description: "Customer label for filtering"
+    type: string
+    required: true
+    example: "lab"
+  INDEX_PATTERN:
+    description: "Elasticsearch index pattern"
+    type: string
+    required: true
+    example: "wazuh-lab_*"
+  START_TIME:
+    description: "Query start time (ISO 8601 or relative)"
+    type: datetime
+    required: false
+    default: "now-24h"
+    example: "YYYY-MM-DD 00:00:00.000"
+  END_TIME:
+    description: "Query end time (ISO 8601 or relative)"
+    type: datetime
+    required: false
+    default: "now"
+    example: "YYYY-MM-DD 23:59:59.999"
+
+how_to_implement: >
+  To successfully implement this search, you need to be ingesting logs with process execution data
+  from your endpoints. Sysmon EventID 1 captures process creation events. Ensure that Sysmon is
+  configured to log all process creation events and that these logs are properly ingested into
+  Elasticsearch with complete command-line information. The detection specifically looks for icacls.exe,
+  cacls.exe, or xcacls.exe executions with permission modification flags (:R, :W, :F, :C, :N, /P, /E),
+  which are strong indicators of ACL tampering for defense evasion or persistence.
+
+known_false_positives: >
+  No false positives have been identified at this time. Legitimate administrative tasks typically
+  modify file permissions through the GUI or documented administrative procedures, not through
+  command-line tools like icacls.exe. However, filter as needed based on your environment's specific
+  administrative practices.
+
+references:
+  - https://malpedia.caad.fkie.fraunhofer.de/details/win.amadey
+
+response:
+  message: >
+    Process name $data_win_eventdata_image$ with access right modification argument executed by
+    $data_win_eventdata_user$ to change security permission of a specific file or directory on host
+    $data_win_system_computer$. CommandLine: $data_win_eventdata_commandLine$. This is indicative of
+    malicious ACL tampering for defense evasion or unauthorized access.
+  risk_score: 75
+  severity: high
+  risk_objects:
+    - field: data_win_system_computer
+      type: system
+      score: 75
+    - field: data_win_eventdata_user
+      type: user
+      score: 70
+  threat_objects:
+    - field: data_win_eventdata_image
+      type: process
+    - field: data_win_eventdata_parentImage
+      type: process
+
+tags:
+  analytic_story:
+    - Amadey
+    - Defense Evasion or Unauthorized Access Via SDDL Tampering
+  asset_type: Endpoint
+  mitre_attack_id:
+    - T1222.001
+  custom_tags:
+    - icacls
+    - access_control
+    - permission_modification
+    - defense_evasion
+  product:
+    - Wazuh
+  security_domain: endpoint
+
+graylog:
+  query: data_win_system_eventID:"1" AND data_win_eventdata_image:"C:\\\\Windows\\\\System32\\\\icacls.exe" AND (data_win_eventdata_commandLine:/.*:F.*/ OR data_win_eventdata_commandLine:/.*:W.*/ OR data_win_eventdata_commandLine:/.*:R.*/)
