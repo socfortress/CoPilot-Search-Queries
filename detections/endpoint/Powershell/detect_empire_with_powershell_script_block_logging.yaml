@@ -1,0 +1,145 @@
+name: Detect Empire with PowerShell Script Block Logging
+id: bc1dc6b8-c954-11eb-bade-acde48001122
+version: 1
+schema_version: "1.0"
+date: "2026-04-08"
+author: SOCFortress LLC
+status: production
+type: TTP
+
+description: >
+  The following analytic detects suspicious PowerShell execution indicative of 
+  PowerShell-Empire activity. It leverages PowerShell Script Block Logging (EventID 4104) 
+  to capture and analyze commands sent to PowerShell, specifically looking for patterns 
+  involving `system.net.webclient` and `DownloadString`. This behavior is significant 
+  as it often represents initial stagers used by PowerShell-Empire, a known 
+  post-exploitation framework. If confirmed malicious, this activity could allow 
+  attackers to download and execute additional payloads, leading to potential code 
+  execution, data exfiltration, or further compromise of the affected system.
+
+data_source:
+  - PowerShell Script Block Logging EventID 4104
+
+search:
+  index_pattern: "${INDEX_PATTERN}"
+  size: 100
+  sort:
+    - timestamp: desc
+  query:
+    bool:
+      must:
+        - term:
+            agent_name: "${AGENT_NAME}"
+        - term:
+            agent_labels_customer: "${CUSTOMER_CODE}"
+        - term:
+            data_win_system_eventID: "4104"
+        - wildcard:
+            data_win_eventdata_scriptBlockText: "*system.net.webclient*"
+        - wildcard:
+            data_win_eventdata_scriptBlockText: "*DownloadString*"
+        - range:
+            timestamp:
+              gte: "${START_TIME}"
+              lte: "${END_TIME}"
+  _source:
+    - timestamp
+    - agent_name
+    - data_win_system_eventID
+    - data_win_eventdata_scriptBlockText
+    - data_win_eventdata_scriptBlockId
+    - data_win_eventdata_user
+
+parameters:
+  AGENT_NAME:
+    description: "Target agent/host name"
+    type: string
+    required: true
+    example: "DESKTOP-AM0HLGE"
+  CUSTOMER_CODE:
+    description: "Customer label for filtering"
+    type: string
+    required: true
+    example: "lab"
+  INDEX_PATTERN:
+    description: "Elasticsearch index pattern"
+    type: string
+    required: true
+    example: "wazuh-lab_*"
+  START_TIME:
+    description: "Query start time (ISO 8601 or relative)"
+    type: datetime
+    required: false
+    default: "now-24h"
+    example: "2026-04-08 00:00:00.000"
+  END_TIME:
+    description: "Query end time (ISO 8601 or relative)"
+    type: datetime
+    required: false
+    default: "now"
+    example: "2026-04-08 23:59:59.999"
+
+how_to_implement: >
+  To successfully implement this analytic, you will need to enable PowerShell Script 
+  Block Logging (EventID 4104) on some or all endpoints. The Wazuh agent ossec.conf 
+  should include the Microsoft-Windows-PowerShell/Operational event channel. This 
+  detection monitors for the combination of System.Net.WebClient and DownloadString 
+  methods, which are commonly used in PowerShell-Empire stagers to download and 
+  execute remote code. PowerShell-Empire is a post-exploitation framework that 
+  allows attackers to maintain persistence and execute arbitrary commands on 
+  compromised systems.
+
+known_false_positives: >
+  False positives may pertain to it not being related to Empire, but another 
+  framework or legitimate PowerShell scripts that use similar patterns. Filter as 
+  needed if any legitimate applications use the same pattern within your organization.
+
+references:
+  - https://github.com/BC-SECURITY/Empire
+  - https://www.splunk.com/en_us/blog/security/hunting-for-malicious-powershell-using-script-block-logging.html
+  - https://blog.palantir.com/tampering-with-windows-event-tracing-background-offense-and-defense-4be7ac62ac63
+  - https://attack.mitre.org/techniques/T1059/001/
+
+response:
+  message: >
+    The following behavior was identified and typically related to PowerShell-Empire 
+    on $agent_name$ by user $data_win_eventdata_user$. 
+    Script: $data_win_eventdata_scriptBlockText$. 
+    This indicates potential post-exploitation activity. MITRE ATT&CK: T1059.001
+  risk_score: 70
+  severity: high
+  risk_objects:
+    - field: agent_name
+      type: system
+      score: 70
+    - field: data_win_eventdata_user
+      type: user
+      score: 70
+  threat_objects:
+    - field: data_win_eventdata_scriptBlockText
+      type: powershell_script
+
+tags:
+  analytic_story:
+    - Hellcat Ransomware
+    - Malicious PowerShell
+    - Hermetic Wiper
+    - Data Destruction
+    - Post-Exploitation
+  asset_type: Endpoint
+  mitre_attack_id:
+    - T1059.001
+  custom_tags:
+    - empire
+    - powershell_empire
+    - system_net_webclient
+    - downloadstring
+    - post_exploitation
+    - command_execution
+    - powershell
+  product:
+    - Wazuh
+  security_domain: endpoint
+
+graylog:
+  query: data_win_system_eventID:"4104" AND data_win_eventdata_scriptBlockText:/.*system.net.webclient.*/ AND data_win_eventdata_scriptBlockText:/.*DownloadString.*/

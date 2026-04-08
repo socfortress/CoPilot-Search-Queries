@@ -1,0 +1,153 @@
+name: Delete ShadowCopy With PowerShell
+id: 5ee2bcd0-b2ff-11eb-bb34-acde48001122
+version: 1
+schema_version: "1.0"
+date: "2026-04-08"
+author: SOCFortress LLC
+status: production
+type: TTP
+
+description: >
+  The following analytic detects the use of PowerShell to delete shadow copies via 
+  the WMIC PowerShell module or WMI object manipulation. It leverages PowerShell 
+  Script Block Logging (EventID 4104) and searches for specific keywords like 
+  "ShadowCopy," "Delete," or "Remove" within the ScriptBlockText. This activity is 
+  significant because deleting shadow copies is a common tactic used by ransomware, 
+  such as DarkSide, DarkGate, and Cactus, to prevent data recovery and maximize 
+  impact. If confirmed malicious, this action could lead to irreversible data loss 
+  and hinder recovery efforts, significantly impacting business continuity and data 
+  integrity.
+
+data_source:
+  - PowerShell Script Block Logging EventID 4104
+
+search:
+  index_pattern: "${INDEX_PATTERN}"
+  size: 100
+  sort:
+    - timestamp: desc
+  query:
+    bool:
+      must:
+        - term:
+            agent_name: "${AGENT_NAME}"
+        - term:
+            agent_labels_customer: "${CUSTOMER_CODE}"
+        - term:
+            data_win_system_eventID: "4104"
+        - wildcard:
+            data_win_eventdata_scriptBlockText: "*ShadowCopy*"
+        - bool:
+            should:
+              - wildcard:
+                  data_win_eventdata_scriptBlockText: "*Delete*"
+              - wildcard:
+                  data_win_eventdata_scriptBlockText: "*Remove*"
+            minimum_should_match: 1
+        - range:
+            timestamp:
+              gte: "${START_TIME}"
+              lte: "${END_TIME}"
+  _source:
+    - timestamp
+    - agent_name
+    - data_win_system_eventID
+    - data_win_eventdata_scriptBlockText
+    - data_win_eventdata_scriptBlockId
+    - data_win_eventdata_user
+
+parameters:
+  AGENT_NAME:
+    description: "Target agent/host name"
+    type: string
+    required: true
+    example: "DESKTOP-AM0HLGE"
+  CUSTOMER_CODE:
+    description: "Customer label for filtering"
+    type: string
+    required: true
+    example: "lab"
+  INDEX_PATTERN:
+    description: "Elasticsearch index pattern"
+    type: string
+    required: true
+    example: "wazuh-lab_*"
+  START_TIME:
+    description: "Query start time (ISO 8601 or relative)"
+    type: datetime
+    required: false
+    default: "now-24h"
+    example: "2026-04-08 00:00:00.000"
+  END_TIME:
+    description: "Query end time (ISO 8601 or relative)"
+    type: datetime
+    required: false
+    default: "now"
+    example: "2026-04-08 23:59:59.999"
+
+how_to_implement: >
+  To successfully implement this search, you need to be ingesting PowerShell Script 
+  Block Logging (EventID 4104) from your Windows endpoints. Enable PowerShell 
+  operational logs to be imported into the Wazuh index. The Wazuh agent ossec.conf 
+  should include the Microsoft-Windows-PowerShell/Operational event channel. This 
+  detection monitors for PowerShell commands that interact with WMI objects to delete 
+  shadow copies, which is a critical indicator of ransomware activity. Shadow copies 
+  (Volume Shadow Copy Service snapshots) are crucial for system and data recovery.
+
+known_false_positives: >
+  No false positives have been identified at this time. Legitimate administrators 
+  do not typically delete shadow copies via PowerShell. Any deletion of shadow copies 
+  should be investigated immediately as it is a strong indicator of malicious activity 
+  or ransomware infection.
+
+references:
+  - https://www.mandiant.com/resources/shining-a-light-on-darkside-ransomware-operations
+  - https://www.techtarget.com/searchwindowsserver/tutorial/Set-up-PowerShell-script-block-logging-for-added-security
+  - https://attack.mitre.org/techniques/T1490/
+
+response:
+  message: >
+    An attempt to delete ShadowCopy was performed using PowerShell on $agent_name$ 
+    by user $data_win_eventdata_user$. Script: $data_win_eventdata_scriptBlockText$. 
+    This is a strong indicator of ransomware activity. MITRE ATT&CK: T1490
+  risk_score: 90
+  severity: critical
+  risk_objects:
+    - field: agent_name
+      type: system
+      score: 90
+    - field: data_win_eventdata_user
+      type: user
+      score: 90
+  threat_objects:
+    - field: data_win_eventdata_scriptBlockText
+      type: powershell_script
+
+tags:
+  analytic_story:
+    - DarkSide Ransomware
+    - Ransomware
+    - Revil Ransomware
+    - DarkGate Malware
+    - Cactus Ransomware
+    - VanHelsing Ransomware
+    - Data Destruction
+  asset_type: Endpoint
+  mitre_attack_id:
+    - T1490
+  custom_tags:
+    - shadowcopy
+    - vss
+    - ransomware
+    - data_destruction
+    - darkside
+    - darkgate
+    - cactus
+    - wmi
+    - volume_shadow_copy
+  product:
+    - Wazuh
+  security_domain: endpoint
+
+graylog:
+  query: data_win_system_eventID:"4104" AND data_win_eventdata_scriptBlockText:/.*ShadowCopy.*/ AND (data_win_eventdata_scriptBlockText:/.*Delete.*/ OR data_win_eventdata_scriptBlockText:/.*Remove.*/)

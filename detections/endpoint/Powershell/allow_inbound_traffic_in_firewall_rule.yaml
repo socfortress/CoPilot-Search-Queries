@@ -1,0 +1,144 @@
+name: Allow Inbound Traffic In Firewall Rule
+id: a5d85486-b89c-11eb-8267-acde48001122
+version: 1
+schema_version: "1.0"
+date: "2026-04-08"
+author: SOCFortress LLC
+status: production
+type: TTP
+
+description: >
+  The following analytic detects a suspicious PowerShell command that allows inbound 
+  traffic to a specific local port within the public profile. It leverages PowerShell 
+  Script Block Logging (EventID 4104) to identify commands containing keywords like 
+  "New-NetFirewallRule," "Inbound," "Allow," and "-LocalPort." This activity is 
+  significant because it may indicate an attacker attempting to establish remote access 
+  by modifying firewall rules to expose services. If confirmed malicious, this could 
+  allow unauthorized access to the machine, potentially leading to further exploitation, 
+  lateral movement, and data exfiltration.
+
+data_source:
+  - PowerShell Script Block Logging EventID 4104
+
+search:
+  index_pattern: "${INDEX_PATTERN}"
+  size: 100
+  sort:
+    - timestamp: desc
+  query:
+    bool:
+      must:
+        - term:
+            agent_name: "${AGENT_NAME}"
+        - term:
+            agent_labels_customer: "${CUSTOMER_CODE}"
+        - term:
+            data_win_system_eventID: "4104"
+        - wildcard:
+            data_win_eventdata_scriptBlockText: "*New-NetFirewallRule*"
+        - wildcard:
+            data_win_eventdata_scriptBlockText: "*Inbound*"
+        - wildcard:
+            data_win_eventdata_scriptBlockText: "*Allow*"
+        - wildcard:
+            data_win_eventdata_scriptBlockText: "*-LocalPort*"
+        - range:
+            timestamp:
+              gte: "${START_TIME}"
+              lte: "${END_TIME}"
+  _source:
+    - timestamp
+    - agent_name
+    - data_win_system_eventID
+    - data_win_eventdata_scriptBlockText
+    - data_win_eventdata_scriptBlockId
+    - data_win_eventdata_user
+
+parameters:
+  AGENT_NAME:
+    description: "Target agent/host name"
+    type: string
+    required: true
+    example: "DESKTOP-AM0HLGE"
+  CUSTOMER_CODE:
+    description: "Customer label for filtering"
+    type: string
+    required: true
+    example: "lab"
+  INDEX_PATTERN:
+    description: "Elasticsearch index pattern"
+    type: string
+    required: true
+    example: "wazuh-lab_*"
+  START_TIME:
+    description: "Query start time (ISO 8601 or relative)"
+    type: datetime
+    required: false
+    default: "now-24h"
+    example: "2026-04-08 00:00:00.000"
+  END_TIME:
+    description: "Query end time (ISO 8601 or relative)"
+    type: datetime
+    required: false
+    default: "now"
+    example: "2026-04-08 23:59:59.999"
+
+how_to_implement: >
+  To successfully implement this search, you need to be ingesting PowerShell Script 
+  Block Logging (EventID 4104) from your Windows endpoints. Enable PowerShell 
+  operational logs to be imported into the Wazuh index. The Wazuh agent ossec.conf 
+  should include the Microsoft-Windows-PowerShell/Operational event channel. This 
+  detection monitors for the New-NetFirewallRule PowerShell cmdlet combined with 
+  keywords indicating inbound traffic allowance on specific local ports. The detection 
+  specifically looks for firewall rules that allow inbound connections, which is 
+  commonly used by attackers for remote access establishment.
+
+known_false_positives: >
+  Administrators may legitimately allow inbound traffic for legitimate network or 
+  machine administration purposes. Filter based on user context and whether the action 
+  was expected and authorized within your organization. Legitimate administrative 
+  scripts and system management tools may also trigger this detection.
+
+references:
+  - https://docs.microsoft.com/en-us/powershell/module/netsecurity/new-netfirewallrule?view=windowsserver2019-ps
+  - https://attack.mitre.org/techniques/T1021/001/
+
+response:
+  message: >
+    Suspicious firewall modification detected on endpoint $agent_name$ by user $data_win_eventdata_user$.
+    PowerShell Script: $data_win_eventdata_scriptBlockText$. 
+    This may indicate an attempt to establish remote access. MITRE ATT&CK: T1021.001
+  risk_score: 50
+  severity: medium
+  risk_objects:
+    - field: agent_name
+      type: system
+      score: 50
+    - field: data_win_eventdata_user
+      type: user
+      score: 50
+  threat_objects:
+    - field: data_win_eventdata_scriptBlockText
+      type: powershell_script
+
+tags:
+  analytic_story:
+    - Prohibited Traffic Allowed or Protocol Mismatch
+    - NetSupport RMM Tool Abuse
+    - Lateral Movement
+  asset_type: Endpoint
+  mitre_attack_id:
+    - T1021.001
+  custom_tags:
+    - firewall_rule
+    - new_netfirewallrule
+    - inbound_allow
+    - remote_access
+    - powershell
+    - lateral_movement
+  product:
+    - Wazuh
+  security_domain: endpoint
+
+graylog:
+  query: data_win_system_eventID:"4104" AND data_win_eventdata_scriptBlockText:/.*New-NetFirewallRule.*/ AND data_win_eventdata_scriptBlockText:/.*Inbound.*/ AND data_win_eventdata_scriptBlockText:/.*Allow.*/ AND data_win_eventdata_scriptBlockText:/.*LocalPort.*/

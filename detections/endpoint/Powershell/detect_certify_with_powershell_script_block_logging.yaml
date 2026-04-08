@@ -1,0 +1,144 @@
+name: Detect Certify With PowerShell Script Block Logging
+id: f533ca6c-9440-4686-80cb-7f294c07812a
+version: 1
+schema_version: "1.0"
+date: "2026-04-08"
+author: SOCFortress LLC
+status: production
+type: TTP
+
+description: >
+  The following analytic detects the use of the Certify tool via an in-memory 
+  PowerShell function to enumerate Active Directory Certificate Services (AD CS) 
+  environments. It leverages PowerShell Script Block Logging (EventID 4104) to 
+  identify specific command patterns associated with Certify's enumeration and 
+  exploitation functions. This activity is significant as it indicates potential 
+  reconnaissance or exploitation attempts against AD CS, which could lead to 
+  unauthorized certificate issuance and privilege escalation. If confirmed malicious, 
+  attackers could leverage this to escalate privileges, persist in the environment, 
+  or access sensitive information by abusing AD CS vulnerabilities such as ESC1-ESC8.
+
+data_source:
+  - PowerShell Script Block Logging EventID 4104
+
+search:
+  index_pattern: "${INDEX_PATTERN}"
+  size: 100
+  sort:
+    - timestamp: desc
+  query:
+    bool:
+      must:
+        - term:
+            agent_name: "${AGENT_NAME}"
+        - term:
+            agent_labels_customer: "${CUSTOMER_CODE}"
+        - term:
+            data_win_system_eventID: "4104"
+        - wildcard:
+            data_win_eventdata_scriptBlockText: "*Certify*"
+        - wildcard:
+            data_win_eventdata_scriptBlockText: "*find*"
+        - wildcard:
+            data_win_eventdata_scriptBlockText: "*vulnerable*"
+        - range:
+            timestamp:
+              gte: "${START_TIME}"
+              lte: "${END_TIME}"
+  _source:
+    - timestamp
+    - agent_name
+    - data_win_system_eventID
+    - data_win_eventdata_scriptBlockText
+    - data_win_eventdata_scriptBlockId
+    - data_win_eventdata_user
+
+parameters:
+  AGENT_NAME:
+    description: "Target agent/host name"
+    type: string
+    required: true
+    example: "DESKTOP-AM0HLGE"
+  CUSTOMER_CODE:
+    description: "Customer label for filtering"
+    type: string
+    required: true
+    example: "lab"
+  INDEX_PATTERN:
+    description: "Elasticsearch index pattern"
+    type: string
+    required: true
+    example: "wazuh-lab_*"
+  START_TIME:
+    description: "Query start time (ISO 8601 or relative)"
+    type: datetime
+    required: false
+    default: "now-24h"
+    example: "2026-04-08 00:00:00.000"
+  END_TIME:
+    description: "Query end time (ISO 8601 or relative)"
+    type: datetime
+    required: false
+    default: "now"
+    example: "2026-04-08 23:59:59.999"
+
+how_to_implement: >
+  To successfully implement this analytic, you will need to enable PowerShell Script 
+  Block Logging (EventID 4104) on some or all endpoints. The Wazuh agent ossec.conf 
+  should include the Microsoft-Windows-PowerShell/Operational event channel. This 
+  detection monitors for the Certify tool, which is a C# tool for enumerating and 
+  abusing Active Directory Certificate Services. Certify can identify misconfigurations 
+  in AD CS that allow privilege escalation. The detection specifically looks for the 
+  "find /vulnerable" pattern which enumerates vulnerable certificate templates.
+
+known_false_positives: >
+  No false positives have been identified at this time. Certify is a specialized 
+  attack tool not typically used in legitimate administrative tasks.
+
+references:
+  - https://github.com/GhostPack/Certify
+  - https://specterops.io/wp-content/uploads/sites/3/2022/06/Certified_Pre-Owned.pdf
+  - https://attack.mitre.org/techniques/T1649/
+
+response:
+  message: >
+    Certify tool execution detected via PowerShell on $agent_name$ by user 
+    $data_win_eventdata_user$. Script: $data_win_eventdata_scriptBlockText$. 
+    This indicates AD CS reconnaissance or exploitation. MITRE ATT&CK: T1649
+  risk_score: 75
+  severity: high
+  risk_objects:
+    - field: agent_name
+      type: system
+      score: 75
+    - field: data_win_eventdata_user
+      type: user
+      score: 75
+  threat_objects:
+    - field: data_win_eventdata_scriptBlockText
+      type: powershell_script
+
+tags:
+  analytic_story:
+    - Windows Certificate Services
+    - Malicious PowerShell
+    - AD CS Exploitation
+  asset_type: Endpoint
+  mitre_attack_id:
+    - T1059.001
+    - T1649
+  custom_tags:
+    - certify
+    - ad_cs
+    - certificate_services
+    - privilege_escalation
+    - reconnaissance
+    - powershell
+    - esc1
+    - esc8
+  product:
+    - Wazuh
+  security_domain: endpoint
+
+graylog:
+  query: data_win_system_eventID:"4104" AND data_win_eventdata_scriptBlockText:/.*Certify.*/ AND data_win_eventdata_scriptBlockText:/.*find.*/ AND data_win_eventdata_scriptBlockText:/.*vulnerable.*/

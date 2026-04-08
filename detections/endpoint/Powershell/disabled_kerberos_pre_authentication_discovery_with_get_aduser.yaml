@@ -1,0 +1,145 @@
+name: Disabled Kerberos Pre-Authentication Discovery With Get-ADUser
+id: 114c6bfe-9406-11ec-bcce-acde48001122
+version: 1
+schema_version: "1.0"
+date: "2026-04-08"
+author: SOCFortress LLC
+status: production
+type: TTP
+
+description: >
+  The following analytic detects the execution of the `Get-ADUser` PowerShell cmdlet 
+  with parameters indicating a search for domain accounts with Kerberos Pre-Authentication 
+  disabled. It leverages PowerShell Script Block Logging (EventID 4104) to identify 
+  this specific activity. This behavior is significant because discovering accounts 
+  with Kerberos Pre-Authentication disabled (UserAccountControl flag 4194304) can 
+  allow adversaries to perform AS-REP roasting attacks and offline password cracking. 
+  If confirmed malicious, this activity could lead to unauthorized access to user 
+  accounts, credential compromise, and potential privilege escalation within the network.
+
+data_source:
+  - PowerShell Script Block Logging EventID 4104
+
+search:
+  index_pattern: "${INDEX_PATTERN}"
+  size: 100
+  sort:
+    - timestamp: desc
+  query:
+    bool:
+      must:
+        - term:
+            agent_name: "${AGENT_NAME}"
+        - term:
+            agent_labels_customer: "${CUSTOMER_CODE}"
+        - term:
+            data_win_system_eventID: "4104"
+        - wildcard:
+            data_win_eventdata_scriptBlockText: "*Get-ADUser*"
+        - wildcard:
+            data_win_eventdata_scriptBlockText: "*4194304*"
+        - range:
+            timestamp:
+              gte: "${START_TIME}"
+              lte: "${END_TIME}"
+  _source:
+    - timestamp
+    - agent_name
+    - data_win_system_eventID
+    - data_win_eventdata_scriptBlockText
+    - data_win_eventdata_scriptBlockId
+    - data_win_eventdata_user
+
+parameters:
+  AGENT_NAME:
+    description: "Target agent/host name"
+    type: string
+    required: true
+    example: "DESKTOP-AM0HLGE"
+  CUSTOMER_CODE:
+    description: "Customer label for filtering"
+    type: string
+    required: true
+    example: "lab"
+  INDEX_PATTERN:
+    description: "Elasticsearch index pattern"
+    type: string
+    required: true
+    example: "wazuh-lab_*"
+  START_TIME:
+    description: "Query start time (ISO 8601 or relative)"
+    type: datetime
+    required: false
+    default: "now-24h"
+    example: "2026-04-08 00:00:00.000"
+  END_TIME:
+    description: "Query end time (ISO 8601 or relative)"
+    type: datetime
+    required: false
+    default: "now"
+    example: "2026-04-08 23:59:59.999"
+
+how_to_implement: >
+  To successfully implement this analytic, you will need to enable PowerShell Script 
+  Block Logging (EventID 4104) on some or all endpoints. The Wazuh agent ossec.conf 
+  should include the Microsoft-Windows-PowerShell/Operational event channel. This 
+  detection monitors for the Get-ADUser cmdlet combined with the UserAccountControl 
+  flag 4194304 (DONT_REQ_PREAUTH), which indicates accounts with Kerberos 
+  Pre-Authentication disabled. These accounts are vulnerable to AS-REP roasting 
+  attacks where attackers can request Kerberos authentication without providing valid 
+  credentials and then perform offline password cracking.
+
+known_false_positives: >
+  Administrators or power users may search for accounts with Kerberos Pre-Authentication 
+  disabled for legitimate purposes, such as system administration, auditing, or 
+  troubleshooting. Filter based on user context and whether the action was expected 
+  and authorized within your organization.
+
+references:
+  - https://attack.mitre.org/techniques/T1558/004/
+  - https://m0chan.github.io/2019/07/31/How-To-Attack-Kerberos-101.html
+  - https://stealthbits.com/blog/cracking-active-directory-passwords-with-as-rep-roasting/
+  - https://learn.microsoft.com/en-us/troubleshoot/windows-server/active-directory/useraccountcontrol-manipulated-ldap
+
+response:
+  message: >
+    Disabled Kerberos Pre-Authentication Discovery With Get-ADUser detected on 
+    $agent_name$ by user $data_win_eventdata_user$. 
+    Script: $data_win_eventdata_scriptBlockText$. 
+    This indicates reconnaissance for AS-REP roasting vulnerable accounts. 
+    MITRE ATT&CK: T1558.004
+  risk_score: 60
+  severity: medium
+  risk_objects:
+    - field: agent_name
+      type: system
+      score: 60
+  threat_objects:
+    - field: data_win_eventdata_scriptBlockText
+      type: powershell_script
+
+tags:
+  analytic_story:
+    - CISA AA23-347A
+    - Active Directory Kerberos Attacks
+    - BlackSuit Ransomware
+    - Interlock Ransomware
+    - Kerberos Attacks
+  asset_type: Endpoint
+  mitre_attack_id:
+    - T1558.004
+  custom_tags:
+    - get_aduser
+    - kerberos
+    - pre_authentication
+    - asrep_roasting
+    - useraccountcontrol
+    - 4194304
+    - active_directory
+    - reconnaissance
+  product:
+    - Wazuh
+  security_domain: endpoint
+
+graylog:
+  query: data_win_system_eventID:"4104" AND data_win_eventdata_scriptBlockText:/.*Get-ADUser.*/ AND data_win_eventdata_scriptBlockText:/.*4194304.*/
