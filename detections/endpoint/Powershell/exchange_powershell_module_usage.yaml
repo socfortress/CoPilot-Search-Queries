@@ -1,0 +1,158 @@
+name: Exchange PowerShell Module Usage
+id: 2d10095e-05ae-11ec-8fdf-acde48001122
+version: 1
+schema_version: "1.0"
+date: "2026-04-08"
+author: SOCFortress LLC
+status: production
+type: TTP
+
+description: >
+  The following analytic detects the usage of specific Exchange PowerShell modules, 
+  such as New-MailboxExportRequest, New-ManagementRoleAssignment, New-MailboxSearch, 
+  Get-Recipient, and Search-Mailbox. It leverages PowerShell Script Block Logging 
+  (EventID 4104) to identify these commands. This activity is significant because 
+  these modules can be exploited by adversaries who have gained access via ProxyShell 
+  or ProxyNotShell vulnerabilities. If confirmed malicious, attackers could export 
+  mailbox contents, assign management roles, conduct mailbox searches, or view 
+  recipient objects, potentially leading to data exfiltration, privilege escalation, 
+  or unauthorized access to sensitive information.
+
+data_source:
+  - PowerShell Script Block Logging EventID 4104
+
+search:
+  index_pattern: "${INDEX_PATTERN}"
+  size: 100
+  sort:
+    - timestamp: desc
+  query:
+    bool:
+      must:
+        - term:
+            agent_name: "${AGENT_NAME}"
+        - term:
+            agent_labels_customer: "${CUSTOMER_CODE}"
+        - term:
+            data_win_system_eventID: "4104"
+        - bool:
+            should:
+              - wildcard:
+                  data_win_eventdata_scriptBlockText: "*New-MailboxExportRequest*"
+              - wildcard:
+                  data_win_eventdata_scriptBlockText: "*New-ManagementRoleAssignment*"
+              - wildcard:
+                  data_win_eventdata_scriptBlockText: "*New-MailboxSearch*"
+              - wildcard:
+                  data_win_eventdata_scriptBlockText: "*Get-Recipient*"
+              - wildcard:
+                  data_win_eventdata_scriptBlockText: "*Search-Mailbox*"
+            minimum_should_match: 1
+        - range:
+            timestamp:
+              gte: "${START_TIME}"
+              lte: "${END_TIME}"
+  _source:
+    - timestamp
+    - agent_name
+    - data_win_system_eventID
+    - data_win_eventdata_scriptBlockText
+    - data_win_eventdata_scriptBlockId
+    - data_win_eventdata_user
+
+parameters:
+  AGENT_NAME:
+    description: "Target agent/host name"
+    type: string
+    required: true
+    example: "DESKTOP-AM0HLGE"
+  CUSTOMER_CODE:
+    description: "Customer label for filtering"
+    type: string
+    required: true
+    example: "lab"
+  INDEX_PATTERN:
+    description: "Elasticsearch index pattern"
+    type: string
+    required: true
+    example: "wazuh-lab_*"
+  START_TIME:
+    description: "Query start time (ISO 8601 or relative)"
+    type: datetime
+    required: false
+    default: "now-24h"
+    example: "2026-04-08 00:00:00.000"
+  END_TIME:
+    description: "Query end time (ISO 8601 or relative)"
+    type: datetime
+    required: false
+    default: "now"
+    example: "2026-04-08 23:59:59.999"
+
+how_to_implement: >
+  To successfully implement this analytic, you will need to enable PowerShell Script 
+  Block Logging (EventID 4104) on some or all endpoints. The Wazuh agent ossec.conf 
+  should include the Microsoft-Windows-PowerShell/Operational event channel. This 
+  detection monitors for specific Exchange PowerShell cmdlets that are commonly abused 
+  in ProxyShell and ProxyNotShell attacks. New-MailboxExportRequest is used to export 
+  mailbox data for data exfiltration. New-ManagementRoleAssignment is used to escalate 
+  privileges. New-MailboxSearch and Search-Mailbox are used to search mailbox contents. 
+  Get-Recipient is used for enumeration.
+
+known_false_positives: >
+  Administrators or power users may use these PowerShell cmdlets for legitimate 
+  troubleshooting and system administration purposes. Filter based on user context 
+  and whether the action was expected and authorized within your organization.
+
+references:
+  - https://docs.microsoft.com/en-us/powershell/module/exchange/new-mailboxexportrequest?view=exchange-ps
+  - https://docs.microsoft.com/en-us/powershell/module/exchange/new-managementroleassignment?view=exchange-ps
+  - https://blog.orange.tw/2021/08/proxyshell-a-new-attack-surface-on-ms-exchange-part-3.html
+  - https://www.zerodayinitiative.com/blog/2021/8/17/from-pwn2own-2021-a-new-attack-surface-on-microsoft-exchange-proxyshell
+  - https://thedfirreport.com/2021/11/15/exchange-exploit-leads-to-domain-wide-ransomware/
+  - https://www.cisa.gov/uscert/ncas/alerts/aa22-264a
+
+response:
+  message: >
+    Suspicious Exchange PowerShell module usage was identified on $agent_name$ 
+    by user $data_win_eventdata_user$. Script: $data_win_eventdata_scriptBlockText$. 
+    This may indicate ProxyShell/ProxyNotShell exploitation. MITRE ATT&CK: T1059.001
+  risk_score: 75
+  severity: high
+  risk_objects:
+    - field: agent_name
+      type: system
+      score: 75
+  threat_objects:
+    - field: data_win_eventdata_scriptBlockText
+      type: powershell_script
+
+tags:
+  analytic_story:
+    - ProxyNotShell
+    - CISA AA22-277A
+    - ProxyShell
+    - BlackByte Ransomware
+    - CISA AA22-264A
+    - Scattered Spider
+    - Exchange Server Exploitation
+  asset_type: Endpoint
+  mitre_attack_id:
+    - T1059.001
+  custom_tags:
+    - exchange
+    - new_mailboxexportrequest
+    - new_managementroleassignment
+    - new_mailboxsearch
+    - get_recipient
+    - search_mailbox
+    - proxyshell
+    - proxynotshell
+    - data_exfiltration
+    - powershell
+  product:
+    - Wazuh
+  security_domain: endpoint
+
+graylog:
+  query: data_win_system_eventID:"4104" AND (data_win_eventdata_scriptBlockText:/.*New-MailboxExportRequest.*/ OR data_win_eventdata_scriptBlockText:/.*New-ManagementRoleAssignment.*/ OR data_win_eventdata_scriptBlockText:/.*New-MailboxSearch.*/ OR data_win_eventdata_scriptBlockText:/.*Get-Recipient.*/ OR data_win_eventdata_scriptBlockText:/.*Search-Mailbox.*/)

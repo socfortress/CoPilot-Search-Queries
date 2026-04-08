@@ -1,0 +1,153 @@
+name: Elevated Group Discovery with PowerView
+id: 10d62950-0de5-4199-a710-cff9ea79b413
+version: 1
+schema_version: "1.0"
+date: "2026-04-08"
+author: SOCFortress LLC
+status: production
+type: Hunting
+
+description: >
+  The following analytic detects the execution of the `Get-DomainGroupMember` cmdlet 
+  from PowerView, identified through PowerShell Script Block Logging (EventID 4104). 
+  This cmdlet is used to enumerate members of elevated domain groups such as Domain 
+  Admins, Enterprise Admins, Schema Admins, and other privileged groups. Monitoring 
+  this activity is crucial as it indicates potential reconnaissance efforts by adversaries 
+  to identify high-privileged users within the domain. If confirmed malicious, this 
+  activity could lead to targeted attacks on privileged accounts, facilitating further 
+  compromise and lateral movement within the network.
+
+data_source:
+  - PowerShell Script Block Logging EventID 4104
+
+search:
+  index_pattern: "${INDEX_PATTERN}"
+  size: 100
+  sort:
+    - timestamp: desc
+  query:
+    bool:
+      must:
+        - term:
+            agent_name: "${AGENT_NAME}"
+        - term:
+            agent_labels_customer: "${CUSTOMER_CODE}"
+        - term:
+            data_win_system_eventID: "4104"
+        - wildcard:
+            data_win_eventdata_scriptBlockText: "*Get-DomainGroupMember*"
+        - bool:
+            should:
+              - wildcard:
+                  data_win_eventdata_scriptBlockText: "*Domain Admins*"
+              - wildcard:
+                  data_win_eventdata_scriptBlockText: "*Enterprise Admins*"
+              - wildcard:
+                  data_win_eventdata_scriptBlockText: "*Schema Admins*"
+              - wildcard:
+                  data_win_eventdata_scriptBlockText: "*Account Operators*"
+              - wildcard:
+                  data_win_eventdata_scriptBlockText: "*Server Operators*"
+              - wildcard:
+                  data_win_eventdata_scriptBlockText: "*Protected Users*"
+              - wildcard:
+                  data_win_eventdata_scriptBlockText: "*Dns Admins*"
+            minimum_should_match: 1
+        - range:
+            timestamp:
+              gte: "${START_TIME}"
+              lte: "${END_TIME}"
+  _source:
+    - timestamp
+    - agent_name
+    - data_win_system_eventID
+    - data_win_eventdata_scriptBlockText
+    - data_win_eventdata_scriptBlockId
+    - data_win_eventdata_user
+
+parameters:
+  AGENT_NAME:
+    description: "Target agent/host name"
+    type: string
+    required: true
+    example: "DESKTOP-AM0HLGE"
+  CUSTOMER_CODE:
+    description: "Customer label for filtering"
+    type: string
+    required: true
+    example: "lab"
+  INDEX_PATTERN:
+    description: "Elasticsearch index pattern"
+    type: string
+    required: true
+    example: "wazuh-lab_*"
+  START_TIME:
+    description: "Query start time (ISO 8601 or relative)"
+    type: datetime
+    required: false
+    default: "now-24h"
+    example: "2026-04-08 00:00:00.000"
+  END_TIME:
+    description: "Query end time (ISO 8601 or relative)"
+    type: datetime
+    required: false
+    default: "now"
+    example: "2026-04-08 23:59:59.999"
+
+how_to_implement: >
+  To successfully implement this analytic, you will need to enable PowerShell Script 
+  Block Logging (EventID 4104) on some or all endpoints. The Wazuh agent ossec.conf 
+  should include the Microsoft-Windows-PowerShell/Operational event channel. This 
+  detection monitors for the Get-DomainGroupMember PowerView cmdlet combined with 
+  elevated group names such as Domain Admins, Enterprise Admins, Schema Admins, and 
+  other privileged groups. This combination indicates reconnaissance targeting high-privilege 
+  accounts within the domain.
+
+known_false_positives: >
+  Administrators or power users may use this PowerView cmdlet for legitimate 
+  troubleshooting and system administration purposes. Filter based on user context 
+  and whether the action was expected and authorized within your organization.
+
+references:
+  - https://attack.mitre.org/techniques/T1069/002/
+  - https://powersploit.readthedocs.io/en/latest/Recon/Get-DomainGroupMember/
+  - https://docs.microsoft.com/en-us/windows-server/identity/ad-ds/plan/security-best-practices/appendix-b--privileged-accounts-and-groups-in-active-directory
+  - https://github.com/PowerShellMafia/PowerSploit/blob/master/Recon/PowerView.ps1
+
+response:
+  message: >
+    Elevated group discovery with PowerView detected on $agent_name$ by user 
+    $data_win_eventdata_user$. Script: $data_win_eventdata_scriptBlockText$. 
+    This indicates reconnaissance targeting privileged accounts. MITRE ATT&CK: T1069.002
+  risk_score: 55
+  severity: medium
+  risk_objects:
+    - field: agent_name
+      type: system
+      score: 55
+  threat_objects:
+    - field: data_win_eventdata_scriptBlockText
+      type: powershell_script
+
+tags:
+  analytic_story:
+    - Active Directory Discovery
+    - Privileged Account Discovery
+  asset_type: Endpoint
+  mitre_attack_id:
+    - T1069.002
+  custom_tags:
+    - powerview
+    - get_domaingroupmember
+    - domain_admins
+    - enterprise_admins
+    - privileged_groups
+    - active_directory
+    - reconnaissance
+    - powershell
+  product:
+    - Wazuh
+  security_domain: endpoint
+
+graylog:
+  query: data_win_system_eventID:"4104" AND data_win_eventdata_scriptBlockText:/.*Get-DomainGroupMember.*/ AND (data_win_eventdata_scriptBlockText:/.*Domain Admins.*/ OR data_win_eventdata_scriptBlockText:/.*Enterprise Admins.*/ OR data_win_eventdata_scriptBlockText:/.*Schema Admins.*/ OR data_win_eventdata_scriptBlockText:/.*Account Operators.*/ OR data_win_eventdata_scriptBlockText:/.*Server Operators.*/ OR data_win_eventdata_scriptBlockText:/.*Protected Users.*/ OR data_win_eventdata_scriptBlockText:/.*Dns Admins.*/)
