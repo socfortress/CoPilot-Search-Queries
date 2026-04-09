@@ -1,0 +1,139 @@
+name: Get-DomainTrust with PowerShell Script Block
+id: 89275e7e-0548-11ec-bf75-acde48001122
+version: 1
+schema_version: "1.0"
+date: "2026-04-09"
+author: SOCFortress LLC
+status: production
+type: TTP
+
+description: >
+  The following analytic detects the execution of the `Get-DomainTrust` cmdlet from 
+  PowerView using PowerShell Script Block Logging (EventID 4104). This method captures 
+  the full command sent to PowerShell, allowing for detailed inspection. Identifying this 
+  activity is significant because it may indicate an attempt to gather domain trust 
+  information, which is often a precursor to lateral movement or privilege escalation. 
+  If confirmed malicious, this activity could enable an attacker to map trust 
+  relationships within the domain, potentially leading to further exploitation and 
+  compromise of additional systems.
+
+data_source:
+  - PowerShell Script Block Logging EventID 4104
+
+search:
+  index_pattern: "${INDEX_PATTERN}"
+  size: 100
+  sort:
+    - timestamp: desc
+  query:
+    bool:
+      must:
+        - term:
+            agent_name: "${AGENT_NAME}"
+        - term:
+            agent_labels_customer: "${CUSTOMER_CODE}"
+        - term:
+            data_win_system_eventID: "4104"
+        - wildcard:
+            data_win_eventdata_scriptBlockText: "*Get-DomainTrust*"
+        - range:
+            timestamp:
+              gte: "${START_TIME}"
+              lte: "${END_TIME}"
+  _source:
+    - timestamp
+    - agent_name
+    - data_win_system_eventID
+    - data_win_eventdata_scriptBlockText
+    - data_win_eventdata_scriptBlockId
+    - data_win_eventdata_user
+
+parameters:
+  AGENT_NAME:
+    description: "Target agent/host name"
+    type: string
+    required: true
+    example: "DESKTOP-AM0HLGE"
+  CUSTOMER_CODE:
+    description: "Customer label for filtering"
+    type: string
+    required: true
+    example: "lab"
+  INDEX_PATTERN:
+    description: "Elasticsearch index pattern"
+    type: string
+    required: true
+    example: "wazuh-lab_*"
+  START_TIME:
+    description: "Query start time (ISO 8601 or relative)"
+    type: datetime
+    required: false
+    default: "now-24h"
+    example: "2026-04-09 00:00:00.000"
+  END_TIME:
+    description: "Query end time (ISO 8601 or relative)"
+    type: datetime
+    required: false
+    default: "now"
+    example: "2026-04-09 23:59:59.999"
+
+how_to_implement: >
+  To successfully implement this analytic, you will need to enable PowerShell Script 
+  Block Logging (EventID 4104) on some or all endpoints. The Wazuh agent ossec.conf 
+  should include the Microsoft-Windows-PowerShell/Operational event channel. This 
+  detection monitors for the Get-DomainTrust cmdlet, which is used to gather domain 
+  trust information. Validate that data_win_eventdata_scriptBlockText field is being 
+  populated in Elasticsearch/Wazuh Indexer.
+
+known_false_positives: >
+  It is possible certain system management frameworks utilize this command to gather 
+  trust information. Filter based on user context and whether the action was expected 
+  and authorized within your organization.
+
+references:
+  - https://blog.harmj0y.net/redteaming/a-guide-to-attacking-domain-trusts/
+  - https://blog.palantir.com/tampering-with-windows-event-tracing-background-offense-and-defense-4be7ac62ac63
+  - https://static1.squarespace.com/static/552092d5e4b0661088167e5c/t/59c1814829f18782e24f1fe2/1505853768977/Windows+PowerShell+Logging+Cheat+Sheet+ver+Sept+2017+v2.1.pdf
+  - https://www.crowdstrike.com/blog/investigating-powershell-command-and-script-logging/
+
+response:
+  message: >
+    Get-DomainTrust execution detected on $agent_name$ by user $data_win_eventdata_user$. 
+    Script block: $data_win_eventdata_scriptBlockText$. 
+    This indicates domain trust reconnaissance/enumeration activity for lateral movement planning. 
+    MITRE ATT&CK: T1482
+  risk_score: 55
+  severity: medium
+  risk_objects:
+    - field: agent_name
+      type: system
+      score: 55
+    - field: data_win_eventdata_user
+      type: user
+      score: 55
+  threat_objects:
+    - field: data_win_eventdata_scriptBlockText
+      type: powershell_script
+
+tags:
+  analytic_story:
+    - Active Directory Discovery
+    - Lateral Movement
+  asset_type: Endpoint
+  mitre_attack_id:
+    - T1482
+  custom_tags:
+    - get_domaintrust
+    - active_directory
+    - domain_trust
+    - trust_discovery
+    - lateral_movement
+    - reconnaissance
+    - powershell
+    - enumeration
+  product:
+    - Wazuh
+  security_domain: endpoint
+
+graylog:
+  query: data_win_system_eventID:"4104" AND data_win_eventdata_scriptBlockText:/.*Get-DomainTrust.*/

@@ -1,0 +1,151 @@
+name: PowerShell Windows Defender Exclusion Commands
+id: 907ac95c-4dd9-11ec-ba2c-acde48001122
+version: 1
+schema_version: "1.0"
+date: "2026-04-09"
+author: SOCFortress LLC
+status: production
+type: TTP
+
+description: >
+  The following analytic detects the use of PowerShell commands to add or set Windows 
+  Defender exclusions. It leverages EventCode 4104 to identify suspicious `Add-MpPreference` 
+  or `Set-MpPreference` commands with exclusion parameters. This activity is significant 
+  because adversaries often use it to bypass Windows Defender, allowing malicious code to 
+  execute without detection. If confirmed malicious, this behavior could enable attackers 
+  to evade antivirus defenses, maintain persistence, and execute further malicious 
+  activities undetected.
+
+data_source:
+  - PowerShell Script Block Logging EventID 4104
+
+search:
+  index_pattern: "${INDEX_PATTERN}"
+  size: 100
+  sort:
+    - timestamp: desc
+  query:
+    bool:
+      must:
+        - term:
+            agent_name: "${AGENT_NAME}"
+        - term:
+            agent_labels_customer: "${CUSTOMER_CODE}"
+        - term:
+            data_win_system_eventID: "4104"
+        - bool:
+            should:
+              - wildcard:
+                  data_win_eventdata_scriptBlockText: "*Add-MpPreference*"
+              - wildcard:
+                  data_win_eventdata_scriptBlockText: "*Set-MpPreference*"
+            minimum_should_match: 1
+        - wildcard:
+            data_win_eventdata_scriptBlockText: "*-exclusion*"
+        - range:
+            timestamp:
+              gte: "${START_TIME}"
+              lte: "${END_TIME}"
+  _source:
+    - timestamp
+    - agent_name
+    - data_win_system_eventID
+    - data_win_eventdata_scriptBlockText
+    - data_win_eventdata_scriptBlockId
+    - data_win_eventdata_user
+
+parameters:
+  AGENT_NAME:
+    description: "Target agent/host name"
+    type: string
+    required: true
+    example: "DESKTOP-AM0HLGE"
+  CUSTOMER_CODE:
+    description: "Customer label for filtering"
+    type: string
+    required: true
+    example: "lab"
+  INDEX_PATTERN:
+    description: "Elasticsearch index pattern"
+    type: string
+    required: true
+    example: "wazuh-lab_*"
+  START_TIME:
+    description: "Query start time (ISO 8601 or relative)"
+    type: datetime
+    required: false
+    default: "now-24h"
+    example: "2026-04-09 00:00:00.000"
+  END_TIME:
+    description: "Query end time (ISO 8601 or relative)"
+    type: datetime
+    required: false
+    default: "now"
+    example: "2026-04-09 23:59:59.999"
+
+how_to_implement: >
+  To successfully implement this search you need to be ingesting information on 
+  processes that include the name of the process responsible for the changes from 
+  your endpoints. The Wazuh agent ossec.conf should include the Microsoft-Windows-PowerShell/Operational 
+  event channel. This detection monitors for Add-MpPreference or Set-MpPreference 
+  cmdlets with exclusion parameters. Validate that data_win_eventdata_scriptBlockText 
+  field is being populated in Elasticsearch/Wazuh Indexer.
+
+known_false_positives: >
+  Administrators or users may choose to use this Windows feature for legitimate purposes. 
+  Filter based on user context and whether the action was expected and authorized within 
+  your organization.
+
+references:
+  - https://tccontre.blogspot.com/2020/01/remcos-rat-evading-windows-defender-av.html
+  - https://app.any.run/tasks/cf1245de-06a7-4366-8209-8e3006f2bfe5/
+  - https://www.microsoft.com/security/blog/2022/01/15/destructive-malware-targeting-ukrainian-organizations/
+  - https://attack.mitre.org/techniques/T1562/001/
+
+response:
+  message: >
+    Windows Defender exclusion command detected on $agent_name$ by user 
+    $data_win_eventdata_user$. Script block: $data_win_eventdata_scriptBlockText$. 
+    This indicates antivirus evasion/defense impairment attempt. 
+    MITRE ATT&CK: T1562.001
+  risk_score: 80
+  severity: high
+  risk_objects:
+    - field: agent_name
+      type: system
+      score: 75
+    - field: data_win_eventdata_user
+      type: user
+      score: 75
+  threat_objects:
+    - field: data_win_eventdata_scriptBlockText
+      type: powershell_script
+
+tags:
+  analytic_story:
+    - CISA AA22-320A
+    - AgentTesla
+    - Remcos
+    - Windows Defense Evasion Tactics
+    - Data Destruction
+    - WhisperGate
+    - Warzone RAT
+    - NetSupport RMM Tool Abuse
+    - BlankGrabber Stealer
+  asset_type: Endpoint
+  mitre_attack_id:
+    - T1562.001
+  custom_tags:
+    - add_mppreference
+    - set_mppreference
+    - windows_defender
+    - exclusion
+    - defense_evasion
+    - antivirus_bypass
+    - powershell
+  product:
+    - Wazuh
+  security_domain: endpoint
+
+graylog:
+  query: data_win_system_eventID:"4104" AND (data_win_eventdata_scriptBlockText:/.*[Aa]dd-[Mm]p[Pp]reference.*/ OR data_win_eventdata_scriptBlockText:/.*[Ss]et-[Mm]p[Pp]reference.*/) AND data_win_eventdata_scriptBlockText:/.*[Ee]xclusion.*/

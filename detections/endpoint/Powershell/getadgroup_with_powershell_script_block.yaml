@@ -1,0 +1,138 @@
+name: Get-AdGroup with PowerShell Script Block
+id: e4c73d68-794b-468d-b4d0-dac1772bbae7
+version: 1
+schema_version: "1.0"
+date: "2026-04-09"
+author: SOCFortress LLC
+status: production
+type: Hunting
+
+description: >
+  The following analytic detects the execution of the `Get-AdGroup` PowerShell cmdlet 
+  using PowerShell Script Block Logging (EventID 4104). This cmdlet is used to enumerate 
+  all domain groups, which adversaries may exploit for situational awareness and Active 
+  Directory discovery. Monitoring this activity is crucial as it can indicate 
+  reconnaissance efforts within the network. If confirmed malicious, this behavior could 
+  lead to further exploitation, such as privilege escalation or lateral movement, by 
+  providing attackers with detailed information about the domain's group structure.
+
+data_source:
+  - PowerShell Script Block Logging EventID 4104
+
+search:
+  index_pattern: "${INDEX_PATTERN}"
+  size: 100
+  sort:
+    - timestamp: desc
+  query:
+    bool:
+      must:
+        - term:
+            agent_name: "${AGENT_NAME}"
+        - term:
+            agent_labels_customer: "${CUSTOMER_CODE}"
+        - term:
+            data_win_system_eventID: "4104"
+        - wildcard:
+            data_win_eventdata_scriptBlockText: "*Get-ADGroup*"
+        - range:
+            timestamp:
+              gte: "${START_TIME}"
+              lte: "${END_TIME}"
+  _source:
+    - timestamp
+    - agent_name
+    - data_win_system_eventID
+    - data_win_eventdata_scriptBlockText
+    - data_win_eventdata_scriptBlockId
+    - data_win_eventdata_user
+
+parameters:
+  AGENT_NAME:
+    description: "Target agent/host name"
+    type: string
+    required: true
+    example: "DESKTOP-AM0HLGE"
+  CUSTOMER_CODE:
+    description: "Customer label for filtering"
+    type: string
+    required: true
+    example: "lab"
+  INDEX_PATTERN:
+    description: "Elasticsearch index pattern"
+    type: string
+    required: true
+    example: "wazuh-lab_*"
+  START_TIME:
+    description: "Query start time (ISO 8601 or relative)"
+    type: datetime
+    required: false
+    default: "now-24h"
+    example: "2026-04-09 00:00:00.000"
+  END_TIME:
+    description: "Query end time (ISO 8601 or relative)"
+    type: datetime
+    required: false
+    default: "now"
+    example: "2026-04-09 23:59:59.999"
+
+how_to_implement: >
+  To successfully implement this analytic, you will need to enable PowerShell Script 
+  Block Logging (EventID 4104) on some or all endpoints. The Wazuh agent ossec.conf 
+  should include the Microsoft-Windows-PowerShell/Operational event channel. This 
+  detection monitors for the Get-ADGroup cmdlet, which is used for domain group 
+  enumeration. Validate that data_win_eventdata_scriptBlockText field is being 
+  populated in Elasticsearch/Wazuh Indexer.
+
+known_false_positives: >
+  Administrators or power users may use this PowerShell cmdlet for legitimate 
+  troubleshooting and group management purposes. Filter based on user context and 
+  whether the action was expected and authorized within your organization.
+
+references:
+  - https://attack.mitre.org/techniques/T1069/002/
+  - https://docs.microsoft.com/en-us/powershell/module/activedirectory/get-adgroup?view=windowsserver2019-ps
+  - https://github.com/S1ckB0y1337/Active-Directory-Exploitation-Cheat-Sheet
+
+response:
+  message: >
+    Get-ADGroup execution detected on $agent_name$ by user $data_win_eventdata_user$. 
+    Script block: $data_win_eventdata_scriptBlockText$. 
+    This indicates domain group enumeration/reconnaissance activity for privilege escalation planning. 
+    MITRE ATT&CK: T1069.002
+  risk_score: 45
+  severity: low
+  risk_objects:
+    - field: agent_name
+      type: system
+      score: 45
+    - field: data_win_eventdata_user
+      type: user
+      score: 45
+  threat_objects:
+    - field: data_win_eventdata_scriptBlockText
+      type: powershell_script
+
+tags:
+  analytic_story:
+    - Scattered Lapsus$ Hunters
+    - Active Directory Discovery
+    - Permission Groups Discovery
+  asset_type: Endpoint
+  mitre_attack_id:
+    - T1069.002
+  custom_tags:
+    - get_adgroup
+    - active_directory
+    - group_enumeration
+    - domain_groups
+    - privilege_escalation
+    - reconnaissance
+    - powershell
+    - enumeration
+  product:
+    - Wazuh
+  security_domain: endpoint
+
+graylog:
+  query: data_win_system_eventID:"4104" AND data_win_eventdata_scriptBlockText:/.*Get-ADGroup.*/

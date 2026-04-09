@@ -1,0 +1,138 @@
+name: Get-NetTcpconnection with PowerShell Script Block
+id: 091712ff-b02a-4d43-82ed-34765515d95d
+version: 1
+schema_version: "1.0"
+date: "2026-04-09"
+author: SOCFortress LLC
+status: production
+type: Hunting
+
+description: >
+  The following analytic detects the execution of the `Get-NetTcpconnection` PowerShell 
+  cmdlet using PowerShell Script Block Logging (EventID 4104). This cmdlet lists network 
+  connections on a system, which adversaries may use for situational awareness and Active 
+  Directory discovery. Monitoring this activity is crucial as it can indicate reconnaissance 
+  efforts by an attacker. If confirmed malicious, this behavior could allow an attacker to 
+  map the network, identify critical systems, and plan further attacks, potentially leading 
+  to data exfiltration or lateral movement within the network.
+
+data_source:
+  - PowerShell Script Block Logging EventID 4104
+
+search:
+  index_pattern: "${INDEX_PATTERN}"
+  size: 100
+  sort:
+    - timestamp: desc
+  query:
+    bool:
+      must:
+        - term:
+            agent_name: "${AGENT_NAME}"
+        - term:
+            agent_labels_customer: "${CUSTOMER_CODE}"
+        - term:
+            data_win_system_eventID: "4104"
+        - wildcard:
+            data_win_eventdata_scriptBlockText: "*Get-NetTcpconnection*"
+        - range:
+            timestamp:
+              gte: "${START_TIME}"
+              lte: "${END_TIME}"
+  _source:
+    - timestamp
+    - agent_name
+    - data_win_system_eventID
+    - data_win_eventdata_scriptBlockText
+    - data_win_eventdata_scriptBlockId
+    - data_win_eventdata_user
+
+parameters:
+  AGENT_NAME:
+    description: "Target agent/host name"
+    type: string
+    required: true
+    example: "DESKTOP-AM0HLGE"
+  CUSTOMER_CODE:
+    description: "Customer label for filtering"
+    type: string
+    required: true
+    example: "lab"
+  INDEX_PATTERN:
+    description: "Elasticsearch index pattern"
+    type: string
+    required: true
+    example: "wazuh-lab_*"
+  START_TIME:
+    description: "Query start time (ISO 8601 or relative)"
+    type: datetime
+    required: false
+    default: "now-24h"
+    example: "2026-04-09 00:00:00.000"
+  END_TIME:
+    description: "Query end time (ISO 8601 or relative)"
+    type: datetime
+    required: false
+    default: "now"
+    example: "2026-04-09 23:59:59.999"
+
+how_to_implement: >
+  To successfully implement this analytic, you will need to enable PowerShell Script 
+  Block Logging (EventID 4104) on some or all endpoints. The Wazuh agent ossec.conf 
+  should include the Microsoft-Windows-PowerShell/Operational event channel. This 
+  detection monitors for the Get-NetTcpconnection cmdlet, which is used for network 
+  connection enumeration. Validate that data_win_eventdata_scriptBlockText field is 
+  being populated in Elasticsearch/Wazuh Indexer.
+
+known_false_positives: >
+  Administrators or power users may use this PowerShell cmdlet for legitimate 
+  troubleshooting and network diagnostics purposes. Filter based on user context and 
+  whether the action was expected and authorized within your organization.
+
+references:
+  - https://attack.mitre.org/techniques/T1049/
+  - https://docs.microsoft.com/en-us/powershell/module/nettcpip/get-nettcpconnection?view=windowsserver2019-ps
+  - https://github.com/redcanaryco/atomic-red-team/blob/master/atomics/T1049/T1049.md
+
+response:
+  message: >
+    Get-NetTcpconnection execution detected on $agent_name$ by user $data_win_eventdata_user$. 
+    Script block: $data_win_eventdata_scriptBlockText$. 
+    This indicates network connection enumeration/reconnaissance activity for network mapping. 
+    MITRE ATT&CK: T1049
+  risk_score: 40
+  severity: low
+  risk_objects:
+    - field: agent_name
+      type: system
+      score: 40
+    - field: data_win_eventdata_user
+      type: user
+      score: 40
+  threat_objects:
+    - field: data_win_eventdata_scriptBlockText
+      type: powershell_script
+
+tags:
+  analytic_story:
+    - Active Directory Discovery
+    - System Network Connections Discovery
+    - Network Reconnaissance
+  asset_type: Endpoint
+  mitre_attack_id:
+    - T1049
+  custom_tags:
+    - get_nettcpconnection
+    - network_connections
+    - connection_enumeration
+    - network_discovery
+    - network_mapping
+    - reconnaissance
+    - powershell
+    - enumeration
+  product:
+    - Wazuh
+  security_domain: endpoint
+
+graylog:
+  query: data_win_system_eventID:"4104" AND data_win_eventdata_scriptBlockText:/.*Get-NetTcpconnection.*/

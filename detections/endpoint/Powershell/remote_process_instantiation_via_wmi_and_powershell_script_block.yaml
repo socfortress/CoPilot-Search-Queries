@@ -1,0 +1,147 @@
+name: Remote Process Instantiation via WMI and PowerShell Script Block
+id: 2a048c14-4634-11ec-a618-3e22fbd008af
+version: 1
+schema_version: "1.0"
+date: "2026-04-09"
+author: SOCFortress LLC
+status: production
+type: TTP
+
+description: >
+  The following analytic detects the execution of the `Invoke-WmiMethod` commandlet 
+  with parameters used to start a process on a remote endpoint via WMI, leveraging 
+  PowerShell Script Block Logging (EventCode=4104). This method identifies specific 
+  script block text patterns associated with remote process instantiation via the 
+  Win32_Process class. This activity is significant as it may indicate lateral 
+  movement or remote code execution attempts by adversaries. If confirmed malicious, 
+  this could allow attackers to execute arbitrary code on remote systems, potentially 
+  leading to further compromise and persistence within the network.
+
+data_source:
+  - PowerShell Script Block Logging EventID 4104
+
+search:
+  index_pattern: "${INDEX_PATTERN}"
+  size: 100
+  sort:
+    - timestamp: desc
+  query:
+    bool:
+      must:
+        - term:
+            agent_name: "${AGENT_NAME}"
+        - term:
+            agent_labels_customer: "${CUSTOMER_CODE}"
+        - term:
+            data_win_system_eventID: "4104"
+        - wildcard:
+            data_win_eventdata_scriptBlockText: "*Invoke-WmiMethod*"
+        - bool:
+            should:
+              - wildcard:
+                  data_win_eventdata_scriptBlockText: "*-CN*"
+              - wildcard:
+                  data_win_eventdata_scriptBlockText: "*-ComputerName*"
+            minimum_should_match: 1
+        - wildcard:
+            data_win_eventdata_scriptBlockText: "*-Class Win32_Process*"
+        - wildcard:
+            data_win_eventdata_scriptBlockText: "*-Name create*"
+        - range:
+            timestamp:
+              gte: "${START_TIME}"
+              lte: "${END_TIME}"
+  _source:
+    - timestamp
+    - agent_name
+    - data_win_system_eventID
+    - data_win_eventdata_scriptBlockText
+    - data_win_eventdata_scriptBlockId
+    - data_win_eventdata_user
+
+parameters:
+  AGENT_NAME:
+    description: "Target agent/host name"
+    type: string
+    required: true
+    example: "DESKTOP-AM0HLGE"
+  CUSTOMER_CODE:
+    description: "Customer label for filtering"
+    type: string
+    required: true
+    example: "lab"
+  INDEX_PATTERN:
+    description: "Elasticsearch index pattern"
+    type: string
+    required: true
+    example: "wazuh-lab_*"
+  START_TIME:
+    description: "Query start time (ISO 8601 or relative)"
+    type: datetime
+    required: false
+    default: "now-24h"
+    example: "2026-04-09 00:00:00.000"
+  END_TIME:
+    description: "Query end time (ISO 8601 or relative)"
+    type: datetime
+    required: false
+    default: "now"
+    example: "2026-04-09 23:59:59.999"
+
+how_to_implement: >
+  To successfully implement this analytic, you will need to enable PowerShell Script 
+  Block Logging on some or all endpoints. The Wazuh agent ossec.conf should include 
+  the Microsoft-Windows-PowerShell/Operational event channel. This detection monitors 
+  for Invoke-WmiMethod cmdlet targeting the Win32_Process class with the create method 
+  on remote systems. Validate that data_win_eventdata_scriptBlockText field is being 
+  populated in Elasticsearch/Wazuh Indexer.
+
+known_false_positives: >
+  Administrators may leverage WMI and Invoke-WmiMethod to start a process on remote 
+  systems for system administration or automation use cases, but this activity is 
+  usually limited to a small set of hosts or users. Validate that such activity is 
+  authorized within your organization.
+
+references:
+  - https://attack.mitre.org/techniques/T1047/
+  - https://docs.microsoft.com/en-us/powershell/module/microsoft.powershell.management/invoke-wmimethod?view=powershell-5.1
+  - https://help.splunk.com/en/security-offerings/splunk-user-behavior-analytics/get-data-in/5.4.1/add-other-data-to-splunk-uba/configure-powershell-logging-to-see-powershell-anomalies-in-splunk-uba.html
+
+response:
+  message: >
+    WMI remote process instantiation detected on $agent_name$ by user 
+    $data_win_eventdata_user$. Script block: $data_win_eventdata_scriptBlockText$. 
+    This indicates potential lateral movement via Invoke-WmiMethod and Win32_Process. 
+    MITRE ATT&CK: T1047
+  risk_score: 50
+  severity: medium
+  risk_objects:
+    - field: agent_name
+      type: system
+      score: 50
+    - field: data_win_eventdata_user
+      type: user
+      score: 50
+  threat_objects:
+    - field: data_win_eventdata_scriptBlockText
+      type: powershell_script
+
+tags:
+  analytic_story:
+    - Active Directory Lateral Movement
+  asset_type: Endpoint
+  mitre_attack_id:
+    - T1047
+  custom_tags:
+    - wmi_lateral_movement
+    - invoke_wmimethod
+    - win32_process
+    - remote_code_execution
+    - powershell
+    - create_method
+  product:
+    - Wazuh
+  security_domain: endpoint
+
+graylog:
+  query: data_win_system_eventID:"4104" AND data_win_eventdata_scriptBlockText:/.*Invoke-WmiMethod.*/ AND (data_win_eventdata_scriptBlockText:/.*-CN.*/ OR data_win_eventdata_scriptBlockText:/.*-ComputerName.*/) AND data_win_eventdata_scriptBlockText:/.*-Class Win32_Process.*/ AND data_win_eventdata_scriptBlockText:/.*-Name create.*/

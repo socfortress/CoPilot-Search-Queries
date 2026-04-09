@@ -1,0 +1,180 @@
+name: Recon Using WMI Class
+id: 018c1972-ca07-11eb-9473-acde48001122
+version: 1
+schema_version: "1.0"
+date: "2026-04-09"
+author: SOCFortress LLC
+status: production
+type: Anomaly
+
+description: >
+  The following analytic detects suspicious PowerShell activity via EventCode 4104, 
+  where WMI performs event queries to gather information on running processes or 
+  services. This detection leverages PowerShell Script Block Logging to identify 
+  specific WMI queries targeting system information classes like Win32_Bios, 
+  Win32_OperatingSystem, Win32_Processor, Win32_ComputerSystem, Win32_PnPEntity, 
+  Win32_ShadowCopy, Win32_DiskDrive, Win32_PhysicalMemory, Win32_BaseBoard, and 
+  Win32_DisplayConfiguration. This activity is significant as it often indicates 
+  reconnaissance efforts by an adversary to profile the compromised machine. If 
+  confirmed malicious, the attacker could gain detailed system information, aiding 
+  in further exploitation or lateral movement within the network.
+
+data_source:
+  - PowerShell Script Block Logging EventID 4104
+
+search:
+  index_pattern: "${INDEX_PATTERN}"
+  size: 100
+  sort:
+    - timestamp: desc
+  query:
+    bool:
+      must:
+        - term:
+            agent_name: "${AGENT_NAME}"
+        - term:
+            agent_labels_customer: "${CUSTOMER_CODE}"
+        - term:
+            data_win_system_eventID: "4104"
+        - bool:
+            should:
+              - wildcard:
+                  data_win_eventdata_scriptBlockText: "*SELECT*"
+              - wildcard:
+                  data_win_eventdata_scriptBlockText: "*Get-WmiObject*"
+            minimum_should_match: 1
+        - bool:
+            should:
+              - wildcard:
+                  data_win_eventdata_scriptBlockText: "*Win32_Bios*"
+              - wildcard:
+                  data_win_eventdata_scriptBlockText: "*Win32_OperatingSystem*"
+              - wildcard:
+                  data_win_eventdata_scriptBlockText: "*Win32_Processor*"
+              - wildcard:
+                  data_win_eventdata_scriptBlockText: "*Win32_ComputerSystem*"
+              - wildcard:
+                  data_win_eventdata_scriptBlockText: "*Win32_PnPEntity*"
+              - wildcard:
+                  data_win_eventdata_scriptBlockText: "*Win32_ShadowCopy*"
+              - wildcard:
+                  data_win_eventdata_scriptBlockText: "*Win32_DiskDrive*"
+              - wildcard:
+                  data_win_eventdata_scriptBlockText: "*Win32_PhysicalMemory*"
+              - wildcard:
+                  data_win_eventdata_scriptBlockText: "*Win32_BaseBoard*"
+              - wildcard:
+                  data_win_eventdata_scriptBlockText: "*Win32_DisplayConfiguration*"
+            minimum_should_match: 1
+        - range:
+            timestamp:
+              gte: "${START_TIME}"
+              lte: "${END_TIME}"
+  _source:
+    - timestamp
+    - agent_name
+    - data_win_system_eventID
+    - data_win_eventdata_scriptBlockText
+    - data_win_eventdata_scriptBlockId
+    - data_win_eventdata_user
+
+parameters:
+  AGENT_NAME:
+    description: "Target agent/host name"
+    type: string
+    required: true
+    example: "DESKTOP-AM0HLGE"
+  CUSTOMER_CODE:
+    description: "Customer label for filtering"
+    type: string
+    required: true
+    example: "lab"
+  INDEX_PATTERN:
+    description: "Elasticsearch index pattern"
+    type: string
+    required: true
+    example: "wazuh-lab_*"
+  START_TIME:
+    description: "Query start time (ISO 8601 or relative)"
+    type: datetime
+    required: false
+    default: "now-24h"
+    example: "2026-04-09 00:00:00.000"
+  END_TIME:
+    description: "Query end time (ISO 8601 or relative)"
+    type: datetime
+    required: false
+    default: "now"
+    example: "2026-04-09 23:59:59.999"
+
+how_to_implement: >
+  To successfully implement this analytic, you will need to enable PowerShell Script 
+  Block Logging on some or all endpoints. The Wazuh agent ossec.conf should include 
+  the Microsoft-Windows-PowerShell/Operational event channel. This detection monitors 
+  for SELECT or Get-WmiObject commands querying system information classes. Validate 
+  that data_win_eventdata_scriptBlockText field is being populated in Elasticsearch/Wazuh Indexer.
+
+known_false_positives: >
+  System administrators or legitimate scripts may query WMI for system information 
+  during diagnostics, inventory management, or compliance checks. Filter based on 
+  user context and whether the action was expected and authorized within your organization.
+
+references:
+  - https://news.sophos.com/en-us/2020/05/12/maze-ransomware-1-year-counting/
+  - https://help.splunk.com/en/security-offerings/splunk-user-behavior-analytics/get-data-in/5.4.1/add-other-data-to-splunk-uba/configure-powershell-logging-to-see-powershell-anomalies-in-splunk-uba.html
+  - https://blog.palantir.com/tampering-with-windows-event-tracing-background-offense-and-defense-4be7ac62ac63
+  - https://static1.squarespace.com/static/552092d5e4b0661088167e5c/t/59c1814829f18782e24f1fe2/1505853768977/Windows+PowerShell+Logging+Cheat+Sheet+ver+Sept+2017+v2.1.pdf
+  - https://www.crowdstrike.com/blog/investigating-powershell-command-and-script-logging/
+  - https://www.splunk.com/en_us/blog/security/hunting-for-malicious-powershell-using-script-block-logging.html
+  - https://www.welivesecurity.com/2022/04/12/industroyer2-industroyer-reloaded/
+  - https://blogs.vmware.com/security/2022/10/lockbit-3-0-also-known-as-lockbit-black.html
+
+response:
+  message: >
+    WMI system reconnaissance detected on $agent_name$ by user 
+    $data_win_eventdata_user$. Script block: $data_win_eventdata_scriptBlockText$. 
+    Adversary is profiling the compromised system for exploitation or lateral movement. 
+    MITRE ATT&CK: T1592, T1059.001
+  risk_score: 20
+  severity: low
+  risk_objects:
+    - field: agent_name
+      type: system
+      score: 20
+    - field: data_win_eventdata_user
+      type: user
+      score: 20
+  threat_objects:
+    - field: data_win_eventdata_scriptBlockText
+      type: powershell_script
+
+tags:
+  analytic_story:
+    - Hermetic Wiper
+    - Quasar RAT
+    - Malicious PowerShell
+    - Data Destruction
+    - AsyncRAT
+    - MoonPeak
+    - LockBit Ransomware
+    - Malicious Inno Setup Loader
+    - Qakbot
+    - Industroyer2
+    - Scattered Spider
+    - BlankGrabber Stealer
+  asset_type: Endpoint
+  mitre_attack_id:
+    - T1592
+    - T1059.001
+  custom_tags:
+    - wmi_reconnaissance
+    - system_profiling
+    - win32_classes
+    - powershell
+    - shadow_copy_enumeration
+  product:
+    - Wazuh
+  security_domain: endpoint
+
+graylog:
+  query: data_win_system_eventID:"4104" AND (data_win_eventdata_scriptBlockText:/.*SELECT.*/ OR data_win_eventdata_scriptBlockText:/.*Get-WmiObject.*/) AND (data_win_eventdata_scriptBlockText:/.*Win32_Bios.*/ OR data_win_eventdata_scriptBlockText:/.*Win32_OperatingSystem.*/ OR data_win_eventdata_scriptBlockText:/.*Win32_Processor.*/ OR data_win_eventdata_scriptBlockText:/.*Win32_ComputerSystem.*/ OR data_win_eventdata_scriptBlockText:/.*Win32_PnPEntity.*/ OR data_win_eventdata_scriptBlockText:/.*Win32_ShadowCopy.*/ OR data_win_eventdata_scriptBlockText:/.*Win32_DiskDrive.*/ OR data_win_eventdata_scriptBlockText:/.*Win32_PhysicalMemory.*/ OR data_win_eventdata_scriptBlockText:/.*Win32_BaseBoard.*/ OR data_win_eventdata_scriptBlockText:/.*Win32_DisplayConfiguration.*/)

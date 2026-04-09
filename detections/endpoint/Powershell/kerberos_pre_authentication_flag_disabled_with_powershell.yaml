@@ -1,0 +1,143 @@
+name: Kerberos Pre-Authentication Flag Disabled with PowerShell
+id: 59b51620-94c9-11ec-b3d5-acde48001122
+version: 1
+schema_version: "1.0"
+date: "2026-04-09"
+author: SOCFortress LLC
+status: production
+type: TTP
+
+description: >
+  The following analytic detects the use of the `Set-ADAccountControl` PowerShell cmdlet 
+  with parameters that disable Kerberos Pre-Authentication. It leverages PowerShell 
+  Script Block Logging (EventID 4104) to identify this specific command execution. 
+  Disabling Kerberos Pre-Authentication is significant because it allows adversaries to 
+  perform offline brute force attacks against user passwords using the AS-REP Roasting 
+  technique. If confirmed malicious, this activity could enable attackers to escalate 
+  privileges or maintain persistence within an Active Directory environment, posing a 
+  severe security risk.
+
+data_source:
+  - PowerShell Script Block Logging EventID 4104
+
+search:
+  index_pattern: "${INDEX_PATTERN}"
+  size: 100
+  sort:
+    - timestamp: desc
+  query:
+    bool:
+      must:
+        - term:
+            agent_name: "${AGENT_NAME}"
+        - term:
+            agent_labels_customer: "${CUSTOMER_CODE}"
+        - term:
+            data_win_system_eventID: "4104"
+        - wildcard:
+            data_win_eventdata_scriptBlockText: "*Set-ADAccountControl*"
+        - wildcard:
+            data_win_eventdata_scriptBlockText: "*DoesNotRequirePreAuth:$true*"
+        - range:
+            timestamp:
+              gte: "${START_TIME}"
+              lte: "${END_TIME}"
+  _source:
+    - timestamp
+    - agent_name
+    - data_win_system_eventID
+    - data_win_eventdata_scriptBlockText
+    - data_win_eventdata_scriptBlockId
+    - data_win_eventdata_user
+
+parameters:
+  AGENT_NAME:
+    description: "Target agent/host name"
+    type: string
+    required: true
+    example: "DESKTOP-AM0HLGE"
+  CUSTOMER_CODE:
+    description: "Customer label for filtering"
+    type: string
+    required: true
+    example: "lab"
+  INDEX_PATTERN:
+    description: "Elasticsearch index pattern"
+    type: string
+    required: true
+    example: "wazuh-lab_*"
+  START_TIME:
+    description: "Query start time (ISO 8601 or relative)"
+    type: datetime
+    required: false
+    default: "now-24h"
+    example: "2026-04-09 00:00:00.000"
+  END_TIME:
+    description: "Query end time (ISO 8601 or relative)"
+    type: datetime
+    required: false
+    default: "now"
+    example: "2026-04-09 23:59:59.999"
+
+how_to_implement: >
+  To successfully implement this analytic, you will need to enable PowerShell Script 
+  Block Logging (EventID 4104) on some or all endpoints. The Wazuh agent ossec.conf 
+  should include the Microsoft-Windows-PowerShell/Operational event channel. This 
+  detection monitors for the Set-ADAccountControl cmdlet with DoesNotRequirePreAuth:$true 
+  parameter. Validate that data_win_eventdata_scriptBlockText field is being populated 
+  in Elasticsearch/Wazuh Indexer.
+
+known_false_positives: >
+  Although unlikely, Administrators may need to set this flag for legitimate purposes. 
+  Filter based on user context and whether the action was expected and authorized within 
+  your organization.
+
+references:
+  - https://docs.microsoft.com/en-us/troubleshoot/windows-server/identity/useraccountcontrol-manipulate-account-properties
+  - https://m0chan.github.io/2019/07/31/How-To-Attack-Kerberos-101.html
+  - https://stealthbits.com/blog/cracking-active-directory-passwords-with-as-rep-roasting/
+  - https://attack.mitre.org/techniques/T1558/004/
+
+response:
+  message: >
+    Kerberos Pre-Authentication disabled on $agent_name$ by user $data_win_eventdata_user$. 
+    Script block: $data_win_eventdata_scriptBlockText$. 
+    This indicates AS-REP Roasting preparation/privilege escalation activity. 
+    MITRE ATT&CK: T1558.004
+  risk_score: 70
+  severity: high
+  risk_objects:
+    - field: agent_name
+      type: system
+      score: 70
+    - field: data_win_eventdata_user
+      type: user
+      score: 70
+  threat_objects:
+    - field: data_win_eventdata_scriptBlockText
+      type: powershell_script
+
+tags:
+  analytic_story:
+    - Active Directory Kerberos Attacks
+    - Privilege Escalation
+    - Credential Access
+  asset_type: Endpoint
+  mitre_attack_id:
+    - T1558.004
+  custom_tags:
+    - set_adaccountcontrol
+    - kerberos_preauth
+    - asrep_roasting
+    - doesnotrequirepreauth
+    - account_control
+    - kerberos
+    - privilege_escalation
+    - powershell
+    - active_directory
+  product:
+    - Wazuh
+  security_domain: endpoint
+
+graylog:
+  query: data_win_system_eventID:"4104" AND data_win_eventdata_scriptBlockText:/.*Set-ADAccountControl.*/ AND data_win_eventdata_scriptBlockText:/.*DoesNotRequirePreAuth:\$true.*/
