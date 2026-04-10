@@ -1,0 +1,138 @@
+name: Windows PowerView Kerberos Service Ticket Request
+id: 970455a1-4ac2-47e1-a9a5-9e75443ddcb9
+version: 1
+schema_version: "1.0"
+date: "2026-04-10"
+author: SOCFortress LLC
+status: production
+type: TTP
+
+description: >
+  The following analytic detects the execution of the `Get-DomainSPNTicket` commandlet, 
+  part of the PowerView tool, by leveraging PowerShell Script Block Logging 
+  (EventCode=4104). This commandlet requests Kerberos service tickets for specified 
+  service principal names (SPNs). Monitoring this activity is crucial as it can 
+  indicate attempts to perform Kerberoasting, a technique used to extract SPN account 
+  passwords via cracking tools like hashcat. If confirmed malicious, this activity 
+  could allow attackers to gain unauthorized access to sensitive accounts, potentially 
+  leading to privilege escalation and further network compromise.
+
+data_source:
+  - PowerShell Script Block Logging EventID 4104
+
+search:
+  index_pattern: "${INDEX_PATTERN}"
+  size: 100
+  sort:
+    - timestamp: desc
+  query:
+    bool:
+      must:
+        - term:
+            agent_name: "${AGENT_NAME}"
+        - term:
+            agent_labels_customer: "${CUSTOMER_CODE}"
+        - term:
+            data_win_system_eventID: "4104"
+        - wildcard:
+            data_win_eventdata_scriptBlockText: "*Get-DomainSPNTicket*"
+        - range:
+            timestamp:
+              gte: "${START_TIME}"
+              lte: "${END_TIME}"
+  _source:
+    - timestamp
+    - agent_name
+    - data_win_system_eventID
+    - data_win_eventdata_scriptBlockText
+    - data_win_eventdata_scriptBlockId
+    - data_win_eventdata_user
+
+parameters:
+  AGENT_NAME:
+    description: "Target agent/host name"
+    type: string
+    required: true
+    example: "DESKTOP-AM0HLGE"
+  CUSTOMER_CODE:
+    description: "Customer label for filtering"
+    type: string
+    required: true
+    example: "lab"
+  INDEX_PATTERN:
+    description: "Elasticsearch index pattern"
+    type: string
+    required: true
+    example: "wazuh-lab_*"
+  START_TIME:
+    description: "Query start time (ISO 8601 or relative)"
+    type: datetime
+    required: false
+    default: "now-24h"
+    example: "2026-04-10 00:00:00.000"
+  END_TIME:
+    description: "Query end time (ISO 8601 or relative)"
+    type: datetime
+    required: false
+    default: "now"
+    example: "2026-04-10 23:59:59.999"
+
+how_to_implement: >
+  To successfully implement this analytic, you will need to enable PowerShell Script 
+  Block Logging on some or all endpoints. The Wazuh agent ossec.conf should include 
+  the Microsoft-Windows-PowerShell/Operational event channel. This detection monitors 
+  for the use of Get-DomainSPNTicket to extract Kerberos service tickets for offline 
+  cracking and password theft. Validate that data_win_eventdata_scriptBlockText 
+  field is being populated in Elasticsearch/Wazuh Indexer.
+
+known_false_positives: >
+  False positives may include Administrators using PowerView for legitimate 
+  troubleshooting and management purposes. Filter based on user context and whether 
+  the action was expected and authorized within your organization.
+
+references:
+  - https://powersploit.readthedocs.io/en/latest/Recon/Get-DomainSPNTicket/
+  - https://book.hacktricks.xyz/windows-hardening/active-directory-methodology/kerberoast
+  - https://github.com/PowerShellMafia/PowerSploit/blob/master/Recon/PowerView.ps1
+  - https://www.ired.team/offensive-security-experiments/active-directory-kerberos-abuse/t1208-kerberoasting
+  - https://attack.mitre.org/techniques/T1558/003
+
+response:
+  message: >
+    PowerView Kerberos ticket request detected on $agent_name$ by user 
+    $data_win_eventdata_user$. Script block: $data_win_eventdata_scriptBlockText$. 
+    Adversary is extracting SPN service tickets for Kerberoasting and offline password 
+    cracking. MITRE ATT&CK: T1558.003
+  risk_score: 55
+  severity: medium
+  risk_objects:
+    - field: agent_name
+      type: system
+      score: 55
+    - field: data_win_eventdata_user
+      type: user
+      score: 55
+  threat_objects:
+    - field: data_win_eventdata_scriptBlockText
+      type: powershell_script
+
+tags:
+  analytic_story:
+    - Active Directory Kerberos Attacks
+    - Rhysida Ransomware
+  asset_type: Endpoint
+  mitre_attack_id:
+    - T1558.003
+  custom_tags:
+    - powerview
+    - get_domainspnticket
+    - kerberoasting
+    - spn_ticket_extraction
+    - credential_theft
+    - kerberos_abuse
+  product:
+    - Wazuh
+  security_domain: endpoint
+
+graylog:
+  query: data_win_system_eventID:"4104" AND data_win_eventdata_scriptBlockText:/.*Get-DomainSPNTicket.*/

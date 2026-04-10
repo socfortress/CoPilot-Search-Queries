@@ -1,0 +1,148 @@
+name: Windows PowerView Constrained Delegation Discovery
+id: 86dc8176-6e6c-42d6-9684-5444c6557ab3
+version: 1
+schema_version: "1.0"
+date: "2026-04-10"
+author: SOCFortress LLC
+status: production
+type: TTP
+
+description: >
+  The following analytic detects the use of PowerView commandlets to discover Windows 
+  endpoints with Kerberos Constrained Delegation. It leverages PowerShell Script Block 
+  Logging (EventCode=4104) to identify specific commandlets like `Get-DomainComputer` 
+  or `Get-NetComputer` with the `-TrustedToAuth` parameter. This activity is significant 
+  as it indicates potential reconnaissance efforts by adversaries or Red Teams to map 
+  out privileged delegation settings in Active Directory. If confirmed malicious, this 
+  could allow attackers to identify high-value targets for further exploitation, 
+  potentially leading to privilege escalation or lateral movement within the network.
+
+data_source:
+  - PowerShell Script Block Logging EventID 4104
+
+search:
+  index_pattern: "${INDEX_PATTERN}"
+  size: 100
+  sort:
+    - timestamp: desc
+  query:
+    bool:
+      must:
+        - term:
+            agent_name: "${AGENT_NAME}"
+        - term:
+            agent_labels_customer: "${CUSTOMER_CODE}"
+        - term:
+            data_win_system_eventID: "4104"
+        - bool:
+            should:
+              - wildcard:
+                  data_win_eventdata_scriptBlockText: "*Get-DomainComputer*"
+              - wildcard:
+                  data_win_eventdata_scriptBlockText: "*Get-NetComputer*"
+            minimum_should_match: 1
+        - wildcard:
+            data_win_eventdata_scriptBlockText: "*-TrustedToAuth*"
+        - range:
+            timestamp:
+              gte: "${START_TIME}"
+              lte: "${END_TIME}"
+  _source:
+    - timestamp
+    - agent_name
+    - data_win_system_eventID
+    - data_win_eventdata_scriptBlockText
+    - data_win_eventdata_scriptBlockId
+    - data_win_eventdata_user
+
+parameters:
+  AGENT_NAME:
+    description: "Target agent/host name"
+    type: string
+    required: true
+    example: "DESKTOP-AM0HLGE"
+  CUSTOMER_CODE:
+    description: "Customer label for filtering"
+    type: string
+    required: true
+    example: "lab"
+  INDEX_PATTERN:
+    description: "Elasticsearch index pattern"
+    type: string
+    required: true
+    example: "wazuh-lab_*"
+  START_TIME:
+    description: "Query start time (ISO 8601 or relative)"
+    type: datetime
+    required: false
+    default: "now-24h"
+    example: "2026-04-10 00:00:00.000"
+  END_TIME:
+    description: "Query end time (ISO 8601 or relative)"
+    type: datetime
+    required: false
+    default: "now"
+    example: "2026-04-10 23:59:59.999"
+
+how_to_implement: >
+  To successfully implement this analytic, you will need to enable PowerShell Script 
+  Block Logging on some or all endpoints. The Wazuh agent ossec.conf should include 
+  the Microsoft-Windows-PowerShell/Operational event channel. This detection monitors 
+  for the use of Get-DomainComputer or Get-NetComputer with the -TrustedToAuth 
+  parameter to identify endpoints configured for Kerberos constrained delegation. 
+  Validate that data_win_eventdata_scriptBlockText field is being populated in 
+  Elasticsearch/Wazuh Indexer.
+
+known_false_positives: >
+  Administrators or power users may leverage PowerView for legitimate system 
+  management or troubleshooting purposes. Filter based on user context and whether 
+  the action was expected and authorized within your organization.
+
+references:
+  - https://attack.mitre.org/techniques/T1018/
+  - https://adsecurity.org/?p=1667
+  - https://docs.microsoft.com/en-us/defender-for-identity/cas-isp-unconstrained-kerberos
+  - https://www.guidepointsecurity.com/blog/delegating-like-a-boss-abusing-kerberos-delegation-in-active-directory/
+  - https://book.hacktricks.xyz/windows-hardening/active-directory-methodology/constrained-delegation
+  - https://www.cyberark.com/resources/threat-research-blog/weakness-within-kerberos-delegation
+
+response:
+  message: >
+    PowerView constrained delegation discovery detected on $agent_name$ by user 
+    $data_win_eventdata_user$. Script block: $data_win_eventdata_scriptBlockText$. 
+    Adversary is mapping constrained delegation settings in Active Directory to 
+    identify privilege escalation targets. MITRE ATT&CK: T1018
+  risk_score: 50
+  severity: medium
+  risk_objects:
+    - field: agent_name
+      type: system
+      score: 50
+    - field: data_win_eventdata_user
+      type: user
+      score: 50
+  threat_objects:
+    - field: data_win_eventdata_scriptBlockText
+      type: powershell_script
+
+tags:
+  analytic_story:
+    - CISA AA23-347A
+    - Rhysida Ransomware
+    - Active Directory Kerberos Attacks
+  asset_type: Endpoint
+  mitre_attack_id:
+    - T1018
+  custom_tags:
+    - powerview
+    - constrained_delegation
+    - kerberos_delegation
+    - trustedtoauth
+    - active_directory
+    - privilege_escalation
+  product:
+    - Wazuh
+  security_domain: endpoint
+
+graylog:
+  query: data_win_system_eventID:"4104" AND (data_win_eventdata_scriptBlockText:/.*Get-DomainComputer.*/ OR data_win_eventdata_scriptBlockText:/.*Get-NetComputer.*/) AND data_win_eventdata_scriptBlockText:/.*-TrustedToAuth.*/

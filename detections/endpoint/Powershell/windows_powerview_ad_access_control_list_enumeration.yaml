@@ -1,0 +1,145 @@
+name: Windows PowerView AD Access Control List Enumeration
+id: 39405650-c364-4e1e-a740-32a63ef042a6
+version: 1
+schema_version: "1.0"
+date: "2026-04-10"
+author: SOCFortress LLC
+status: production
+type: TTP
+
+description: >
+  The following analytic detects the execution of PowerView PowerShell cmdlets 
+  `Get-ObjectAcl` or `Get-DomainObjectAcl`, which are used to enumerate Access Control 
+  List (ACL) permissions for Active Directory objects. It leverages Event ID 4104 from 
+  PowerShell Script Block Logging to identify this activity. This behavior is 
+  significant as it may indicate an attempt to discover weak permissions in Active 
+  Directory, potentially leading to privilege escalation. If confirmed malicious, 
+  attackers could exploit these permissions to gain unauthorized access or escalate 
+  their privileges within the network.
+
+data_source:
+  - PowerShell Script Block Logging EventID 4104
+
+search:
+  index_pattern: "${INDEX_PATTERN}"
+  size: 100
+  sort:
+    - timestamp: desc
+  query:
+    bool:
+      must:
+        - term:
+            agent_name: "${AGENT_NAME}"
+        - term:
+            agent_labels_customer: "${CUSTOMER_CODE}"
+        - term:
+            data_win_system_eventID: "4104"
+        - bool:
+            should:
+              - wildcard:
+                  data_win_eventdata_scriptBlockText: "*Get-ObjectAcl*"
+              - wildcard:
+                  data_win_eventdata_scriptBlockText: "*Get-DomainObjectAcl*"
+            minimum_should_match: 1
+        - range:
+            timestamp:
+              gte: "${START_TIME}"
+              lte: "${END_TIME}"
+  _source:
+    - timestamp
+    - agent_name
+    - data_win_system_eventID
+    - data_win_eventdata_scriptBlockText
+    - data_win_eventdata_scriptBlockId
+    - data_win_eventdata_user
+
+parameters:
+  AGENT_NAME:
+    description: "Target agent/host name"
+    type: string
+    required: true
+    example: "DESKTOP-AM0HLGE"
+  CUSTOMER_CODE:
+    description: "Customer label for filtering"
+    type: string
+    required: true
+    example: "lab"
+  INDEX_PATTERN:
+    description: "Elasticsearch index pattern"
+    type: string
+    required: true
+    example: "wazuh-lab_*"
+  START_TIME:
+    description: "Query start time (ISO 8601 or relative)"
+    type: datetime
+    required: false
+    default: "now-24h"
+    example: "2026-04-10 00:00:00.000"
+  END_TIME:
+    description: "Query end time (ISO 8601 or relative)"
+    type: datetime
+    required: false
+    default: "now"
+    example: "2026-04-10 23:59:59.999"
+
+how_to_implement: >
+  To successfully implement this analytic, you will need to enable PowerShell Script 
+  Block Logging on some or all endpoints. The Wazuh agent ossec.conf should include 
+  the Microsoft-Windows-PowerShell/Operational event channel. This detection monitors 
+  for the use of Get-ObjectAcl or Get-DomainObjectAcl cmdlets to enumerate Active 
+  Directory object permissions. Validate that data_win_eventdata_scriptBlockText 
+  field is being populated in Elasticsearch/Wazuh Indexer.
+
+known_false_positives: >
+  Administrators may leverage PowerView for legitimate purposes such as Active 
+  Directory auditing or troubleshooting. Filter based on user context and whether 
+  the action was expected and authorized within your organization.
+
+references:
+  - https://attack.mitre.org/techniques/T1078/002/
+  - https://medium.com/r3d-buck3t/enumerating-access-controls-in-active-directory-c06e2efa8b89
+  - https://www.ired.team/offensive-security-experiments/active-directory-kerberos-abuse/abusing-active-directory-acls-aces
+  - https://powersploit.readthedocs.io/en/latest/Recon/Get-DomainObjectAcl/
+  - https://help.splunk.com/en/security-offerings/splunk-user-behavior-analytics/get-data-in/5.4.1/add-other-data-to-splunk-uba/configure-powershell-logging-to-see-powershell-anomalies-in-splunk-uba.html
+
+response:
+  message: >
+    PowerView ACL enumeration detected on $agent_name$ by user 
+    $data_win_eventdata_user$. Script block: $data_win_eventdata_scriptBlockText$. 
+    Adversary is discovering weak permissions in Active Directory for privilege 
+    escalation and lateral movement. MITRE ATT&CK: T1078.002, T1069
+  risk_score: 50
+  severity: medium
+  risk_objects:
+    - field: agent_name
+      type: system
+      score: 50
+    - field: data_win_eventdata_user
+      type: user
+      score: 50
+  threat_objects:
+    - field: data_win_eventdata_scriptBlockText
+      type: powershell_script
+
+tags:
+  analytic_story:
+    - Active Directory Discovery
+    - Active Directory Privilege Escalation
+    - Rhysida Ransomware
+  asset_type: Endpoint
+  mitre_attack_id:
+    - T1078.002
+    - T1069
+  custom_tags:
+    - powerview
+    - acl_enumeration
+    - access_control_list
+    - active_directory_permissions
+    - privilege_escalation
+    - reconnaissance
+  product:
+    - Wazuh
+  security_domain: endpoint
+
+graylog:
+  query: data_win_system_eventID:"4104" AND (data_win_eventdata_scriptBlockText:/.*Get-ObjectAcl.*/ OR data_win_eventdata_scriptBlockText:/.*Get-DomainObjectAcl.*/)

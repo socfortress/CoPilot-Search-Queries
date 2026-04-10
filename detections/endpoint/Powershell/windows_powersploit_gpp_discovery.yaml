@@ -1,0 +1,145 @@
+name: Windows PowerSploit GPP Discovery
+id: 0130a0df-83a1-4647-9011-841e950ff302
+version: 1
+schema_version: "1.0"
+date: "2026-04-10"
+author: SOCFortress LLC
+status: production
+type: TTP
+
+description: >
+  The following analytic detects the execution of the Get-GPPPassword PowerShell 
+  cmdlet, which is used to search for unsecured credentials in Group Policy 
+  Preferences (GPP). This detection leverages PowerShell Script Block Logging to 
+  identify specific script block text associated with this cmdlet. Monitoring this 
+  activity is crucial as it can indicate an attempt to retrieve and decrypt stored 
+  credentials from SYSVOL, potentially leading to unauthorized access. If confirmed 
+  malicious, this activity could allow an attacker to escalate privileges or move 
+  laterally within the network by exploiting exposed credentials stored in Group 
+  Policy Preferences.
+
+data_source:
+  - PowerShell Script Block Logging EventID 4104
+
+search:
+  index_pattern: "${INDEX_PATTERN}"
+  size: 100
+  sort:
+    - timestamp: desc
+  query:
+    bool:
+      must:
+        - term:
+            agent_name: "${AGENT_NAME}"
+        - term:
+            agent_labels_customer: "${CUSTOMER_CODE}"
+        - term:
+            data_win_system_eventID: "4104"
+        - bool:
+            should:
+              - wildcard:
+                  data_win_eventdata_scriptBlockText: "*Get-GPPPassword*"
+              - wildcard:
+                  data_win_eventdata_scriptBlockText: "*Get-CachedGPPPassword*"
+            minimum_should_match: 1
+        - range:
+            timestamp:
+              gte: "${START_TIME}"
+              lte: "${END_TIME}"
+  _source:
+    - timestamp
+    - agent_name
+    - data_win_system_eventID
+    - data_win_eventdata_scriptBlockText
+    - data_win_eventdata_scriptBlockId
+    - data_win_eventdata_user
+
+parameters:
+  AGENT_NAME:
+    description: "Target agent/host name"
+    type: string
+    required: true
+    example: "DESKTOP-AM0HLGE"
+  CUSTOMER_CODE:
+    description: "Customer label for filtering"
+    type: string
+    required: true
+    example: "lab"
+  INDEX_PATTERN:
+    description: "Elasticsearch index pattern"
+    type: string
+    required: true
+    example: "wazuh-lab_*"
+  START_TIME:
+    description: "Query start time (ISO 8601 or relative)"
+    type: datetime
+    required: false
+    default: "now-24h"
+    example: "2026-04-10 00:00:00.000"
+  END_TIME:
+    description: "Query end time (ISO 8601 or relative)"
+    type: datetime
+    required: false
+    default: "now"
+    example: "2026-04-10 23:59:59.999"
+
+how_to_implement: >
+  To successfully implement this analytic, you will need to enable PowerShell Script 
+  Block Logging on some or all endpoints. The Wazuh agent ossec.conf should include 
+  the Microsoft-Windows-PowerShell/Operational event channel. This detection monitors 
+  for the use of Get-GPPPassword or Get-CachedGPPPassword cmdlets to extract Group 
+  Policy Preferences credentials. Validate that data_win_eventdata_scriptBlockText 
+  field is being populated in Elasticsearch/Wazuh Indexer.
+
+known_false_positives: >
+  No false positives have been identified at this time. Get-GPPPassword and 
+  Get-CachedGPPPassword are specialized PowerShell cmdlets used specifically for 
+  extracting credentials from Group Policy Preferences and are not typically used 
+  in legitimate administrative activities.
+
+references:
+  - https://attack.mitre.org/techniques/T1552/006/
+  - https://pentestlab.blog/2017/03/20/group-policy-preferences/
+  - https://adsecurity.org/?p=2288
+  - https://www.hackingarticles.in/credential-dumping-group-policy-preferences-gpp/
+  - https://support.microsoft.com/en-us/topic/ms14-025-vulnerability-in-group-policy-preferences-could-allow-elevation-of-privilege-may-13-2014-60734e15-af79-26ca-ea53-8cd617073c30
+
+response:
+  message: >
+    PowerSploit GPP credential discovery detected on $agent_name$ by user 
+    $data_win_eventdata_user$. Script block: $data_win_eventdata_scriptBlockText$. 
+    Attacker is attempting to extract unsecured credentials from Group Policy 
+    Preferences for privilege escalation and lateral movement. 
+    MITRE ATT&CK: T1552.006
+  risk_score: 50
+  severity: high
+  risk_objects:
+    - field: agent_name
+      type: system
+      score: 50
+    - field: data_win_eventdata_user
+      type: user
+      score: 50
+  threat_objects:
+    - field: data_win_eventdata_scriptBlockText
+      type: powershell_script
+
+tags:
+  analytic_story:
+    - Active Directory Privilege Escalation
+  asset_type: Endpoint
+  mitre_attack_id:
+    - T1552.006
+  custom_tags:
+    - gpp_discovery
+    - group_policy_preferences
+    - credential_dumping
+    - powersploit
+    - privilege_escalation
+    - sysvol_exploitation
+  product:
+    - Wazuh
+  security_domain: endpoint
+
+graylog:
+  query: data_win_system_eventID:"4104" AND (data_win_eventdata_scriptBlockText:/.*Get-GPPPassword.*/ OR data_win_eventdata_scriptBlockText:/.*Get-CachedGPPPassword.*/)

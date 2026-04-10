@@ -1,0 +1,139 @@
+name: User Discovery With Env Vars PowerShell Script Block
+id: 77f41d9e-b8be-47e3-ab35-5776f5ec1d20
+version: 1
+schema_version: "1.0"
+date: "2026-04-10"
+author: SOCFortress LLC
+status: production
+type: Hunting
+
+description: >
+  The following analytic detects the use of PowerShell environment variables to 
+  identify the current logged user by leveraging PowerShell Script Block Logging 
+  (EventCode=4104). This method monitors script blocks containing `$env:UserName` 
+  or `[System.Environment]::UserName`. Identifying this activity is significant as 
+  adversaries and Red Teams may use it for situational awareness and Active Directory 
+  discovery on compromised endpoints. If confirmed malicious, this activity could 
+  allow attackers to gain insights into user context, aiding in further exploitation 
+  and lateral movement within the network.
+
+data_source:
+  - PowerShell Script Block Logging EventID 4104
+
+search:
+  index_pattern: "${INDEX_PATTERN}"
+  size: 100
+  sort:
+    - timestamp: desc
+  query:
+    bool:
+      must:
+        - term:
+            agent_name: "${AGENT_NAME}"
+        - term:
+            agent_labels_customer: "${CUSTOMER_CODE}"
+        - term:
+            data_win_system_eventID: "4104"
+        - bool:
+            should:
+              - wildcard:
+                  data_win_eventdata_scriptBlockText: "*$env:UserName*"
+              - wildcard:
+                  data_win_eventdata_scriptBlockText: "*[System.Environment]::UserName*"
+            minimum_should_match: 1
+        - range:
+            timestamp:
+              gte: "${START_TIME}"
+              lte: "${END_TIME}"
+  _source:
+    - timestamp
+    - agent_name
+    - data_win_system_eventID
+    - data_win_eventdata_scriptBlockText
+    - data_win_eventdata_scriptBlockId
+    - data_win_eventdata_user
+
+parameters:
+  AGENT_NAME:
+    description: "Target agent/host name"
+    type: string
+    required: true
+    example: "DESKTOP-AM0HLGE"
+  CUSTOMER_CODE:
+    description: "Customer label for filtering"
+    type: string
+    required: true
+    example: "lab"
+  INDEX_PATTERN:
+    description: "Elasticsearch index pattern"
+    type: string
+    required: true
+    example: "wazuh-lab_*"
+  START_TIME:
+    description: "Query start time (ISO 8601 or relative)"
+    type: datetime
+    required: false
+    default: "now-24h"
+    example: "2026-04-10 00:00:00.000"
+  END_TIME:
+    description: "Query end time (ISO 8601 or relative)"
+    type: datetime
+    required: false
+    default: "now"
+    example: "2026-04-10 23:59:59.999"
+
+how_to_implement: >
+  To successfully implement this analytic, you will need to enable PowerShell Script 
+  Block Logging on some or all endpoints. The Wazuh agent ossec.conf should include 
+  the Microsoft-Windows-PowerShell/Operational event channel. This detection monitors 
+  for the use of $env:UserName or [System.Environment]::UserName environment variables 
+  to discover the current user context. Validate that data_win_eventdata_scriptBlockText 
+  field is being populated in Elasticsearch/Wazuh Indexer.
+
+known_false_positives: >
+  Administrators or power users may use this PowerShell environment variable for 
+  legitimate troubleshooting or system administration purposes. Filter based on user 
+  context and whether the action was expected and authorized within your organization.
+
+references:
+  - https://attack.mitre.org/techniques/T1033/
+  - https://help.splunk.com/en/security-offerings/splunk-user-behavior-analytics/get-data-in/5.4.1/add-other-data-to-splunk-uba/configure-powershell-logging-to-see-powershell-anomalies-in-splunk-uba.html
+
+response:
+  message: >
+    User discovery via environment variables detected on $agent_name$ by user 
+    $data_win_eventdata_user$. Script block: $data_win_eventdata_scriptBlockText$. 
+    Adversary is performing user context discovery for situational awareness and 
+    potential lateral movement planning. MITRE ATT&CK: T1033
+  risk_score: 20
+  severity: low
+  risk_objects:
+    - field: agent_name
+      type: system
+      score: 20
+    - field: data_win_eventdata_user
+      type: user
+      score: 20
+  threat_objects:
+    - field: data_win_eventdata_scriptBlockText
+      type: powershell_script
+
+tags:
+  analytic_story:
+    - Active Directory Discovery
+  asset_type: Endpoint
+  mitre_attack_id:
+    - T1033
+  custom_tags:
+    - user_discovery
+    - environment_variables
+    - system_owner_discovery
+    - powershell
+    - situational_awareness
+    - reconnaissance
+  product:
+    - Wazuh
+  security_domain: endpoint
+
+graylog:
+  query: data_win_system_eventID:"4104" AND (data_win_eventdata_scriptBlockText:/.*\$env:UserName.*/ OR data_win_eventdata_scriptBlockText:/.*\[System\.Environment\]::UserName.*/)

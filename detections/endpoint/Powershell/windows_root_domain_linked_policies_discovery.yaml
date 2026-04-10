@@ -1,0 +1,140 @@
+name: Windows Root Domain linked policies Discovery
+id: 80ffaede-1f12-49d5-a86e-b4b599b68b3c
+version: 1
+schema_version: "1.0"
+date: "2026-04-10"
+author: SOCFortress LLC
+status: production
+type: Anomaly
+
+description: >
+  The following analytic detects the use of the `[Adsisearcher]` type accelerator in 
+  PowerShell to query Active Directory for root domain linked policies. It leverages 
+  PowerShell Script Block Logging (EventCode=4104) to identify this activity. This 
+  behavior is significant as it may indicate an attempt by adversaries or Red Teams 
+  to gain situational awareness and perform Active Directory Discovery. If confirmed 
+  malicious, this activity could allow attackers to map out domain policies, 
+  potentially aiding in further exploitation or lateral movement within the network.
+
+data_source:
+  - PowerShell Script Block Logging EventID 4104
+
+search:
+  index_pattern: "${INDEX_PATTERN}"
+  size: 100
+  sort:
+    - timestamp: desc
+  query:
+    bool:
+      must:
+        - term:
+            agent_name: "${AGENT_NAME}"
+        - term:
+            agent_labels_customer: "${CUSTOMER_CODE}"
+        - term:
+            data_win_system_eventID: "4104"
+        - wildcard:
+            data_win_eventdata_scriptBlockText: "*[adsisearcher]*"
+        - wildcard:
+            data_win_eventdata_scriptBlockText: "*SearchRoot*"
+        - wildcard:
+            data_win_eventdata_scriptBlockText: "*gplink*"
+        - range:
+            timestamp:
+              gte: "${START_TIME}"
+              lte: "${END_TIME}"
+  _source:
+    - timestamp
+    - agent_name
+    - data_win_system_eventID
+    - data_win_eventdata_scriptBlockText
+    - data_win_eventdata_scriptBlockId
+    - data_win_eventdata_user
+
+parameters:
+  AGENT_NAME:
+    description: "Target agent/host name"
+    type: string
+    required: true
+    example: "DESKTOP-AM0HLGE"
+  CUSTOMER_CODE:
+    description: "Customer label for filtering"
+    type: string
+    required: true
+    example: "lab"
+  INDEX_PATTERN:
+    description: "Elasticsearch index pattern"
+    type: string
+    required: true
+    example: "wazuh-lab_*"
+  START_TIME:
+    description: "Query start time (ISO 8601 or relative)"
+    type: datetime
+    required: false
+    default: "now-24h"
+    example: "2026-04-10 00:00:00.000"
+  END_TIME:
+    description: "Query end time (ISO 8601 or relative)"
+    type: datetime
+    required: false
+    default: "now"
+    example: "2026-04-10 23:59:59.999"
+
+how_to_implement: >
+  To successfully implement this analytic, you will need to enable PowerShell Script 
+  Block Logging on some or all endpoints. The Wazuh agent ossec.conf should include 
+  the Microsoft-Windows-PowerShell/Operational event channel. This detection monitors 
+  for the use of [adsisearcher] type accelerator with SearchRoot and gplink properties 
+  to enumerate root domain linked Group Policy Objects. Validate that 
+  data_win_eventdata_scriptBlockText field is being populated in Elasticsearch/Wazuh 
+  Indexer.
+
+known_false_positives: >
+  Administrators or power users may use this command for legitimate troubleshooting 
+  and Active Directory management purposes. Filter based on user context and whether 
+  the action was expected and authorized within your organization.
+
+references:
+  - https://www.welivesecurity.com/2022/04/12/industroyer2-industroyer-reloaded/
+  - https://medium.com/@pentesttas/discover-hidden-gpo-s-on-active-directory-using-ps-adsi-a284b6814c81
+
+response:
+  message: >
+    ADSI searcher root domain policy discovery detected on $agent_name$ by user 
+    $data_win_eventdata_user$. Script block: $data_win_eventdata_scriptBlockText$. 
+    Adversary is enumerating root domain linked policies for situational awareness 
+    and Active Directory discovery. MITRE ATT&CK: T1087.002
+  risk_score: 20
+  severity: low
+  risk_objects:
+    - field: agent_name
+      type: system
+      score: 20
+    - field: data_win_eventdata_user
+      type: user
+      score: 20
+  threat_objects:
+    - field: data_win_eventdata_scriptBlockText
+      type: powershell_script
+
+tags:
+  analytic_story:
+    - Data Destruction
+    - Active Directory Discovery
+    - Industroyer2
+  asset_type: Endpoint
+  mitre_attack_id:
+    - T1087.002
+  custom_tags:
+    - adsisearcher
+    - adsi
+    - root_domain
+    - gpo_discovery
+    - group_policy_objects
+    - active_directory_discovery
+  product:
+    - Wazuh
+  security_domain: endpoint
+
+graylog:
+  query: data_win_system_eventID:"4104" AND data_win_eventdata_scriptBlockText:/.*\[adsisearcher\].*/ AND data_win_eventdata_scriptBlockText:/.*SearchRoot.*/ AND data_win_eventdata_scriptBlockText:/.*gplink.*/

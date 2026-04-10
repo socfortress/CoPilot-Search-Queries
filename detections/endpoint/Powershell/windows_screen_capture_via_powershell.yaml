@@ -1,0 +1,146 @@
+name: Windows Screen Capture Via Powershell
+id: 5e0b1936-8f99-4399-8ee2-9edc5b32e170
+version: 1
+schema_version: "1.0"
+date: "2026-04-10"
+author: SOCFortress LLC
+status: production
+type: TTP
+
+description: >
+  The following analytic detects the execution of a PowerShell script designed to 
+  capture screen images on a host. It leverages PowerShell Script Block Logging to 
+  identify specific script block text patterns associated with screen capture activities. 
+  This behavior is significant as it may indicate an attempt to exfiltrate sensitive 
+  information by capturing desktop screenshots. If confirmed malicious, this activity 
+  could allow an attacker to gather visual data from the compromised system, potentially 
+  leading to data breaches or further exploitation.
+
+data_source:
+  - PowerShell Script Block Logging EventID 4104
+
+search:
+  index_pattern: "${INDEX_PATTERN}"
+  size: 100
+  sort:
+    - timestamp: desc
+  query:
+    bool:
+      must:
+        - term:
+            agent_name: "${AGENT_NAME}"
+        - term:
+            agent_labels_customer: "${CUSTOMER_CODE}"
+        - term:
+            data_win_system_eventID: "4104"
+        - bool:
+            should:
+              - wildcard:
+                  data_win_eventdata_scriptBlockText: "*[Drawing.Graphics]::FromImage*"
+              - wildcard:
+                  data_win_eventdata_scriptBlockText: "*Drawing.Bitmap*"
+              - wildcard:
+                  data_win_eventdata_scriptBlockText: "*Graphics.FromImage*"
+            minimum_should_match: 1
+        - wildcard:
+            data_win_eventdata_scriptBlockText: "*.CopyFromScreen*"
+        - range:
+            timestamp:
+              gte: "${START_TIME}"
+              lte: "${END_TIME}"
+  _source:
+    - timestamp
+    - agent_name
+    - data_win_system_eventID
+    - data_win_eventdata_scriptBlockText
+    - data_win_eventdata_scriptBlockId
+    - data_win_eventdata_user
+
+parameters:
+  AGENT_NAME:
+    description: "Target agent/host name"
+    type: string
+    required: true
+    example: "DESKTOP-AM0HLGE"
+  CUSTOMER_CODE:
+    description: "Customer label for filtering"
+    type: string
+    required: true
+    example: "lab"
+  INDEX_PATTERN:
+    description: "Elasticsearch index pattern"
+    type: string
+    required: true
+    example: "wazuh-lab_*"
+  START_TIME:
+    description: "Query start time (ISO 8601 or relative)"
+    type: datetime
+    required: false
+    default: "now-24h"
+    example: "2026-04-10 00:00:00.000"
+  END_TIME:
+    description: "Query end time (ISO 8601 or relative)"
+    type: datetime
+    required: false
+    default: "now"
+    example: "2026-04-10 23:59:59.999"
+
+how_to_implement: >
+  To successfully implement this analytic, you will need to enable PowerShell Script 
+  Block Logging on some or all endpoints. The Wazuh agent ossec.conf should include 
+  the Microsoft-Windows-PowerShell/Operational event channel. This detection monitors 
+  for the use of GDI+ drawing APIs ([Drawing.Graphics], [Drawing.Bitmap], 
+  Graphics.FromImage) combined with CopyFromScreen method to capture screen content. 
+  Validate that data_win_eventdata_scriptBlockText field is being populated in 
+  Elasticsearch/Wazuh Indexer.
+
+known_false_positives: >
+  No false positives have been identified at this time. Screen capture via PowerShell 
+  GDI+ APIs is highly suspicious and rarely used in legitimate administrative 
+  scenarios.
+
+references:
+  - https://twitter.com/_CERT_UA/status/1620781684257091584
+  - https://cert.gov.ua/article/3761104
+
+response:
+  message: >
+    PowerShell screen capture detected on $agent_name$ by user 
+    $data_win_eventdata_user$. Script block: $data_win_eventdata_scriptBlockText$. 
+    Adversary is capturing desktop screenshots for visual data exfiltration and 
+    sensitive information theft. MITRE ATT&CK: T1113
+  risk_score: 50
+  severity: high
+  risk_objects:
+    - field: agent_name
+      type: system
+      score: 50
+    - field: data_win_eventdata_user
+      type: user
+      score: 50
+  threat_objects:
+    - field: data_win_eventdata_scriptBlockText
+      type: powershell_script
+
+tags:
+  analytic_story:
+    - APT37 Rustonotto and FadeStealer
+    - Winter Vivern
+    - Water Gamayun
+    - BlankGrabber Stealer
+  asset_type: Endpoint
+  mitre_attack_id:
+    - T1113
+  custom_tags:
+    - screen_capture
+    - gdi_plus
+    - drawing_api
+    - screenshot
+    - data_exfiltration
+    - infostealer
+  product:
+    - Wazuh
+  security_domain: endpoint
+
+graylog:
+  query: data_win_system_eventID:"4104" AND (data_win_eventdata_scriptBlockText:/.*\[Drawing\.Graphics\]::FromImage.*/ OR data_win_eventdata_scriptBlockText:/.*Drawing\.Bitmap.*/ OR data_win_eventdata_scriptBlockText:/.*Graphics\.FromImage.*/) AND data_win_eventdata_scriptBlockText:/.*CopyFromScreen.*/

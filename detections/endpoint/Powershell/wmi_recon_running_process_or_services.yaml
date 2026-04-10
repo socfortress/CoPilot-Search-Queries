@@ -1,0 +1,146 @@
+name: WMI Recon Running Process Or Services
+id: b5cd5526-cce7-11eb-b3bd-acde48001122
+version: 1
+schema_version: "1.0"
+date: "2026-04-10"
+author: SOCFortress LLC
+status: production
+type: Anomaly
+
+description: >
+  The following analytic identifies suspicious PowerShell script execution via 
+  EventCode 4104, where WMI performs an event query to list running processes or 
+  services. This detection leverages PowerShell Script Block Logging to capture and 
+  analyze script block text for specific WMI queries. This activity is significant as 
+  it is commonly used by malware and APT actors to map security applications or 
+  services on a compromised machine. If confirmed malicious, this could allow 
+  attackers to identify and potentially disable security defenses, facilitating 
+  further compromise and persistence within the environment.
+
+data_source:
+  - PowerShell Script Block Logging EventID 4104
+
+search:
+  index_pattern: "${INDEX_PATTERN}"
+  size: 100
+  sort:
+    - timestamp: desc
+  query:
+    bool:
+      must:
+        - term:
+            agent_name: "${AGENT_NAME}"
+        - term:
+            agent_labels_customer: "${CUSTOMER_CODE}"
+        - term:
+            data_win_system_eventID: "4104"
+        - wildcard:
+            data_win_eventdata_scriptBlockText: "*SELECT*"
+        - bool:
+            should:
+              - wildcard:
+                  data_win_eventdata_scriptBlockText: "*Win32_Process*"
+              - wildcard:
+                  data_win_eventdata_scriptBlockText: "*Win32_Service*"
+            minimum_should_match: 1
+        - range:
+            timestamp:
+              gte: "${START_TIME}"
+              lte: "${END_TIME}"
+  _source:
+    - timestamp
+    - agent_name
+    - data_win_system_eventID
+    - data_win_eventdata_scriptBlockText
+    - data_win_eventdata_scriptBlockId
+    - data_win_eventdata_user
+
+parameters:
+  AGENT_NAME:
+    description: "Target agent/host name"
+    type: string
+    required: true
+    example: "DESKTOP-AM0HLGE"
+  CUSTOMER_CODE:
+    description: "Customer label for filtering"
+    type: string
+    required: true
+    example: "lab"
+  INDEX_PATTERN:
+    description: "Elasticsearch index pattern"
+    type: string
+    required: true
+    example: "wazuh-lab_*"
+  START_TIME:
+    description: "Query start time (ISO 8601 or relative)"
+    type: datetime
+    required: false
+    default: "now-24h"
+    example: "2026-04-10 00:00:00.000"
+  END_TIME:
+    description: "Query end time (ISO 8601 or relative)"
+    type: datetime
+    required: false
+    default: "now"
+    example: "2026-04-10 23:59:59.999"
+
+how_to_implement: >
+  To successfully implement this analytic, you will need to enable PowerShell Script 
+  Block Logging on some or all endpoints. The Wazuh agent ossec.conf should include 
+  the Microsoft-Windows-PowerShell/Operational event channel. This detection monitors 
+  for WMI SELECT queries targeting Win32_Process or Win32_Service classes to enumerate 
+  running processes and services for security application discovery. Validate that 
+  data_win_eventdata_scriptBlockText field is being populated in Elasticsearch/Wazuh 
+  Indexer.
+
+known_false_positives: >
+  Network administrators may use this command for legitimate checking and 
+  troubleshooting purposes. Filter based on user context and whether the action was 
+  expected and authorized within your organization.
+
+references:
+  - https://news.sophos.com/en-us/2020/05/12/maze-ransomware-1-year-counting/
+  - https://www.eideon.com/2018-03-02-THL03-WMIBackdoors/
+  - https://github.com/trustedsec/SysmonCommunityGuide/blob/master/chapters/WMI-events.md
+  - https://in.security/2019/04/03/an-intro-into-abusing-and-identifying-wmi-event-subscriptions-for-persistence/
+
+response:
+  message: >
+    WMI process or service reconnaissance detected on $agent_name$ by user 
+    $data_win_eventdata_user$. Script block: $data_win_eventdata_scriptBlockText$. 
+    Adversary is enumerating running processes and services to identify security 
+    applications for evasion or disabling. MITRE ATT&CK: T1592
+  risk_score: 20
+  severity: low
+  risk_objects:
+    - field: agent_name
+      type: system
+      score: 20
+    - field: data_win_eventdata_user
+      type: user
+      score: 20
+  threat_objects:
+    - field: data_win_eventdata_scriptBlockText
+      type: powershell_script
+
+tags:
+  analytic_story:
+    - Malicious PowerShell
+    - Hermetic Wiper
+    - Data Destruction
+  asset_type: Endpoint
+  mitre_attack_id:
+    - T1592
+  custom_tags:
+    - wmi_recon
+    - process_discovery
+    - service_discovery
+    - win32_process
+    - win32_service
+    - security_application_discovery
+  product:
+    - Wazuh
+  security_domain: endpoint
+
+graylog:
+  query: data_win_system_eventID:"4104" AND data_win_eventdata_scriptBlockText:/.*SELECT.*/ AND (data_win_eventdata_scriptBlockText:/.*Win32_Process.*/ OR data_win_eventdata_scriptBlockText:/.*Win32_Service.*/)

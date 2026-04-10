@@ -1,0 +1,146 @@
+name: ServicePrincipalNames Discovery with PowerShell
+id: 13243068-2d38-11ec-8908-acde48001122
+version: 1
+schema_version: "1.0"
+date: "2026-04-10"
+author: SOCFortress LLC
+status: production
+type: TTP
+
+description: >
+  The following analytic detects the use of `powershell.exe` to query the domain for 
+  Service Principal Names (SPNs) using Script Block Logging EventCode 4104. It 
+  identifies the use of the KerberosRequestorSecurityToken class within the script 
+  block, which is equivalent to using setspn.exe. This activity is significant as it 
+  often precedes kerberoasting or silver ticket attacks, which can lead to credential 
+  theft and privilege escalation. If confirmed malicious, attackers could leverage 
+  this information to escalate privileges or persist within the environment.
+
+data_source:
+  - PowerShell Script Block Logging EventID 4104
+
+search:
+  index_pattern: "${INDEX_PATTERN}"
+  size: 100
+  sort:
+    - timestamp: desc
+  query:
+    bool:
+      must:
+        - term:
+            agent_name: "${AGENT_NAME}"
+        - term:
+            agent_labels_customer: "${CUSTOMER_CODE}"
+        - term:
+            data_win_system_eventID: "4104"
+        - wildcard:
+            data_win_eventdata_scriptBlockText: "*KerberosRequestorSecurityToken*"
+        - range:
+            timestamp:
+              gte: "${START_TIME}"
+              lte: "${END_TIME}"
+  _source:
+    - timestamp
+    - agent_name
+    - data_win_system_eventID
+    - data_win_eventdata_scriptBlockText
+    - data_win_eventdata_scriptBlockId
+    - data_win_eventdata_user
+
+parameters:
+  AGENT_NAME:
+    description: "Target agent/host name"
+    type: string
+    required: true
+    example: "DESKTOP-AM0HLGE"
+  CUSTOMER_CODE:
+    description: "Customer label for filtering"
+    type: string
+    required: true
+    example: "lab"
+  INDEX_PATTERN:
+    description: "Elasticsearch index pattern"
+    type: string
+    required: true
+    example: "wazuh-lab_*"
+  START_TIME:
+    description: "Query start time (ISO 8601 or relative)"
+    type: datetime
+    required: false
+    default: "now-24h"
+    example: "2026-04-10 00:00:00.000"
+  END_TIME:
+    description: "Query end time (ISO 8601 or relative)"
+    type: datetime
+    required: false
+    default: "now"
+    example: "2026-04-10 23:59:59.999"
+
+how_to_implement: >
+  To successfully implement this analytic, you will need to enable PowerShell Script 
+  Block Logging on some or all endpoints. The Wazuh agent ossec.conf should include 
+  the Microsoft-Windows-PowerShell/Operational event channel. This detection monitors 
+  for the KerberosRequestorSecurityToken class used to enumerate Service Principal 
+  Names for Kerberoasting attacks. Validate that data_win_eventdata_scriptBlockText 
+  field is being populated in Elasticsearch/Wazuh Indexer.
+
+known_false_positives: >
+  False positives should be limited. However, legitimate SPN enumeration by system 
+  administrators may occur during Active Directory management or troubleshooting 
+  activities. Filter based on user context and whether the action was expected and 
+  authorized within your organization.
+
+references:
+  - https://docs.microsoft.com/en-us/windows/win32/ad/service-principal-names
+  - https://docs.microsoft.com/en-us/dotnet/api/system.identitymodel.tokens.kerberosrequestorsecuritytoken?view=netframework-4.8
+  - https://www.ired.team/offensive-security-experiments/active-directory-kerberos-abuse/t1208-kerberoasting
+  - https://strontic.github.io/xcyclopedia/library/setspn.exe-5C184D581524245DAD7A0A02B51FD2C2.html
+  - https://attack.mitre.org/techniques/T1558/003/
+  - https://social.technet.microsoft.com/wiki/contents/articles/717.service-principal-names-spn-setspn-syntax.aspx
+  - https://web.archive.org/web/20220212163642/https://www.harmj0y.net/blog/powershell/kerberoasting-without-mimikatz/
+  - https://blog.zsec.uk/paving-2-da-wholeset/
+  - https://msitpros.com/?p=3113
+  - https://adsecurity.org/?p=3466
+
+response:
+  message: >
+    Service Principal Names (SPN) discovery with KerberosRequestorSecurityToken 
+    detected on $agent_name$ by user $data_win_eventdata_user$. Script block: 
+    $data_win_eventdata_scriptBlockText$. This indicates potential Kerberoasting 
+    reconnaissance for credential theft. MITRE ATT&CK: T1558.003
+  risk_score: 50
+  severity: medium
+  risk_objects:
+    - field: agent_name
+      type: system
+      score: 50
+    - field: data_win_eventdata_user
+      type: user
+      score: 50
+  threat_objects:
+    - field: data_win_eventdata_scriptBlockText
+      type: powershell_script
+
+tags:
+  analytic_story:
+    - Hellcat Ransomware
+    - Active Directory Discovery
+    - Active Directory Kerberos Attacks
+    - Malicious PowerShell
+    - Active Directory Privilege Escalation
+  asset_type: Endpoint
+  mitre_attack_id:
+    - T1558.003
+  custom_tags:
+    - serviceprincipalname
+    - kerberoasting
+    - spn_enumeration
+    - powershell
+    - kerberos_abuse
+    - credential_theft
+  product:
+    - Wazuh
+  security_domain: endpoint
+
+graylog:
+  query: data_win_system_eventID:"4104" AND data_win_eventdata_scriptBlockText:/.*KerberosRequestorSecurityToken.*/
