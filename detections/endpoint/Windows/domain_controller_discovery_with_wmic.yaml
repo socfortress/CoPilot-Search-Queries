@@ -1,0 +1,181 @@
+name: Domain Controller Discovery with Wmic
+id: 64c7adaa-48ee-483c-b0d6-7175bc65e6cc
+version: 1
+schema_version: "1.0"
+date: "2026-04-21"
+author: SOCFortress LLC
+status: production
+type: Hunting
+
+description: >
+  This analytic identifies the execution of wmic.exe with a command-line
+  argument referencing "DomainControllerAddress", used to discover domain
+  controller network addresses in an Active Directory forest via WMI
+  queries against the ds_dc namespace. Sysmon EventID 1 is used to match
+  process creation events where the image or OriginalFileName is wmic.exe
+  and the command line contains "DomainControllerAddress". This activity
+  is significant because it is commonly used by adversaries and Red Teams
+  for situational awareness and Active Directory discovery during the
+  early phases of an intrusion. Because WMI queries can bypass some
+  traditional AD monitoring, this technique is favored by attackers
+  seeking to minimize detection footprint while mapping domain
+  infrastructure. If confirmed malicious, this behavior could allow
+  attackers to identify domain controller IP addresses for targeted
+  attacks, plan lateral movement, or prepare for credential theft
+  operations including DCSync or Kerberos-based attacks.
+
+data_source:
+  - Sysmon EventID 1
+
+search:
+  index_pattern: "${INDEX_PATTERN}"
+  size: 100
+  sort:
+    - timestamp: desc
+  query:
+    bool:
+      must:
+        - term:
+            agent_name: "${AGENT_NAME}"
+        - term:
+            agent_labels_customer: "${CUSTOMER_CODE}"
+        - term:
+            data_win_system_eventID: "1"
+        - bool:
+            should:
+              - wildcard:
+                  data_win_eventdata_image:
+                    value: "*wmic.exe"
+                    case_insensitive: true
+              - term:
+                  data_win_eventdata_originalFileName: "wmic.exe"
+            minimum_should_match: 1
+        - wildcard:
+            data_win_eventdata_commandLine:
+              value: "*DomainControllerAddress*"
+              case_insensitive: true
+        - range:
+            timestamp:
+              gte: "${START_TIME}"
+              lte: "${END_TIME}"
+  _source:
+    - timestamp
+    - agent_name
+    - data_win_eventdata_image
+    - data_win_eventdata_originalFileName
+    - data_win_eventdata_commandLine
+    - data_win_eventdata_parentImage
+    - data_win_eventdata_parentCommandLine
+    - data_win_eventdata_user
+    - data_win_eventdata_processId
+    - data_win_eventdata_processGuid
+    - data_win_eventdata_parentProcessId
+    - data_win_eventdata_parentProcessGuid
+    - data_win_eventdata_hashes
+    - data_win_eventdata_integrityLevel
+    - data_win_eventdata_currentDirectory
+
+parameters:
+  AGENT_NAME:
+    description: "Target agent/host name"
+    type: string
+    required: true
+    example: "DESKTOP-AM0HLGE"
+  CUSTOMER_CODE:
+    description: "Customer label for filtering"
+    type: string
+    required: true
+    example: "lab"
+  INDEX_PATTERN:
+    description: "Elasticsearch index pattern"
+    type: string
+    required: true
+    example: "wazuh-lab_*"
+  START_TIME:
+    description: "Query start time (ISO 8601 or relative)"
+    type: datetime
+    required: false
+    default: "now-24h"
+    example: "2026-04-21 00:00:00.000"
+  END_TIME:
+    description: "Query end time (ISO 8601 or relative)"
+    type: datetime
+    required: false
+    default: "now"
+    example: "2026-04-21 23:59:59.999"
+
+how_to_implement: >
+  This detection requires Sysmon EventID 1 (Process Creation) logs to be forwarded
+  from Windows endpoints to Wazuh Indexer. Ensure Sysmon is deployed with a
+  configuration that captures Image, OriginalFileName, and CommandLine fields
+  (SwiftOnSecurity or Olaf Hartong Sysmon modular config recommended). The
+  detection matches wmic.exe either by Image path (case-insensitive) or by
+  PE OriginalFileName, combined with "DomainControllerAddress" in the command
+  line. Case-insensitive matching is used throughout. The ES DSL uses the
+  case_insensitive wildcard option (OpenSearch 2.x / Elasticsearch 7.10+);
+  Graylog equivalent uses character classes.
+
+known_false_positives: >
+  System administrators, helpdesk staff, or domain admins may legitimately
+  query domain controller information via WMI for troubleshooting or
+  scripting purposes. Review parent process lineage (admin-initiated
+  session vs. unexpected non-interactive parent), user context (admin
+  account vs. standard user), and timing to distinguish authorized
+  administrative activity from reconnaissance. Concurrent use of multiple
+  AD discovery tools on a single host (wmic + dsquery + nltest +
+  PowerShell AD modules) within a short window should be treated as
+  high-priority.
+
+references:
+  - https://attack.mitre.org/techniques/T1018/
+  - https://attack.mitre.org/techniques/T1047/
+  - https://learn.microsoft.com/en-us/windows/win32/wmisdk/wmic
+
+response:
+  message: >
+    wmic.exe was used to query domain controller address information on
+    endpoint $agent_name$ by user $data_win_eventdata_user$. Process
+    image: $data_win_eventdata_image$. Parent process:
+    $data_win_eventdata_parentImage$. Command line:
+    $data_win_eventdata_commandLine$. This is consistent with Active
+    Directory reconnaissance and situational awareness; investigate
+    parent process lineage and concurrent discovery activity.
+  risk_score: 40
+  severity: medium
+  risk_objects:
+    - field: agent_name
+      type: system
+      score: 30
+    - field: data_win_eventdata_user
+      type: user
+      score: 30
+  threat_objects:
+    - field: data_win_eventdata_image
+      type: process_name
+    - field: data_win_eventdata_parentImage
+      type: parent_process_name
+    - field: data_win_eventdata_commandLine
+      type: command_line
+
+tags:
+  analytic_story:
+    - Active Directory Discovery
+    - Active Directory Reconnaissance
+  asset_type: Endpoint
+  mitre_attack_id:
+    - T1018
+    - T1047
+  custom_tags:
+    - wmic
+    - wmi
+    - domain_controller_discovery
+    - ad_enumeration
+    - active_directory
+    - reconnaissance
+    - lolbin
+  product:
+    - Wazuh
+  security_domain: endpoint
+
+graylog:
+  query: data_win_system_eventID:"1" AND (data_win_eventdata_image:/.*[Ww][Mm][Ii][Cc]\.exe.*/ OR data_win_eventdata_originalFileName:"wmic.exe") AND data_win_eventdata_commandLine:/.*[Dd][Oo][Mm][Aa][Ii][Nn][Cc][Oo][Nn][Tt][Rr][Oo][Ll][Ll][Ee][Rr][Aa][Dd][Dd][Rr][Ee][Ss][Ss].*/
