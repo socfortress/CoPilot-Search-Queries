@@ -1,0 +1,166 @@
+name: Detect Renamed 7-Zip
+id: 4057291a-b8cf-11eb-95fe-acde48001122
+version: 1
+schema_version: "1.0"
+date: "2026-04-21"
+author: SOCFortress LLC
+status: production
+type: Hunting
+
+description: >
+  This analytic detects the execution of a renamed 7-Zip executable using Sysmon
+  EventID 1 data. It matches on the PE OriginalFileName attribute matching
+  "7z*.exe" while the actual process image filename does NOT match "7z*.exe" -
+  indicating that the binary retains its original 7-Zip metadata but has been
+  renamed on disk. This is significant because attackers frequently rename
+  legitimate archive and dual-use utilities to evade detection while staging or
+  exfiltrating data. 7-Zip in particular is commonly abused by ransomware
+  operators and APT groups to compress and encrypt stolen data prior to
+  exfiltration. If confirmed malicious, this behavior could indicate data
+  exfiltration preparation, collection staging, or other unauthorized data
+  manipulation, potentially leading to significant data breaches. Analysts
+  should validate the legitimacy of the renamed 7-Zip executable, review parent
+  process lineage, check for large archive creations, and investigate parallel
+  processes for further suspicious activity.
+
+data_source:
+  - Sysmon EventID 1
+
+search:
+  index_pattern: "${INDEX_PATTERN}"
+  size: 100
+  sort:
+    - timestamp: desc
+  query:
+    bool:
+      must:
+        - term:
+            agent_name: "${AGENT_NAME}"
+        - term:
+            agent_labels_customer: "${CUSTOMER_CODE}"
+        - term:
+            data_win_system_eventID: "1"
+        - wildcard:
+            data_win_eventdata_originalFileName: "7z*.exe"
+        - range:
+            timestamp:
+              gte: "${START_TIME}"
+              lte: "${END_TIME}"
+      must_not:
+        - wildcard:
+            data_win_eventdata_image: "*\\\\7z*.exe"
+  _source:
+    - timestamp
+    - agent_name
+    - data_win_eventdata_image
+    - data_win_eventdata_originalFileName
+    - data_win_eventdata_commandLine
+    - data_win_eventdata_parentImage
+    - data_win_eventdata_parentCommandLine
+    - data_win_eventdata_user
+    - data_win_eventdata_processId
+    - data_win_eventdata_processGuid
+    - data_win_eventdata_parentProcessId
+    - data_win_eventdata_parentProcessGuid
+    - data_win_eventdata_hashes
+    - data_win_eventdata_integrityLevel
+    - data_win_eventdata_currentDirectory
+
+parameters:
+  AGENT_NAME:
+    description: "Target agent/host name"
+    type: string
+    required: true
+    example: "DESKTOP-AM0HLGE"
+  CUSTOMER_CODE:
+    description: "Customer label for filtering"
+    type: string
+    required: true
+    example: "lab"
+  INDEX_PATTERN:
+    description: "Elasticsearch index pattern"
+    type: string
+    required: true
+    example: "wazuh-lab_*"
+  START_TIME:
+    description: "Query start time (ISO 8601 or relative)"
+    type: datetime
+    required: false
+    default: "now-24h"
+    example: "2026-04-21 00:00:00.000"
+  END_TIME:
+    description: "Query end time (ISO 8601 or relative)"
+    type: datetime
+    required: false
+    default: "now"
+    example: "2026-04-21 23:59:59.999"
+
+how_to_implement: >
+  This detection requires Sysmon EventID 1 (Process Creation) logs to be forwarded
+  from Windows endpoints to Wazuh Indexer. Ensure Sysmon is deployed with a
+  configuration that captures process creation events including Image and
+  OriginalFileName fields (SwiftOnSecurity or Olaf Hartong Sysmon modular config
+  recommended). The OriginalFileName field is extracted from the PE version
+  information and is the foundation of this detection - if Sysmon is not
+  capturing this field, the detection will not function. The detection covers
+  all 7-Zip variants (7z.exe, 7zr.exe, 7zG.exe, 7zFM.exe, 7zS.exe, etc.) since
+  the pattern "7z*.exe" matches all of them.
+
+known_false_positives: >
+  Limited false positives are expected, however this analytic may need tuning per
+  environment if legitimate internal tools or installers are known to embed 7-Zip
+  binaries under non-standard filenames (for example, some backup software or
+  portable app launchers wrap 7-Zip). Review parent process lineage and signing
+  information to distinguish legitimate embedded 7-Zip use from staging
+  activity.
+
+references:
+  - https://attack.mitre.org/techniques/T1560/001/
+  - https://github.com/redcanaryco/atomic-red-team/blob/master/atomics/T1560.001/T1560.001.md
+  - https://www.7-zip.org/
+
+response:
+  message: >
+    A renamed 7-Zip executable was identified on endpoint $agent_name$ by user
+    $data_win_eventdata_user$. The process $data_win_eventdata_image$ was
+    spawned by $data_win_eventdata_parentImage$ but its PE OriginalFileName
+    metadata is $data_win_eventdata_originalFileName$, indicating the binary
+    has been renamed. Command line: $data_win_eventdata_commandLine$. This may
+    indicate collection and staging for data exfiltration.
+  risk_score: 56
+  severity: medium
+  risk_objects:
+    - field: agent_name
+      type: system
+      score: 40
+    - field: data_win_eventdata_user
+      type: user
+      score: 40
+  threat_objects:
+    - field: data_win_eventdata_image
+      type: process_name
+    - field: data_win_eventdata_originalFileName
+      type: process_name
+    - field: data_win_eventdata_commandLine
+      type: command_line
+
+tags:
+  analytic_story:
+    - Collection and Staging
+    - Malicious Inno Setup Loader
+    - Data Exfiltration
+  asset_type: Endpoint
+  mitre_attack_id:
+    - T1560.001
+  custom_tags:
+    - 7zip
+    - renamed_binary
+    - masquerading
+    - data_staging
+    - archive_utility
+  product:
+    - Wazuh
+  security_domain: endpoint
+
+graylog:
+  query: data_win_system_eventID:"1" AND data_win_eventdata_originalFileName:/7z.*\.exe/ AND NOT data_win_eventdata_image:/.*\\\\7z.*\.exe/

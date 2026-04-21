@@ -1,0 +1,191 @@
+name: Detect Renamed PSExec
+id: 683e6196-b8e8-11eb-9a79-acde48001122
+version: 1
+schema_version: "1.0"
+date: "2026-04-21"
+author: SOCFortress LLC
+status: production
+type: Hunting
+
+description: >
+  This analytic identifies instances where PsExec.exe has been renamed and
+  executed on an endpoint. Sysmon EventID 1 is used to match events where the
+  PE OriginalFileName attribute equals "psexec.c" (the internal name embedded
+  in every Sysinternals PsExec binary by its compiler) while the actual process
+  image filename is NOT psexec.exe or psexec64.exe. This is significant because
+  renaming PsExec.exe is a common attacker tradecraft to evade filename-based
+  detection while retaining its powerful lateral movement capabilities. PsExec
+  is abused extensively by ransomware operators (BlackByte, Cactus, DarkSide,
+  Medusa, Rhysida, SamSam, VanHelsing), APT groups (HAFNIUM, Salt Typhoon,
+  Sandworm), and commodity malware campaigns (DarkGate). If confirmed
+  malicious, this could allow an attacker to execute commands remotely under
+  SYSTEM, potentially leading to credential theft, lateral movement, ransomware
+  deployment, or full domain compromise. Immediate investigation is recommended.
+
+data_source:
+  - Sysmon EventID 1
+
+search:
+  index_pattern: "${INDEX_PATTERN}"
+  size: 100
+  sort:
+    - timestamp: desc
+  query:
+    bool:
+      must:
+        - term:
+            agent_name: "${AGENT_NAME}"
+        - term:
+            agent_labels_customer: "${CUSTOMER_CODE}"
+        - term:
+            data_win_system_eventID: "1"
+        - term:
+            data_win_eventdata_originalFileName: "psexec.c"
+        - range:
+            timestamp:
+              gte: "${START_TIME}"
+              lte: "${END_TIME}"
+      must_not:
+        - wildcard:
+            data_win_eventdata_image:
+              value: "*\\\\psexec.exe"
+              case_insensitive: true
+        - wildcard:
+            data_win_eventdata_image:
+              value: "*\\\\psexec64.exe"
+              case_insensitive: true
+  _source:
+    - timestamp
+    - agent_name
+    - data_win_eventdata_image
+    - data_win_eventdata_originalFileName
+    - data_win_eventdata_commandLine
+    - data_win_eventdata_parentImage
+    - data_win_eventdata_parentCommandLine
+    - data_win_eventdata_user
+    - data_win_eventdata_processId
+    - data_win_eventdata_processGuid
+    - data_win_eventdata_parentProcessId
+    - data_win_eventdata_parentProcessGuid
+    - data_win_eventdata_hashes
+    - data_win_eventdata_integrityLevel
+    - data_win_eventdata_product
+    - data_win_eventdata_company
+    - data_win_eventdata_currentDirectory
+
+parameters:
+  AGENT_NAME:
+    description: "Target agent/host name"
+    type: string
+    required: true
+    example: "DESKTOP-AM0HLGE"
+  CUSTOMER_CODE:
+    description: "Customer label for filtering"
+    type: string
+    required: true
+    example: "lab"
+  INDEX_PATTERN:
+    description: "Elasticsearch index pattern"
+    type: string
+    required: true
+    example: "wazuh-lab_*"
+  START_TIME:
+    description: "Query start time (ISO 8601 or relative)"
+    type: datetime
+    required: false
+    default: "now-24h"
+    example: "2026-04-21 00:00:00.000"
+  END_TIME:
+    description: "Query end time (ISO 8601 or relative)"
+    type: datetime
+    required: false
+    default: "now"
+    example: "2026-04-21 23:59:59.999"
+
+how_to_implement: >
+  This detection requires Sysmon EventID 1 (Process Creation) logs to be forwarded
+  from Windows endpoints to Wazuh Indexer. Ensure Sysmon is deployed with a
+  configuration that captures Image and OriginalFileName fields (SwiftOnSecurity
+  or Olaf Hartong Sysmon modular config recommended). The OriginalFileName field
+  is extracted from the PE version information and is central to this detection -
+  PsExec binaries always have OriginalFileName set to "psexec.c" regardless of
+  what the file is renamed to on disk. The Elasticsearch wildcard exclusions use
+  the case_insensitive option (OpenSearch 2.x / Elasticsearch 7.10+) so that
+  PsExec.exe, psexec.exe, PSEXEC.EXE, etc. are all correctly recognized as the
+  unrenamed binary and excluded. The equivalent Graylog regex uses character
+  classes (e.g., [Pp][Ss][Ee][Xx][Ee][Cc]) to achieve case-insensitivity since
+  Graylog's Lucene (?i) inline flag is not reliably honored in all deployments.
+
+known_false_positives: >
+  Limited false positives should be present. Some third-party applications may
+  bundle older versions of PsExec under custom filenames (e.g., system
+  administration toolkits, legitimate remote support tools). Filter or tune
+  based on parent process, signer, and hash as needed. Review the associated
+  command-line arguments for lateral movement indicators such as remote host
+  specifications and service-install flags.
+
+references:
+  - https://attack.mitre.org/techniques/T1569/002/
+  - https://github.com/redcanaryco/atomic-red-team/blob/master/atomics/T1569.002/T1569.002.yaml
+  - https://redcanary.com/blog/threat-hunting-psexec-lateral-movement/
+  - https://learn.microsoft.com/en-us/sysinternals/downloads/psexec
+
+response:
+  message: >
+    A renamed PsExec binary was identified on endpoint $agent_name$ by user
+    $data_win_eventdata_user$. The process $data_win_eventdata_image$ was
+    spawned by $data_win_eventdata_parentImage$ but its PE OriginalFileName is
+    "psexec.c", indicating the binary is Sysinternals PsExec renamed to evade
+    detection. Command line: $data_win_eventdata_commandLine$. This is a
+    high-confidence indicator of attacker tradecraft; investigate for lateral
+    movement, credential theft, and ransomware staging.
+  risk_score: 80
+  severity: high
+  risk_objects:
+    - field: agent_name
+      type: system
+      score: 60
+    - field: data_win_eventdata_user
+      type: user
+      score: 60
+  threat_objects:
+    - field: data_win_eventdata_image
+      type: process_name
+    - field: data_win_eventdata_originalFileName
+      type: process_name
+    - field: data_win_eventdata_commandLine
+      type: command_line
+
+tags:
+  analytic_story:
+    - Active Directory Lateral Movement
+    - BlackByte Ransomware
+    - Cactus Ransomware
+    - China-Nexus Threat Activity
+    - CISA AA22-320A
+    - DarkGate Malware
+    - DarkSide Ransomware
+    - DHS Report TA18-074A
+    - HAFNIUM Group
+    - Medusa Ransomware
+    - Rhysida Ransomware
+    - Salt Typhoon
+    - SamSam Ransomware
+    - Sandworm Tools
+    - VanHelsing Ransomware
+  asset_type: Endpoint
+  mitre_attack_id:
+    - T1569.002
+  custom_tags:
+    - psexec
+    - renamed_binary
+    - masquerading
+    - lateral_movement
+    - sysinternals
+    - lolbin
+  product:
+    - Wazuh
+  security_domain: endpoint
+
+graylog:
+  query: data_win_system_eventID:"1" AND data_win_eventdata_originalFileName:"psexec.c" AND NOT data_win_eventdata_image:/.*[\\]+[Pp][Ss][Ee][Xx][Ee][Cc]\.exe/ AND NOT data_win_eventdata_image:/.*[\\]+[Pp][Ss][Ee][Xx][Ee][Cc]64\.exe/
