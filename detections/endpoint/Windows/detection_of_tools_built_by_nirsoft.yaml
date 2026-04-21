@@ -1,0 +1,141 @@
+name: Detection of Tools Built by NirSoft
+id: detection-of-tools-built-by-nirsoft-001
+version: 1
+schema_version: "1.0"
+date: "2026-04-20"
+author: SOCFortress LLC
+status: production
+type: Anomaly
+
+description: >
+  Detects the execution of tools built by NirSoft by identifying specific command-line
+  arguments such as "/stext" and "/scomma" in Sysmon EventID 1 (Process Creation) logs.
+  NirSoft tools are legitimate utilities that recover credentials and system information
+  from Windows hosts, but are commonly abused by attackers and malware families such as
+  Emotet, Azorult, and commodity infostealers to dump cached credentials from web
+  browsers, email clients, wireless profiles, and other local credential stores. The
+  "/stext" flag dumps output to plain text while "/scomma" dumps to CSV — both are
+  exfiltration-friendly formats used during credential access and reconnaissance
+  stages. If confirmed malicious, this activity could indicate credential theft, data
+  staging for exfiltration, or system reconnaissance by an adversary.
+
+data_source:
+  - Sysmon EventID 1
+
+search:
+  index_pattern: "${INDEX_PATTERN}"
+  size: 100
+  sort:
+    - timestamp: desc
+  query:
+    bool:
+      must:
+        - term:
+            agent_name: "${AGENT_NAME}"
+        - term:
+            agent_labels_customer: "${CUSTOMER_CODE}"
+        - term:
+            data_win_system_eventID: "1"
+        - bool:
+            should:
+              - wildcard:
+                  data_win_eventdata_commandLine: "* /stext *"
+              - wildcard:
+                  data_win_eventdata_commandLine: "* /scomma *"
+            minimum_should_match: 1
+        - range:
+            timestamp:
+              gte: "${START_TIME}"
+              lte: "${END_TIME}"
+  _source:
+    - timestamp
+    - agent_name
+    - data_win_eventdata_image
+    - data_win_eventdata_originalFileName
+    - data_win_eventdata_commandLine
+    - data_win_eventdata_parentImage
+    - data_win_eventdata_parentCommandLine
+    - data_win_eventdata_user
+
+parameters:
+  AGENT_NAME:
+    type: string
+    required: true
+    example: "DESKTOP-AM0HLGE"
+  CUSTOMER_CODE:
+    type: string
+    required: true
+    example: "lab"
+  INDEX_PATTERN:
+    type: string
+    required: true
+    example: "wazuh-lab_*"
+  START_TIME:
+    type: datetime
+    default: "now-24h"
+  END_TIME:
+    type: datetime
+    default: "now"
+
+how_to_implement: >
+  Requires Sysmon EventID 1 with full command-line logging enabled. The
+  Microsoft-Windows-Sysmon/Operational channel must be forwarded by the Wazuh agent
+  via the ossec.conf localfile configuration.
+
+known_false_positives: >
+  Administrators, IT support staff, and forensic analysts may occasionally run
+  NirSoft utilities for legitimate password recovery, audit, or troubleshooting
+  purposes. Other software using the same switch naming convention (/stext,
+  /scomma) could also trigger this detection. Verify the tool was used for a
+  legitimate purpose by an authorized user and investigate the parent process
+  and user context.
+
+references:
+  - https://attack.mitre.org/techniques/T1072/
+  - https://www.nirsoft.net/
+  - https://attack.mitre.org/software/S0349/
+
+response:
+  message: >
+    NirSoft-style tool execution detected on $agent_name$.
+    Process: $data_win_eventdata_image$.
+    OriginalFileName: $data_win_eventdata_originalFileName$.
+    CommandLine: $data_win_eventdata_commandLine$.
+    Parent: $data_win_eventdata_parentImage$.
+    User: $data_win_eventdata_user$. MITRE ATT&CK: T1072
+  risk_score: 40
+  severity: medium
+  risk_objects:
+    - field: agent_name
+      type: system
+      score: 40
+    - field: data_win_eventdata_user
+      type: user
+      score: 40
+  threat_objects:
+    - field: data_win_eventdata_image
+      type: process
+    - field: data_win_eventdata_commandLine
+      type: process
+
+tags:
+  analytic_story:
+    - Emotet Malware DHS Report TA18-201A
+    - Azorult
+    - Suspicious Command-Line Executions
+  asset_type: Endpoint
+  mitre_attack_id:
+    - T1072
+  custom_tags:
+    - nirsoft
+    - credential_access
+    - credential_dumping
+    - infostealer
+    - reconnaissance
+    - lolbin
+  product:
+    - Wazuh
+  security_domain: endpoint
+
+graylog:
+  query: data_win_system_eventID:"1" AND (data_win_eventdata_commandLine:/.* \/stext .*/ OR data_win_eventdata_commandLine:/.* \/scomma .*/)

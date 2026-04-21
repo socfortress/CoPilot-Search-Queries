@@ -1,0 +1,148 @@
+name: Detect mshta inline hta execution
+id: a0873b32-5b68-11eb-ae93-0242ac130002
+version: 1
+schema_version: "1.0"
+date: "2026-04-21"
+author: SOCFortress LLC
+status: production
+type: TTP
+
+description: >
+  The following analytic detects the execution of mshta.exe with inline protocol 
+  handlers such as VBScript, JavaScript, and About. This activity is significant 
+  because mshta.exe can be exploited to execute malicious scripts, potentially 
+  leading to unauthorized code execution. If confirmed malicious, this could allow 
+  an attacker to execute arbitrary code, escalate privileges, or establish 
+  persistence within the environment.
+
+data_source:
+  - Sysmon EventID 1
+  - Windows Event Log Security 4688
+
+search:
+  index_pattern: "${INDEX_PATTERN}"
+  size: 100
+  sort:
+    - timestamp: desc
+  query:
+    bool:
+      must:
+        - term:
+            agent_name: "${AGENT_NAME}"
+        - term:
+            agent_labels_customer: "${CUSTOMER_CODE}"
+        - term:
+            data_win_system_eventID: "1"
+        - wildcard:
+            data_win_eventdata_image: "*mshta.exe"
+        - bool:
+            should:
+              - wildcard:
+                  data_win_eventdata_commandLine: "*vbscript*"
+              - wildcard:
+                  data_win_eventdata_commandLine: "*javascript*"
+              - wildcard:
+                  data_win_eventdata_commandLine: "*about*"
+        - range:
+            timestamp:
+              gte: "${START_TIME}"
+              lte: "${END_TIME}"
+  _source:
+    - timestamp
+    - agent_name
+    - data_win_system_eventID
+    - data_win_eventdata_image
+    - data_win_eventdata_commandLine
+    - data_win_eventdata_parentImage
+    - data_win_eventdata_parentProcessId
+    - data_win_eventdata_user
+
+parameters:
+  AGENT_NAME:
+    description: "Target agent/host name"
+    type: string
+    required: true
+    example: "DESKTOP-AM0HLGE"
+  CUSTOMER_CODE:
+    description: "Customer label for filtering"
+    type: string
+    required: true
+    example: "lab"
+  INDEX_PATTERN:
+    description: "Elasticsearch index pattern"
+    type: string
+    required: true
+    example: "wazuh-lab_*"
+  START_TIME:
+    description: "Query start time (ISO 8601 or relative)"
+    type: datetime
+    required: false
+    default: "now-24h"
+    example: "2026-04-21 00:00:00.000"
+  END_TIME:
+    description: "Query end time (ISO 8601 or relative)"
+    type: datetime
+    required: false
+    default: "now"
+    example: "2026-04-21 23:59:59.999"
+
+how_to_implement: >
+  Ensure Sysmon EventID 1 process creation logging is enabled on Windows endpoints. 
+  Configure the Wazuh agent to forward Windows Security Event Log events. 
+  Validate that data_win_eventdata_image and data_win_eventdata_commandLine 
+  fields are being populated in Elasticsearch/Wazuh Indexer.
+
+known_false_positives: >
+  Although unlikely, some legitimate applications may exhibit this behavior. 
+  Administrative tools or scripts that legitimately use mshta with inline 
+  protocols may trigger alerts. Filter based on user context and expected usage.
+
+references:
+  - https://github.com/redcanaryco/AtomicTestHarnesses
+  - https://redcanary.com/blog/introducing-atomictestharnesses/
+  - https://docs.microsoft.com/en-us/windows/win32/search/-search-3x-wds-extidx-prot-implementing
+  - https://attack.mitre.org/techniques/T1218/005/
+
+response:
+  message: >
+    mshta.exe inline HTA execution detected on $agent_name$ by user $data_win_eventdata_user$. 
+    Command: $data_win_eventdata_commandLine$. 
+    Parent process: $data_win_eventdata_parentImage$. 
+    This indicates potential malicious script execution. 
+    MITRE ATT&CK: T1218.005
+  risk_score: 60
+  severity: high
+  risk_objects:
+    - field: agent_name
+      type: system
+      score: 60
+    - field: data_win_eventdata_user
+      type: user
+      score: 60
+  threat_objects:
+    - field: data_win_eventdata_image
+      type: process_name
+    - field: data_win_eventdata_commandLine
+      type: command_line
+
+tags:
+  analytic_story:
+    - Compromised Windows Host
+    - Suspicious MSHTA Activity
+    - Living Off The Land
+  asset_type: Endpoint
+  mitre_attack_id:
+    - T1218.005
+  custom_tags:
+    - mshta
+    - inline_hta
+    - vbscript
+    - javascript
+    - defense_evasion
+    - lolbas
+  product:
+    - Wazuh
+  security_domain: endpoint
+
+graylog:
+  query: data_win_system_eventID:"1" AND data_win_eventdata_image:/.*mshta.exe.*/ AND (data_win_eventdata_commandLine:/.*vbscript.*/ OR data_win_eventdata_commandLine:/.*javascript.*/ OR data_win_eventdata_commandLine:/.*about:.*/)
