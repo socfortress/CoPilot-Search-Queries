@@ -1,0 +1,171 @@
+name: Detect Prohibited Applications Spawning cmd exe
+id: dcfd6b40-42f9-469d-a433-2e53f7486664
+version: 1
+schema_version: "1.0"
+date: "2026-04-21"
+author: SOCFortress LLC
+status: production
+type: Hunting
+
+description: >
+  Identifies executions of cmd.exe spawned by processes that are commonly abused
+  by attackers and do not typically launch cmd.exe. This activity is significant
+  because it may indicate an attempt to execute unauthorized commands or scripts,
+  often a precursor to further malicious actions. If confirmed malicious, this
+  behavior could lead to unauthorized code execution, privilege escalation, or
+  persistence within the environment.
+
+data_source:
+  - Sysmon EventID 1
+  - Windows Event Log Security 4688
+
+search:
+  index_pattern: "${INDEX_PATTERN}"
+  size: 100
+  sort:
+    - timestamp: desc
+  query:
+    bool:
+      must:
+        - term:
+            agent_name: "${AGENT_NAME}"
+        - term:
+            agent_labels_customer: "${CUSTOMER_CODE}"
+        - term:
+            data_win_system_eventID: "1"
+        - wildcard:
+            data_win_eventdata_image: "*cmd.exe"
+        - bool:
+            should:
+              - wildcard:
+                  data_win_eventdata_parentImage: "*winword.exe"
+              - wildcard:
+                  data_win_eventdata_parentImage: "*EXCEL.EXE"
+              - wildcard:
+                  data_win_eventdata_parentImage: "*OUTLOOK.EXE"
+              - wildcard:
+                  data_win_eventdata_parentImage: "*POWERPNT.EXE"
+              - wildcard:
+                  data_win_eventdata_parentImage: "*visio.exe"
+              - wildcard:
+                  data_win_eventdata_parentImage: "*mspub.exe"
+              - wildcard:
+                  data_win_eventdata_parentImage: "*Acrobat.exe"
+              - wildcard:
+                  data_win_eventdata_parentImage: "*Acrord32.exe"
+              - wildcard:
+                  data_win_eventdata_parentImage: "*chrome.exe"
+              - wildcard:
+                  data_win_eventdata_parentImage: "*iexplore.exe"
+              - wildcard:
+                  data_win_eventdata_parentImage: "*opera.exe"
+              - wildcard:
+                  data_win_eventdata_parentImage: "*firefox.exe"
+              - wildcard:
+                  data_win_eventdata_parentImage: "*java.exe"
+              - wildcard:
+                  data_win_eventdata_parentImage: "*powershell.exe"
+              - wildcard:
+                  data_win_eventdata_parentImage: "*mshta.exe"
+              - wildcard:
+                  data_win_eventdata_parentImage: "*zoom.exe"
+              - wildcard:
+                  data_win_eventdata_parentImage: "*node.exe"
+            minimum_should_match: 1
+        - range:
+            timestamp:
+              gte: "${START_TIME}"
+              lte: "${END_TIME}"
+  _source:
+    - timestamp
+    - agent_name
+    - data_win_system_eventID
+    - data_win_eventdata_image
+    - data_win_eventdata_parentImage
+    - data_win_eventdata_commandLine
+    - data_win_eventdata_user
+
+parameters:
+  AGENT_NAME:
+    description: "Target agent/host name"
+    type: string
+    required: true
+    example: "DESKTOP-AM0HLGE"
+  CUSTOMER_CODE:
+    description: "Customer label for filtering"
+    type: string
+    required: true
+    example: "lab"
+  INDEX_PATTERN:
+    description: "Elasticsearch index pattern"
+    type: string
+    required: true
+    example: "wazuh-lab_*"
+  START_TIME:
+    description: "Query start time (ISO 8601 or relative)"
+    type: datetime
+    required: false
+    default: "now-24h"
+    example: "2026-04-21 00:00:00.000"
+  END_TIME:
+    description: "Query end time (ISO 8601 or relative)"
+    type: datetime
+    required: false
+    default: "now"
+    example: "2026-04-21 23:59:59.999"
+
+how_to_implement: >
+  Requires Wazuh agents with Sysmon installed and configured to log process
+  creation events (EventID 1). The data_win_eventdata_parentImage and
+  data_win_eventdata_image fields must be populated in Elasticsearch/Wazuh
+  Indexer. This detection monitors for cmd.exe spawned by applications that
+  typically do not execute command-line processes.
+
+known_false_positives: >
+  There are circumstances where an application may legitimately execute and
+  interact with the Windows command-line interface. Investigate and modify
+  the prohibited applications list as appropriate for your environment.
+
+references:
+  - https://attack.mitre.org/techniques/T1059/003/
+
+response:
+  message: >
+    Prohibited application spawning cmd.exe detected on $agent_name$ by user
+    $data_win_eventdata_user$. Parent process: $data_win_eventdata_parentImage$.
+    Command: $data_win_eventdata_commandLine$. This indicates potential
+    unauthorized command execution. MITRE ATT&CK: T1059.003
+  risk_score: 50
+  severity: medium
+  risk_objects:
+    - field: agent_name
+      type: system
+      score: 50
+    - field: data_win_eventdata_user
+      type: user
+      score: 50
+  threat_objects:
+    - field: data_win_eventdata_parentImage
+      type: parent_process
+    - field: data_win_eventdata_commandLine
+      type: command_line
+
+tags:
+  analytic_story:
+    - Suspicious Command-Line Executions
+    - Suspicious MSHTA Activity
+    - NOBELIUM Group
+  asset_type: Endpoint
+  mitre_attack_id:
+    - T1059.003
+  custom_tags:
+    - cmd_execution
+    - prohibited_applications
+    - command_line_abuse
+    - defense_evasion
+  product:
+    - Wazuh
+  security_domain: endpoint
+
+graylog:
+  query: data_win_system_eventID:"1" AND data_win_eventdata_image:/.*cmd\.exe.*/ AND (data_win_eventdata_parentImage:/.*winword\.exe.*/ OR data_win_eventdata_parentImage:/.*EXCEL\.EXE.*/ OR data_win_eventdata_parentImage:/.*OUTLOOK\.EXE.*/ OR data_win_eventdata_parentImage:/.*POWERPNT\.EXE.*/ OR data_win_eventdata_parentImage:/.*visio\.exe.*/ OR data_win_eventdata_parentImage:/.*mspub\.exe.*/ OR data_win_eventdata_parentImage:/.*Acrobat\.exe.*/ OR data_win_eventdata_parentImage:/.*Acrord32\.exe.*/ OR data_win_eventdata_parentImage:/.*chrome\.exe.*/ OR data_win_eventdata_parentImage:/.*iexplore\.exe.*/ OR data_win_eventdata_parentImage:/.*opera\.exe.*/ OR data_win_eventdata_parentImage:/.*firefox\.exe.*/ OR data_win_eventdata_parentImage:/.*java\.exe.*/ OR data_win_eventdata_parentImage:/.*powershell\.exe.*/ OR data_win_eventdata_parentImage:/.*mshta\.exe.*/ OR data_win_eventdata_parentImage:/.*zoom\.exe.*/ OR data_win_eventdata_parentImage:/.*node\.exe.*/)

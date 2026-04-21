@@ -1,0 +1,163 @@
+name: Detect PsExec With accepteula Flag
+id: 27c3a83d-cada-47c6-9042-67baf19d2574
+version: 1
+schema_version: "1.0"
+date: "2026-04-21"
+author: SOCFortress LLC
+status: production
+type: TTP
+
+description: >
+  The following analytic identifies the execution of PsExec.exe or PsExec64.exe
+  with the accepteula flag in the command line. This activity is significant
+  because PsExec is commonly used by threat actors to execute code on remote
+  systems, and the accepteula flag indicates first-time usage, which could
+  signify initial compromise or lateral movement. If confirmed malicious, this
+  activity could allow attackers to gain remote code execution capabilities,
+  potentially leading to further system compromise and lateral movement within
+  the network.
+
+data_source:
+  - Sysmon EventID 1
+  - Windows Event Log Security 4688
+
+search:
+  index_pattern: "${INDEX_PATTERN}"
+  size: 100
+  sort:
+    - timestamp: desc
+  query:
+    bool:
+      must:
+        - term:
+            agent_name: "${AGENT_NAME}"
+        - term:
+            agent_labels_customer: "${CUSTOMER_CODE}"
+        - term:
+            data_win_system_eventID: "1"
+        - bool:
+            should:
+              - wildcard:
+                  data_win_eventdata_image: "*psexec.exe"
+              - wildcard:
+                  data_win_eventdata_image: "*psexec64.exe"
+              - wildcard:
+                  data_win_eventdata_originalFileName: "psexec.c"
+            minimum_should_match: 1
+        - wildcard:
+            data_win_eventdata_commandLine: "*accepteula*"
+        - range:
+            timestamp:
+              gte: "${START_TIME}"
+              lte: "${END_TIME}"
+  _source:
+    - timestamp
+    - agent_name
+    - data_win_system_eventID
+    - data_win_eventdata_image
+    - data_win_eventdata_commandLine
+    - data_win_eventdata_originalFileName
+    - data_win_eventdata_user
+    - data_win_eventdata_parentImage
+
+parameters:
+  AGENT_NAME:
+    description: "Target agent/host name"
+    type: string
+    required: true
+    example: "DESKTOP-AM0HLGE"
+  CUSTOMER_CODE:
+    description: "Customer label for filtering"
+    type: string
+    required: true
+    example: "lab"
+  INDEX_PATTERN:
+    description: "Elasticsearch index pattern"
+    type: string
+    required: true
+    example: "wazuh-lab_*"
+  START_TIME:
+    description: "Query start time (ISO 8601 or relative)"
+    type: datetime
+    required: false
+    default: "now-24h"
+    example: "2026-04-21 00:00:00.000"
+  END_TIME:
+    description: "Query end time (ISO 8601 or relative)"
+    type: datetime
+    required: false
+    default: "now"
+    example: "2026-04-21 23:59:59.999"
+
+how_to_implement: >
+  Requires Wazuh agents with Sysmon installed and configured to log process
+  creation events (EventID 1). The data_win_eventdata_image,
+  data_win_eventdata_originalFileName, and data_win_eventdata_commandLine
+  fields must be populated in Elasticsearch/Wazuh Indexer. This detection
+  monitors for PsExec execution with the accepteula flag, which is typically
+  used during first-time execution.
+
+known_false_positives: >
+  Administrators can leverage PsExec for accessing remote systems and might
+  pass accepteula as an argument if they are running this tool for the first
+  time. However, it is not likely that you'd see multiple occurrences of this
+  event on a machine. Investigate based on context and frequency.
+
+references:
+  - https://attack.mitre.org/techniques/T1021/002/
+  - https://media.defense.gov/2023/May/24/2003229517/-1/-1/0/CSA_Living_off_the_Land.PDF
+
+response:
+  message: >
+    PsExec execution with accepteula flag detected on $agent_name$ by user
+    $data_win_eventdata_user$. Process: $data_win_eventdata_image$.
+    Command: $data_win_eventdata_commandLine$. This indicates potential
+    remote code execution attempt. MITRE ATT&CK: T1021.002
+  risk_score: 50
+  severity: medium
+  risk_objects:
+    - field: agent_name
+      type: system
+      score: 50
+    - field: data_win_eventdata_user
+      type: user
+      score: 50
+  threat_objects:
+    - field: data_win_eventdata_image
+      type: process_name
+    - field: data_win_eventdata_commandLine
+      type: command_line
+
+tags:
+  analytic_story:
+    - Active Directory Lateral Movement
+    - DHS Report TA18-074A
+    - HAFNIUM Group
+    - Rhysida Ransomware
+    - Medusa Ransomware
+    - DarkSide Ransomware
+    - SamSam Ransomware
+    - CISA AA22-320A
+    - Sandworm Tools
+    - IcedID
+    - BlackByte Ransomware
+    - DarkGate Malware
+    - Cactus Ransomware
+    - Volt Typhoon
+    - Seashell Blizzard
+    - VanHelsing Ransomware
+    - Storm-0501 Ransomware
+  asset_type: Endpoint
+  mitre_attack_id:
+    - T1021.002
+  custom_tags:
+    - remote_execution
+    - lateral_movement
+    - psexec
+    - privilege_escalation
+  product:
+    - Wazuh
+  security_domain: endpoint
+
+graylog:
+  query: data_win_system_eventID:"1" AND (data_win_eventdata_image:/.*psexec\.exe.*/ OR data_win_eventdata_image:/.*psexec64\.exe.*/ OR data_win_eventdata_originalFileName:/.*psexec\.c.*/) AND data_win_eventdata_commandLine:/.*accepteula.*/

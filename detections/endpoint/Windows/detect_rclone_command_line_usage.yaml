@@ -1,0 +1,187 @@
+name: Detect RClone Command-Line Usage
+id: 32e0baea-b3f1-11eb-a2ce-acde48001122
+version: 1
+schema_version: "1.0"
+date: "2026-04-21"
+author: SOCFortress LLC
+status: production
+type: TTP
+
+description: >
+  This analytic detects the usage of rclone.exe with specific command-line arguments
+  indicative of file transfer activities. It leverages Sysmon EventID 1 data, focusing
+  on process name (or original file name) matching rclone.exe combined with suspicious
+  command-line flags commonly used for data exfiltration. This activity is significant
+  as rclone.exe is frequently abused by adversaries for data exfiltration, especially
+  during ransomware operations (DarkSide, Black Basta, Cactus, Hellcat, Storm-0501).
+  If confirmed malicious, this behavior could lead to unauthorized data transfer to
+  cloud storage providers (Mega, pCloud, FTP), resulting in data breaches and potential
+  loss of sensitive information. Immediate isolation of the affected endpoint and
+  further investigation are recommended.
+
+data_source:
+  - Sysmon EventID 1
+
+search:
+  index_pattern: "${INDEX_PATTERN}"
+  size: 100
+  sort:
+    - timestamp: desc
+  query:
+    bool:
+      must:
+        - term:
+            agent_name: "${AGENT_NAME}"
+        - term:
+            agent_labels_customer: "${CUSTOMER_CODE}"
+        - term:
+            data_win_system_eventID: "1"
+        - bool:
+            should:
+              - wildcard:
+                  data_win_eventdata_image: "*rclone.exe"
+              - wildcard:
+                  data_win_eventdata_originalFileName: "rclone.exe"
+            minimum_should_match: 1
+        - bool:
+            should:
+              - wildcard:
+                  data_win_eventdata_commandLine: "*copy*"
+              - wildcard:
+                  data_win_eventdata_commandLine: "*mega*"
+              - wildcard:
+                  data_win_eventdata_commandLine: "*pcloud*"
+              - wildcard:
+                  data_win_eventdata_commandLine: "*ftp*"
+              - wildcard:
+                  data_win_eventdata_commandLine: "*--config*"
+              - wildcard:
+                  data_win_eventdata_commandLine: "*--progress*"
+              - wildcard:
+                  data_win_eventdata_commandLine: "*--no-check-certificate*"
+              - wildcard:
+                  data_win_eventdata_commandLine: "*--ignore-existing*"
+              - wildcard:
+                  data_win_eventdata_commandLine: "*--auto-confirm*"
+              - wildcard:
+                  data_win_eventdata_commandLine: "*--transfers*"
+              - wildcard:
+                  data_win_eventdata_commandLine: "*--multi-thread-streams*"
+            minimum_should_match: 1
+        - range:
+            timestamp:
+              gte: "${START_TIME}"
+              lte: "${END_TIME}"
+  _source:
+    - timestamp
+    - agent_name
+    - data_win_eventdata_image
+    - data_win_eventdata_originalFileName
+    - data_win_eventdata_commandLine
+    - data_win_eventdata_parentImage
+    - data_win_eventdata_parentCommandLine
+    - data_win_eventdata_user
+    - data_win_eventdata_processId
+    - data_win_eventdata_processGuid
+    - data_win_eventdata_hashes
+    - data_win_eventdata_integrityLevel
+
+parameters:
+  AGENT_NAME:
+    description: "Target agent/host name"
+    type: string
+    required: true
+    example: "DESKTOP-AM0HLGE"
+  CUSTOMER_CODE:
+    description: "Customer label for filtering"
+    type: string
+    required: true
+    example: "lab"
+  INDEX_PATTERN:
+    description: "Elasticsearch index pattern"
+    type: string
+    required: true
+    example: "wazuh-lab_*"
+  START_TIME:
+    description: "Query start time (ISO 8601 or relative)"
+    type: datetime
+    required: false
+    default: "now-24h"
+    example: "2026-04-21 00:00:00.000"
+  END_TIME:
+    description: "Query end time (ISO 8601 or relative)"
+    type: datetime
+    required: false
+    default: "now"
+    example: "2026-04-21 23:59:59.999"
+
+how_to_implement: >
+  This detection requires Sysmon EventID 1 (Process Creation) logs to be forwarded
+  from Windows endpoints to Wazuh Indexer. Ensure Sysmon is deployed with a
+  configuration that captures process creation events including Image, OriginalFileName,
+  and CommandLine fields (SwiftOnSecurity or Olaf Hartong Sysmon modular config
+  recommended). The detection matches on rclone.exe by either its process image path
+  OR its original file name (to catch renamed binaries), combined with command-line
+  arguments typical of data exfiltration operations. Tune the wildcard patterns as
+  needed if legitimate rclone usage exists in your environment.
+
+known_false_positives: >
+  False positives should be limited as this detection is scoped to the rclone process
+  name or original file name. Legitimate backup administrators, IT staff, or DevOps
+  engineers may use rclone for authorized cloud sync operations. Filter or tune the
+  analytic by user, host, or parent process as needed. Consider allow-listing specific
+  service accounts or hosts where rclone is an approved tool.
+
+references:
+  - https://redcanary.com/blog/rclone-mega-extortion/
+  - https://www.mandiant.com/resources/shining-a-light-on-darkside-ransomware-operations
+  - https://thedfirreport.com/2021/03/29/sodinokibi-aka-revil-ransomware/
+  - https://thedfirreport.com/2021/11/29/continuing-the-bazar-ransomware-story/
+  - https://attack.mitre.org/techniques/T1020/
+
+response:
+  message: >
+    An instance of $data_win_eventdata_parentImage$ spawning rclone.exe
+    ($data_win_eventdata_image$) was identified on endpoint $agent_name$ by user
+    $data_win_eventdata_user$ attempting to connect to a remote cloud service to
+    move files or folders. Command line: $data_win_eventdata_commandLine$
+  risk_score: 64
+  severity: high
+  risk_objects:
+    - field: agent_name
+      type: system
+      score: 50
+    - field: data_win_eventdata_user
+      type: user
+      score: 50
+  threat_objects:
+    - field: data_win_eventdata_image
+      type: process_name
+    - field: data_win_eventdata_parentImage
+      type: parent_process_name
+    - field: data_win_eventdata_commandLine
+      type: command_line
+
+tags:
+  analytic_story:
+    - Storm-0501 Ransomware
+    - Hellcat Ransomware
+    - DarkSide Ransomware
+    - Ransomware
+    - Black Basta Ransomware
+    - Cactus Ransomware
+    - Data Exfiltration
+  asset_type: Endpoint
+  mitre_attack_id:
+    - T1020
+  custom_tags:
+    - rclone
+    - data_exfiltration
+    - cloud_exfiltration
+    - ransomware
+  product:
+    - Wazuh
+  security_domain: endpoint
+
+graylog:
+  query: data_win_system_eventID:"1" AND (data_win_eventdata_image:/.*rclone\.exe.*/ OR data_win_eventdata_originalFileName:/rclone\.exe/) AND (data_win_eventdata_commandLine:/.*copy.*/ OR data_win_eventdata_commandLine:/.*mega.*/ OR data_win_eventdata_commandLine:/.*pcloud.*/ OR data_win_eventdata_commandLine:/.*ftp.*/ OR data_win_eventdata_commandLine:/.*\-\-config.*/ OR data_win_eventdata_commandLine:/.*\-\-progress.*/ OR data_win_eventdata_commandLine:/.*\-\-no\-check\-certificate.*/ OR data_win_eventdata_commandLine:/.*\-\-ignore\-existing.*/ OR data_win_eventdata_commandLine:/.*\-\-auto\-confirm.*/ OR data_win_eventdata_commandLine:/.*\-\-transfers.*/ OR data_win_eventdata_commandLine:/.*\-\-multi\-thread\-streams.*/)
