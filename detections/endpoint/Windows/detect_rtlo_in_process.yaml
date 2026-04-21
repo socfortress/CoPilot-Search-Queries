@@ -1,0 +1,179 @@
+name: Detect RTLO In Process
+id: 22ac27b4-7189-4a4f-9375-b9017c9620d7
+version: 1
+schema_version: "1.0"
+date: "2026-04-21"
+author: SOCFortress LLC
+status: production
+type: TTP
+
+description: >
+  This analytic identifies the abuse of the Right-to-Left Override (RTLO) Unicode
+  character (U+202E) in process image paths, command lines, and original file
+  names. Sysmon EventID 1 is used to match any process creation event whose
+  Image, CommandLine, or OriginalFileName field contains the literal U+202E
+  character. This activity is significant because the RTLO character causes
+  subsequent text to be rendered right-to-left by Windows Explorer, file
+  managers, and most text-rendering applications - allowing attackers to
+  visually disguise malicious file extensions. For example, a file named
+  "invoice<U+202E>fdp.exe" displays to the user as "invoiceexe.pdf",
+  masquerading a malicious executable as a benign PDF. This tradecraft is
+  commonly used in spear-phishing attachment campaigns (e.g., BlackTech cyber
+  espionage activity) to trick users into executing attached malware. If
+  confirmed malicious, this technique can allow attackers to execute harmful
+  code undetected, potentially leading to unauthorized access, data
+  exfiltration, or further system compromise.
+
+data_source:
+  - Sysmon EventID 1
+
+search:
+  index_pattern: "${INDEX_PATTERN}"
+  size: 100
+  sort:
+    - timestamp: desc
+  query:
+    bool:
+      must:
+        - term:
+            agent_name: "${AGENT_NAME}"
+        - term:
+            agent_labels_customer: "${CUSTOMER_CODE}"
+        - term:
+            data_win_system_eventID: "1"
+        - bool:
+            should:
+              - wildcard:
+                  data_win_eventdata_image: "*‮*"
+              - wildcard:
+                  data_win_eventdata_commandLine: "*‮*"
+              - wildcard:
+                  data_win_eventdata_originalFileName: "*‮*"
+            minimum_should_match: 1
+        - range:
+            timestamp:
+              gte: "${START_TIME}"
+              lte: "${END_TIME}"
+  _source:
+    - timestamp
+    - agent_name
+    - data_win_eventdata_image
+    - data_win_eventdata_originalFileName
+    - data_win_eventdata_commandLine
+    - data_win_eventdata_parentImage
+    - data_win_eventdata_parentCommandLine
+    - data_win_eventdata_user
+    - data_win_eventdata_processId
+    - data_win_eventdata_processGuid
+    - data_win_eventdata_parentProcessId
+    - data_win_eventdata_parentProcessGuid
+    - data_win_eventdata_hashes
+    - data_win_eventdata_integrityLevel
+    - data_win_eventdata_currentDirectory
+
+parameters:
+  AGENT_NAME:
+    description: "Target agent/host name"
+    type: string
+    required: true
+    example: "DESKTOP-AM0HLGE"
+  CUSTOMER_CODE:
+    description: "Customer label for filtering"
+    type: string
+    required: true
+    example: "lab"
+  INDEX_PATTERN:
+    description: "Elasticsearch index pattern"
+    type: string
+    required: true
+    example: "wazuh-lab_*"
+  START_TIME:
+    description: "Query start time (ISO 8601 or relative)"
+    type: datetime
+    required: false
+    default: "now-24h"
+    example: "2026-04-21 00:00:00.000"
+  END_TIME:
+    description: "Query end time (ISO 8601 or relative)"
+    type: datetime
+    required: false
+    default: "now"
+    example: "2026-04-21 23:59:59.999"
+
+how_to_implement: >
+  This detection requires Sysmon EventID 1 (Process Creation) logs to be forwarded
+  from Windows endpoints to Wazuh Indexer. Ensure Sysmon is deployed with a
+  configuration that captures Image, OriginalFileName, and CommandLine fields
+  (SwiftOnSecurity or Olaf Hartong Sysmon modular config recommended). The
+  detection matches on the literal Unicode character U+202E (Right-to-Left
+  Override) appearing anywhere in the image path, command line, or original
+  file name. In the Elasticsearch DSL query, the wildcard value includes the
+  U+202E character directly (represented in JSON as \u202E); in the Graylog
+  equivalent, the literal character is embedded in the regex pattern. Both
+  OpenSearch and Graylog/Lucene handle the character natively when matched on
+  a keyword-type field. If copying this detection YAML between systems, preserve
+  the invisible U+202E character - use a Unicode-aware editor or the escape
+  sequence \u202E.
+
+known_false_positives: >
+  Organizations with legitimate business operations in Arabic, Hebrew, Persian,
+  Urdu, or other right-to-left (RTL) language regions may encounter benign
+  files or scripts that contain the RTLO character as part of normal text
+  handling. Tune the detection by filtering on specific file paths, users, or
+  parent processes known to legitimately produce RTLO content. Any RTLO in an
+  executable filename or command-line argument should be considered highly
+  suspicious regardless of region.
+
+references:
+  - https://attack.mitre.org/techniques/T1036/002/
+  - https://resources.infosecinstitute.com/topic/spoof-using-right-to-left-override-rtlo-technique-2/
+  - https://www.trendmicro.com/en_us/research/17/f/following-trail-blacktech-cyber-espionage-campaigns.html
+  - https://en.wikipedia.org/wiki/Bidirectional_text
+
+response:
+  message: >
+    A process execution containing the Right-to-Left Override (U+202E)
+    character was identified on endpoint $agent_name$ by user
+    $data_win_eventdata_user$. Process image: $data_win_eventdata_image$.
+    Parent process: $data_win_eventdata_parentImage$. Command line:
+    $data_win_eventdata_commandLine$. This is a high-confidence indicator of
+    filename masquerading, commonly used in spear-phishing attachment campaigns
+    to visually disguise executables as benign documents.
+  risk_score: 80
+  severity: high
+  risk_objects:
+    - field: agent_name
+      type: system
+      score: 60
+    - field: data_win_eventdata_user
+      type: user
+      score: 60
+  threat_objects:
+    - field: data_win_eventdata_image
+      type: process_name
+    - field: data_win_eventdata_commandLine
+      type: command_line
+    - field: data_win_eventdata_originalFileName
+      type: process_name
+
+tags:
+  analytic_story:
+    - Spearphishing Attachments
+    - Masquerading
+    - Phishing
+  asset_type: Endpoint
+  mitre_attack_id:
+    - T1036.002
+  custom_tags:
+    - rtlo
+    - u202e
+    - unicode_abuse
+    - masquerading
+    - filename_spoofing
+    - spearphishing
+  product:
+    - Wazuh
+  security_domain: endpoint
+
+graylog:
+  query: data_win_system_eventID:"1" AND (data_win_eventdata_image:/.*‮.*/ OR data_win_eventdata_commandLine:/.*‮.*/ OR data_win_eventdata_originalFileName:/.*‮.*/)

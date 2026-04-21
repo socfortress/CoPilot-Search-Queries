@@ -1,0 +1,184 @@
+name: Disable Schedule Task
+id: db596056-3019-11ec-a9ff-acde48001122
+version: 1
+schema_version: "1.0"
+date: "2026-04-21"
+author: SOCFortress LLC
+status: production
+type: Anomaly
+
+description: >
+  This analytic detects the execution of schtasks.exe with the /change and
+  /disable parameters, indicating an attempt to disable an existing scheduled
+  task. Sysmon EventID 1 is used to match process creation events where the
+  image or OriginalFileName is schtasks.exe and the command line contains
+  both /change and /disable flags. This activity is significant because
+  disabling scheduled tasks is a common tactic used by adversaries and
+  commodity malware (including IcedID) to disable security-related scheduled
+  maintenance tasks, Windows Defender scans, update mechanisms, or
+  enterprise backup jobs to evade detection and hinder recovery. If
+  confirmed malicious, this activity could allow attackers to persist
+  undetected, disable critical security defenses, and further compromise
+  the targeted host. Investigate the specific task name, parent process
+  lineage, and user context to assess whether the change was authorized
+  administrative activity or malicious tampering.
+
+data_source:
+  - Sysmon EventID 1
+
+search:
+  index_pattern: "${INDEX_PATTERN}"
+  size: 100
+  sort:
+    - timestamp: desc
+  query:
+    bool:
+      must:
+        - term:
+            agent_name: "${AGENT_NAME}"
+        - term:
+            agent_labels_customer: "${CUSTOMER_CODE}"
+        - term:
+            data_win_system_eventID: "1"
+        - bool:
+            should:
+              - wildcard:
+                  data_win_eventdata_image:
+                    value: "*schtasks.exe"
+                    case_insensitive: true
+              - term:
+                  data_win_eventdata_originalFileName: "schtasks.exe"
+            minimum_should_match: 1
+        - wildcard:
+            data_win_eventdata_commandLine:
+              value: "*/change*"
+              case_insensitive: true
+        - wildcard:
+            data_win_eventdata_commandLine:
+              value: "*/disable*"
+              case_insensitive: true
+        - range:
+            timestamp:
+              gte: "${START_TIME}"
+              lte: "${END_TIME}"
+  _source:
+    - timestamp
+    - agent_name
+    - data_win_eventdata_image
+    - data_win_eventdata_originalFileName
+    - data_win_eventdata_commandLine
+    - data_win_eventdata_parentImage
+    - data_win_eventdata_parentCommandLine
+    - data_win_eventdata_user
+    - data_win_eventdata_processId
+    - data_win_eventdata_processGuid
+    - data_win_eventdata_parentProcessId
+    - data_win_eventdata_parentProcessGuid
+    - data_win_eventdata_hashes
+    - data_win_eventdata_integrityLevel
+    - data_win_eventdata_currentDirectory
+
+parameters:
+  AGENT_NAME:
+    description: "Target agent/host name"
+    type: string
+    required: true
+    example: "DESKTOP-AM0HLGE"
+  CUSTOMER_CODE:
+    description: "Customer label for filtering"
+    type: string
+    required: true
+    example: "lab"
+  INDEX_PATTERN:
+    description: "Elasticsearch index pattern"
+    type: string
+    required: true
+    example: "wazuh-lab_*"
+  START_TIME:
+    description: "Query start time (ISO 8601 or relative)"
+    type: datetime
+    required: false
+    default: "now-24h"
+    example: "2026-04-21 00:00:00.000"
+  END_TIME:
+    description: "Query end time (ISO 8601 or relative)"
+    type: datetime
+    required: false
+    default: "now"
+    example: "2026-04-21 23:59:59.999"
+
+how_to_implement: >
+  This detection requires Sysmon EventID 1 (Process Creation) logs to be forwarded
+  from Windows endpoints to Wazuh Indexer. Ensure Sysmon is deployed with a
+  configuration that captures Image, OriginalFileName, and CommandLine fields
+  (SwiftOnSecurity or Olaf Hartong Sysmon modular config recommended).
+  IMPORTANT: In some Sysmon configurations, schtasks.exe command-line arguments
+  may not be fully captured due to process-filtering rules - verify your
+  Sysmon config includes schtasks.exe in ProcessCreate rules before deploying
+  this detection. The detection matches schtasks.exe either by Image path
+  (case-insensitive) or PE OriginalFileName, combined with both /change and
+  /disable flags in the command line. Case-insensitive matching is used
+  throughout. The ES DSL uses case_insensitive wildcard option (OpenSearch
+  2.x / Elasticsearch 7.10+); Graylog equivalent uses character classes.
+
+known_false_positives: >
+  System administrators may legitimately disable problematic or deprecated
+  scheduled tasks during maintenance activities. Software installers,
+  management tools (SCCM, Intune), and GPO-driven automation may also
+  legitimately invoke schtasks.exe with /change /disable. Review the
+  specific task name being disabled, parent process, and user context to
+  distinguish legitimate admin activity from malicious tampering. Disabling
+  of security-related tasks (Windows Defender, backup, update,
+  endpoint protection) should always be treated as high-priority.
+
+references:
+  - https://attack.mitre.org/techniques/T1562/001/
+  - https://thedfirreport.com/2021/10/18/icedid-to-xinglocker-ransomware-in-24-hours/
+  - https://learn.microsoft.com/en-us/windows-server/administration/windows-commands/schtasks
+
+response:
+  message: >
+    schtasks.exe was used to disable a scheduled task on endpoint $agent_name$
+    by user $data_win_eventdata_user$. Process image:
+    $data_win_eventdata_image$. Parent process:
+    $data_win_eventdata_parentImage$. Command line:
+    $data_win_eventdata_commandLine$. Review whether the targeted task is
+    security-related (Defender scans, backups, updates) and whether the
+    change was authorized.
+  risk_score: 40
+  severity: medium
+  risk_objects:
+    - field: agent_name
+      type: system
+      score: 30
+    - field: data_win_eventdata_user
+      type: user
+      score: 30
+  threat_objects:
+    - field: data_win_eventdata_image
+      type: process_name
+    - field: data_win_eventdata_parentImage
+      type: parent_process_name
+    - field: data_win_eventdata_commandLine
+      type: command_line
+
+tags:
+  analytic_story:
+    - IcedID
+    - Living Off The Land
+    - Defense Evasion
+  asset_type: Endpoint
+  mitre_attack_id:
+    - T1562.001
+  custom_tags:
+    - schtasks
+    - scheduled_task
+    - defense_evasion
+    - impair_defenses
+    - lolbin
+  product:
+    - Wazuh
+  security_domain: endpoint
+
+graylog:
+  query: data_win_system_eventID:"1" AND (data_win_eventdata_image:/.*[Ss][Cc][Hh][Tt][Aa][Ss][Kk][Ss]\.exe.*/ OR data_win_eventdata_originalFileName:"schtasks.exe") AND data_win_eventdata_commandLine:/.*\/[Cc][Hh][Aa][Nn][Gg][Ee].*/ AND data_win_eventdata_commandLine:/.*\/[Dd][Ii][Ss][Aa][Bb][Ll][Ee].*/

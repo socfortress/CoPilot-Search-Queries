@@ -1,0 +1,211 @@
+name: DNS Exfiltration Using Nslookup App
+id: 2452e632-9e0d-11eb-bacd-acde48001122
+version: 1
+schema_version: "1.0"
+date: "2026-04-21"
+author: SOCFortress LLC
+status: production
+type: TTP
+
+description: >
+  This analytic identifies potential DNS exfiltration or DNS-based C2
+  tunneling using the Windows nslookup.exe utility. Sysmon EventID 1 is
+  used to match process creation events where the image or OriginalFileName
+  is nslookup.exe and the command line contains any of the following query
+  control parameters: -querytype=, -qt=, -q=, -type=, or -retry=. These
+  parameters are commonly used by attackers to perform non-default DNS
+  queries (particularly TXT records, which support long string payloads
+  suitable for data encoding) or to retry failed exfiltration attempts.
+  This technique has been observed in use by multiple threat actor groups
+  including FIN7 (spear-phishing campaigns), the SolarWinds/SUNBURST
+  Teardrop/Raindrop intrusion chain, and various commodity malware families
+  using DNS tunneling for covert channels. If confirmed malicious, this
+  could indicate an active attempt to communicate with C2 infrastructure
+  or to smuggle sensitive data out of the environment via DNS queries,
+  potentially leading to data breaches and unauthorized access to critical
+  information. Investigate the parent process, destination DNS server, and
+  query content for indicators of encoded payloads.
+
+data_source:
+  - Sysmon EventID 1
+
+search:
+  index_pattern: "${INDEX_PATTERN}"
+  size: 100
+  sort:
+    - timestamp: desc
+  query:
+    bool:
+      must:
+        - term:
+            agent_name: "${AGENT_NAME}"
+        - term:
+            agent_labels_customer: "${CUSTOMER_CODE}"
+        - term:
+            data_win_system_eventID: "1"
+        - bool:
+            should:
+              - wildcard:
+                  data_win_eventdata_image:
+                    value: "*nslookup.exe"
+                    case_insensitive: true
+              - term:
+                  data_win_eventdata_originalFileName: "nslookup.exe"
+            minimum_should_match: 1
+        - bool:
+            should:
+              - wildcard:
+                  data_win_eventdata_commandLine:
+                    value: "*-querytype=*"
+                    case_insensitive: true
+              - wildcard:
+                  data_win_eventdata_commandLine:
+                    value: "*-qt=*"
+                    case_insensitive: true
+              - wildcard:
+                  data_win_eventdata_commandLine:
+                    value: "*-q=*"
+                    case_insensitive: true
+              - wildcard:
+                  data_win_eventdata_commandLine:
+                    value: "*-type=*"
+                    case_insensitive: true
+              - wildcard:
+                  data_win_eventdata_commandLine:
+                    value: "*-retry=*"
+                    case_insensitive: true
+            minimum_should_match: 1
+        - range:
+            timestamp:
+              gte: "${START_TIME}"
+              lte: "${END_TIME}"
+  _source:
+    - timestamp
+    - agent_name
+    - data_win_eventdata_image
+    - data_win_eventdata_originalFileName
+    - data_win_eventdata_commandLine
+    - data_win_eventdata_parentImage
+    - data_win_eventdata_parentCommandLine
+    - data_win_eventdata_user
+    - data_win_eventdata_processId
+    - data_win_eventdata_processGuid
+    - data_win_eventdata_parentProcessId
+    - data_win_eventdata_parentProcessGuid
+    - data_win_eventdata_hashes
+    - data_win_eventdata_integrityLevel
+    - data_win_eventdata_currentDirectory
+
+parameters:
+  AGENT_NAME:
+    description: "Target agent/host name"
+    type: string
+    required: true
+    example: "DESKTOP-AM0HLGE"
+  CUSTOMER_CODE:
+    description: "Customer label for filtering"
+    type: string
+    required: true
+    example: "lab"
+  INDEX_PATTERN:
+    description: "Elasticsearch index pattern"
+    type: string
+    required: true
+    example: "wazuh-lab_*"
+  START_TIME:
+    description: "Query start time (ISO 8601 or relative)"
+    type: datetime
+    required: false
+    default: "now-24h"
+    example: "2026-04-21 00:00:00.000"
+  END_TIME:
+    description: "Query end time (ISO 8601 or relative)"
+    type: datetime
+    required: false
+    default: "now"
+    example: "2026-04-21 23:59:59.999"
+
+how_to_implement: >
+  This detection requires Sysmon EventID 1 (Process Creation) logs to be forwarded
+  from Windows endpoints to Wazuh Indexer. Ensure Sysmon is deployed with a
+  configuration that captures Image, OriginalFileName, and CommandLine fields
+  (SwiftOnSecurity or Olaf Hartong Sysmon modular config recommended). The
+  detection matches nslookup.exe either by Image path (case-insensitive) or
+  PE OriginalFileName, combined with any of the five non-default query control
+  parameters in the command line. Case-insensitive matching is used throughout
+  so that variations like -QueryType=, -QUERYTYPE=, -qt= are all caught. The
+  ES DSL uses case_insensitive wildcard option (OpenSearch 2.x / Elasticsearch
+  7.10+); Graylog equivalent uses character classes. Note that the "-q=" and
+  "-qt=" short-form patterns are relatively broad and may match substrings in
+  other contexts - the requirement that image or originalFileName be
+  nslookup.exe keeps the detection focused.
+
+known_false_positives: >
+  Legitimate administrator use of nslookup.exe for DNS troubleshooting,
+  domain validation, or network diagnostic work can trigger this detection,
+  particularly when querying specific record types via -querytype=TXT or
+  -type=MX. Review the parent process (legitimate admin session vs.
+  unexpected non-interactive context), user context, target DNS server,
+  and query content for indicators of encoded data or non-standard FQDN
+  patterns that suggest tunneling. Any nslookup invocation originating
+  from Office applications, browsers, or unusual binaries should be
+  treated as high-priority regardless of the query type.
+
+references:
+  - https://attack.mitre.org/techniques/T1048/003/
+  - https://attack.mitre.org/techniques/T1071/004/
+  - https://www.mandiant.com/resources/fin7-spear-phishing-campaign-targets-personnel-involved-sec-filings
+  - https://www.varonis.com/blog/dns-tunneling
+  - https://www.microsoft.com/security/blog/2021/01/20/deep-dive-into-the-solorigate-second-stage-activation-from-sunburst-to-teardrop-and-raindrop/
+
+response:
+  message: >
+    An instance of $data_win_eventdata_parentImage$ spawning nslookup.exe
+    ($data_win_eventdata_image$) with DNS query control parameters was
+    identified on endpoint $agent_name$ by user $data_win_eventdata_user$.
+    Command line: $data_win_eventdata_commandLine$. This pattern is
+    associated with DNS exfiltration and DNS-based C2 tunneling; investigate
+    the parent process lineage, destination server, and query content.
+  risk_score: 56
+  severity: medium
+  risk_objects:
+    - field: agent_name
+      type: system
+      score: 50
+    - field: data_win_eventdata_user
+      type: user
+      score: 50
+  threat_objects:
+    - field: data_win_eventdata_image
+      type: process_name
+    - field: data_win_eventdata_parentImage
+      type: parent_process_name
+    - field: data_win_eventdata_commandLine
+      type: command_line
+
+tags:
+  analytic_story:
+    - Suspicious DNS Traffic
+    - Dynamic DNS
+    - Data Exfiltration
+    - Command And Control
+    - Compromised Windows Host
+    - DNS Tunneling
+  asset_type: Endpoint
+  mitre_attack_id:
+    - T1048
+    - T1048.003
+    - T1071.004
+  custom_tags:
+    - nslookup
+    - dns_tunneling
+    - dns_exfiltration
+    - c2
+    - data_exfiltration
+    - lolbin
+  product:
+    - Wazuh
+  security_domain: endpoint
+
+graylog:
+  query: data_win_system_eventID:"1" AND (data_win_eventdata_image:/.*[Nn][Ss][Ll][Oo][Oo][Kk][Uu][Pp]\.exe.*/ OR data_win_eventdata_originalFileName:"nslookup.exe") AND (data_win_eventdata_commandLine:/.*\-[Qq][Uu][Ee][Rr][Yy][Tt][Yy][Pp][Ee]=.*/ OR data_win_eventdata_commandLine:/.*\-[Qq][Tt]=.*/ OR data_win_eventdata_commandLine:/.*\-[Qq]=.*/ OR data_win_eventdata_commandLine:/.*\-[Tt][Yy][Pp][Ee]=.*/ OR data_win_eventdata_commandLine:/.*\-[Rr][Ee][Tt][Rr][Yy]=.*/)

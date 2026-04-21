@@ -1,0 +1,213 @@
+name: Detect Use of cmd exe to Launch Script Interpreters
+id: b89919ed-fe5f-492c-b139-95dbb162039e
+version: 1
+schema_version: "1.0"
+date: "2026-04-21"
+author: SOCFortress LLC
+status: production
+type: Anomaly
+
+description: >
+  This analytic detects the execution of cscript.exe or wscript.exe when
+  spawned by cmd.exe. Sysmon EventID 1 is used to match process creation
+  events where the parent process image ends with cmd.exe and the child
+  process is cscript.exe or wscript.exe (matched by either Image path or PE
+  OriginalFileName to catch renamed binaries). The detection applies
+  contextual filtering to reduce false positives by excluding executions
+  whose command lines reference trusted system paths
+  (C:\Windows\System32\, C:\Windows\SysWOW64\, C:\Program Files\,
+  C:\Program Files (x86)\) that typically contain legitimate script-driven
+  installers and software, and by excluding machine/service accounts whose
+  usernames end with $. The remaining matches are script interpreter
+  invocations from user-writable directories (Users, AppData, Temp,
+  Downloads, custom tool directories), which are commonly abused by
+  attackers to stage and execute malicious VBScript or JScript payloads.
+  This technique is observed in use by commodity malware families (Emotet,
+  Azorult) and in broader Living Off The Land campaigns. If confirmed
+  malicious, this activity could enable code execution, persistence, payload
+  delivery, or credential harvesting.
+
+data_source:
+  - Sysmon EventID 1
+
+search:
+  index_pattern: "${INDEX_PATTERN}"
+  size: 100
+  sort:
+    - timestamp: desc
+  query:
+    bool:
+      must:
+        - term:
+            agent_name: "${AGENT_NAME}"
+        - term:
+            agent_labels_customer: "${CUSTOMER_CODE}"
+        - term:
+            data_win_system_eventID: "1"
+        - wildcard:
+            data_win_eventdata_parentImage:
+              value: "*\\\\cmd.exe"
+              case_insensitive: true
+        - bool:
+            should:
+              - wildcard:
+                  data_win_eventdata_image:
+                    value: "*\\\\cscript.exe"
+                    case_insensitive: true
+              - wildcard:
+                  data_win_eventdata_image:
+                    value: "*\\\\wscript.exe"
+                    case_insensitive: true
+              - term:
+                  data_win_eventdata_originalFileName: "cscript.exe"
+              - term:
+                  data_win_eventdata_originalFileName: "wscript.exe"
+            minimum_should_match: 1
+        - range:
+            timestamp:
+              gte: "${START_TIME}"
+              lte: "${END_TIME}"
+      must_not:
+        - wildcard:
+            data_win_eventdata_commandLine:
+              value: "*C:\\\\Program Files (x86)\\\\*"
+              case_insensitive: true
+        - wildcard:
+            data_win_eventdata_commandLine:
+              value: "*C:\\\\Program Files\\\\*"
+              case_insensitive: true
+        - wildcard:
+            data_win_eventdata_commandLine:
+              value: "*C:\\\\Windows\\\\System32\\\\*"
+              case_insensitive: true
+        - wildcard:
+            data_win_eventdata_commandLine:
+              value: "*C:\\\\Windows\\\\SysWOW64\\\\*"
+              case_insensitive: true
+        - wildcard:
+            data_win_eventdata_user: "*$"
+  _source:
+    - timestamp
+    - agent_name
+    - data_win_eventdata_image
+    - data_win_eventdata_originalFileName
+    - data_win_eventdata_commandLine
+    - data_win_eventdata_parentImage
+    - data_win_eventdata_parentCommandLine
+    - data_win_eventdata_user
+    - data_win_eventdata_processId
+    - data_win_eventdata_processGuid
+    - data_win_eventdata_parentProcessId
+    - data_win_eventdata_parentProcessGuid
+    - data_win_eventdata_hashes
+    - data_win_eventdata_integrityLevel
+    - data_win_eventdata_currentDirectory
+
+parameters:
+  AGENT_NAME:
+    description: "Target agent/host name"
+    type: string
+    required: true
+    example: "DESKTOP-AM0HLGE"
+  CUSTOMER_CODE:
+    description: "Customer label for filtering"
+    type: string
+    required: true
+    example: "lab"
+  INDEX_PATTERN:
+    description: "Elasticsearch index pattern"
+    type: string
+    required: true
+    example: "wazuh-lab_*"
+  START_TIME:
+    description: "Query start time (ISO 8601 or relative)"
+    type: datetime
+    required: false
+    default: "now-24h"
+    example: "2026-04-21 00:00:00.000"
+  END_TIME:
+    description: "Query end time (ISO 8601 or relative)"
+    type: datetime
+    required: false
+    default: "now"
+    example: "2026-04-21 23:59:59.999"
+
+how_to_implement: >
+  This detection requires Sysmon EventID 1 (Process Creation) logs to be forwarded
+  from Windows endpoints to Wazuh Indexer. Ensure Sysmon is deployed with a
+  configuration that captures Image, ParentImage, OriginalFileName, CommandLine,
+  and User fields (SwiftOnSecurity or Olaf Hartong Sysmon modular config
+  recommended). The detection uses case-insensitive matching throughout to
+  catch path variations like "System32", "SYSTEM32", "system32" in both the
+  inclusion and exclusion clauses. The ES DSL uses the case_insensitive option
+  on wildcard queries (OpenSearch 2.x / Elasticsearch 7.10+); the Graylog
+  equivalent uses character classes. Tune the exclusion paths for your
+  environment - add any known-legitimate directories where script interpreters
+  are invoked by administrative tools (e.g., SCCM cache paths, custom deploy
+  shares, mapped drive letters).
+
+known_false_positives: >
+  This detection may generate alerts from legitimate administrative or
+  enterprise activity, particularly in environments that rely on logon
+  scripts, software deployment tools (SCCM, Intune), legacy applications, or
+  IT automation frameworks that execute scripts via cmd.exe. Some
+  organizations have internally developed scripts that run from
+  user-writable directories, which can appear suspicious but are benign.
+  Environments with non-standard application installations or portable
+  tools may trigger this detection. Review parent-of-parent lineage,
+  user context, and script content to differentiate malicious from
+  legitimate use.
+
+references:
+  - https://attack.mitre.org/techniques/T1059/003/
+  - https://attack.mitre.org/techniques/T1059/005/
+  - https://attack.mitre.org/techniques/T1059/007/
+  - https://redcanary.com/threat-detection-report/techniques/windows-command-shell/
+
+response:
+  message: >
+    cmd.exe launched a script interpreter ($data_win_eventdata_image$) from a
+    non-system path on endpoint $agent_name$ by user
+    $data_win_eventdata_user$. Command line: $data_win_eventdata_commandLine$.
+    This pattern is commonly associated with script-based malware delivery
+    (Emotet, Azorult) and should be investigated - review the script content
+    and parent process lineage.
+  risk_score: 40
+  severity: medium
+  risk_objects:
+    - field: agent_name
+      type: system
+      score: 30
+    - field: data_win_eventdata_user
+      type: user
+      score: 30
+  threat_objects:
+    - field: data_win_eventdata_image
+      type: process_name
+    - field: data_win_eventdata_parentImage
+      type: parent_process_name
+    - field: data_win_eventdata_commandLine
+      type: command_line
+
+tags:
+  analytic_story:
+    - Emotet Malware DHS Report TA18-201A
+    - Suspicious Command-Line Executions
+    - Azorult
+    - Script-Based Execution
+  asset_type: Endpoint
+  mitre_attack_id:
+    - T1059.003
+  custom_tags:
+    - cmd
+    - cscript
+    - wscript
+    - script_interpreter
+    - user_writable_path
+    - lolbin
+  product:
+    - Wazuh
+  security_domain: endpoint
+
+graylog:
+  query: data_win_system_eventID:"1" AND data_win_eventdata_parentImage:/.*[\\]+[Cc][Mm][Dd]\.exe/ AND (data_win_eventdata_image:/.*[\\]+[Cc][Ss][Cc][Rr][Ii][Pp][Tt]\.exe/ OR data_win_eventdata_image:/.*[\\]+[Ww][Ss][Cc][Rr][Ii][Pp][Tt]\.exe/ OR data_win_eventdata_originalFileName:"cscript.exe" OR data_win_eventdata_originalFileName:"wscript.exe") AND NOT data_win_eventdata_commandLine:/.*[Pp]rogram [Ff]iles.*/ AND NOT data_win_eventdata_commandLine:/.*[Ss]ystem32.*/ AND NOT data_win_eventdata_commandLine:/.*[Ss]ys[Ww][Oo][Ww]64.*/ AND NOT data_win_eventdata_user:/.*\$/

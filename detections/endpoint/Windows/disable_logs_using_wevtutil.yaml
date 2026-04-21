@@ -1,0 +1,198 @@
+name: Disable Logs Using WevtUtil
+id: 236e7c8e-c9d9-11eb-a824-acde48001122
+version: 1
+schema_version: "1.0"
+date: "2026-04-21"
+author: SOCFortress LLC
+status: production
+type: TTP
+
+description: >
+  This analytic detects the execution of wevtutil.exe with parameters to
+  disable Windows event logs. Sysmon EventID 1 is used to match process
+  creation events where the image path or OriginalFileName is wevtutil.exe
+  and the command line contains either the "sl" (set-log) short-form or
+  "set-log" long-form subcommand combined with "/e:false" (enabled=false).
+  This activity is significant because disabling event logs is a common
+  tactic used by ransomware operators (including Rhysida and those referenced
+  in CISA AA23-347A) and general threat actors to evade detection and hinder
+  forensic investigations. By disabling logs, attackers destroy the audit
+  trail needed to identify lateral movement, credential theft, and
+  ransomware staging. If confirmed malicious, this action could allow
+  attackers to operate undetected in the environment, making it significantly
+  harder for responders to trace their activities, scope the breach, and
+  respond effectively to the incident. Immediate isolation of the endpoint
+  and preservation of any remaining volatile forensic data is strongly
+  recommended.
+
+data_source:
+  - Sysmon EventID 1
+
+search:
+  index_pattern: "${INDEX_PATTERN}"
+  size: 100
+  sort:
+    - timestamp: desc
+  query:
+    bool:
+      must:
+        - term:
+            agent_name: "${AGENT_NAME}"
+        - term:
+            agent_labels_customer: "${CUSTOMER_CODE}"
+        - term:
+            data_win_system_eventID: "1"
+        - bool:
+            should:
+              - wildcard:
+                  data_win_eventdata_image:
+                    value: "*wevtutil.exe"
+                    case_insensitive: true
+              - term:
+                  data_win_eventdata_originalFileName: "wevtutil.exe"
+            minimum_should_match: 1
+        - bool:
+            should:
+              - wildcard:
+                  data_win_eventdata_commandLine:
+                    value: "*sl*"
+                    case_insensitive: true
+              - wildcard:
+                  data_win_eventdata_commandLine:
+                    value: "*set-log*"
+                    case_insensitive: true
+            minimum_should_match: 1
+        - wildcard:
+            data_win_eventdata_commandLine:
+              value: "*/e:false*"
+              case_insensitive: true
+        - range:
+            timestamp:
+              gte: "${START_TIME}"
+              lte: "${END_TIME}"
+  _source:
+    - timestamp
+    - agent_name
+    - data_win_eventdata_image
+    - data_win_eventdata_originalFileName
+    - data_win_eventdata_commandLine
+    - data_win_eventdata_parentImage
+    - data_win_eventdata_parentCommandLine
+    - data_win_eventdata_user
+    - data_win_eventdata_processId
+    - data_win_eventdata_processGuid
+    - data_win_eventdata_parentProcessId
+    - data_win_eventdata_parentProcessGuid
+    - data_win_eventdata_hashes
+    - data_win_eventdata_integrityLevel
+    - data_win_eventdata_currentDirectory
+
+parameters:
+  AGENT_NAME:
+    description: "Target agent/host name"
+    type: string
+    required: true
+    example: "DESKTOP-AM0HLGE"
+  CUSTOMER_CODE:
+    description: "Customer label for filtering"
+    type: string
+    required: true
+    example: "lab"
+  INDEX_PATTERN:
+    description: "Elasticsearch index pattern"
+    type: string
+    required: true
+    example: "wazuh-lab_*"
+  START_TIME:
+    description: "Query start time (ISO 8601 or relative)"
+    type: datetime
+    required: false
+    default: "now-24h"
+    example: "2026-04-21 00:00:00.000"
+  END_TIME:
+    description: "Query end time (ISO 8601 or relative)"
+    type: datetime
+    required: false
+    default: "now"
+    example: "2026-04-21 23:59:59.999"
+
+how_to_implement: >
+  This detection requires Sysmon EventID 1 (Process Creation) logs to be forwarded
+  from Windows endpoints to Wazuh Indexer. Ensure Sysmon is deployed with a
+  configuration that captures Image, OriginalFileName, and CommandLine fields
+  (SwiftOnSecurity or Olaf Hartong Sysmon modular config recommended). The
+  detection matches wevtutil.exe either by Image path (case-insensitive) or PE
+  OriginalFileName, combined with the set-log subcommand (in either its short
+  "sl" or long "set-log" form) and the "/e:false" flag. Case-insensitive
+  matching is used throughout to catch uppercase, lowercase, and mixed-case
+  variations. The ES DSL uses the case_insensitive wildcard option (OpenSearch
+  2.x / Elasticsearch 7.10+); the Graylog equivalent uses character classes.
+  Note that the "sl" subcommand pattern is broad and could match unintended
+  substrings - the mandatory "/e:false" clause acts as the primary selector
+  to keep fidelity high.
+
+known_false_positives: >
+  Network administrators or system operators may legitimately disable
+  specific audit event logs for debugging, performance troubleshooting, or
+  temporary log management purposes. Review the user account, parent process,
+  and specific log channel targeted to distinguish legitimate admin activity
+  from malicious log tampering. Any occurrence of this pattern outside of
+  scheduled maintenance windows or approved administrative activity should
+  be treated as high-priority.
+
+references:
+  - https://attack.mitre.org/techniques/T1070/001/
+  - https://www.bleepingcomputer.com/news/security/new-ransom-x-ransomware-used-in-texas-txdot-cyberattack/
+  - https://www.cisa.gov/news-events/cybersecurity-advisories/aa23-347a
+  - https://learn.microsoft.com/en-us/windows-server/administration/windows-commands/wevtutil
+
+response:
+  message: >
+    WevtUtil.exe was used to disable Windows event logging on endpoint
+    $agent_name$ by user $data_win_eventdata_user$. Process image:
+    $data_win_eventdata_image$. Parent process:
+    $data_win_eventdata_parentImage$. Command line:
+    $data_win_eventdata_commandLine$. This is a high-confidence indicator of
+    anti-forensic activity frequently observed prior to ransomware encryption;
+    investigate immediately and preserve any remaining volatile forensic
+    evidence.
+  risk_score: 80
+  severity: high
+  risk_objects:
+    - field: agent_name
+      type: system
+      score: 60
+    - field: data_win_eventdata_user
+      type: user
+      score: 60
+  threat_objects:
+    - field: data_win_eventdata_image
+      type: process_name
+    - field: data_win_eventdata_parentImage
+      type: parent_process_name
+    - field: data_win_eventdata_commandLine
+      type: command_line
+
+tags:
+  analytic_story:
+    - Ransomware
+    - CISA AA23-347A
+    - Rhysida Ransomware
+    - Defense Evasion
+    - Anti-Forensics
+  asset_type: Endpoint
+  mitre_attack_id:
+    - T1070.001
+  custom_tags:
+    - wevtutil
+    - event_log_tampering
+    - anti_forensics
+    - defense_evasion
+    - ransomware_precursor
+    - indicator_removal
+  product:
+    - Wazuh
+  security_domain: endpoint
+
+graylog:
+  query: data_win_system_eventID:"1" AND (data_win_eventdata_image:/.*[Ww][Ee][Vv][Tt][Uu][Tt][Ii][Ll]\.exe.*/ OR data_win_eventdata_originalFileName:"wevtutil.exe") AND (data_win_eventdata_commandLine:/.*[Ss][Ll].*/ OR data_win_eventdata_commandLine:/.*[Ss][Ee][Tt]\-[Ll][Oo][Gg].*/) AND data_win_eventdata_commandLine:/.*\/[Ee]:[Ff][Aa][Ll][Ss][Ee].*/

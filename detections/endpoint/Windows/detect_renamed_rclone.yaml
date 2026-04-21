@@ -1,0 +1,183 @@
+name: Detect Renamed RClone
+id: 6dca1124-b3ec-11eb-9328-acde48001122
+version: 1
+schema_version: "1.0"
+date: "2026-04-21"
+author: SOCFortress LLC
+status: production
+type: Hunting
+
+description: >
+  This analytic detects the execution of a renamed rclone.exe process, which is
+  commonly used for data exfiltration to remote cloud destinations. Sysmon
+  EventID 1 is used to match events where the PE OriginalFileName attribute
+  equals "rclone.exe" while the actual process image filename is NOT rclone.exe.
+  This indicates that the binary retains its original rclone metadata but has
+  been renamed on disk to evade filename-based detection. This activity is
+  significant because ransomware operators (DarkSide, Black Basta, Cactus,
+  REvil/Sodinokibi, Hellcat, Storm-0501) and other extortion groups routinely
+  use RClone to exfiltrate sensitive data to attacker-controlled cloud storage
+  (Mega, pCloud, Backblaze, S3) as part of double-extortion campaigns. If
+  confirmed malicious, this behavior could indicate an ongoing data exfiltration
+  attempt, potentially leading to significant data loss, regulatory exposure,
+  and further compromise of the affected systems. Immediate isolation of the
+  endpoint and network traffic analysis are recommended.
+
+data_source:
+  - Sysmon EventID 1
+
+search:
+  index_pattern: "${INDEX_PATTERN}"
+  size: 100
+  sort:
+    - timestamp: desc
+  query:
+    bool:
+      must:
+        - term:
+            agent_name: "${AGENT_NAME}"
+        - term:
+            agent_labels_customer: "${CUSTOMER_CODE}"
+        - term:
+            data_win_system_eventID: "1"
+        - term:
+            data_win_eventdata_originalFileName: "rclone.exe"
+        - range:
+            timestamp:
+              gte: "${START_TIME}"
+              lte: "${END_TIME}"
+      must_not:
+        - wildcard:
+            data_win_eventdata_image:
+              value: "*\\\\rclone.exe"
+              case_insensitive: true
+  _source:
+    - timestamp
+    - agent_name
+    - data_win_eventdata_image
+    - data_win_eventdata_originalFileName
+    - data_win_eventdata_commandLine
+    - data_win_eventdata_parentImage
+    - data_win_eventdata_parentCommandLine
+    - data_win_eventdata_user
+    - data_win_eventdata_processId
+    - data_win_eventdata_processGuid
+    - data_win_eventdata_parentProcessId
+    - data_win_eventdata_parentProcessGuid
+    - data_win_eventdata_hashes
+    - data_win_eventdata_integrityLevel
+    - data_win_eventdata_product
+    - data_win_eventdata_company
+    - data_win_eventdata_currentDirectory
+
+parameters:
+  AGENT_NAME:
+    description: "Target agent/host name"
+    type: string
+    required: true
+    example: "DESKTOP-AM0HLGE"
+  CUSTOMER_CODE:
+    description: "Customer label for filtering"
+    type: string
+    required: true
+    example: "lab"
+  INDEX_PATTERN:
+    description: "Elasticsearch index pattern"
+    type: string
+    required: true
+    example: "wazuh-lab_*"
+  START_TIME:
+    description: "Query start time (ISO 8601 or relative)"
+    type: datetime
+    required: false
+    default: "now-24h"
+    example: "2026-04-21 00:00:00.000"
+  END_TIME:
+    description: "Query end time (ISO 8601 or relative)"
+    type: datetime
+    required: false
+    default: "now"
+    example: "2026-04-21 23:59:59.999"
+
+how_to_implement: >
+  This detection requires Sysmon EventID 1 (Process Creation) logs to be forwarded
+  from Windows endpoints to Wazuh Indexer. Ensure Sysmon is deployed with a
+  configuration that captures Image and OriginalFileName fields (SwiftOnSecurity
+  or Olaf Hartong Sysmon modular config recommended). The OriginalFileName field
+  is extracted from the PE version information and is central to this detection -
+  official rclone.exe binaries always have OriginalFileName set to "rclone.exe"
+  regardless of what the file is renamed to on disk. The Elasticsearch wildcard
+  exclusion uses the case_insensitive option (OpenSearch 2.x / Elasticsearch
+  7.10+) so RClone.exe, RCLONE.EXE, rclone.exe, etc. are all correctly
+  recognized as the unrenamed binary and excluded. The equivalent Graylog regex
+  uses character classes to achieve case-insensitivity since Graylog's Lucene
+  (?i) inline flag is not reliably honored in all deployments.
+
+known_false_positives: >
+  False positives should be limited since this analytic specifically identifies
+  renamed instances of rclone.exe. Some legitimate backup administrators,
+  DevOps engineers, or IT staff may deploy rclone under non-standard filenames
+  for legitimate cloud-sync automation. Filter or tune as needed based on
+  endpoint role, parent process lineage, user context, or signing information.
+  Consider allow-listing specific service accounts or hosts where renamed
+  rclone is an approved tool.
+
+references:
+  - https://attack.mitre.org/techniques/T1020/
+  - https://redcanary.com/blog/rclone-mega-extortion/
+  - https://www.mandiant.com/resources/shining-a-light-on-darkside-ransomware-operations
+  - https://thedfirreport.com/2021/03/29/sodinokibi-aka-revil-ransomware/
+  - https://rclone.org/
+
+response:
+  message: >
+    A renamed rclone binary was identified on endpoint $agent_name$ by user
+    $data_win_eventdata_user$. The process $data_win_eventdata_image$ was
+    spawned by $data_win_eventdata_parentImage$ but its PE OriginalFileName is
+    "rclone.exe", indicating the binary is official rclone renamed to evade
+    detection. Command line: $data_win_eventdata_commandLine$. This is a
+    high-confidence indicator of data exfiltration preparation commonly used in
+    ransomware double-extortion campaigns. Investigate immediately for outbound
+    cloud traffic and large-volume file access.
+  risk_score: 80
+  severity: high
+  risk_objects:
+    - field: agent_name
+      type: system
+      score: 60
+    - field: data_win_eventdata_user
+      type: user
+      score: 60
+  threat_objects:
+    - field: data_win_eventdata_image
+      type: process_name
+    - field: data_win_eventdata_originalFileName
+      type: process_name
+    - field: data_win_eventdata_commandLine
+      type: command_line
+
+tags:
+  analytic_story:
+    - DarkSide Ransomware
+    - Ransomware
+    - Black Basta Ransomware
+    - Cactus Ransomware
+    - Hellcat Ransomware
+    - Storm-0501 Ransomware
+    - Data Exfiltration
+  asset_type: Endpoint
+  mitre_attack_id:
+    - T1020
+  custom_tags:
+    - rclone
+    - renamed_binary
+    - masquerading
+    - data_exfiltration
+    - cloud_exfiltration
+    - ransomware
+  product:
+    - Wazuh
+  security_domain: endpoint
+
+graylog:
+  query: data_win_system_eventID:"1" AND data_win_eventdata_originalFileName:"rclone.exe" AND NOT data_win_eventdata_image:/.*[\\]+[Rr][Cc][Ll][Oo][Nn][Ee]\.exe/

@@ -1,0 +1,190 @@
+name: Detect Rundll32 Inline HTA Execution
+id: 91c79f14-5b41-11eb-ae93-0242ac130002
+version: 1
+schema_version: "1.0"
+date: "2026-04-21"
+author: SOCFortress LLC
+status: production
+type: TTP
+
+description: >
+  This analytic detects the execution of rundll32.exe with inline scripting
+  protocol handlers such as "javascript:" and "vbscript:" in its command line.
+  Sysmon EventID 1 is used to match rundll32.exe (by Image path or PE
+  OriginalFileName) combined with these inline scripting keywords in the
+  command line. This activity is significant because it is a hallmark of
+  fileless malware execution and application control bypass (AppLocker /
+  Windows Defender Application Control). When rundll32.exe is invoked with
+  script protocols, it can execute arbitrary JavaScript or VBScript code
+  in-memory via the MSHTML engine without dropping files to disk. This
+  technique has been observed in use by APT groups (including NOBELIUM, APT37
+  Rustonotto/FadeStealer) and in general Living Off The Land campaigns. If
+  confirmed malicious, this could allow an attacker to execute arbitrary code,
+  bypass security controls, establish persistence, or deliver follow-on
+  payloads. Immediate investigation of the parent process lineage and
+  downstream network/file activity is recommended.
+
+data_source:
+  - Sysmon EventID 1
+
+search:
+  index_pattern: "${INDEX_PATTERN}"
+  size: 100
+  sort:
+    - timestamp: desc
+  query:
+    bool:
+      must:
+        - term:
+            agent_name: "${AGENT_NAME}"
+        - term:
+            agent_labels_customer: "${CUSTOMER_CODE}"
+        - term:
+            data_win_system_eventID: "1"
+        - bool:
+            should:
+              - wildcard:
+                  data_win_eventdata_image: "*rundll32.exe"
+              - wildcard:
+                  data_win_eventdata_originalFileName: "RUNDLL32.EXE"
+            minimum_should_match: 1
+        - bool:
+            should:
+              - wildcard:
+                  data_win_eventdata_commandLine:
+                    value: "*vbscript*"
+                    case_insensitive: true
+              - wildcard:
+                  data_win_eventdata_commandLine:
+                    value: "*javascript*"
+                    case_insensitive: true
+            minimum_should_match: 1
+        - range:
+            timestamp:
+              gte: "${START_TIME}"
+              lte: "${END_TIME}"
+  _source:
+    - timestamp
+    - agent_name
+    - data_win_eventdata_image
+    - data_win_eventdata_originalFileName
+    - data_win_eventdata_commandLine
+    - data_win_eventdata_parentImage
+    - data_win_eventdata_parentCommandLine
+    - data_win_eventdata_user
+    - data_win_eventdata_processId
+    - data_win_eventdata_processGuid
+    - data_win_eventdata_parentProcessId
+    - data_win_eventdata_parentProcessGuid
+    - data_win_eventdata_hashes
+    - data_win_eventdata_integrityLevel
+    - data_win_eventdata_currentDirectory
+
+parameters:
+  AGENT_NAME:
+    description: "Target agent/host name"
+    type: string
+    required: true
+    example: "DESKTOP-AM0HLGE"
+  CUSTOMER_CODE:
+    description: "Customer label for filtering"
+    type: string
+    required: true
+    example: "lab"
+  INDEX_PATTERN:
+    description: "Elasticsearch index pattern"
+    type: string
+    required: true
+    example: "wazuh-lab_*"
+  START_TIME:
+    description: "Query start time (ISO 8601 or relative)"
+    type: datetime
+    required: false
+    default: "now-24h"
+    example: "2026-04-21 00:00:00.000"
+  END_TIME:
+    description: "Query end time (ISO 8601 or relative)"
+    type: datetime
+    required: false
+    default: "now"
+    example: "2026-04-21 23:59:59.999"
+
+how_to_implement: >
+  This detection requires Sysmon EventID 1 (Process Creation) logs to be forwarded
+  from Windows endpoints to Wazuh Indexer. Ensure Sysmon is deployed with a
+  configuration that captures Image, OriginalFileName, and CommandLine fields
+  (SwiftOnSecurity or Olaf Hartong Sysmon modular config recommended). The
+  detection matches rundll32.exe either by process image path OR by PE
+  OriginalFileName (to catch renamed binaries), combined with the "vbscript" or
+  "javascript" string in the command line. Both the Elasticsearch and Graylog
+  queries use case-insensitive matching - the ES DSL uses the case_insensitive
+  wildcard option (OpenSearch 2.x / Elasticsearch 7.10+), while the Graylog
+  Lucene regex uses character classes. Note that Microsoft Defender ASR rules
+  may block this technique at execution time when real rundll32.exe is used;
+  if so, consider correlating this detection with EDR block events.
+
+known_false_positives: >
+  Although unlikely, some legitimate applications (particularly legacy
+  enterprise software, developer tools, or certain Microsoft Office add-ins)
+  may exhibit this behavior. Filter or tune based on parent process lineage,
+  user context, and signing information. Any occurrence of rundll32.exe with
+  javascript: or vbscript: protocol in the command line should be considered
+  highly suspicious regardless of parent process.
+
+references:
+  - https://attack.mitre.org/techniques/T1218/005/
+  - https://github.com/redcanaryco/AtomicTestHarnesses
+  - https://redcanary.com/blog/introducing-atomictestharnesses/
+  - https://docs.microsoft.com/en-us/windows/win32/search/-search-3x-wds-extidx-prot-implementing
+  - https://lolbas-project.github.io/lolbas/Binaries/Rundll32/
+
+response:
+  message: >
+    Rundll32.exe was executed with inline scripting protocol handler
+    (javascript: or vbscript:) on endpoint $agent_name$ by user
+    $data_win_eventdata_user$. Process image: $data_win_eventdata_image$.
+    Parent process: $data_win_eventdata_parentImage$. Command line:
+    $data_win_eventdata_commandLine$. This is a high-confidence indicator of
+    fileless code execution and application control bypass; investigate
+    immediately.
+  risk_score: 80
+  severity: high
+  risk_objects:
+    - field: agent_name
+      type: system
+      score: 60
+    - field: data_win_eventdata_user
+      type: user
+      score: 60
+  threat_objects:
+    - field: data_win_eventdata_image
+      type: process_name
+    - field: data_win_eventdata_parentImage
+      type: parent_process_name
+    - field: data_win_eventdata_commandLine
+      type: command_line
+
+tags:
+  analytic_story:
+    - Suspicious MSHTA Activity
+    - NOBELIUM Group
+    - Living Off The Land
+    - APT37 Rustonotto and FadeStealer
+    - Fileless Execution
+  asset_type: Endpoint
+  mitre_attack_id:
+    - T1218.005
+  custom_tags:
+    - rundll32
+    - mshta
+    - javascript
+    - vbscript
+    - lolbin
+    - fileless_execution
+    - application_control_bypass
+  product:
+    - Wazuh
+  security_domain: endpoint
+
+graylog:
+  query: data_win_system_eventID:"1" AND (data_win_eventdata_image:/.*[Rr][Uu][Nn][Dd][Ll][Ll]32\.exe.*/ OR data_win_eventdata_originalFileName:/RUNDLL32\.EXE/) AND (data_win_eventdata_commandLine:/.*[Vv][Bb][Ss][Cc][Rr][Ii][Pp][Tt].*/ OR data_win_eventdata_commandLine:/.*[Jj][Aa][Vv][Aa][Ss][Cc][Rr][Ii][Pp][Tt].*/)

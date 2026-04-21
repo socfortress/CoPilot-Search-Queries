@@ -1,0 +1,188 @@
+name: Detect SharpHound Command-Line Arguments
+id: a0bdd2f6-c2ff-11eb-b918-acde48001122
+version: 1
+schema_version: "1.0"
+date: "2026-04-21"
+author: SOCFortress LLC
+status: production
+type: TTP
+
+description: >
+  This analytic detects the execution of SharpHound command-line arguments,
+  specifically "-CollectionMethod" and "Invoke-BloodHound". Sysmon EventID 1
+  is used to match any process whose command line contains these canonical
+  SharpHound or BloodHound invocation patterns, regardless of the process
+  image name (to catch renamed binaries). This activity is significant because
+  SharpHound (the data ingestion component of BloodHound) is commonly used for
+  Active Directory enumeration to map out users, groups, computers, sessions,
+  trusts, ACLs, and other relationships. AD enumeration is a frequent precursor
+  to lateral movement, privilege escalation, and domain compromise. SharpHound
+  has been observed in use by multiple ransomware operators (including
+  BlackSuit) and in targeted intrusion campaigns. If confirmed malicious, this
+  activity could allow an attacker to fully enumerate the Active Directory
+  environment, identify high-value targets (Domain Admins, unconstrained
+  delegation, Kerberoastable service accounts), and plan further attacks that
+  may compromise sensitive information and critical systems.
+
+data_source:
+  - Sysmon EventID 1
+
+search:
+  index_pattern: "${INDEX_PATTERN}"
+  size: 100
+  sort:
+    - timestamp: desc
+  query:
+    bool:
+      must:
+        - term:
+            agent_name: "${AGENT_NAME}"
+        - term:
+            agent_labels_customer: "${CUSTOMER_CODE}"
+        - term:
+            data_win_system_eventID: "1"
+        - bool:
+            should:
+              - wildcard:
+                  data_win_eventdata_commandLine:
+                    value: "*-collectionMethod*"
+                    case_insensitive: true
+              - wildcard:
+                  data_win_eventdata_commandLine:
+                    value: "*invoke-bloodhound*"
+                    case_insensitive: true
+            minimum_should_match: 1
+        - range:
+            timestamp:
+              gte: "${START_TIME}"
+              lte: "${END_TIME}"
+  _source:
+    - timestamp
+    - agent_name
+    - data_win_eventdata_image
+    - data_win_eventdata_originalFileName
+    - data_win_eventdata_commandLine
+    - data_win_eventdata_parentImage
+    - data_win_eventdata_parentCommandLine
+    - data_win_eventdata_user
+    - data_win_eventdata_processId
+    - data_win_eventdata_processGuid
+    - data_win_eventdata_parentProcessId
+    - data_win_eventdata_parentProcessGuid
+    - data_win_eventdata_hashes
+    - data_win_eventdata_integrityLevel
+    - data_win_eventdata_currentDirectory
+
+parameters:
+  AGENT_NAME:
+    description: "Target agent/host name"
+    type: string
+    required: true
+    example: "DESKTOP-AM0HLGE"
+  CUSTOMER_CODE:
+    description: "Customer label for filtering"
+    type: string
+    required: true
+    example: "lab"
+  INDEX_PATTERN:
+    description: "Elasticsearch index pattern"
+    type: string
+    required: true
+    example: "wazuh-lab_*"
+  START_TIME:
+    description: "Query start time (ISO 8601 or relative)"
+    type: datetime
+    required: false
+    default: "now-24h"
+    example: "2026-04-21 00:00:00.000"
+  END_TIME:
+    description: "Query end time (ISO 8601 or relative)"
+    type: datetime
+    required: false
+    default: "now"
+    example: "2026-04-21 23:59:59.999"
+
+how_to_implement: >
+  This detection requires Sysmon EventID 1 (Process Creation) logs to be forwarded
+  from Windows endpoints to Wazuh Indexer. Ensure Sysmon is deployed with a
+  configuration that captures Image, OriginalFileName, and CommandLine fields
+  (SwiftOnSecurity or Olaf Hartong Sysmon modular config recommended). The
+  detection is process-agnostic - it matches on the command-line arguments
+  only, regardless of the calling binary name. This covers both
+  SharpHound.exe/SharpHound.ps1 invocations and the PowerShell module
+  Invoke-BloodHound, including cases where the binary has been renamed.
+  Case-insensitive matching is used throughout so variations like
+  "Invoke-BloodHound", "invoke-bloodhound", "-CollectionMethod", and
+  "-collectionmethod" are all caught.
+
+known_false_positives: >
+  False positives should be limited as these arguments are highly specific to
+  SharpHound and BloodHound. Legitimate internal security assessment teams,
+  penetration testers, or authorized AD auditors may produce true-positive
+  alerts that are not malicious - these should be tuned via approved-source
+  allow-listing rather than removing the detection. Consider filtering by
+  user account or source host in environments where AD auditing is an
+  approved ongoing activity.
+
+references:
+  - https://attack.mitre.org/software/S0521/
+  - https://attack.mitre.org/techniques/T1069/001/
+  - https://attack.mitre.org/techniques/T1069/002/
+  - https://attack.mitre.org/techniques/T1087/001/
+  - https://attack.mitre.org/techniques/T1087/002/
+  - https://attack.mitre.org/techniques/T1482/
+  - https://thedfirreport.com/?s=bloodhound
+  - https://github.com/BloodHoundAD/BloodHound/tree/master/Collectors
+  - https://github.com/BloodHoundAD/SharpHound3
+  - https://github.com/redcanaryco/atomic-red-team/blob/master/atomics/T1059.001/T1059.001.md
+
+response:
+  message: >
+    Possible SharpHound / BloodHound Active Directory enumeration was
+    identified on endpoint $agent_name$ by user $data_win_eventdata_user$.
+    Process image: $data_win_eventdata_image$. Parent process:
+    $data_win_eventdata_parentImage$. Command line:
+    $data_win_eventdata_commandLine$. This is a high-confidence indicator of
+    domain reconnaissance commonly preceding lateral movement, privilege
+    escalation, or ransomware deployment. Investigate immediately.
+  risk_score: 72
+  severity: high
+  risk_objects:
+    - field: agent_name
+      type: system
+      score: 60
+    - field: data_win_eventdata_user
+      type: user
+      score: 60
+  threat_objects:
+    - field: data_win_eventdata_image
+      type: process_name
+    - field: data_win_eventdata_commandLine
+      type: command_line
+
+tags:
+  analytic_story:
+    - Windows Discovery Techniques
+    - Ransomware
+    - BlackSuit Ransomware
+    - Active Directory Reconnaissance
+  asset_type: Endpoint
+  mitre_attack_id:
+    - T1069.001
+    - T1069.002
+    - T1087.001
+    - T1087.002
+    - T1482
+  custom_tags:
+    - sharphound
+    - bloodhound
+    - ad_enumeration
+    - active_directory
+    - reconnaissance
+    - lateral_movement_precursor
+  product:
+    - Wazuh
+  security_domain: endpoint
+
+graylog:
+  query: data_win_system_eventID:"1" AND (data_win_eventdata_commandLine:/.*\-[Cc][Oo][Ll][Ll][Ee][Cc][Tt][Ii][Oo][Nn][Mm][Ee][Tt][Hh][Oo][Dd].*/ OR data_win_eventdata_commandLine:/.*[Ii][Nn][Vv][Oo][Kk][Ee]\-[Bb][Ll][Oo][Oo][Dd][Hh][Oo][Uu][Nn][Dd].*/)

@@ -1,0 +1,184 @@
+name: Detect Renamed WinRAR
+id: 1b7bfb2c-b8e6-11eb-99ac-acde48001122
+version: 1
+schema_version: "1.0"
+date: "2026-04-21"
+author: SOCFortress LLC
+status: production
+type: Hunting
+
+description: >
+  This analytic identifies instances where WinRAR.exe has been renamed and
+  executed on an endpoint. Sysmon EventID 1 is used to match events where the
+  PE OriginalFileName attribute equals "WinRAR.exe" while the actual process
+  image filename is NOT rar.exe or winrar.exe. This indicates that the binary
+  retains its original WinRAR metadata but has been renamed on disk to evade
+  filename-based detection. This activity is significant because renaming
+  archive utilities is a common attacker tradecraft to stage data for
+  exfiltration under innocuous-looking filenames. WinRAR specifically has been
+  observed in use by China-nexus APT activity (including Salt Typhoon
+  campaigns), CISA-documented campaigns (AA22-277A), and general collection
+  and staging operations across multiple ransomware families. If confirmed
+  malicious, this could indicate an attempt to bypass security controls for
+  archive creation, potentially leading to unauthorized data extraction or
+  further system compromise. Analysts should review parent process lineage,
+  examine parallel archive creation activity, and investigate for outbound
+  data transfer.
+
+data_source:
+  - Sysmon EventID 1
+
+search:
+  index_pattern: "${INDEX_PATTERN}"
+  size: 100
+  sort:
+    - timestamp: desc
+  query:
+    bool:
+      must:
+        - term:
+            agent_name: "${AGENT_NAME}"
+        - term:
+            agent_labels_customer: "${CUSTOMER_CODE}"
+        - term:
+            data_win_system_eventID: "1"
+        - term:
+            data_win_eventdata_originalFileName: "WinRAR.exe"
+        - range:
+            timestamp:
+              gte: "${START_TIME}"
+              lte: "${END_TIME}"
+      must_not:
+        - wildcard:
+            data_win_eventdata_image:
+              value: "*\\\\rar.exe"
+              case_insensitive: true
+        - wildcard:
+            data_win_eventdata_image:
+              value: "*\\\\winrar.exe"
+              case_insensitive: true
+  _source:
+    - timestamp
+    - agent_name
+    - data_win_eventdata_image
+    - data_win_eventdata_originalFileName
+    - data_win_eventdata_commandLine
+    - data_win_eventdata_parentImage
+    - data_win_eventdata_parentCommandLine
+    - data_win_eventdata_user
+    - data_win_eventdata_processId
+    - data_win_eventdata_processGuid
+    - data_win_eventdata_parentProcessId
+    - data_win_eventdata_parentProcessGuid
+    - data_win_eventdata_hashes
+    - data_win_eventdata_integrityLevel
+    - data_win_eventdata_product
+    - data_win_eventdata_company
+    - data_win_eventdata_currentDirectory
+
+parameters:
+  AGENT_NAME:
+    description: "Target agent/host name"
+    type: string
+    required: true
+    example: "DESKTOP-AM0HLGE"
+  CUSTOMER_CODE:
+    description: "Customer label for filtering"
+    type: string
+    required: true
+    example: "lab"
+  INDEX_PATTERN:
+    description: "Elasticsearch index pattern"
+    type: string
+    required: true
+    example: "wazuh-lab_*"
+  START_TIME:
+    description: "Query start time (ISO 8601 or relative)"
+    type: datetime
+    required: false
+    default: "now-24h"
+    example: "2026-04-21 00:00:00.000"
+  END_TIME:
+    description: "Query end time (ISO 8601 or relative)"
+    type: datetime
+    required: false
+    default: "now"
+    example: "2026-04-21 23:59:59.999"
+
+how_to_implement: >
+  This detection requires Sysmon EventID 1 (Process Creation) logs to be forwarded
+  from Windows endpoints to Wazuh Indexer. Ensure Sysmon is deployed with a
+  configuration that captures Image and OriginalFileName fields (SwiftOnSecurity
+  or Olaf Hartong Sysmon modular config recommended). The OriginalFileName field
+  is extracted from the PE version information and is central to this detection -
+  official WinRAR and Rar console binaries always have OriginalFileName set to
+  "WinRAR.exe" regardless of what the file is renamed to on disk. The
+  Elasticsearch wildcard exclusions use the case_insensitive option (OpenSearch
+  2.x / Elasticsearch 7.10+) so WinRAR.exe, WINRAR.EXE, Rar.exe, RAR.EXE, etc.
+  are all correctly recognized as unrenamed binaries and excluded. The
+  equivalent Graylog regex uses character classes to achieve case-insensitivity
+  since Graylog's Lucene (?i) inline flag is not reliably honored in all
+  deployments.
+
+known_false_positives: >
+  No significant false positives have been identified at this time, as
+  legitimate use of renamed WinRAR binaries is extremely rare. Some portable
+  application launchers or legacy corporate software packages may embed WinRAR
+  under non-standard filenames. Filter or tune based on parent process
+  lineage, user context, or signer information as needed.
+
+references:
+  - https://attack.mitre.org/techniques/T1560/001/
+  - https://github.com/redcanaryco/atomic-red-team/blob/master/atomics/T1560.001/T1560.001.md
+  - https://www.cisa.gov/news-events/cybersecurity-advisories/aa22-277a
+  - https://www.win-rar.com/
+
+response:
+  message: >
+    A renamed WinRAR binary was identified on endpoint $agent_name$ by user
+    $data_win_eventdata_user$. The process $data_win_eventdata_image$ was
+    spawned by $data_win_eventdata_parentImage$ but its PE OriginalFileName is
+    "WinRAR.exe", indicating the binary is official WinRAR renamed to evade
+    detection. Command line: $data_win_eventdata_commandLine$. This is a
+    high-confidence indicator of collection and staging activity; investigate
+    for large archive creation and data exfiltration.
+  risk_score: 72
+  severity: high
+  risk_objects:
+    - field: agent_name
+      type: system
+      score: 60
+    - field: data_win_eventdata_user
+      type: user
+      score: 60
+  threat_objects:
+    - field: data_win_eventdata_image
+      type: process_name
+    - field: data_win_eventdata_originalFileName
+      type: process_name
+    - field: data_win_eventdata_commandLine
+      type: command_line
+
+tags:
+  analytic_story:
+    - China-Nexus Threat Activity
+    - Collection and Staging
+    - CISA AA22-277A
+    - Salt Typhoon
+    - Data Exfiltration
+  asset_type: Endpoint
+  mitre_attack_id:
+    - T1560.001
+  custom_tags:
+    - winrar
+    - renamed_binary
+    - masquerading
+    - data_staging
+    - archive_utility
+    - collection
+  product:
+    - Wazuh
+  security_domain: endpoint
+
+graylog:
+  query: data_win_system_eventID:"1" AND data_win_eventdata_originalFileName:"WinRAR.exe" AND NOT data_win_eventdata_image:/.*[\\]+[Rr][Aa][Rr]\.exe/ AND NOT data_win_eventdata_image:/.*[\\]+[Ww][Ii][Nn][Rr][Aa][Rr]\.exe/

@@ -1,0 +1,198 @@
+name: Disabling Firewall with Netsh
+id: 6860a62c-9203-11eb-9e05-acde48001122
+version: 1
+schema_version: "1.0"
+date: "2026-04-21"
+author: SOCFortress LLC
+status: production
+type: Anomaly
+
+description: >
+  This analytic identifies the disabling of the Windows Firewall using the
+  netsh.exe utility. Sysmon EventID 1 is used to match process creation
+  events where the image or OriginalFileName is netsh.exe and the command
+  line contains "firewall" combined with either "off" or "disable" keywords.
+  This activity is significant because disabling the host-based firewall
+  can expose the system to external threats, allowing malware to freely
+  communicate with command-and-control (C2) infrastructure, receive
+  additional payloads, and exfiltrate data without filtering restrictions.
+  This technique is commonly observed in use by ransomware operators
+  (including BlackByte) and commodity malware families (Remcos RAT and
+  others) during the defense evasion phase, typically prior to lateral
+  movement or payload deployment. If confirmed malicious, this action could
+  lead to unauthorized data exfiltration, further malware downloads, and
+  broader network compromise. Investigate parent process lineage, user
+  context, and any concurrent outbound network activity.
+
+data_source:
+  - Sysmon EventID 1
+
+search:
+  index_pattern: "${INDEX_PATTERN}"
+  size: 100
+  sort:
+    - timestamp: desc
+  query:
+    bool:
+      must:
+        - term:
+            agent_name: "${AGENT_NAME}"
+        - term:
+            agent_labels_customer: "${CUSTOMER_CODE}"
+        - term:
+            data_win_system_eventID: "1"
+        - bool:
+            should:
+              - wildcard:
+                  data_win_eventdata_image:
+                    value: "*netsh.exe"
+                    case_insensitive: true
+              - term:
+                  data_win_eventdata_originalFileName: "netsh.exe"
+            minimum_should_match: 1
+        - wildcard:
+            data_win_eventdata_commandLine:
+              value: "*firewall*"
+              case_insensitive: true
+        - bool:
+            should:
+              - wildcard:
+                  data_win_eventdata_commandLine:
+                    value: "*off*"
+                    case_insensitive: true
+              - wildcard:
+                  data_win_eventdata_commandLine:
+                    value: "*disable*"
+                    case_insensitive: true
+            minimum_should_match: 1
+        - range:
+            timestamp:
+              gte: "${START_TIME}"
+              lte: "${END_TIME}"
+  _source:
+    - timestamp
+    - agent_name
+    - data_win_eventdata_image
+    - data_win_eventdata_originalFileName
+    - data_win_eventdata_commandLine
+    - data_win_eventdata_parentImage
+    - data_win_eventdata_parentCommandLine
+    - data_win_eventdata_user
+    - data_win_eventdata_processId
+    - data_win_eventdata_processGuid
+    - data_win_eventdata_parentProcessId
+    - data_win_eventdata_parentProcessGuid
+    - data_win_eventdata_hashes
+    - data_win_eventdata_integrityLevel
+    - data_win_eventdata_currentDirectory
+
+parameters:
+  AGENT_NAME:
+    description: "Target agent/host name"
+    type: string
+    required: true
+    example: "DESKTOP-AM0HLGE"
+  CUSTOMER_CODE:
+    description: "Customer label for filtering"
+    type: string
+    required: true
+    example: "lab"
+  INDEX_PATTERN:
+    description: "Elasticsearch index pattern"
+    type: string
+    required: true
+    example: "wazuh-lab_*"
+  START_TIME:
+    description: "Query start time (ISO 8601 or relative)"
+    type: datetime
+    required: false
+    default: "now-24h"
+    example: "2026-04-21 00:00:00.000"
+  END_TIME:
+    description: "Query end time (ISO 8601 or relative)"
+    type: datetime
+    required: false
+    default: "now"
+    example: "2026-04-21 23:59:59.999"
+
+how_to_implement: >
+  This detection requires Sysmon EventID 1 (Process Creation) logs to be forwarded
+  from Windows endpoints to Wazuh Indexer. Ensure Sysmon is deployed with a
+  configuration that captures Image, OriginalFileName, and CommandLine fields
+  (SwiftOnSecurity or Olaf Hartong Sysmon modular config recommended).
+  IMPORTANT: In some Sysmon configurations, netsh.exe command-line arguments
+  may not be fully captured due to process-filtering rules - verify your
+  Sysmon config includes netsh.exe in ProcessCreate rules before deploying
+  this detection. The detection matches netsh.exe either by Image path
+  (case-insensitive) or PE OriginalFileName, combined with "firewall" and
+  either "off" or "disable" in the command line. Case-insensitive matching
+  is used throughout. The ES DSL uses case_insensitive wildcard option
+  (OpenSearch 2.x / Elasticsearch 7.10+); Graylog equivalent uses character
+  classes.
+
+known_false_positives: >
+  System administrators may legitimately disable the Windows Firewall during
+  network troubleshooting, software deployment, compatibility testing, or
+  scheduled maintenance. Group Policy-managed environments may also invoke
+  netsh firewall commands through legitimate management tooling. Review the
+  parent process (e.g., cmd.exe from PowerShell ISE during admin session vs.
+  unknown parent), user account (admin vs. service account vs. standard user),
+  and timing (business hours maintenance window vs. unexpected off-hours) to
+  distinguish authorized administrative activity from malicious tampering.
+  Any occurrence outside of approved change windows should be treated as
+  high-priority.
+
+references:
+  - https://attack.mitre.org/techniques/T1562/004/
+  - https://attack.mitre.org/techniques/T1562/001/
+  - https://tccontre.blogspot.com/2020/01/remcos-rat-evading-windows-defender-av.html
+  - https://learn.microsoft.com/en-us/windows-server/networking/technologies/netsh/netsh-contexts
+
+response:
+  message: >
+    The Windows Firewall was disabled on endpoint $agent_name$ by user
+    $data_win_eventdata_user$. Process image: $data_win_eventdata_image$.
+    Parent process: $data_win_eventdata_parentImage$. Command line:
+    $data_win_eventdata_commandLine$. This action is commonly seen during
+    malware defense evasion and lateral movement preparation; investigate
+    immediately and review parallel network activity for signs of C2 or
+    data exfiltration.
+  risk_score: 40
+  severity: medium
+  risk_objects:
+    - field: agent_name
+      type: system
+      score: 30
+    - field: data_win_eventdata_user
+      type: user
+      score: 30
+  threat_objects:
+    - field: data_win_eventdata_image
+      type: process_name
+    - field: data_win_eventdata_parentImage
+      type: parent_process_name
+    - field: data_win_eventdata_commandLine
+      type: command_line
+
+tags:
+  analytic_story:
+    - Windows Defense Evasion Tactics
+    - BlackByte Ransomware
+    - Defense Evasion
+    - Impair Defenses
+  asset_type: Endpoint
+  mitre_attack_id:
+    - T1562.001
+    - T1562.004
+  custom_tags:
+    - netsh
+    - firewall
+    - defense_evasion
+    - impair_defenses
+    - lolbin
+  product:
+    - Wazuh
+  security_domain: endpoint
+
+graylog:
+  query: data_win_system_eventID:"1" AND (data_win_eventdata_image:/.*[Nn][Ee][Tt][Ss][Hh]\.exe.*/ OR data_win_eventdata_originalFileName:"netsh.exe") AND data_win_eventdata_commandLine:/.*[Ff][Ii][Rr][Ee][Ww][Aa][Ll][Ll].*/ AND (data_win_eventdata_commandLine:/.*[Oo][Ff][Ff].*/ OR data_win_eventdata_commandLine:/.*[Dd][Ii][Ss][Aa][Bb][Ll][Ee].*/)

@@ -1,0 +1,197 @@
+name: Domain Controller Discovery with Nltest
+id: 41243735-89a7-4c83-bcdd-570aa78f00a1
+version: 1
+schema_version: "1.0"
+date: "2026-04-21"
+author: SOCFortress LLC
+status: production
+type: TTP
+
+description: >
+  This analytic detects the execution of nltest.exe with the /dclist: or
+  /dsgetdc: command-line arguments, which are used to enumerate domain
+  controllers in an Active Directory forest. Sysmon EventID 1 is used to
+  match process creation events where either the image is nltest.exe or
+  the PE OriginalFileName is nltestrk.exe (the internal PE name of the
+  binary regardless of rename), combined with the /dclist: or /dsgetdc:
+  flags. This activity is significant because both Red Teams and real
+  adversaries routinely use nltest.exe during the discovery and
+  situational-awareness phases of an intrusion to identify domain
+  controllers prior to credential theft, Kerberos attacks, or lateral
+  movement. This technique has been observed in use by multiple ransomware
+  operations (Medusa, BlackSuit, Rhysida), documented CISA-tracked
+  campaigns (AA23-347A), and in NetSupport RMM tool abuse. If confirmed
+  malicious, this behavior could allow attackers to map the domain
+  topology, identify primary DCs for targeted attacks, and plan further
+  compromise including DCSync, Zerologon exploitation, or Golden Ticket
+  attacks.
+
+data_source:
+  - Sysmon EventID 1
+
+search:
+  index_pattern: "${INDEX_PATTERN}"
+  size: 100
+  sort:
+    - timestamp: desc
+  query:
+    bool:
+      must:
+        - term:
+            agent_name: "${AGENT_NAME}"
+        - term:
+            agent_labels_customer: "${CUSTOMER_CODE}"
+        - term:
+            data_win_system_eventID: "1"
+        - bool:
+            should:
+              - wildcard:
+                  data_win_eventdata_image:
+                    value: "*nltest.exe"
+                    case_insensitive: true
+              - term:
+                  data_win_eventdata_originalFileName: "nltestrk.exe"
+            minimum_should_match: 1
+        - bool:
+            should:
+              - wildcard:
+                  data_win_eventdata_commandLine:
+                    value: "*/dclist:*"
+                    case_insensitive: true
+              - wildcard:
+                  data_win_eventdata_commandLine:
+                    value: "*/dsgetdc:*"
+                    case_insensitive: true
+            minimum_should_match: 1
+        - range:
+            timestamp:
+              gte: "${START_TIME}"
+              lte: "${END_TIME}"
+  _source:
+    - timestamp
+    - agent_name
+    - data_win_eventdata_image
+    - data_win_eventdata_originalFileName
+    - data_win_eventdata_commandLine
+    - data_win_eventdata_parentImage
+    - data_win_eventdata_parentCommandLine
+    - data_win_eventdata_user
+    - data_win_eventdata_processId
+    - data_win_eventdata_processGuid
+    - data_win_eventdata_parentProcessId
+    - data_win_eventdata_parentProcessGuid
+    - data_win_eventdata_hashes
+    - data_win_eventdata_integrityLevel
+    - data_win_eventdata_currentDirectory
+
+parameters:
+  AGENT_NAME:
+    description: "Target agent/host name"
+    type: string
+    required: true
+    example: "DESKTOP-AM0HLGE"
+  CUSTOMER_CODE:
+    description: "Customer label for filtering"
+    type: string
+    required: true
+    example: "lab"
+  INDEX_PATTERN:
+    description: "Elasticsearch index pattern"
+    type: string
+    required: true
+    example: "wazuh-lab_*"
+  START_TIME:
+    description: "Query start time (ISO 8601 or relative)"
+    type: datetime
+    required: false
+    default: "now-24h"
+    example: "2026-04-21 00:00:00.000"
+  END_TIME:
+    description: "Query end time (ISO 8601 or relative)"
+    type: datetime
+    required: false
+    default: "now"
+    example: "2026-04-21 23:59:59.999"
+
+how_to_implement: >
+  This detection requires Sysmon EventID 1 (Process Creation) logs to be forwarded
+  from Windows endpoints to Wazuh Indexer. Ensure Sysmon is deployed with a
+  configuration that captures Image, OriginalFileName, and CommandLine fields
+  (SwiftOnSecurity or Olaf Hartong Sysmon modular config recommended). The
+  detection matches nltest.exe either by Image path (case-insensitive) or by
+  PE OriginalFileName being "nltestrk.exe" (the internal name assigned by
+  Microsoft at build time, present regardless of whether the file is
+  renamed). The command-line conditions match either /dclist: or /dsgetdc:
+  flags. Case-insensitive matching is used throughout. The ES DSL uses the
+  case_insensitive wildcard option (OpenSearch 2.x / Elasticsearch 7.10+);
+  Graylog equivalent uses character classes.
+
+known_false_positives: >
+  System administrators, helpdesk staff, or domain admins may legitimately
+  use nltest.exe for domain controller troubleshooting, replication
+  diagnostics, or AD health checks. Review parent process lineage
+  (admin session vs. unexpected non-interactive parent), user context
+  (admin account vs. standard user vs. compromised account), and timing
+  (scheduled maintenance window vs. unexpected off-hours) to distinguish
+  authorized administrative activity from reconnaissance. Concurrent use
+  of multiple AD discovery tools (dsquery, net group, nltest, dsget,
+  Get-ADComputer) on a single host should be treated as high-priority
+  regardless of user context.
+
+references:
+  - https://attack.mitre.org/techniques/T1018/
+  - https://learn.microsoft.com/en-us/previous-versions/windows/it-pro/windows-server-2012-r2-and-2012/cc731935(v=ws.11)
+  - https://www.cisa.gov/news-events/cybersecurity-advisories/aa23-347a
+
+response:
+  message: >
+    Domain controller discovery via nltest.exe was identified on endpoint
+    $agent_name$ by user $data_win_eventdata_user$. Process image:
+    $data_win_eventdata_image$. Parent process:
+    $data_win_eventdata_parentImage$. Command line:
+    $data_win_eventdata_commandLine$. This is consistent with
+    situational-awareness reconnaissance commonly preceding credential
+    theft, lateral movement, or ransomware deployment; investigate parent
+    process lineage and concurrent discovery activity.
+  risk_score: 72
+  severity: high
+  risk_objects:
+    - field: agent_name
+      type: system
+      score: 60
+    - field: data_win_eventdata_user
+      type: user
+      score: 60
+  threat_objects:
+    - field: data_win_eventdata_image
+      type: process_name
+    - field: data_win_eventdata_parentImage
+      type: parent_process_name
+    - field: data_win_eventdata_commandLine
+      type: command_line
+
+tags:
+  analytic_story:
+    - Active Directory Discovery
+    - CISA AA23-347A
+    - Medusa Ransomware
+    - BlackSuit Ransomware
+    - Rhysida Ransomware
+    - NetSupport RMM Tool Abuse
+    - Active Directory Reconnaissance
+  asset_type: Endpoint
+  mitre_attack_id:
+    - T1018
+  custom_tags:
+    - nltest
+    - domain_controller_discovery
+    - ad_enumeration
+    - active_directory
+    - reconnaissance
+    - lolbin
+  product:
+    - Wazuh
+  security_domain: endpoint
+
+graylog:
+  query: data_win_system_eventID:"1" AND (data_win_eventdata_image:/.*[Nn][Ll][Tt][Ee][Ss][Tt]\.exe.*/ OR data_win_eventdata_originalFileName:"nltestrk.exe") AND (data_win_eventdata_commandLine:/.*\/[Dd][Cc][Ll][Ii][Ss][Tt]:.*/ OR data_win_eventdata_commandLine:/.*\/[Dd][Ss][Gg][Ee][Tt][Dd][Cc]:.*/)
