@@ -1,0 +1,171 @@
+name: Detect Regsvr32 Application Control Bypass
+id: 070e9b80-6252-11eb-ae93-0242ac130002
+version: 1
+schema_version: "1.0"
+date: "2026-04-21"
+author: SOCFortress LLC
+status: production
+type: TTP
+
+description: >
+  This analytic identifies the abuse of Regsvr32.exe to proxy execution of
+  malicious code, specifically detecting the loading of scrobj.dll by Regsvr32.exe.
+  Sysmon EventID 1 is used to match process creation events where the process name
+  (or original file name) is regsvr32.exe and the command-line contains the string
+  "scrobj". This activity is significant because Regsvr32.exe is a trusted, signed
+  Microsoft binary, often used in "Squiblydoo" attacks to bypass application
+  control mechanisms such as AppLocker, Windows Defender Application Control, and
+  Software Restriction Policies. The scrobj.dll (Script Component Runtime) allows
+  regsvr32.exe to execute scriptlet files (.sct) from remote URLs, enabling
+  arbitrary code execution without dropping a binary to disk. If confirmed
+  malicious, this technique could allow an attacker to execute arbitrary code,
+  potentially leading to system compromise, persistent access, or deployment of
+  additional payloads such as Cobalt Strike beacons or ransomware.
+
+data_source:
+  - Sysmon EventID 1
+
+search:
+  index_pattern: "${INDEX_PATTERN}"
+  size: 100
+  sort:
+    - timestamp: desc
+  query:
+    bool:
+      must:
+        - term:
+            agent_name: "${AGENT_NAME}"
+        - term:
+            agent_labels_customer: "${CUSTOMER_CODE}"
+        - term:
+            data_win_system_eventID: "1"
+        - bool:
+            should:
+              - wildcard:
+                  data_win_eventdata_image: "*regsvr32.exe"
+              - wildcard:
+                  data_win_eventdata_originalFileName: "REGSVR32.EXE"
+            minimum_should_match: 1
+        - wildcard:
+            data_win_eventdata_commandLine: "*scrobj*"
+        - range:
+            timestamp:
+              gte: "${START_TIME}"
+              lte: "${END_TIME}"
+  _source:
+    - timestamp
+    - agent_name
+    - data_win_eventdata_image
+    - data_win_eventdata_originalFileName
+    - data_win_eventdata_commandLine
+    - data_win_eventdata_parentImage
+    - data_win_eventdata_parentCommandLine
+    - data_win_eventdata_user
+    - data_win_eventdata_processId
+    - data_win_eventdata_processGuid
+    - data_win_eventdata_parentProcessId
+    - data_win_eventdata_parentProcessGuid
+    - data_win_eventdata_hashes
+    - data_win_eventdata_integrityLevel
+
+parameters:
+  AGENT_NAME:
+    description: "Target agent/host name"
+    type: string
+    required: true
+    example: "DESKTOP-AM0HLGE"
+  CUSTOMER_CODE:
+    description: "Customer label for filtering"
+    type: string
+    required: true
+    example: "lab"
+  INDEX_PATTERN:
+    description: "Elasticsearch index pattern"
+    type: string
+    required: true
+    example: "wazuh-lab_*"
+  START_TIME:
+    description: "Query start time (ISO 8601 or relative)"
+    type: datetime
+    required: false
+    default: "now-24h"
+    example: "2026-04-21 00:00:00.000"
+  END_TIME:
+    description: "Query end time (ISO 8601 or relative)"
+    type: datetime
+    required: false
+    default: "now"
+    example: "2026-04-21 23:59:59.999"
+
+how_to_implement: >
+  This detection requires Sysmon EventID 1 (Process Creation) logs to be forwarded
+  from Windows endpoints to Wazuh Indexer. Ensure Sysmon is deployed with a
+  configuration that captures process creation events including Image,
+  OriginalFileName, and CommandLine fields (SwiftOnSecurity or Olaf Hartong Sysmon
+  modular config recommended). The detection matches regsvr32.exe by process image
+  path OR original file name (to catch renamed binaries), combined with the
+  "scrobj" string in the command line. Note that Microsoft Defender ASR rules may
+  block this technique at execution time; if so, consider correlating with EDR
+  block events in addition to Sysmon process creation events.
+
+known_false_positives: >
+  Limited false positives related to third-party software registering COM
+  components via Script Component Runtime. Review the parent process, user, and
+  scriptlet URL/path for context. Legitimate use is extremely rare outside of
+  specialized installers.
+
+references:
+  - https://attack.mitre.org/techniques/T1218/010/
+  - https://github.com/redcanaryco/atomic-red-team/blob/master/atomics/T1218.010/T1218.010.md
+  - https://lolbas-project.github.io/lolbas/Binaries/Regsvr32/
+  - https://support.microsoft.com/en-us/topic/how-to-use-the-regsvr32-tool-and-troubleshoot-regsvr32-error-messages-a98d960a-7392-e6fe-d90a-3f4e0cb543e5
+
+response:
+  message: >
+    An instance of $data_win_eventdata_parentImage$ spawning regsvr32.exe
+    ($data_win_eventdata_image$) with scrobj.dll in the command line was
+    identified on endpoint $agent_name$ by user $data_win_eventdata_user$. This is
+    a classic Squiblydoo application control bypass technique. Command line:
+    $data_win_eventdata_commandLine$
+  risk_score: 72
+  severity: high
+  risk_objects:
+    - field: agent_name
+      type: system
+      score: 60
+    - field: data_win_eventdata_user
+      type: user
+      score: 60
+  threat_objects:
+    - field: data_win_eventdata_image
+      type: process_name
+    - field: data_win_eventdata_parentImage
+      type: parent_process_name
+    - field: data_win_eventdata_commandLine
+      type: command_line
+
+tags:
+  analytic_story:
+    - Living Off The Land
+    - Suspicious Regsvr32 Activity
+    - Graceful Wipe Out Attack
+    - Cobalt Strike
+    - Compromised Windows Host
+    - BlackByte Ransomware
+    - PHP-CGI RCE Attack on Japanese Organizations
+  asset_type: Endpoint
+  mitre_attack_id:
+    - T1218.010
+  custom_tags:
+    - regsvr32
+    - squiblydoo
+    - scrobj
+    - lolbin
+    - application_control_bypass
+    - proxy_execution
+  product:
+    - Wazuh
+  security_domain: endpoint
+
+graylog:
+  query: data_win_system_eventID:"1" AND (data_win_eventdata_image:/.*regsvr32\.exe.*/ OR data_win_eventdata_originalFileName:/REGSVR32\.EXE/) AND data_win_eventdata_commandLine:/.*scrobj.*/

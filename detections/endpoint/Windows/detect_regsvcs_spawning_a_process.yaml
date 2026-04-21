@@ -1,0 +1,155 @@
+name: Detect Regsvcs Spawning a Process
+id: bc477b57-5c21-4ab6-9c33-668772e7f114
+version: 1
+schema_version: "1.0"
+date: "2026-04-21"
+author: SOCFortress LLC
+status: production
+type: TTP
+
+description: >
+  This analytic identifies regsvcs.exe spawning a child process. Sysmon EventID 1
+  is used to detect process creation events where the parent process image is
+  regsvcs.exe. This activity is significant because regsvcs.exe is a legitimate
+  Microsoft .NET Framework utility (.NET Services Installation Tool) that should
+  rarely spawn child processes. When it does, it can indicate abuse of the binary
+  as a Living Off The Land Binary (LOLBIN) to bypass application control
+  mechanisms such as AppLocker or Windows Defender Application Control. If
+  confirmed malicious, this could allow an attacker to execute arbitrary code via
+  loaded .NET assemblies, potentially leading to privilege escalation, persistence,
+  or lateral movement within the environment. Immediate investigation is recommended
+  to determine the legitimacy of the spawned process and any associated suspicious
+  activities.
+
+data_source:
+  - Sysmon EventID 1
+
+search:
+  index_pattern: "${INDEX_PATTERN}"
+  size: 100
+  sort:
+    - timestamp: desc
+  query:
+    bool:
+      must:
+        - term:
+            agent_name: "${AGENT_NAME}"
+        - term:
+            agent_labels_customer: "${CUSTOMER_CODE}"
+        - term:
+            data_win_system_eventID: "1"
+        - wildcard:
+            data_win_eventdata_parentImage: "*regsvcs.exe"
+        - range:
+            timestamp:
+              gte: "${START_TIME}"
+              lte: "${END_TIME}"
+  _source:
+    - timestamp
+    - agent_name
+    - data_win_eventdata_image
+    - data_win_eventdata_originalFileName
+    - data_win_eventdata_commandLine
+    - data_win_eventdata_parentImage
+    - data_win_eventdata_parentCommandLine
+    - data_win_eventdata_user
+    - data_win_eventdata_processId
+    - data_win_eventdata_processGuid
+    - data_win_eventdata_parentProcessId
+    - data_win_eventdata_parentProcessGuid
+    - data_win_eventdata_hashes
+    - data_win_eventdata_integrityLevel
+
+parameters:
+  AGENT_NAME:
+    description: "Target agent/host name"
+    type: string
+    required: true
+    example: "DESKTOP-AM0HLGE"
+  CUSTOMER_CODE:
+    description: "Customer label for filtering"
+    type: string
+    required: true
+    example: "lab"
+  INDEX_PATTERN:
+    description: "Elasticsearch index pattern"
+    type: string
+    required: true
+    example: "wazuh-lab_*"
+  START_TIME:
+    description: "Query start time (ISO 8601 or relative)"
+    type: datetime
+    required: false
+    default: "now-24h"
+    example: "2026-04-21 00:00:00.000"
+  END_TIME:
+    description: "Query end time (ISO 8601 or relative)"
+    type: datetime
+    required: false
+    default: "now"
+    example: "2026-04-21 23:59:59.999"
+
+how_to_implement: >
+  This detection requires Sysmon EventID 1 (Process Creation) logs to be forwarded
+  from Windows endpoints to Wazuh Indexer. Ensure Sysmon is deployed with a
+  configuration that captures process creation events including Image, ParentImage,
+  and CommandLine fields (SwiftOnSecurity or Olaf Hartong Sysmon modular config
+  recommended). The detection flags any child process spawned by regsvcs.exe.
+  Additional child processes can be filtered out based on your environment's
+  baseline behavior. Note that in most environments, regsvcs.exe spawning any child
+  process is anomalous.
+
+known_false_positives: >
+  Although unlikely, limited instances of regsvcs.exe spawning child processes may
+  occur during legitimate .NET component registration by developers or installers.
+  Filter based on endpoint usage, command-line arguments, or process lineage (e.g.,
+  parent of regsvcs.exe being a trusted installer or Visual Studio build process).
+
+references:
+  - https://attack.mitre.org/techniques/T1218/009/
+  - https://github.com/redcanaryco/atomic-red-team/blob/master/atomics/T1218.009/T1218.009.md
+  - https://lolbas-project.github.io/lolbas/Binaries/Regsvcs/
+
+response:
+  message: >
+    An instance of regsvcs.exe ($data_win_eventdata_parentImage$) spawning
+    $data_win_eventdata_image$ was identified on endpoint $agent_name$ by user
+    $data_win_eventdata_user$. This behavior is typically not normal for
+    regsvcs.exe and may indicate LOLBIN abuse or application control bypass. Child
+    command line: $data_win_eventdata_commandLine$
+  risk_score: 64
+  severity: high
+  risk_objects:
+    - field: agent_name
+      type: system
+      score: 50
+    - field: data_win_eventdata_user
+      type: user
+      score: 50
+  threat_objects:
+    - field: data_win_eventdata_parentImage
+      type: parent_process_name
+    - field: data_win_eventdata_image
+      type: process_name
+    - field: data_win_eventdata_commandLine
+      type: command_line
+
+tags:
+  analytic_story:
+    - Suspicious Regsvcs Regasm Activity
+    - Living Off The Land
+    - Compromised Windows Host
+  asset_type: Endpoint
+  mitre_attack_id:
+    - T1218.009
+  custom_tags:
+    - regsvcs
+    - lolbin
+    - application_control_bypass
+    - dotnet_abuse
+  product:
+    - Wazuh
+  security_domain: endpoint
+
+graylog:
+  query: data_win_system_eventID:"1" AND data_win_eventdata_parentImage:/.*regsvcs\.exe.*/
