@@ -1,0 +1,193 @@
+name: Domain Group Discovery With Wmic
+id: a87736a6-95cd-4728-8689-3c64d5026b3e
+version: 1
+schema_version: "1.0"
+date: "2026-04-21"
+author: SOCFortress LLC
+status: production
+type: Hunting
+
+description: >
+  This analytic identifies the execution of wmic.exe with the specific
+  command-line arguments used to query the WMI LDAP namespace
+  (\\root\directory\ldap) for domain group objects (ds_group) and
+  retrieve the ds_samaccountname attribute via a GET operation. Sysmon
+  EventID 1 is used to match process creation events where the image or
+  OriginalFileName is wmic.exe AND the command line contains all three
+  indicators: the /NAMESPACE flag pointing to the LDAP WMI namespace,
+  "ds_group" object reference, and "GET ds_samaccountname" clause. This
+  highly specific pattern indicates deliberate Active Directory group
+  enumeration via WMI, a technique used by adversaries for situational
+  awareness while avoiding traditional AD query telemetry. If confirmed
+  malicious, this behavior could allow attackers to enumerate domain
+  groups (particularly privileged groups like Domain Admins, Enterprise
+  Admins, Schema Admins) and identify high-value targets for subsequent
+  credential theft, Kerberoasting, or lateral movement.
+
+data_source:
+  - Sysmon EventID 1
+
+search:
+  index_pattern: "${INDEX_PATTERN}"
+  size: 100
+  sort:
+    - timestamp: desc
+  query:
+    bool:
+      must:
+        - term:
+            agent_name: "${AGENT_NAME}"
+        - term:
+            agent_labels_customer: "${CUSTOMER_CODE}"
+        - term:
+            data_win_system_eventID: "1"
+        - bool:
+            should:
+              - wildcard:
+                  data_win_eventdata_image:
+                    value: "*wmic.exe"
+                    case_insensitive: true
+              - term:
+                  data_win_eventdata_originalFileName: "wmic.exe"
+            minimum_should_match: 1
+        - wildcard:
+            data_win_eventdata_commandLine:
+              value: "*/NAMESPACE:*root*directory*ldap*"
+              case_insensitive: true
+        - wildcard:
+            data_win_eventdata_commandLine:
+              value: "*ds_group*"
+              case_insensitive: true
+        - wildcard:
+            data_win_eventdata_commandLine:
+              value: "*GET*ds_samaccountname*"
+              case_insensitive: true
+        - range:
+            timestamp:
+              gte: "${START_TIME}"
+              lte: "${END_TIME}"
+  _source:
+    - timestamp
+    - agent_name
+    - data_win_eventdata_image
+    - data_win_eventdata_originalFileName
+    - data_win_eventdata_commandLine
+    - data_win_eventdata_parentImage
+    - data_win_eventdata_parentCommandLine
+    - data_win_eventdata_user
+    - data_win_eventdata_processId
+    - data_win_eventdata_processGuid
+    - data_win_eventdata_parentProcessId
+    - data_win_eventdata_parentProcessGuid
+    - data_win_eventdata_hashes
+    - data_win_eventdata_integrityLevel
+    - data_win_eventdata_currentDirectory
+
+parameters:
+  AGENT_NAME:
+    description: "Target agent/host name"
+    type: string
+    required: true
+    example: "DESKTOP-AM0HLGE"
+  CUSTOMER_CODE:
+    description: "Customer label for filtering"
+    type: string
+    required: true
+    example: "lab"
+  INDEX_PATTERN:
+    description: "Elasticsearch index pattern"
+    type: string
+    required: true
+    example: "wazuh-lab_*"
+  START_TIME:
+    description: "Query start time (ISO 8601 or relative)"
+    type: datetime
+    required: false
+    default: "now-24h"
+    example: "2026-04-21 00:00:00.000"
+  END_TIME:
+    description: "Query end time (ISO 8601 or relative)"
+    type: datetime
+    required: false
+    default: "now"
+    example: "2026-04-21 23:59:59.999"
+
+how_to_implement: >
+  This detection requires Sysmon EventID 1 (Process Creation) logs to be forwarded
+  from Windows endpoints to Wazuh Indexer. Ensure Sysmon is deployed with a
+  configuration that captures Image, OriginalFileName, and CommandLine fields
+  (SwiftOnSecurity or Olaf Hartong Sysmon modular config recommended). The
+  detection matches wmic.exe either by Image path (case-insensitive) or by
+  PE OriginalFileName, combined with all three required command-line
+  indicators (NAMESPACE, ds_group, GET ds_samaccountname). The NAMESPACE
+  pattern uses wildcards between path components (root, directory, ldap)
+  to handle different backslash escaping between event channels.
+  Case-insensitive matching is used throughout. The ES DSL uses
+  case_insensitive wildcard option (OpenSearch 2.x / Elasticsearch 7.10+);
+  Graylog equivalent uses character classes.
+
+known_false_positives: >
+  System administrators or power users may legitimately use this wmic
+  query pattern for group membership auditing or troubleshooting, but
+  such usage is rare compared to standard tools like dsquery or Get-ADGroup.
+  Review parent process lineage, user context (admin vs. non-admin
+  account), and timing to distinguish authorized administrative activity
+  from reconnaissance. Given the specificity of this command pattern
+  (/NAMESPACE:\\root\directory\ldap with ds_group GET ds_samaccountname),
+  false positive rate should be very low and any occurrence warrants
+  investigation.
+
+references:
+  - https://attack.mitre.org/techniques/T1069/002/
+  - https://attack.mitre.org/techniques/T1047/
+  - https://learn.microsoft.com/en-us/windows/win32/wmisdk/wmic
+
+response:
+  message: >
+    wmic.exe was used to enumerate domain groups via the WMI LDAP
+    namespace on endpoint $agent_name$ by user $data_win_eventdata_user$.
+    Process image: $data_win_eventdata_image$. Parent process:
+    $data_win_eventdata_parentImage$. Command line:
+    $data_win_eventdata_commandLine$. This is a high-confidence indicator
+    of Active Directory reconnaissance commonly preceding credential
+    theft or lateral movement; investigate immediately and review
+    concurrent discovery activity.
+  risk_score: 72
+  severity: high
+  risk_objects:
+    - field: agent_name
+      type: system
+      score: 60
+    - field: data_win_eventdata_user
+      type: user
+      score: 60
+  threat_objects:
+    - field: data_win_eventdata_image
+      type: process_name
+    - field: data_win_eventdata_parentImage
+      type: parent_process_name
+    - field: data_win_eventdata_commandLine
+      type: command_line
+
+tags:
+  analytic_story:
+    - Active Directory Discovery
+    - Active Directory Reconnaissance
+  asset_type: Endpoint
+  mitre_attack_id:
+    - T1069.002
+    - T1047
+  custom_tags:
+    - wmic
+    - wmi
+    - ad_enumeration
+    - active_directory
+    - reconnaissance
+    - domain_group_discovery
+    - lolbin
+  product:
+    - Wazuh
+  security_domain: endpoint
+
+graylog:
+  query: data_win_system_eventID:"1" AND (data_win_eventdata_image:/.*[Ww][Mm][Ii][Cc]\.exe.*/ OR data_win_eventdata_originalFileName:"wmic.exe") AND data_win_eventdata_commandLine:/.*\/[Nn][Aa][Mm][Ee][Ss][Pp][Aa][Cc][Ee]:.*[Rr][Oo][Oo][Tt].*[Dd][Ii][Rr][Ee][Cc][Tt][Oo][Rr][Yy].*[Ll][Dd][Aa][Pp].*/ AND data_win_eventdata_commandLine:/.*[Dd][Ss]_[Gg][Rr][Oo][Uu][Pp].*/ AND data_win_eventdata_commandLine:/.*[Gg][Ee][Tt].*[Dd][Ss]_[Ss][Aa][Mm][Aa][Cc][Cc][Oo][Uu][Nn][Tt][Nn][Aa][Mm][Ee].*/

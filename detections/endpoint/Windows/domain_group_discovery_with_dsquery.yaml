@@ -1,0 +1,186 @@
+name: Domain Group Discovery With Dsquery
+id: f0c9d62f-a232-4edd-b17e-bc409fb133d4
+version: 1
+schema_version: "1.0"
+date: "2026-04-21"
+author: SOCFortress LLC
+status: production
+type: Anomaly
+
+description: >
+  This analytic identifies the execution of dsquery.exe with the "group"
+  subcommand, used to enumerate domain groups in an Active Directory
+  environment. Sysmon EventID 1 is used to match process creation events
+  where the image or OriginalFileName is dsquery.exe and the command line
+  contains "group". This activity is significant because both Red Teams
+  and real adversaries routinely use dsquery.exe during the discovery and
+  situational-awareness phases of an intrusion to enumerate domain groups,
+  particularly privileged groups such as Domain Admins, Enterprise Admins,
+  and Schema Admins. This technique has been observed in use across many
+  targeted intrusions including the LAMEHUG campaign and broader Active
+  Directory discovery operations. dsquery.exe is part of the Remote Server
+  Administration Tools (RSAT) suite and is typically only present on
+  domain controllers or workstations with RSAT installed - its presence
+  and active use on a non-admin endpoint should be treated as suspicious.
+  If confirmed malicious, this behavior could allow attackers to map the
+  domain group structure, identify high-value targets (members of
+  privileged groups), and plan subsequent attacks including targeted
+  credential theft, Kerberoasting of service accounts, or lateral
+  movement.
+
+data_source:
+  - Sysmon EventID 1
+
+search:
+  index_pattern: "${INDEX_PATTERN}"
+  size: 100
+  sort:
+    - timestamp: desc
+  query:
+    bool:
+      must:
+        - term:
+            agent_name: "${AGENT_NAME}"
+        - term:
+            agent_labels_customer: "${CUSTOMER_CODE}"
+        - term:
+            data_win_system_eventID: "1"
+        - bool:
+            should:
+              - wildcard:
+                  data_win_eventdata_image:
+                    value: "*dsquery.exe"
+                    case_insensitive: true
+              - term:
+                  data_win_eventdata_originalFileName: "dsquery.exe"
+            minimum_should_match: 1
+        - wildcard:
+            data_win_eventdata_commandLine:
+              value: "*group*"
+              case_insensitive: true
+        - range:
+            timestamp:
+              gte: "${START_TIME}"
+              lte: "${END_TIME}"
+  _source:
+    - timestamp
+    - agent_name
+    - data_win_eventdata_image
+    - data_win_eventdata_originalFileName
+    - data_win_eventdata_commandLine
+    - data_win_eventdata_parentImage
+    - data_win_eventdata_parentCommandLine
+    - data_win_eventdata_user
+    - data_win_eventdata_processId
+    - data_win_eventdata_processGuid
+    - data_win_eventdata_parentProcessId
+    - data_win_eventdata_parentProcessGuid
+    - data_win_eventdata_hashes
+    - data_win_eventdata_integrityLevel
+    - data_win_eventdata_currentDirectory
+
+parameters:
+  AGENT_NAME:
+    description: "Target agent/host name"
+    type: string
+    required: true
+    example: "DESKTOP-AM0HLGE"
+  CUSTOMER_CODE:
+    description: "Customer label for filtering"
+    type: string
+    required: true
+    example: "lab"
+  INDEX_PATTERN:
+    description: "Elasticsearch index pattern"
+    type: string
+    required: true
+    example: "wazuh-lab_*"
+  START_TIME:
+    description: "Query start time (ISO 8601 or relative)"
+    type: datetime
+    required: false
+    default: "now-24h"
+    example: "2026-04-21 00:00:00.000"
+  END_TIME:
+    description: "Query end time (ISO 8601 or relative)"
+    type: datetime
+    required: false
+    default: "now"
+    example: "2026-04-21 23:59:59.999"
+
+how_to_implement: >
+  This detection requires Sysmon EventID 1 (Process Creation) logs to be forwarded
+  from Windows endpoints to Wazuh Indexer. Ensure Sysmon is deployed with a
+  configuration that captures Image, OriginalFileName, and CommandLine fields
+  (SwiftOnSecurity or Olaf Hartong Sysmon modular config recommended). The
+  detection matches dsquery.exe either by Image path (case-insensitive) or
+  PE OriginalFileName, combined with the "group" keyword in the command line.
+  Case-insensitive matching is used throughout. The ES DSL uses the
+  case_insensitive wildcard option (OpenSearch 2.x / Elasticsearch 7.10+);
+  Graylog equivalent uses character classes. Note that dsquery.exe is part
+  of RSAT and is typically installed only on domain controllers or admin
+  workstations - its presence on standard user endpoints may itself be a
+  tooling indicator.
+
+known_false_positives: >
+  System administrators, helpdesk staff, or domain admins may legitimately
+  use dsquery.exe for group membership troubleshooting, audit, or
+  reporting activities. Review parent process lineage (Explorer/cmd.exe
+  via admin session vs. unexpected parent), user context (admin account
+  vs. standard user vs. service account), and timing to distinguish
+  authorized administrative activity from reconnaissance. Concurrent use
+  of multiple AD discovery tools (dsquery, net user, net group, nltest,
+  Get-ADGroup) on a single host within a short window should be treated
+  as high-priority regardless of user context.
+
+references:
+  - https://attack.mitre.org/techniques/T1069/002/
+  - https://learn.microsoft.com/en-us/previous-versions/windows/it-pro/windows-server-2012-r2-and-2012/cc732952(v=ws.11)
+
+response:
+  message: >
+    An instance of $data_win_eventdata_parentImage$ spawning dsquery.exe
+    ($data_win_eventdata_image$) with a group discovery parameter was
+    identified on endpoint $agent_name$ by user $data_win_eventdata_user$.
+    Command line: $data_win_eventdata_commandLine$. This is consistent
+    with Active Directory group enumeration commonly preceding targeted
+    credential theft or lateral movement; investigate parent process
+    lineage and concurrent discovery activity.
+  risk_score: 40
+  severity: medium
+  risk_objects:
+    - field: agent_name
+      type: system
+      score: 30
+    - field: data_win_eventdata_user
+      type: user
+      score: 30
+  threat_objects:
+    - field: data_win_eventdata_image
+      type: process_name
+    - field: data_win_eventdata_parentImage
+      type: parent_process_name
+    - field: data_win_eventdata_commandLine
+      type: command_line
+
+tags:
+  analytic_story:
+    - Active Directory Discovery
+    - LAMEHUG
+    - Active Directory Reconnaissance
+  asset_type: Endpoint
+  mitre_attack_id:
+    - T1069.002
+  custom_tags:
+    - dsquery
+    - ad_enumeration
+    - active_directory
+    - reconnaissance
+    - domain_group_discovery
+    - lolbin
+  product:
+    - Wazuh
+  security_domain: endpoint
+
+graylog:
+  query: data_win_system_eventID:"1" AND (data_win_eventdata_image:/.*[Dd][Ss][Qq][Uu][Ee][Rr][Yy]\.exe.*/ OR data_win_eventdata_originalFileName:"dsquery.exe") AND data_win_eventdata_commandLine:/.*[Gg][Rr][Oo][Uu][Pp].*/

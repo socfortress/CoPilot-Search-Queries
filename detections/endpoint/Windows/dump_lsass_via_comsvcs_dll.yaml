@@ -1,0 +1,218 @@
+name: Dump LSASS via comsvcs DLL
+id: 8943b567-f14d-4ee8-a0bb-2121d4ce3184
+version: 1
+schema_version: "1.0"
+date: "2026-04-21"
+author: SOCFortress LLC
+status: production
+type: TTP
+
+description: >
+  This analytic detects the behavior of dumping credentials from memory by
+  exploiting the Local Security Authority Subsystem Service (LSASS)
+  process using comsvcs.dll and its MiniDumpW export (export ordinal #24)
+  via rundll32.exe. Sysmon EventID 1 is used to match process creation
+  events where rundll32.exe is invoked with comsvcs.dll as the DLL to
+  load, combined with either "MiniDump" as the named export to call or
+  "#24" as the ordinal reference. This is a classic Living-Off-the-Land
+  credential theft technique - comsvcs.dll is a legitimate signed
+  Microsoft DLL, and its MiniDumpW export allows any caller with
+  sufficient privileges to produce a full memory dump of a target
+  process. When targeted at the LSASS process, the dump contains
+  plaintext credentials, NTLM hashes, Kerberos tickets, and other
+  sensitive authentication material that can be extracted offline with
+  tools like Mimikatz or pypykatz. This activity is significant because
+  it indicates potential credential theft, which can lead to broader
+  system compromise, persistence, lateral movement, and privilege
+  escalation. This technique has been observed in use by multiple
+  nation-state groups (Volt Typhoon, HAFNIUM, Flax Typhoon) and
+  ransomware operations (Prestige, Hellcat, Scattered Lapsus$), and is
+  documented in CISA advisories AA22-257A and AA22-264A. If confirmed
+  malicious, attackers could gain unauthorized access to sensitive
+  credentials, leading to data theft, ransomware attacks, or other
+  damaging outcomes. Immediate investigation and credential rotation for
+  accounts active on the affected host is strongly recommended.
+
+data_source:
+  - Sysmon EventID 1
+
+search:
+  index_pattern: "${INDEX_PATTERN}"
+  size: 100
+  sort:
+    - timestamp: desc
+  query:
+    bool:
+      must:
+        - term:
+            agent_name: "${AGENT_NAME}"
+        - term:
+            agent_labels_customer: "${CUSTOMER_CODE}"
+        - term:
+            data_win_system_eventID: "1"
+        - bool:
+            should:
+              - wildcard:
+                  data_win_eventdata_image:
+                    value: "*rundll32.exe"
+                    case_insensitive: true
+              - term:
+                  data_win_eventdata_originalFileName: "RUNDLL32.EXE"
+            minimum_should_match: 1
+        - wildcard:
+            data_win_eventdata_commandLine:
+              value: "*comsvcs.dll*"
+              case_insensitive: true
+        - bool:
+            should:
+              - wildcard:
+                  data_win_eventdata_commandLine:
+                    value: "*MiniDump*"
+                    case_insensitive: true
+              - wildcard:
+                  data_win_eventdata_commandLine:
+                    value: "*#24*"
+            minimum_should_match: 1
+        - range:
+            timestamp:
+              gte: "${START_TIME}"
+              lte: "${END_TIME}"
+  _source:
+    - timestamp
+    - agent_name
+    - data_win_eventdata_image
+    - data_win_eventdata_originalFileName
+    - data_win_eventdata_commandLine
+    - data_win_eventdata_parentImage
+    - data_win_eventdata_parentCommandLine
+    - data_win_eventdata_user
+    - data_win_eventdata_processId
+    - data_win_eventdata_processGuid
+    - data_win_eventdata_parentProcessId
+    - data_win_eventdata_parentProcessGuid
+    - data_win_eventdata_hashes
+    - data_win_eventdata_integrityLevel
+    - data_win_eventdata_currentDirectory
+
+parameters:
+  AGENT_NAME:
+    description: "Target agent/host name"
+    type: string
+    required: true
+    example: "DESKTOP-AM0HLGE"
+  CUSTOMER_CODE:
+    description: "Customer label for filtering"
+    type: string
+    required: true
+    example: "lab"
+  INDEX_PATTERN:
+    description: "Elasticsearch index pattern"
+    type: string
+    required: true
+    example: "wazuh-lab_*"
+  START_TIME:
+    description: "Query start time (ISO 8601 or relative)"
+    type: datetime
+    required: false
+    default: "now-24h"
+    example: "2026-04-21 00:00:00.000"
+  END_TIME:
+    description: "Query end time (ISO 8601 or relative)"
+    type: datetime
+    required: false
+    default: "now"
+    example: "2026-04-21 23:59:59.999"
+
+how_to_implement: >
+  This detection requires Sysmon EventID 1 (Process Creation) logs to be forwarded
+  from Windows endpoints to Wazuh Indexer. Ensure Sysmon is deployed with a
+  configuration that captures Image, OriginalFileName, and CommandLine fields
+  (SwiftOnSecurity or Olaf Hartong Sysmon modular config recommended). The
+  detection matches rundll32.exe either by Image path (case-insensitive) or
+  PE OriginalFileName, combined with "comsvcs.dll" in the command line AND
+  either the named export "MiniDump" or the ordinal reference "#24".
+  Case-insensitive matching is used throughout for string keywords; the "#24"
+  pattern is matched literally. The ES DSL uses case_insensitive wildcard
+  option (OpenSearch 2.x / Elasticsearch 7.10+); Graylog equivalent uses
+  character classes. Note that Microsoft Defender ASR rule "Block credential
+  stealing from the Windows local security authority subsystem (lsass.exe)"
+  will block this technique at execution time when ASR is enabled; deploy
+  this detection alongside ASR for layered coverage (ASR blocks, Wazuh
+  alerts).
+
+known_false_positives: >
+  No benign false positives have been identified. Legitimate use of
+  comsvcs.dll MiniDump/export #24 from rundll32.exe is extremely rare and
+  any occurrence should be treated as a high-priority security incident.
+  Authorized penetration testing or incident response memory acquisition
+  using this specific pattern should be documented in the change
+  management system and whitelisted if necessary.
+
+references:
+  - https://attack.mitre.org/techniques/T1003/001/
+  - https://modexp.wordpress.com/2019/08/30/minidumpwritedump-via-com-services-dll/
+  - https://twitter.com/SBousseaden/status/1167417096374050817
+  - https://www.microsoft.com/en-us/security/blog/2023/05/24/volt-typhoon-targets-us-critical-infrastructure-with-living-off-the-land-techniques/
+  - https://www.cisa.gov/news-events/cybersecurity-advisories/aa22-257a
+  - https://www.cisa.gov/news-events/cybersecurity-advisories/aa22-264a
+
+response:
+  message: >
+    An instance of $data_win_eventdata_parentImage$ spawning rundll32.exe
+    ($data_win_eventdata_image$) was identified accessing credentials via
+    comsvcs.dll MiniDump on endpoint $agent_name$ by user
+    $data_win_eventdata_user$. Command line:
+    $data_win_eventdata_commandLine$. This is a high-confidence indicator
+    of LSASS credential dumping - investigate immediately, isolate the
+    host, and initiate credential rotation for any accounts that may
+    have authenticated on this system.
+  risk_score: 90
+  severity: critical
+  risk_objects:
+    - field: agent_name
+      type: system
+      score: 80
+    - field: data_win_eventdata_user
+      type: user
+      score: 80
+  threat_objects:
+    - field: data_win_eventdata_image
+      type: process_name
+    - field: data_win_eventdata_parentImage
+      type: parent_process_name
+    - field: data_win_eventdata_commandLine
+      type: command_line
+
+tags:
+  analytic_story:
+    - Living Off The Land
+    - CISA AA22-257A
+    - CISA AA22-264A
+    - Volt Typhoon
+    - HAFNIUM Group
+    - Flax Typhoon
+    - Prestige Ransomware
+    - Industroyer2
+    - Data Destruction
+    - Suspicious Rundll32 Activity
+    - Compromised Windows Host
+    - Credential Dumping
+    - Scattered Lapsus$ Hunters
+    - Hellcat Ransomware
+  asset_type: Endpoint
+  mitre_attack_id:
+    - T1003.001
+  custom_tags:
+    - lsass
+    - credential_dumping
+    - comsvcs
+    - minidump
+    - rundll32
+    - lolbin
+    - living_off_the_land
+  product:
+    - Wazuh
+  security_domain: endpoint
+
+graylog:
+  query: data_win_system_eventID:"1" AND (data_win_eventdata_image:/.*[Rr][Uu][Nn][Dd][Ll][Ll]32\.exe.*/ OR data_win_eventdata_originalFileName:"RUNDLL32.EXE") AND data_win_eventdata_commandLine:/.*[Cc][Oo][Mm][Ss][Vv][Cc][Ss]\.[Dd][Ll][Ll].*/ AND (data_win_eventdata_commandLine:/.*[Mm][Ii][Nn][Ii][Dd][Uu][Mm][Pp].*/ OR data_win_eventdata_commandLine:/.*\#24.*/)

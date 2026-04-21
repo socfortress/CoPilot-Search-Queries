@@ -1,0 +1,190 @@
+name: DSQuery Domain Discovery
+id: cc316032-924a-11eb-91a2-acde48001122
+version: 1
+schema_version: "1.0"
+date: "2026-04-21"
+author: SOCFortress LLC
+status: production
+type: TTP
+
+description: >
+  This analytic detects the execution of dsquery.exe with arguments
+  targeting "trustedDomain" queries from the command line. Sysmon EventID 1
+  is used to match process creation events where the image or
+  OriginalFileName is dsquery.exe and the command line contains
+  "trustedDomain", which typically appears in LDAP filters such as
+  "(objectClass=trustedDomain)" used to enumerate Active Directory trust
+  relationships. This activity is significant because domain trust
+  discovery is a common step in lateral movement or privilege escalation
+  campaigns - attackers use this information to identify trusted domains
+  that can be leveraged for cross-domain attacks, such as trust ticket
+  forgery, SID history abuse, or exploitation of trust relationship
+  misconfigurations. This technique is documented in Atomic Red Team
+  (T1482), referenced in Harmj0y's "A Guide to Attacking Domain Trusts",
+  and has been observed across many targeted intrusion campaigns. If
+  confirmed malicious, this could allow attackers to map domain trusts,
+  identify trust types (external, forest, parent-child), and plan
+  cross-domain lateral movement or privilege escalation attacks.
+
+data_source:
+  - Sysmon EventID 1
+
+search:
+  index_pattern: "${INDEX_PATTERN}"
+  size: 100
+  sort:
+    - timestamp: desc
+  query:
+    bool:
+      must:
+        - term:
+            agent_name: "${AGENT_NAME}"
+        - term:
+            agent_labels_customer: "${CUSTOMER_CODE}"
+        - term:
+            data_win_system_eventID: "1"
+        - bool:
+            should:
+              - wildcard:
+                  data_win_eventdata_image:
+                    value: "*dsquery.exe"
+                    case_insensitive: true
+              - term:
+                  data_win_eventdata_originalFileName: "dsquery.exe"
+            minimum_should_match: 1
+        - wildcard:
+            data_win_eventdata_commandLine:
+              value: "*trustedDomain*"
+              case_insensitive: true
+        - range:
+            timestamp:
+              gte: "${START_TIME}"
+              lte: "${END_TIME}"
+  _source:
+    - timestamp
+    - agent_name
+    - data_win_eventdata_image
+    - data_win_eventdata_originalFileName
+    - data_win_eventdata_commandLine
+    - data_win_eventdata_parentImage
+    - data_win_eventdata_parentCommandLine
+    - data_win_eventdata_user
+    - data_win_eventdata_processId
+    - data_win_eventdata_processGuid
+    - data_win_eventdata_parentProcessId
+    - data_win_eventdata_parentProcessGuid
+    - data_win_eventdata_hashes
+    - data_win_eventdata_integrityLevel
+    - data_win_eventdata_currentDirectory
+
+parameters:
+  AGENT_NAME:
+    description: "Target agent/host name"
+    type: string
+    required: true
+    example: "DESKTOP-AM0HLGE"
+  CUSTOMER_CODE:
+    description: "Customer label for filtering"
+    type: string
+    required: true
+    example: "lab"
+  INDEX_PATTERN:
+    description: "Elasticsearch index pattern"
+    type: string
+    required: true
+    example: "wazuh-lab_*"
+  START_TIME:
+    description: "Query start time (ISO 8601 or relative)"
+    type: datetime
+    required: false
+    default: "now-24h"
+    example: "2026-04-21 00:00:00.000"
+  END_TIME:
+    description: "Query end time (ISO 8601 or relative)"
+    type: datetime
+    required: false
+    default: "now"
+    example: "2026-04-21 23:59:59.999"
+
+how_to_implement: >
+  This detection requires Sysmon EventID 1 (Process Creation) logs to be forwarded
+  from Windows endpoints to Wazuh Indexer. Ensure Sysmon is deployed with a
+  configuration that captures Image, OriginalFileName, and CommandLine fields
+  (SwiftOnSecurity or Olaf Hartong Sysmon modular config recommended). The
+  detection matches dsquery.exe either by Image path (case-insensitive) or
+  PE OriginalFileName, combined with the "trustedDomain" keyword anywhere
+  in the command line. Case-insensitive matching is used throughout to
+  handle LDAP attribute naming variations. The ES DSL uses the
+  case_insensitive wildcard option (OpenSearch 2.x / Elasticsearch 7.10+);
+  Graylog equivalent uses character classes. Note that dsquery.exe is part
+  of RSAT and is typically installed only on domain controllers or admin
+  workstations - its presence on standard user endpoints may itself be a
+  tooling indicator.
+
+known_false_positives: >
+  Limited false positives expected. Legitimate administrators or security
+  auditors may query domain trust relationships during periodic AD audits
+  or troubleshooting. Review parent process lineage, user context, and
+  timing to distinguish authorized activity. Concurrent use of multiple
+  trust discovery tools (dsquery trustedDomain, nltest /domain_trusts,
+  Get-ADTrust) on a single host should be treated as high-priority
+  regardless of user context. If legitimate trust audits produce recurring
+  alerts, filter based on specific parent process or user account.
+
+references:
+  - https://attack.mitre.org/techniques/T1482/
+  - https://github.com/redcanaryco/atomic-red-team/blob/master/atomics/T1482/T1482.md
+  - https://blog.harmj0y.net/redteaming/a-guide-to-attacking-domain-trusts/
+  - https://learn.microsoft.com/en-us/previous-versions/windows/it-pro/windows-server-2012-R2-and-2012/cc732952(v=ws.11)
+  - https://learn.microsoft.com/en-us/previous-versions/windows/it-pro/windows-server-2012-R2-and-2012/cc754232(v=ws.11)
+
+response:
+  message: >
+    An instance of $data_win_eventdata_parentImage$ spawning dsquery.exe
+    ($data_win_eventdata_image$) performing domain trust discovery was
+    identified on endpoint $agent_name$ by user $data_win_eventdata_user$.
+    Command line: $data_win_eventdata_commandLine$. This is a
+    high-confidence indicator of Active Directory trust enumeration
+    commonly preceding cross-domain lateral movement or privilege
+    escalation; investigate immediately and review concurrent discovery
+    activity.
+  risk_score: 72
+  severity: high
+  risk_objects:
+    - field: agent_name
+      type: system
+      score: 60
+    - field: data_win_eventdata_user
+      type: user
+      score: 60
+  threat_objects:
+    - field: data_win_eventdata_image
+      type: process_name
+    - field: data_win_eventdata_parentImage
+      type: parent_process_name
+    - field: data_win_eventdata_commandLine
+      type: command_line
+
+tags:
+  analytic_story:
+    - Active Directory Discovery
+    - Domain Trust Discovery
+    - Compromised Windows Host
+    - Active Directory Reconnaissance
+  asset_type: Endpoint
+  mitre_attack_id:
+    - T1482
+  custom_tags:
+    - dsquery
+    - domain_trust_discovery
+    - ad_enumeration
+    - active_directory
+    - reconnaissance
+    - cross_domain_attack
+    - lolbin
+  product:
+    - Wazuh
+  security_domain: endpoint
+
+graylog:
+  query: data_win_system_eventID:"1" AND (data_win_eventdata_image:/.*[Dd][Ss][Qq][Uu][Ee][Rr][Yy]\.exe.*/ OR data_win_eventdata_originalFileName:"dsquery.exe") AND data_win_eventdata_commandLine:/.*[Tt][Rr][Uu][Ss][Tt][Ee][Dd][Dd][Oo][Mm][Aa][Ii][Nn].*/
