@@ -1,0 +1,145 @@
+name: Detect MSHTA Url in Command Line
+id: 9b3af1e6-5b68-11eb-ae93-0242ac130002
+version: 1
+schema_version: "1.0"
+date: "2026-04-21"
+author: SOCFortress LLC
+status: production
+type: TTP
+
+description: >
+  Detects the use of Microsoft HTML Application Host (mshta.exe) to make remote
+  HTTP or HTTPS connections. It leverages data from Endpoint Detection and
+  Response (EDR) agents, focusing on command-line arguments containing URLs.
+  This activity is significant because adversaries often use mshta.exe to
+  download and execute remote .hta files, bypassing security controls. If
+  confirmed malicious, this behavior could allow attackers to execute arbitrary
+  code, potentially leading to system compromise, data exfiltration, or further
+  network infiltration.
+
+data_source:
+  - Sysmon EventID 1
+  - Windows Event Log Security 4688
+
+search:
+  index_pattern: "${INDEX_PATTERN}"
+  size: 100
+  sort:
+    - timestamp: desc
+  query:
+    bool:
+      must:
+        - term:
+            agent_name: "${AGENT_NAME}"
+        - term:
+            agent_labels_customer: "${CUSTOMER_CODE}"
+        - term:
+            data_win_system_eventID: "1"
+        - wildcard:
+            data_win_eventdata_image: "*mshta.exe"
+        - bool:
+            should:
+              - wildcard:
+                  data_win_eventdata_commandLine: "*http://*"
+              - wildcard:
+                  data_win_eventdata_commandLine: "*https://*"
+            minimum_should_match: 1
+        - range:
+            timestamp:
+              gte: "${START_TIME}"
+              lte: "${END_TIME}"
+  _source:
+    - timestamp
+    - agent_name
+    - data_win_system_eventID
+    - data_win_eventdata_image
+    - data_win_eventdata_commandLine
+    - data_win_eventdata_parentImage
+    - data_win_eventdata_user
+
+parameters:
+  AGENT_NAME:
+    description: "Target agent/host name"
+    type: string
+    required: true
+    example: "DESKTOP-AM0HLGE"
+  CUSTOMER_CODE:
+    description: "Customer label for filtering"
+    type: string
+    required: true
+    example: "lab"
+  INDEX_PATTERN:
+    description: "Elasticsearch index pattern"
+    type: string
+    required: true
+    example: "wazuh-lab_*"
+  START_TIME:
+    description: "Query start time (ISO 8601 or relative)"
+    type: datetime
+    required: false
+    default: "now-24h"
+    example: "2026-04-21 00:00:00.000"
+  END_TIME:
+    description: "Query end time (ISO 8601 or relative)"
+    type: datetime
+    required: false
+    default: "now"
+    example: "2026-04-21 23:59:59.999"
+
+how_to_implement: >
+  Requires Wazuh agents with Sysmon installed and configured to log process
+  creation events (EventID 1) with full command-line arguments. The
+  data_win_eventdata_image and data_win_eventdata_commandLine fields must be
+  populated in Elasticsearch/Wazuh Indexer.
+
+known_false_positives: >
+  It is possible legitimate applications may perform this behavior and will need
+  to be filtered. Some administrative tools or scripts may legitimately use
+  mshta.exe to download .hta files for configuration purposes.
+
+references:
+  - https://github.com/redcanaryco/AtomicTestHarnesses
+  - https://redcanary.com/blog/introducing-atomictestharnesses/
+  - https://denwp.com/dissecting-lumma-malware/
+  - https://www.mcafee.com/blogs/other-blogs/mcafee-labs/behind-the-captcha-a-clever-gateway-of-malware/
+  - https://attack.mitre.org/techniques/T1218/005/
+
+response:
+  message: >
+    mshta.exe URL download detected on $agent_name$ by user
+    $data_win_eventdata_user$. Command: $data_win_eventdata_commandLine$.
+    Parent process: $data_win_eventdata_parentImage$. This indicates potential
+    remote payload download and execution. MITRE ATT&CK: T1218.005
+  risk_score: 65
+  severity: high
+  risk_objects:
+    - field: agent_name
+      type: system
+      score: 65
+    - field: data_win_eventdata_user
+      type: user
+      score: 65
+  threat_objects:
+    - field: data_win_eventdata_image
+      type: process_name
+    - field: data_win_eventdata_commandLine
+      type: command_line
+
+tags:
+  analytic_story:
+    - Compromised Windows Host
+    - Suspicious MSHTA Activity
+    - Living Off The Land
+  asset_type: Endpoint
+  mitre_attack_id:
+    - T1218.005
+  custom_tags:
+    - mshta
+    - url_download
+    - remote_payload
+    - http
+    - https
+    - defense_evasion
+  product:
+    - Wazuh
+  security_domain: endpoint
