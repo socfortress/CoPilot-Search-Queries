@@ -1,0 +1,194 @@
+name: Firewall Allowed Program Enable
+id: 9a8f63a8-43ac-11ec-904c-acde48001122
+version: 1
+schema_version: "1.0"
+date: "2026-04-27"
+author: SOCFortress LLC
+status: production
+type: Anomaly
+
+description: >
+  This analytic detects the modification of a Windows Firewall rule to
+  add and enable an allow-rule for a specific application or port,
+  effectively whitelisting it through the host-based firewall. Sysmon
+  EventID 1 is used to match process creation events whose command line
+  simultaneously contains all four keywords: "firewall", "add", "allow",
+  and "enable" (typically seen as netsh advfirewall firewall add rule
+  ... action=allow enable=yes). This activity is significant because it
+  is commonly observed in malware execution chains where attackers
+  whitelist their backdoor, RAT, or C2 component through the Windows
+  Firewall to ensure outbound communications are not blocked. This
+  technique has been observed in multiple ransomware operations
+  (BlackByte, Medusa) and commodity malware families (NjRAT, PlugX,
+  Azorult). If confirmed malicious, this could enable an attacker to
+  bypass network restrictions, allow persistent C2 communication,
+  exfiltrate data, or stage further lateral movement and payload
+  delivery without firewall interference.
+
+data_source:
+  - Sysmon EventID 1
+
+search:
+  index_pattern: "${INDEX_PATTERN}"
+  size: 100
+  sort:
+    - timestamp: desc
+  query:
+    bool:
+      must:
+        - term:
+            agent_name: "${AGENT_NAME}"
+        - term:
+            agent_labels_customer: "${CUSTOMER_CODE}"
+        - term:
+            data_win_system_eventID: "1"
+        - wildcard:
+            data_win_eventdata_commandLine:
+              value: "*firewall*"
+              case_insensitive: true
+        - wildcard:
+            data_win_eventdata_commandLine:
+              value: "*allow*"
+              case_insensitive: true
+        - wildcard:
+            data_win_eventdata_commandLine:
+              value: "*add*"
+              case_insensitive: true
+        - wildcard:
+            data_win_eventdata_commandLine:
+              value: "*enable*"
+              case_insensitive: true
+        - range:
+            timestamp:
+              gte: "${START_TIME}"
+              lte: "${END_TIME}"
+  _source:
+    - timestamp
+    - agent_name
+    - data_win_eventdata_image
+    - data_win_eventdata_originalFileName
+    - data_win_eventdata_commandLine
+    - data_win_eventdata_parentImage
+    - data_win_eventdata_parentCommandLine
+    - data_win_eventdata_user
+    - data_win_eventdata_processId
+    - data_win_eventdata_processGuid
+    - data_win_eventdata_parentProcessId
+    - data_win_eventdata_parentProcessGuid
+    - data_win_eventdata_hashes
+    - data_win_eventdata_integrityLevel
+    - data_win_eventdata_currentDirectory
+
+parameters:
+  AGENT_NAME:
+    description: "Target agent/host name"
+    type: string
+    required: true
+    example: "DESKTOP-AM0HLGE"
+  CUSTOMER_CODE:
+    description: "Customer label for filtering"
+    type: string
+    required: true
+    example: "lab"
+  INDEX_PATTERN:
+    description: "Elasticsearch index pattern"
+    type: string
+    required: true
+    example: "wazuh-lab_*"
+  START_TIME:
+    description: "Query start time (ISO 8601 or relative)"
+    type: datetime
+    required: false
+    default: "now-24h"
+    example: "2026-04-27 00:00:00.000"
+  END_TIME:
+    description: "Query end time (ISO 8601 or relative)"
+    type: datetime
+    required: false
+    default: "now"
+    example: "2026-04-27 23:59:59.999"
+
+how_to_implement: >
+  This detection requires Sysmon EventID 1 (Process Creation) logs to be forwarded
+  from Windows endpoints to Wazuh Indexer. Ensure Sysmon is deployed with a
+  configuration that captures Image, OriginalFileName, and CommandLine fields
+  (SwiftOnSecurity or Olaf Hartong Sysmon modular config recommended).
+  IMPORTANT: In some Sysmon configurations, netsh.exe command-line arguments
+  may not be fully captured due to process-filtering rules - verify your
+  Sysmon config includes netsh.exe in ProcessCreate rules before deploying
+  this detection. The detection requires all four keywords (firewall, add,
+  allow, enable) to be present in the same command line simultaneously,
+  which keeps fidelity high. Case-insensitive matching is used throughout.
+  The ES DSL uses case_insensitive wildcard option (OpenSearch 2.x /
+  Elasticsearch 7.10+); Graylog equivalent uses character classes.
+
+known_false_positives: >
+  System administrators or automated deployment tools (SCCM, Intune,
+  GPO logon scripts, software installers) may legitimately add allow
+  rules to the Windows Firewall as part of normal administrative
+  workflow. Review the parent process (legitimate admin/installer
+  context vs. unexpected parent), user context (admin account vs.
+  standard user vs. service account), and the specific application or
+  port being whitelisted. Filter as needed based on known-good
+  installer or deployment-tool parents. Any addition of firewall
+  allow-rules originating from Office applications, browsers, email
+  clients, or unsigned binaries should be treated as high-priority.
+
+references:
+  - https://attack.mitre.org/techniques/T1562/004/
+  - https://app.any.run/tasks/ad4c3cda-41f2-4401-8dba-56cc2d245488/
+  - https://learn.microsoft.com/en-us/windows-server/networking/technologies/netsh/netsh-advfirewall-firewall
+
+response:
+  message: >
+    A firewall allow-rule was added and enabled on endpoint $agent_name$
+    by user $data_win_eventdata_user$. Process image:
+    $data_win_eventdata_image$. Parent process:
+    $data_win_eventdata_parentImage$. Command line:
+    $data_win_eventdata_commandLine$. This pattern is commonly associated
+    with malware whitelisting itself through the Windows Firewall to
+    enable C2 or data exfiltration; investigate the application or port
+    being whitelisted and the parent process lineage.
+  risk_score: 40
+  severity: medium
+  risk_objects:
+    - field: agent_name
+      type: system
+      score: 30
+    - field: data_win_eventdata_user
+      type: user
+      score: 30
+  threat_objects:
+    - field: data_win_eventdata_image
+      type: process_name
+    - field: data_win_eventdata_parentImage
+      type: parent_process_name
+    - field: data_win_eventdata_commandLine
+      type: command_line
+
+tags:
+  analytic_story:
+    - BlackByte Ransomware
+    - NjRAT
+    - PlugX
+    - Windows Defense Evasion Tactics
+    - Medusa Ransomware
+    - Azorult
+    - Defense Evasion
+    - Impair Defenses
+  asset_type: Endpoint
+  mitre_attack_id:
+    - T1562.004
+  custom_tags:
+    - firewall
+    - firewall_modification
+    - defense_evasion
+    - impair_defenses
+    - whitelist_bypass
+    - lolbin
+  product:
+    - Wazuh
+  security_domain: endpoint
+
+graylog:
+  query: data_win_system_eventID:"1" AND data_win_eventdata_commandLine:/.*[Ff][Ii][Rr][Ee][Ww][Aa][Ll][Ll].*/ AND data_win_eventdata_commandLine:/.*[Aa][Ll][Ll][Oo][Ww].*/ AND data_win_eventdata_commandLine:/.*[Aa][Dd][Dd].*/ AND data_win_eventdata_commandLine:/.*[Ee][Nn][Aa][Bb][Ll][Ee].*/

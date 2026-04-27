@@ -1,0 +1,182 @@
+name: Fsutil Zeroing File
+id: 4e5e024e-fabb-11eb-8b8f-acde48001122
+version: 1
+schema_version: "1.0"
+date: "2026-04-27"
+author: SOCFortress LLC
+status: production
+type: TTP
+
+description: >
+  This analytic detects the execution of fsutil.exe with the
+  "setzerodata" subcommand, which writes zeros over the contents of a
+  target file - effectively wiping its data while preserving the file
+  metadata and structure. Sysmon EventID 1 is used to match process
+  creation events where the image or OriginalFileName is fsutil.exe and
+  the command line contains "setzerodata". This activity is significant
+  because it is a known anti-forensic technique used by ransomware
+  operators (notably LockBit) to destroy malware artifacts after
+  encryption is complete - by zeroing out the ransomware binary itself,
+  attackers ensure that responders cannot recover the executable for
+  reverse engineering even if file recovery from filesystem journaling
+  succeeds. fsutil setzerodata is a standard Windows administrative
+  utility, but its legitimate use is rare outside of disk testing and
+  forensic preparation contexts. If confirmed malicious, this action
+  could hinder forensic investigations, prevent ransomware sample
+  retrieval for IR analysis, and allow attackers to cover their tracks,
+  significantly complicating incident response efforts and recovery
+  planning.
+
+data_source:
+  - Sysmon EventID 1
+
+search:
+  index_pattern: "${INDEX_PATTERN}"
+  size: 100
+  sort:
+    - timestamp: desc
+  query:
+    bool:
+      must:
+        - term:
+            agent_name: "${AGENT_NAME}"
+        - term:
+            agent_labels_customer: "${CUSTOMER_CODE}"
+        - term:
+            data_win_system_eventID: "1"
+        - bool:
+            should:
+              - wildcard:
+                  data_win_eventdata_image: "*fsutil.exe"
+              - term:
+                  data_win_eventdata_originalFileName: "fsutil.exe"
+            minimum_should_match: 1
+        - wildcard:
+            data_win_eventdata_commandLine: "*setzerodata*"
+        - range:
+            timestamp:
+              gte: "${START_TIME}"
+              lte: "${END_TIME}"
+  _source:
+    - timestamp
+    - agent_name
+    - data_win_eventdata_image
+    - data_win_eventdata_originalFileName
+    - data_win_eventdata_commandLine
+    - data_win_eventdata_parentImage
+    - data_win_eventdata_parentCommandLine
+    - data_win_eventdata_user
+    - data_win_eventdata_processId
+    - data_win_eventdata_processGuid
+    - data_win_eventdata_parentProcessId
+    - data_win_eventdata_parentProcessGuid
+    - data_win_eventdata_hashes
+    - data_win_eventdata_integrityLevel
+    - data_win_eventdata_currentDirectory
+
+parameters:
+  AGENT_NAME:
+    description: "Target agent/host name"
+    type: string
+    required: true
+    example: "DESKTOP-AM0HLGE"
+  CUSTOMER_CODE:
+    description: "Customer label for filtering"
+    type: string
+    required: true
+    example: "lab"
+  INDEX_PATTERN:
+    description: "Elasticsearch index pattern"
+    type: string
+    required: true
+    example: "wazuh-lab_*"
+  START_TIME:
+    description: "Query start time (ISO 8601 or relative)"
+    type: datetime
+    required: false
+    default: "now-24h"
+    example: "2026-04-27 00:00:00.000"
+  END_TIME:
+    description: "Query end time (ISO 8601 or relative)"
+    type: datetime
+    required: false
+    default: "now"
+    example: "2026-04-27 23:59:59.999"
+
+how_to_implement: >
+  This detection requires Sysmon EventID 1 (Process Creation) logs to be forwarded
+  from Windows endpoints to Wazuh Indexer. Ensure Sysmon is deployed with a
+  configuration that captures Image, OriginalFileName, and CommandLine fields
+  (SwiftOnSecurity or Olaf Hartong Sysmon modular config recommended). The
+  detection matches fsutil.exe either by Image path or PE OriginalFileName,
+  combined with "setzerodata" in the command line. The Graylog equivalent
+  uses character classes for case-insensitive matching.
+
+known_false_positives: >
+  No benign false positives have been identified at this time.
+  Legitimate use of fsutil setzerodata is extremely rare outside of
+  authorized disk benchmarking, secure-erase preparation, or forensic
+  testing contexts. Any occurrence should be treated as a high-priority
+  security incident pending investigation of the parent process, user
+  context, and the specific file being zeroed.
+
+references:
+  - https://attack.mitre.org/techniques/T1070/
+  - https://attack.mitre.org/techniques/T1070/004/
+  - https://app.any.run/tasks/e0ac072d-58c9-4f53-8a3b-3e491c7ac5db/
+  - https://news.sophos.com/en-us/2020/04/24/lockbit-ransomware-borrows-tricks-to-keep-up-with-revil-and-maze/
+  - https://learn.microsoft.com/en-us/windows-server/administration/windows-commands/fsutil-file
+
+response:
+  message: >
+    Possible file data destruction via fsutil setzerodata was detected
+    on endpoint $agent_name$ by user $data_win_eventdata_user$. Process
+    image: $data_win_eventdata_image$. Parent process:
+    $data_win_eventdata_parentImage$. Command line:
+    $data_win_eventdata_commandLine$. This is a high-confidence
+    indicator of anti-forensic activity commonly observed post-ransomware
+    encryption; investigate immediately, identify which file(s) were
+    zeroed, attempt sample preservation from filesystem journals or
+    volume shadow copies, and isolate the host.
+  risk_score: 80
+  severity: high
+  risk_objects:
+    - field: agent_name
+      type: system
+      score: 70
+    - field: data_win_eventdata_user
+      type: user
+      score: 70
+  threat_objects:
+    - field: data_win_eventdata_image
+      type: process_name
+    - field: data_win_eventdata_parentImage
+      type: parent_process_name
+    - field: data_win_eventdata_commandLine
+      type: command_line
+
+tags:
+  analytic_story:
+    - Ransomware
+    - LockBit Ransomware
+    - Defense Evasion
+    - Anti-Forensics
+    - Indicator Removal
+  asset_type: Endpoint
+  mitre_attack_id:
+    - T1070
+    - T1070.004
+  custom_tags:
+    - fsutil
+    - setzerodata
+    - file_wiping
+    - anti_forensics
+    - indicator_removal
+    - ransomware_post_encryption
+    - lolbin
+  product:
+    - Wazuh
+  security_domain: endpoint
+
+graylog:
+  query: data_win_system_eventID:"1" AND (data_win_eventdata_image:/.*[Ff][Ss][Uu][Tt][Ii][Ll]\.exe.*/ OR data_win_eventdata_originalFileName:"fsutil.exe") AND data_win_eventdata_commandLine:/.*[Ss][Ee][Tt][Zz][Ee][Rr][Oo][Dd][Aa][Tt][Aa].*/

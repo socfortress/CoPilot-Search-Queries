@@ -1,0 +1,197 @@
+name: Execution of File with Multiple Extensions
+id: b06a555e-dce0-417d-a2eb-28a5d8d66ef7
+version: 1
+schema_version: "1.0"
+date: "2026-04-27"
+author: SOCFortress LLC
+status: production
+type: TTP
+
+description: >
+  This analytic detects the execution of files whose names use a
+  document-style extension followed by .exe (e.g., .doc.exe, .pdf.exe,
+  .xlsx.exe), a classic masquerading pattern used by attackers to
+  disguise executable malware as benign document files. Sysmon EventID 1
+  is used to match process creation events where the image path ends
+  with one of the following double-extension patterns: .doc.exe,
+  .xls.exe, .ppt.exe, .htm.exe, .html.exe, .txt.exe, .pdf.exe, .docx.exe,
+  .xlsx.exe, .pptx.exe, .one.exe, .bat.exe, or .rtf.exe. Attackers
+  combine this naming trick with default-Windows behavior (file
+  extensions hidden in Explorer) to fool users into believing the file
+  is a document - they see "invoice.pdf" but the actual filename is
+  "invoice.pdf.exe", and double-clicking executes arbitrary code. This
+  technique is used by multiple malware families (AsyncRAT, DarkGate)
+  and across countless commodity phishing campaigns. If confirmed
+  malicious, this technique can lead to unauthorized code execution,
+  payload delivery, persistence establishment, or credential theft,
+  potentially compromising the endpoint and allowing further malicious
+  activities.
+
+data_source:
+  - Sysmon EventID 1
+
+search:
+  index_pattern: "${INDEX_PATTERN}"
+  size: 100
+  sort:
+    - timestamp: desc
+  query:
+    bool:
+      must:
+        - term:
+            agent_name: "${AGENT_NAME}"
+        - term:
+            agent_labels_customer: "${CUSTOMER_CODE}"
+        - term:
+            data_win_system_eventID: "1"
+        - bool:
+            should:
+              - wildcard:
+                  data_win_eventdata_image: "*.doc.exe"
+              - wildcard:
+                  data_win_eventdata_image: "*.xls.exe"
+              - wildcard:
+                  data_win_eventdata_image: "*.ppt.exe"
+              - wildcard:
+                  data_win_eventdata_image: "*.htm.exe"
+              - wildcard:
+                  data_win_eventdata_image: "*.html.exe"
+              - wildcard:
+                  data_win_eventdata_image: "*.txt.exe"
+              - wildcard:
+                  data_win_eventdata_image: "*.pdf.exe"
+              - wildcard:
+                  data_win_eventdata_image: "*.docx.exe"
+              - wildcard:
+                  data_win_eventdata_image: "*.xlsx.exe"
+              - wildcard:
+                  data_win_eventdata_image: "*.pptx.exe"
+              - wildcard:
+                  data_win_eventdata_image: "*.one.exe"
+              - wildcard:
+                  data_win_eventdata_image: "*.bat.exe"
+              - wildcard:
+                  data_win_eventdata_image: "*.rtf.exe"
+            minimum_should_match: 1
+        - range:
+            timestamp:
+              gte: "${START_TIME}"
+              lte: "${END_TIME}"
+  _source:
+    - timestamp
+    - agent_name
+    - data_win_eventdata_image
+    - data_win_eventdata_originalFileName
+    - data_win_eventdata_commandLine
+    - data_win_eventdata_parentImage
+    - data_win_eventdata_parentCommandLine
+    - data_win_eventdata_user
+    - data_win_eventdata_processId
+    - data_win_eventdata_processGuid
+    - data_win_eventdata_parentProcessId
+    - data_win_eventdata_parentProcessGuid
+    - data_win_eventdata_hashes
+    - data_win_eventdata_integrityLevel
+    - data_win_eventdata_currentDirectory
+
+parameters:
+  AGENT_NAME:
+    description: "Target agent/host name"
+    type: string
+    required: true
+    example: "DESKTOP-AM0HLGE"
+  CUSTOMER_CODE:
+    description: "Customer label for filtering"
+    type: string
+    required: true
+    example: "lab"
+  INDEX_PATTERN:
+    description: "Elasticsearch index pattern"
+    type: string
+    required: true
+    example: "wazuh-lab_*"
+  START_TIME:
+    description: "Query start time (ISO 8601 or relative)"
+    type: datetime
+    required: false
+    default: "now-24h"
+    example: "2026-04-27 00:00:00.000"
+  END_TIME:
+    description: "Query end time (ISO 8601 or relative)"
+    type: datetime
+    required: false
+    default: "now"
+    example: "2026-04-27 23:59:59.999"
+
+how_to_implement: >
+  This detection requires Sysmon EventID 1 (Process Creation) logs to be forwarded
+  from Windows endpoints to Wazuh Indexer. Ensure Sysmon is deployed with a
+  configuration that captures Image, OriginalFileName, and CommandLine fields
+  (SwiftOnSecurity or Olaf Hartong Sysmon modular config recommended). The
+  detection matches on the process Image path ending with any of the 13
+  double-extension patterns. The Graylog equivalent uses character classes
+  for case-insensitive matching on file extensions.
+
+known_false_positives: >
+  No benign false positives have been identified. Legitimate software
+  rarely if ever uses document-style double extensions, and any
+  occurrence should be treated as a high-priority security incident.
+  In rare cases, internal automation scripts or developer test files may
+  produce matches - these should be tuned via parent process or specific
+  filename allow-listing rather than removing the detection.
+
+references:
+  - https://attack.mitre.org/techniques/T1036/003/
+  - https://attack.mitre.org/techniques/T1036/007/
+  - https://malpedia.caad.fkie.fraunhofer.de/details/win.asyncrat
+
+response:
+  message: >
+    A process with a document-style double extension was executed on
+    endpoint $agent_name$ by user $data_win_eventdata_user$. Process
+    image: $data_win_eventdata_image$. Parent process:
+    $data_win_eventdata_parentImage$. Command line:
+    $data_win_eventdata_commandLine$. This is a high-confidence indicator
+    of file masquerading malware - investigate immediately, isolate the
+    host, and review the file origin (email attachment, download path,
+    USB media).
+  risk_score: 80
+  severity: high
+  risk_objects:
+    - field: agent_name
+      type: system
+      score: 70
+    - field: data_win_eventdata_user
+      type: user
+      score: 70
+  threat_objects:
+    - field: data_win_eventdata_image
+      type: process_name
+    - field: data_win_eventdata_parentImage
+      type: parent_process_name
+    - field: data_win_eventdata_commandLine
+      type: command_line
+
+tags:
+  analytic_story:
+    - Windows File Extension and Association Abuse
+    - Masquerading - Rename System Utilities
+    - AsyncRAT
+    - DarkGate Malware
+    - Phishing Payload Delivery
+  asset_type: Endpoint
+  mitre_attack_id:
+    - T1036.003
+    - T1036.007
+  custom_tags:
+    - masquerading
+    - double_extension
+    - file_extension_abuse
+    - phishing
+    - malware_delivery
+  product:
+    - Wazuh
+  security_domain: endpoint
+
+graylog:
+  query: data_win_system_eventID:"1" AND (data_win_eventdata_image:/.*\.[Dd][Oo][Cc]\.exe/ OR data_win_eventdata_image:/.*\.[Xx][Ll][Ss]\.exe/ OR data_win_eventdata_image:/.*\.[Pp][Pp][Tt]\.exe/ OR data_win_eventdata_image:/.*\.[Hh][Tt][Mm]\.exe/ OR data_win_eventdata_image:/.*\.[Hh][Tt][Mm][Ll]\.exe/ OR data_win_eventdata_image:/.*\.[Tt][Xx][Tt]\.exe/ OR data_win_eventdata_image:/.*\.[Pp][Dd][Ff]\.exe/ OR data_win_eventdata_image:/.*\.[Dd][Oo][Cc][Xx]\.exe/ OR data_win_eventdata_image:/.*\.[Xx][Ll][Ss][Xx]\.exe/ OR data_win_eventdata_image:/.*\.[Pp][Pp][Tt][Xx]\.exe/ OR data_win_eventdata_image:/.*\.[Oo][Nn][Ee]\.exe/ OR data_win_eventdata_image:/.*\.[Bb][Aa][Tt]\.exe/ OR data_win_eventdata_image:/.*\.[Rr][Tt][Ff]\.exe/)

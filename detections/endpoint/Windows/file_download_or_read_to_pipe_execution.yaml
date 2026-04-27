@@ -1,0 +1,249 @@
+name: File Download or Read to Pipe Execution
+id: 26f86252-1549-45e1-a212-eb26840e86bc
+version: 1
+schema_version: "1.0"
+date: "2026-04-27"
+author: SOCFortress LLC
+status: production
+type: TTP
+
+description: >
+  This analytic detects the use of file download or read utilities (on
+  Windows, Linux, or macOS) to retrieve content from a remote or local
+  source and pipe it directly to a shell or expression evaluator for
+  immediate execution. Sysmon EventID 1 is used to match process
+  creation events whose command line contains all three indicators
+  simultaneously: (1) a download/read utility (.DownloadFile(,
+  .DownloadString(, ASCII.GetString, bitsadmin, certutil, curl,
+  Invoke-RestMethod, Invoke-WebRequest, irm, iwr, mshta, wget); (2) a
+  pipe character; (3) an execution sink - either a Linux/macOS shell
+  (bash, csh, dash, fish, ksh, rbash, tcsh, zsh, |sh, or " sh ") or a
+  Windows PowerShell expression evaluator (IEX, Invoke-Expression).
+  This is the canonical fileless code execution / ingress tool transfer
+  pattern observed in countless intrusion campaigns - it allows
+  attackers to fetch and execute remote payloads in a single command
+  without writing to disk, evading signature-based defenses. Notable
+  uses include the Log4Shell (CVE-2021-44228) post-exploitation chains,
+  npm supply chain compromises, Linux Living-Off-the-Land campaigns,
+  cryptominer installers, and broad commodity malware delivery. If
+  confirmed malicious, this behavior could allow attackers to execute
+  arbitrary code, leading to system compromise, persistence, lateral
+  movement, and unauthorized access to sensitive data. Investigate
+  immediately, isolate the host, and review what URL was fetched and
+  what code was executed.
+
+data_source:
+  - Sysmon EventID 1
+  - Sysmon for Linux EventID 1
+
+search:
+  index_pattern: "${INDEX_PATTERN}"
+  size: 100
+  sort:
+    - timestamp: desc
+  query:
+    bool:
+      must:
+        - term:
+            agent_name: "${AGENT_NAME}"
+        - term:
+            agent_labels_customer: "${CUSTOMER_CODE}"
+        - term:
+            data_win_system_eventID: "1"
+        - bool:
+            should:
+              - wildcard:
+                  data_win_eventdata_commandLine: "*.DownloadFile(*"
+              - wildcard:
+                  data_win_eventdata_commandLine: "*.DownloadString(*"
+              - wildcard:
+                  data_win_eventdata_commandLine: "*ASCII.GetString*"
+              - wildcard:
+                  data_win_eventdata_commandLine: "*bitsadmin*"
+              - wildcard:
+                  data_win_eventdata_commandLine: "*certutil*"
+              - wildcard:
+                  data_win_eventdata_commandLine: "*curl*"
+              - wildcard:
+                  data_win_eventdata_commandLine: "*Invoke-RestMethod*"
+              - wildcard:
+                  data_win_eventdata_commandLine: "*Invoke-WebRequest*"
+              - wildcard:
+                  data_win_eventdata_commandLine: "*irm*"
+              - wildcard:
+                  data_win_eventdata_commandLine: "*iwr *"
+              - wildcard:
+                  data_win_eventdata_commandLine: "*mshta*"
+              - wildcard:
+                  data_win_eventdata_commandLine: "*wget*"
+            minimum_should_match: 1
+        - wildcard:
+            data_win_eventdata_commandLine: "*|*"
+        - bool:
+            should:
+              - wildcard:
+                  data_win_eventdata_commandLine: "*IEX*"
+              - wildcard:
+                  data_win_eventdata_commandLine: "*Invoke-Expression*"
+              - wildcard:
+                  data_win_eventdata_commandLine: "*bash*"
+              - wildcard:
+                  data_win_eventdata_commandLine: "*csh*"
+              - wildcard:
+                  data_win_eventdata_commandLine: "*dash*"
+              - wildcard:
+                  data_win_eventdata_commandLine: "*fish*"
+              - wildcard:
+                  data_win_eventdata_commandLine: "*ksh*"
+              - wildcard:
+                  data_win_eventdata_commandLine: "*rbash*"
+              - wildcard:
+                  data_win_eventdata_commandLine: "*tcsh*"
+              - wildcard:
+                  data_win_eventdata_commandLine: "*zsh*"
+              - wildcard:
+                  data_win_eventdata_commandLine: "*|sh"
+              - wildcard:
+                  data_win_eventdata_commandLine: "* sh *"
+            minimum_should_match: 1
+        - range:
+            timestamp:
+              gte: "${START_TIME}"
+              lte: "${END_TIME}"
+  _source:
+    - timestamp
+    - agent_name
+    - data_win_eventdata_image
+    - data_win_eventdata_originalFileName
+    - data_win_eventdata_commandLine
+    - data_win_eventdata_parentImage
+    - data_win_eventdata_parentCommandLine
+    - data_win_eventdata_user
+    - data_win_eventdata_processId
+    - data_win_eventdata_processGuid
+    - data_win_eventdata_parentProcessId
+    - data_win_eventdata_parentProcessGuid
+    - data_win_eventdata_hashes
+    - data_win_eventdata_integrityLevel
+    - data_win_eventdata_currentDirectory
+
+parameters:
+  AGENT_NAME:
+    description: "Target agent/host name"
+    type: string
+    required: true
+    example: "DESKTOP-AM0HLGE"
+  CUSTOMER_CODE:
+    description: "Customer label for filtering"
+    type: string
+    required: true
+    example: "lab"
+  INDEX_PATTERN:
+    description: "Elasticsearch index pattern"
+    type: string
+    required: true
+    example: "wazuh-lab_*"
+  START_TIME:
+    description: "Query start time (ISO 8601 or relative)"
+    type: datetime
+    required: false
+    default: "now-24h"
+    example: "2026-04-27 00:00:00.000"
+  END_TIME:
+    description: "Query end time (ISO 8601 or relative)"
+    type: datetime
+    required: false
+    default: "now"
+    example: "2026-04-27 23:59:59.999"
+
+how_to_implement: >
+  This detection requires Sysmon EventID 1 (Process Creation) logs to be forwarded
+  from Windows endpoints to Wazuh Indexer. For Linux/macOS coverage, deploy
+  Sysmon for Linux with equivalent ProcessCreate logging. Ensure Sysmon is
+  deployed with a configuration that captures Image, OriginalFileName, and
+  CommandLine fields (SwiftOnSecurity or Olaf Hartong Sysmon modular config
+  recommended). The detection requires three command-line conditions to
+  match simultaneously: a download/read utility, a pipe character, and an
+  execution sink. The Graylog query uses character classes for
+  case-insensitive matching of utility names and execution sinks. Tune as
+  needed - if your environment legitimately uses curl/wget piped to bash
+  for software installation scripts, add narrow exclusions based on the
+  parent process or specific deployment-tool user contexts.
+
+known_false_positives: >
+  False positives may include legitimate developer or DevOps activity
+  that uses one-liner installer patterns (e.g., curl URL | bash for
+  software installs, iwr URL | iex for PowerShell module bootstrap).
+  These are common in software install instructions. Filter based on
+  parent process (legitimate dev tools vs. unexpected parents),
+  destination URL (trusted vendor domains), and user context (developer
+  workstations vs. servers). Any occurrence on production servers,
+  endpoints with no developer role, or originating from unexpected
+  parents (Office apps, browsers, email clients) should be treated as
+  high-priority.
+
+references:
+  - https://attack.mitre.org/techniques/T1105/
+  - https://attack.mitre.org/techniques/T1059/001/
+  - https://attack.mitre.org/techniques/T1059/004/
+  - https://gist.github.com/nathanqthai/01808c569903f41a52e7e7b575caa890
+  - https://github.com/MHaggis/notes/blob/master/utilities/warp_pipe_tester.py
+  - https://www.huntress.com/blog/rapid-response-critical-rce-vulnerability-is-affecting-java
+  - https://www.lunasec.io/docs/blog/log4j-zero-day/
+  - https://securelist.com/bad-magic-apt/109087/
+
+response:
+  message: >
+    A process executed a download-to-pipe-to-shell pattern on endpoint
+    $agent_name$ by user $data_win_eventdata_user$. Process image:
+    $data_win_eventdata_image$. Parent process:
+    $data_win_eventdata_parentImage$. Command line:
+    $data_win_eventdata_commandLine$. This is a high-confidence indicator
+    of fileless code execution and ingress tool transfer; investigate
+    immediately, identify the URL and payload, isolate the host, and
+    review for follow-on activity.
+  risk_score: 80
+  severity: high
+  risk_objects:
+    - field: agent_name
+      type: system
+      score: 70
+    - field: data_win_eventdata_user
+      type: user
+      score: 70
+  threat_objects:
+    - field: data_win_eventdata_image
+      type: process_name
+    - field: data_win_eventdata_parentImage
+      type: parent_process_name
+    - field: data_win_eventdata_commandLine
+      type: command_line
+
+tags:
+  analytic_story:
+    - Compromised Windows Host
+    - Ingress Tool Transfer
+    - Linux Living Off The Land
+    - Log4Shell CVE-2021-44228
+    - NPM Supply Chain Compromise
+    - Fileless Execution
+  asset_type: Endpoint
+  cve:
+    - CVE-2021-44228
+  mitre_attack_id:
+    - T1105
+    - T1059.001
+    - T1059.004
+  custom_tags:
+    - ingress_tool_transfer
+    - download_pipe_execution
+    - fileless_execution
+    - lolbin
+    - living_off_the_land
+    - one_liner_installer
+  product:
+    - Wazuh
+  security_domain: endpoint
+
+graylog:
+  query: data_win_system_eventID:"1" AND (data_win_eventdata_commandLine:/.*\.[Dd][Oo][Ww][Nn][Ll][Oo][Aa][Dd][Ff][Ii][Ll][Ee]\(.*/ OR data_win_eventdata_commandLine:/.*\.[Dd][Oo][Ww][Nn][Ll][Oo][Aa][Dd][Ss][Tt][Rr][Ii][Nn][Gg]\(.*/ OR data_win_eventdata_commandLine:/.*[Aa][Ss][Cc][Ii][Ii]\.[Gg][Ee][Tt][Ss][Tt][Rr][Ii][Nn][Gg].*/ OR data_win_eventdata_commandLine:/.*[Bb][Ii][Tt][Ss][Aa][Dd][Mm][Ii][Nn].*/ OR data_win_eventdata_commandLine:/.*[Cc][Ee][Rr][Tt][Uu][Tt][Ii][Ll].*/ OR data_win_eventdata_commandLine:/.*[Cc][Uu][Rr][Ll].*/ OR data_win_eventdata_commandLine:/.*[Ii][Nn][Vv][Oo][Kk][Ee]\-[Rr][Ee][Ss][Tt][Mm][Ee][Tt][Hh][Oo][Dd].*/ OR data_win_eventdata_commandLine:/.*[Ii][Nn][Vv][Oo][Kk][Ee]\-[Ww][Ee][Bb][Rr][Ee][Qq][Uu][Ee][Ss][Tt].*/ OR data_win_eventdata_commandLine:/.*[Ii][Rr][Mm].*/ OR data_win_eventdata_commandLine:/.*[Ii][Ww][Rr] .*/ OR data_win_eventdata_commandLine:/.*[Mm][Ss][Hh][Tt][Aa].*/ OR data_win_eventdata_commandLine:/.*[Ww][Gg][Ee][Tt].*/) AND data_win_eventdata_commandLine:/.*\|.*/ AND (data_win_eventdata_commandLine:/.*[Ii][Ee][Xx].*/ OR data_win_eventdata_commandLine:/.*[Ii][Nn][Vv][Oo][Kk][Ee]\-[Ee][Xx][Pp][Rr][Ee][Ss][Ss][Ii][Oo][Nn].*/ OR data_win_eventdata_commandLine:/.*[Bb][Aa][Ss][Hh].*/ OR data_win_eventdata_commandLine:/.*[Cc][Ss][Hh].*/ OR data_win_eventdata_commandLine:/.*[Dd][Aa][Ss][Hh].*/ OR data_win_eventdata_commandLine:/.*[Ff][Ii][Ss][Hh].*/ OR data_win_eventdata_commandLine:/.*[Kk][Ss][Hh].*/ OR data_win_eventdata_commandLine:/.*[Rr][Bb][Aa][Ss][Hh].*/ OR data_win_eventdata_commandLine:/.*[Tt][Cc][Ss][Hh].*/ OR data_win_eventdata_commandLine:/.*[Zz][Ss][Hh].*/ OR data_win_eventdata_commandLine:/.*\|[Ss][Hh]/ OR data_win_eventdata_commandLine:/.* [Ss][Hh] .*/)

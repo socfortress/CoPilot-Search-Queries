@@ -1,0 +1,188 @@
+name: Execute Javascript With Jscript COM CLSID
+id: dc64d064-d346-11eb-8588-acde48001122
+version: 1
+schema_version: "1.0"
+date: "2026-04-27"
+author: SOCFortress LLC
+status: production
+type: TTP
+
+description: >
+  This analytic detects the execution of JavaScript or VBScript via the
+  JScript Encoder COM object (CLSID {F414C262-6AC0-11CF-B6D1-00AA00BBBB58})
+  invoked through cscript.exe with the -e: engine selector flag. Sysmon
+  EventID 1 is used to match process creation events where the image or
+  OriginalFileName is cscript.exe AND the command line contains the
+  specific CLSID -e:{F414C262-6AC0-11CF-B6D1-00AA00BBBB58} pattern. This
+  technique allows attackers to invoke a non-default scripting engine
+  (the JScript Encoder) directly via its COM CLSID, bypassing the typical
+  file-extension-based engine selection. It is a known technique used by
+  ransomware families (including Reddot) and other malware to execute
+  obfuscated/encoded JavaScript payloads, evade signature-based detection,
+  and potentially disable AMSI (Antimalware Scan Interface) before
+  executing additional malicious code. This activity is significant
+  because the use of an explicit CLSID engine selector is extremely
+  unusual outside of malware contexts - legitimate scripts invoke
+  cscript.exe with a script file argument, not with a COM CLSID.
+  If confirmed malicious, this behavior could allow attackers to execute
+  arbitrary code, evade detection, achieve persistence, and deliver
+  follow-on payloads within the environment.
+
+data_source:
+  - Sysmon EventID 1
+
+search:
+  index_pattern: "${INDEX_PATTERN}"
+  size: 100
+  sort:
+    - timestamp: desc
+  query:
+    bool:
+      must:
+        - term:
+            agent_name: "${AGENT_NAME}"
+        - term:
+            agent_labels_customer: "${CUSTOMER_CODE}"
+        - term:
+            data_win_system_eventID: "1"
+        - bool:
+            should:
+              - wildcard:
+                  data_win_eventdata_image:
+                    value: "*cscript.exe"
+                    case_insensitive: true
+              - term:
+                  data_win_eventdata_originalFileName: "cscript.exe"
+            minimum_should_match: 1
+        - wildcard:
+            data_win_eventdata_commandLine:
+              value: "*-e:{F414C262-6AC0-11CF-B6D1-00AA00BBBB58}*"
+              case_insensitive: true
+        - range:
+            timestamp:
+              gte: "${START_TIME}"
+              lte: "${END_TIME}"
+  _source:
+    - timestamp
+    - agent_name
+    - data_win_eventdata_image
+    - data_win_eventdata_originalFileName
+    - data_win_eventdata_commandLine
+    - data_win_eventdata_parentImage
+    - data_win_eventdata_parentCommandLine
+    - data_win_eventdata_user
+    - data_win_eventdata_processId
+    - data_win_eventdata_processGuid
+    - data_win_eventdata_parentProcessId
+    - data_win_eventdata_parentProcessGuid
+    - data_win_eventdata_hashes
+    - data_win_eventdata_integrityLevel
+    - data_win_eventdata_currentDirectory
+
+parameters:
+  AGENT_NAME:
+    description: "Target agent/host name"
+    type: string
+    required: true
+    example: "DESKTOP-AM0HLGE"
+  CUSTOMER_CODE:
+    description: "Customer label for filtering"
+    type: string
+    required: true
+    example: "lab"
+  INDEX_PATTERN:
+    description: "Elasticsearch index pattern"
+    type: string
+    required: true
+    example: "wazuh-lab_*"
+  START_TIME:
+    description: "Query start time (ISO 8601 or relative)"
+    type: datetime
+    required: false
+    default: "now-24h"
+    example: "2026-04-27 00:00:00.000"
+  END_TIME:
+    description: "Query end time (ISO 8601 or relative)"
+    type: datetime
+    required: false
+    default: "now"
+    example: "2026-04-27 23:59:59.999"
+
+how_to_implement: >
+  This detection requires Sysmon EventID 1 (Process Creation) logs to be forwarded
+  from Windows endpoints to Wazuh Indexer. Ensure Sysmon is deployed with a
+  configuration that captures Image, OriginalFileName, and CommandLine fields
+  (SwiftOnSecurity or Olaf Hartong Sysmon modular config recommended). The
+  detection matches cscript.exe either by Image path (case-insensitive) or
+  PE OriginalFileName, combined with the specific JScript Encoder CLSID
+  reference in the command line. Case-insensitive matching is used
+  throughout to handle GUID hex character casing variations. The ES DSL
+  uses case_insensitive wildcard option (OpenSearch 2.x / Elasticsearch
+  7.10+); Graylog equivalent uses character classes with proper escaping
+  of curly braces, hyphens, and the colon.
+
+known_false_positives: >
+  No benign false positives have been identified at this time. Legitimate
+  use of cscript.exe with a CLSID engine selector is extremely rare and
+  any occurrence should be treated as a high-priority security incident.
+  Authorized penetration testing or security research using this specific
+  pattern should be documented and whitelisted via parent process or
+  user-account allow-listing if necessary.
+
+references:
+  - https://attack.mitre.org/techniques/T1059/005/
+  - https://attack.mitre.org/techniques/T1059/007/
+  - https://app.any.run/tasks/c0f98850-af65-4352-9746-fbebadee4f05/
+  - https://learn.microsoft.com/en-us/previous-versions/windows/internet-explorer/ie-developer/scripting-articles/d1wf56tt(v=vs.84)
+
+response:
+  message: >
+    Suspicious cscript.exe execution invoking the JScript Encoder COM
+    CLSID was identified on endpoint $agent_name$ by user
+    $data_win_eventdata_user$. Process image: $data_win_eventdata_image$.
+    Parent process: $data_win_eventdata_parentImage$. Command line:
+    $data_win_eventdata_commandLine$. This is a high-confidence indicator
+    of obfuscated script execution commonly associated with ransomware
+    and AMSI bypass techniques; investigate immediately and review the
+    target script content and parent process lineage.
+  risk_score: 80
+  severity: high
+  risk_objects:
+    - field: agent_name
+      type: system
+      score: 70
+    - field: data_win_eventdata_user
+      type: user
+      score: 70
+  threat_objects:
+    - field: data_win_eventdata_image
+      type: process_name
+    - field: data_win_eventdata_parentImage
+      type: parent_process_name
+    - field: data_win_eventdata_commandLine
+      type: command_line
+
+tags:
+  analytic_story:
+    - Ransomware
+    - Suspicious Script Execution
+    - AMSI Bypass
+  asset_type: Endpoint
+  mitre_attack_id:
+    - T1059.005
+    - T1059.007
+  custom_tags:
+    - cscript
+    - jscript
+    - jscript_encoder
+    - clsid
+    - com_object
+    - amsi_bypass
+    - ransomware
+    - script_execution
+  product:
+    - Wazuh
+  security_domain: endpoint
+
+graylog:
+  query: data_win_system_eventID:"1" AND (data_win_eventdata_image:/.*[Cc][Ss][Cc][Rr][Ii][Pp][Tt]\.exe.*/ OR data_win_eventdata_originalFileName:"cscript.exe") AND data_win_eventdata_commandLine:/.*\-[Ee]:\{[Ff]414[Cc]262\-6[Aa][Cc]0\-11[Cc][Ff]\-[Bb]6[Dd]1\-00[Aa][Aa]00[Bb][Bb][Bb][Bb]58\}.*/

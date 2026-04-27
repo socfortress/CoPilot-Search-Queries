@@ -1,0 +1,198 @@
+name: Esentutl SAM Copy
+id: d372f928-ce4f-11eb-a762-acde48001122
+version: 1
+schema_version: "1.0"
+date: "2026-04-27"
+author: SOCFortress LLC
+status: production
+type: Hunting
+
+description: >
+  This analytic detects the use of esentutl.exe to access or copy
+  credential-bearing database files such as the local SAM hive
+  (C:\Windows\System32\config\SAM) or the Active Directory ntds.dit
+  database (C:\Windows\NTDS\ntds.dit). Sysmon EventID 1 is used to match
+  process creation events where the image or OriginalFileName is
+  esentutl.exe AND the command line contains either "ntds" or "SAM".
+  esentutl.exe is a legitimate Microsoft-signed Extensible Storage Engine
+  utility shipped with Windows, but adversaries abuse it (often with
+  /vss to bypass file locks via Volume Shadow Copies) to extract
+  credential-bearing database files for offline credential extraction.
+  This activity is significant because it may indicate an attempt to
+  extract sensitive credential information - the SAM file contains local
+  account password hashes, while ntds.dit contains all Active Directory
+  user password hashes and is one of the highest-value targets in any
+  Windows network. This technique is documented in Atomic Red Team
+  (T1003.002) and is observed in many ransomware and APT credential
+  theft operations. If confirmed malicious, this could allow an attacker
+  to extract local or domain credential hashes for offline cracking,
+  Pass-the-Hash attacks, or Golden/Silver Ticket forgery, potentially
+  compromising the entire network.
+
+data_source:
+  - Sysmon EventID 1
+
+search:
+  index_pattern: "${INDEX_PATTERN}"
+  size: 100
+  sort:
+    - timestamp: desc
+  query:
+    bool:
+      must:
+        - term:
+            agent_name: "${AGENT_NAME}"
+        - term:
+            agent_labels_customer: "${CUSTOMER_CODE}"
+        - term:
+            data_win_system_eventID: "1"
+        - bool:
+            should:
+              - wildcard:
+                  data_win_eventdata_image:
+                    value: "*esentutl.exe"
+                    case_insensitive: true
+              - term:
+                  data_win_eventdata_originalFileName: "esentutl.exe"
+            minimum_should_match: 1
+        - bool:
+            should:
+              - wildcard:
+                  data_win_eventdata_commandLine:
+                    value: "*ntds*"
+                    case_insensitive: true
+              - wildcard:
+                  data_win_eventdata_commandLine:
+                    value: "*SAM*"
+            minimum_should_match: 1
+        - range:
+            timestamp:
+              gte: "${START_TIME}"
+              lte: "${END_TIME}"
+  _source:
+    - timestamp
+    - agent_name
+    - data_win_eventdata_image
+    - data_win_eventdata_originalFileName
+    - data_win_eventdata_commandLine
+    - data_win_eventdata_parentImage
+    - data_win_eventdata_parentCommandLine
+    - data_win_eventdata_user
+    - data_win_eventdata_processId
+    - data_win_eventdata_processGuid
+    - data_win_eventdata_parentProcessId
+    - data_win_eventdata_parentProcessGuid
+    - data_win_eventdata_hashes
+    - data_win_eventdata_integrityLevel
+    - data_win_eventdata_currentDirectory
+
+parameters:
+  AGENT_NAME:
+    description: "Target agent/host name"
+    type: string
+    required: true
+    example: "DESKTOP-AM0HLGE"
+  CUSTOMER_CODE:
+    description: "Customer label for filtering"
+    type: string
+    required: true
+    example: "lab"
+  INDEX_PATTERN:
+    description: "Elasticsearch index pattern"
+    type: string
+    required: true
+    example: "wazuh-lab_*"
+  START_TIME:
+    description: "Query start time (ISO 8601 or relative)"
+    type: datetime
+    required: false
+    default: "now-24h"
+    example: "2026-04-27 00:00:00.000"
+  END_TIME:
+    description: "Query end time (ISO 8601 or relative)"
+    type: datetime
+    required: false
+    default: "now"
+    example: "2026-04-27 23:59:59.999"
+
+how_to_implement: >
+  This detection requires Sysmon EventID 1 (Process Creation) logs to be forwarded
+  from Windows endpoints to Wazuh Indexer. Ensure Sysmon is deployed with a
+  configuration that captures Image, OriginalFileName, and CommandLine fields
+  (SwiftOnSecurity or Olaf Hartong Sysmon modular config recommended). The
+  detection matches esentutl.exe either by Image path (case-insensitive) or
+  PE OriginalFileName, combined with "ntds" (case-insensitive) or "SAM"
+  (intentionally case-sensitive uppercase) in the command line. The "SAM"
+  match is kept case-sensitive to avoid false positives from common
+  occurrences of "sam" inside paths or usernames (e.g., C:\Users\Sam).
+  The ES DSL uses case_insensitive wildcard option (OpenSearch 2.x /
+  Elasticsearch 7.10+) only on the ntds clause; Graylog equivalent uses
+  character classes on ntds and a literal "SAM" match.
+
+known_false_positives: >
+  False positives should be limited. Legitimate use of esentutl.exe by
+  administrators is typically focused on Exchange or Active Directory
+  database maintenance and would be expected on dedicated mail or
+  domain controller servers, not standard endpoints. Any occurrence of
+  esentutl.exe touching the SAM hive on a workstation, or invoked with
+  /vss flags against credential databases, should be treated as
+  high-priority. Filter based on hostname role (DC vs. workstation),
+  parent process lineage, and user context.
+
+references:
+  - https://attack.mitre.org/techniques/T1003/002/
+  - https://attack.mitre.org/techniques/T1003/003/
+  - https://attack.mitre.org/software/S0404/
+  - https://github.com/redcanaryco/atomic-red-team/blob/master/atomics/T1003.002/T1003.002.md
+  - https://lolbas-project.github.io/lolbas/Binaries/Esentutl/
+
+response:
+  message: >
+    esentutl.exe was used to access a credential-bearing database file
+    (SAM or ntds.dit) on endpoint $agent_name$ by user
+    $data_win_eventdata_user$. Process image: $data_win_eventdata_image$.
+    Parent process: $data_win_eventdata_parentImage$. Command line:
+    $data_win_eventdata_commandLine$. This is a high-confidence indicator
+    of credential database extraction; investigate immediately, isolate
+    the host, and initiate credential rotation for any accounts that may
+    have authenticated on this system.
+  risk_score: 80
+  severity: high
+  risk_objects:
+    - field: agent_name
+      type: system
+      score: 70
+    - field: data_win_eventdata_user
+      type: user
+      score: 70
+  threat_objects:
+    - field: data_win_eventdata_image
+      type: process_name
+    - field: data_win_eventdata_parentImage
+      type: parent_process_name
+    - field: data_win_eventdata_commandLine
+      type: command_line
+
+tags:
+  analytic_story:
+    - Credential Dumping
+    - Living Off The Land
+    - Active Directory Database Extraction
+  asset_type: Endpoint
+  mitre_attack_id:
+    - T1003.002
+    - T1003.003
+  custom_tags:
+    - esentutl
+    - sam
+    - ntds
+    - credential_dumping
+    - lolbin
+    - living_off_the_land
+    - vss
+  product:
+    - Wazuh
+  security_domain: endpoint
+
+graylog:
+  query: data_win_system_eventID:"1" AND (data_win_eventdata_image:/.*[Ee][Ss][Ee][Nn][Tt][Uu][Tt][Ll]\.exe.*/ OR data_win_eventdata_originalFileName:"esentutl.exe") AND (data_win_eventdata_commandLine:/.*[Nn][Tt][Dd][Ss].*/ OR data_win_eventdata_commandLine:/.*SAM.*/)
