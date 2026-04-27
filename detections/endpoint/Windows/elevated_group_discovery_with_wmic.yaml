@@ -1,0 +1,230 @@
+name: Elevated Group Discovery With Wmic
+id: 3f6bbf22-093e-4cb4-9641-83f47b8444b6
+version: 1
+schema_version: "1.0"
+date: "2026-04-27"
+author: SOCFortress LLC
+status: production
+type: TTP
+
+description: >
+  This analytic detects the execution of wmic.exe with command-line
+  arguments querying specific elevated/privileged Active Directory groups
+  via the WMI LDAP namespace (\\root\directory\ldap). Sysmon EventID 1 is
+  used to match process creation events where the image or
+  OriginalFileName is wmic.exe AND the command line references the LDAP
+  WMI namespace AND contains any of the following high-privilege group
+  names: Domain Admins, Enterprise Admins, Schema Admins, Account
+  Operators, Server Operators, Protected Users, or Dns Admins. This
+  pattern indicates targeted reconnaissance focused specifically on
+  high-privilege accounts within Active Directory rather than general
+  user/group enumeration. This activity is significant because it
+  represents a focused effort by adversaries to identify accounts with
+  the privileges needed for full domain compromise (Domain Admins,
+  Enterprise Admins) or with the ability to manipulate authentication
+  and access (Account Operators, Server Operators, DNS Admins). If
+  confirmed malicious, this behavior could lead to privilege escalation,
+  targeted credential theft, Kerberoasting of privileged service
+  accounts, or direct compromise of domain controllers, allowing
+  attackers to gain elevated access and full control over critical
+  network resources.
+
+data_source:
+  - Sysmon EventID 1
+
+search:
+  index_pattern: "${INDEX_PATTERN}"
+  size: 100
+  sort:
+    - timestamp: desc
+  query:
+    bool:
+      must:
+        - term:
+            agent_name: "${AGENT_NAME}"
+        - term:
+            agent_labels_customer: "${CUSTOMER_CODE}"
+        - term:
+            data_win_system_eventID: "1"
+        - bool:
+            should:
+              - wildcard:
+                  data_win_eventdata_image:
+                    value: "*wmic.exe"
+                    case_insensitive: true
+              - term:
+                  data_win_eventdata_originalFileName: "wmic.exe"
+            minimum_should_match: 1
+        - wildcard:
+            data_win_eventdata_commandLine:
+              value: "*/NAMESPACE:*root*directory*ldap*"
+              case_insensitive: true
+        - bool:
+            should:
+              - wildcard:
+                  data_win_eventdata_commandLine:
+                    value: "*Domain Admins*"
+                    case_insensitive: true
+              - wildcard:
+                  data_win_eventdata_commandLine:
+                    value: "*Enterprise Admins*"
+                    case_insensitive: true
+              - wildcard:
+                  data_win_eventdata_commandLine:
+                    value: "*Schema Admins*"
+                    case_insensitive: true
+              - wildcard:
+                  data_win_eventdata_commandLine:
+                    value: "*Account Operators*"
+                    case_insensitive: true
+              - wildcard:
+                  data_win_eventdata_commandLine:
+                    value: "*Server Operators*"
+                    case_insensitive: true
+              - wildcard:
+                  data_win_eventdata_commandLine:
+                    value: "*Protected Users*"
+                    case_insensitive: true
+              - wildcard:
+                  data_win_eventdata_commandLine:
+                    value: "*Dns Admins*"
+                    case_insensitive: true
+            minimum_should_match: 1
+        - range:
+            timestamp:
+              gte: "${START_TIME}"
+              lte: "${END_TIME}"
+  _source:
+    - timestamp
+    - agent_name
+    - data_win_eventdata_image
+    - data_win_eventdata_originalFileName
+    - data_win_eventdata_commandLine
+    - data_win_eventdata_parentImage
+    - data_win_eventdata_parentCommandLine
+    - data_win_eventdata_user
+    - data_win_eventdata_processId
+    - data_win_eventdata_processGuid
+    - data_win_eventdata_parentProcessId
+    - data_win_eventdata_parentProcessGuid
+    - data_win_eventdata_hashes
+    - data_win_eventdata_integrityLevel
+    - data_win_eventdata_currentDirectory
+
+parameters:
+  AGENT_NAME:
+    description: "Target agent/host name"
+    type: string
+    required: true
+    example: "DESKTOP-AM0HLGE"
+  CUSTOMER_CODE:
+    description: "Customer label for filtering"
+    type: string
+    required: true
+    example: "lab"
+  INDEX_PATTERN:
+    description: "Elasticsearch index pattern"
+    type: string
+    required: true
+    example: "wazuh-lab_*"
+  START_TIME:
+    description: "Query start time (ISO 8601 or relative)"
+    type: datetime
+    required: false
+    default: "now-24h"
+    example: "2026-04-27 00:00:00.000"
+  END_TIME:
+    description: "Query end time (ISO 8601 or relative)"
+    type: datetime
+    required: false
+    default: "now"
+    example: "2026-04-27 23:59:59.999"
+
+how_to_implement: >
+  This detection requires Sysmon EventID 1 (Process Creation) logs to be forwarded
+  from Windows endpoints to Wazuh Indexer. Ensure Sysmon is deployed with a
+  configuration that captures Image, OriginalFileName, and CommandLine fields
+  (SwiftOnSecurity or Olaf Hartong Sysmon modular config recommended). The
+  detection matches wmic.exe either by Image path (case-insensitive) or by
+  PE OriginalFileName, combined with both the LDAP NAMESPACE reference and
+  any of the seven monitored elevated group names. The NAMESPACE pattern
+  uses wildcards between path components (root, directory, ldap) to handle
+  different backslash escaping between event channels. Case-insensitive
+  matching is used throughout. The ES DSL uses case_insensitive wildcard
+  option (OpenSearch 2.x / Elasticsearch 7.10+); Graylog equivalent uses
+  character classes. Tune the elevated group list for your environment by
+  adding any custom privileged group names (e.g., Tier 0 admin groups,
+  application-specific admin groups, MSP-managed privileged groups).
+
+known_false_positives: >
+  System administrators or domain admins may legitimately query elevated
+  group membership via WMI for periodic AD audits, compliance reporting,
+  or troubleshooting. Such usage is uncommon compared to standard tools
+  like dsquery, net group, or Get-ADGroupMember. Review parent process
+  lineage (admin session vs. unexpected non-interactive parent), user
+  context (admin account vs. standard user vs. service account), and
+  timing to distinguish authorized administrative activity from
+  reconnaissance. Given the specificity of this command pattern and the
+  high-privilege nature of the targeted groups, any occurrence outside
+  of approved audit windows should be treated as high-priority.
+
+references:
+  - https://attack.mitre.org/techniques/T1069/002/
+  - https://attack.mitre.org/techniques/T1047/
+  - https://learn.microsoft.com/en-us/windows-server/identity/ad-ds/plan/security-best-practices/appendix-b--privileged-accounts-and-groups-in-active-directory
+  - https://adsecurity.org/?p=3658
+  - https://learn.microsoft.com/en-us/windows/win32/wmisdk/wmic
+
+response:
+  message: >
+    wmic.exe was used to enumerate members of an elevated/privileged
+    Active Directory group via the WMI LDAP namespace on endpoint
+    $agent_name$ by user $data_win_eventdata_user$. Process image:
+    $data_win_eventdata_image$. Parent process:
+    $data_win_eventdata_parentImage$. Command line:
+    $data_win_eventdata_commandLine$. This is a high-confidence indicator
+    of focused privileged-account reconnaissance commonly preceding
+    targeted credential theft, lateral movement, or domain compromise;
+    investigate immediately and review concurrent discovery activity
+    against privileged accounts.
+  risk_score: 80
+  severity: high
+  risk_objects:
+    - field: agent_name
+      type: system
+      score: 70
+    - field: data_win_eventdata_user
+      type: user
+      score: 70
+  threat_objects:
+    - field: data_win_eventdata_image
+      type: process_name
+    - field: data_win_eventdata_parentImage
+      type: parent_process_name
+    - field: data_win_eventdata_commandLine
+      type: command_line
+
+tags:
+  analytic_story:
+    - Active Directory Discovery
+    - Active Directory Reconnaissance
+    - Privileged Account Enumeration
+  asset_type: Endpoint
+  mitre_attack_id:
+    - T1069.002
+    - T1047
+  custom_tags:
+    - wmic
+    - wmi
+    - ad_enumeration
+    - active_directory
+    - reconnaissance
+    - elevated_group_discovery
+    - privileged_account_discovery
+    - lolbin
+  product:
+    - Wazuh
+  security_domain: endpoint
+
+graylog:
+  query: data_win_system_eventID:"1" AND (data_win_eventdata_image:/.*[Ww][Mm][Ii][Cc]\.exe.*/ OR data_win_eventdata_originalFileName:"wmic.exe") AND data_win_eventdata_commandLine:/.*\/[Nn][Aa][Mm][Ee][Ss][Pp][Aa][Cc][Ee]:.*[Rr][Oo][Oo][Tt].*[Dd][Ii][Rr][Ee][Cc][Tt][Oo][Rr][Yy].*[Ll][Dd][Aa][Pp].*/ AND (data_win_eventdata_commandLine:/.*[Dd][Oo][Mm][Aa][Ii][Nn] [Aa][Dd][Mm][Ii][Nn][Ss].*/ OR data_win_eventdata_commandLine:/.*[Ee][Nn][Tt][Ee][Rr][Pp][Rr][Ii][Ss][Ee] [Aa][Dd][Mm][Ii][Nn][Ss].*/ OR data_win_eventdata_commandLine:/.*[Ss][Cc][Hh][Ee][Mm][Aa] [Aa][Dd][Mm][Ii][Nn][Ss].*/ OR data_win_eventdata_commandLine:/.*[Aa][Cc][Cc][Oo][Uu][Nn][Tt] [Oo][Pp][Ee][Rr][Aa][Tt][Oo][Rr][Ss].*/ OR data_win_eventdata_commandLine:/.*[Ss][Ee][Rr][Vv][Ee][Rr] [Oo][Pp][Ee][Rr][Aa][Tt][Oo][Rr][Ss].*/ OR data_win_eventdata_commandLine:/.*[Pp][Rr][Oo][Tt][Ee][Cc][Tt][Ee][Dd] [Uu][Ss][Ee][Rr][Ss].*/ OR data_win_eventdata_commandLine:/.*[Dd][Nn][Ss] [Aa][Dd][Mm][Ii][Nn][Ss].*/)
