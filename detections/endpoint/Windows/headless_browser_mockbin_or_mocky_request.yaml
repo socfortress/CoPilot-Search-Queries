@@ -1,0 +1,195 @@
+name: Headless Browser Mockbin or Mocky Request
+id: 94fc85a1-e55b-4265-95e1-4b66730e05c0
+version: 1
+schema_version: "1.0"
+date: "2026-04-28"
+author: SOCFortress LLC
+status: production
+type: TTP
+
+description: >
+  This analytic detects headless browser activity accessing mockbin.org
+  or mocky.io. Sysmon EventID 1 is used to match process creation
+  events whose command line contains the headless-mode flags
+  (--headless and --disable-gpu) AND a URL targeting either
+  mockbin.org/ or mocky.io/. mockbin.org and mocky.io are public HTTP
+  request inspection / mock endpoint services intended for legitimate
+  developer use (testing API integrations, viewing webhook payloads),
+  but they are increasingly abused by adversaries as low-cost C2 or
+  data-exfiltration drop sites - the attacker creates a mock endpoint
+  that records inbound HTTP requests, then uses a headless browser
+  (Chrome/Edge) on a compromised host to POST stolen data or beacon
+  traffic to that endpoint without raising suspicion through obvious
+  C2 infrastructure. The combination of headless flags plus
+  mockbin/mocky URLs in the command line is a high-fidelity indicator
+  of this activity. This is a known T1564.003 (Hide Artifacts:
+  Hidden Window) technique and has been observed in named threat
+  activity including Forest Blizzard and the GhostRedirector IIS
+  Module / Rungan Backdoor campaigns. If confirmed malicious, this
+  activity could indicate data exfiltration, C2 beaconing, or
+  automated webhook-based command relay - investigate the host
+  immediately, identify the parent process that spawned the headless
+  browser, and review network egress to the mockbin/mocky endpoint
+  for sensitive data movement.
+
+data_source:
+  - Sysmon EventID 1
+
+search:
+  index_pattern: "${INDEX_PATTERN}"
+  size: 100
+  sort:
+    - timestamp: desc
+  query:
+    bool:
+      must:
+        - term:
+            agent_name: "${AGENT_NAME}"
+        - term:
+            agent_labels_customer: "${CUSTOMER_CODE}"
+        - term:
+            data_win_system_eventID: "1"
+        - wildcard:
+            data_win_eventdata_commandLine: "*--headless*"
+        - wildcard:
+            data_win_eventdata_commandLine: "*--disable-gpu*"
+        - bool:
+            should:
+              - wildcard:
+                  data_win_eventdata_commandLine: "*mockbin.org/*"
+              - wildcard:
+                  data_win_eventdata_commandLine: "*mocky.io/*"
+            minimum_should_match: 1
+        - range:
+            timestamp:
+              gte: "${START_TIME}"
+              lte: "${END_TIME}"
+  _source:
+    - timestamp
+    - agent_name
+    - data_win_eventdata_image
+    - data_win_eventdata_originalFileName
+    - data_win_eventdata_commandLine
+    - data_win_eventdata_parentImage
+    - data_win_eventdata_parentCommandLine
+    - data_win_eventdata_user
+    - data_win_eventdata_processId
+    - data_win_eventdata_processGuid
+    - data_win_eventdata_parentProcessId
+    - data_win_eventdata_parentProcessGuid
+    - data_win_eventdata_hashes
+    - data_win_eventdata_integrityLevel
+    - data_win_eventdata_currentDirectory
+
+parameters:
+  AGENT_NAME:
+    description: "Target agent/host name"
+    type: string
+    required: true
+    example: "DESKTOP-AM0HLGE"
+  CUSTOMER_CODE:
+    description: "Customer label for filtering"
+    type: string
+    required: true
+    example: "lab"
+  INDEX_PATTERN:
+    description: "Elasticsearch index pattern"
+    type: string
+    required: true
+    example: "wazuh-lab_*"
+  START_TIME:
+    description: "Query start time (ISO 8601 or relative)"
+    type: datetime
+    required: false
+    default: "now-24h"
+    example: "2026-04-28 00:00:00.000"
+  END_TIME:
+    description: "Query end time (ISO 8601 or relative)"
+    type: datetime
+    required: false
+    default: "now"
+    example: "2026-04-28 23:59:59.999"
+
+how_to_implement: >
+  This detection requires Sysmon EventID 1 (Process Creation) logs to be forwarded
+  from Windows endpoints to Wazuh Indexer. Ensure Sysmon is deployed with a
+  configuration that captures Image, OriginalFileName, and CommandLine fields
+  (SwiftOnSecurity or Olaf Hartong Sysmon modular config recommended). The
+  detection is process-agnostic - any process with --headless, --disable-gpu,
+  and a mockbin.org/ or mocky.io/ URL in its command line will match. This
+  combination has high specificity because legitimate use of headless
+  browsers against mock-endpoint services in production environments is
+  rare. If the organization has a documented developer use case for
+  headless testing against mockbin/mocky, allow-list specific approved
+  endpoints rather than removing the detection. Pair with network
+  monitoring for outbound TLS connections to mockbin.org and mocky.io
+  for full-coverage detection.
+
+known_false_positives: >
+  False positives are not expected with this detection unless within
+  the organization there is a legitimate developer or QA need for
+  headless browsing accessing mockbin.org or mocky.io for API testing
+  purposes. If such use exists, allow-list specific developer
+  endpoints, parent processes, or user accounts rather than removing
+  the detection.
+
+references:
+  - https://attack.mitre.org/techniques/T1564/003/
+  - https://mockbin.org/
+  - https://www.mocky.io/
+
+response:
+  message: >
+    Headless browser activity accessing mockbin.org or mocky.io was
+    detected on endpoint $agent_name$ by user $data_win_eventdata_user$.
+    Process image: $data_win_eventdata_image$. Parent process:
+    $data_win_eventdata_parentImage$. Command line:
+    $data_win_eventdata_commandLine$. This is a high-confidence
+    indicator of mock-endpoint abuse for C2 beaconing or data
+    exfiltration; investigate immediately, review network egress to
+    the mockbin/mocky endpoint for sensitive data movement, and isolate
+    the host pending further analysis.
+  risk_score: 80
+  severity: high
+  risk_objects:
+    - field: agent_name
+      type: system
+      score: 70
+    - field: data_win_eventdata_user
+      type: user
+      score: 70
+  threat_objects:
+    - field: data_win_eventdata_image
+      type: process_name
+    - field: data_win_eventdata_parentImage
+      type: parent_process_name
+    - field: data_win_eventdata_commandLine
+      type: command_line
+
+tags:
+  analytic_story:
+    - Forest Blizzard
+    - GhostRedirector IIS Module and Rungan Backdoor
+    - Hide Artifacts
+    - Webhook C2 Abuse
+    - Data Exfiltration via Mock Endpoints
+  asset_type: Endpoint
+  mitre_attack_id:
+    - T1564.003
+  custom_tags:
+    - headless_browser
+    - chrome_headless
+    - edge_headless
+    - mockbin
+    - mocky
+    - webhook_abuse
+    - mock_endpoint_abuse
+    - c2_beaconing
+    - data_exfiltration
+    - hide_artifacts
+  product:
+    - Wazuh
+  security_domain: endpoint
+
+graylog:
+  query: data_win_system_eventID:"1" AND data_win_eventdata_commandLine:/.*\-\-[Hh][Ee][Aa][Dd][Ll][Ee][Ss][Ss].*/ AND data_win_eventdata_commandLine:/.*\-\-[Dd][Ii][Ss][Aa][Bb][Ll][Ee]\-[Gg][Pp][Uu].*/ AND (data_win_eventdata_commandLine:/.*[Mm][Oo][Cc][Kk][Bb][Ii][Nn]\.[Oo][Rr][Gg]\/.*/ OR data_win_eventdata_commandLine:/.*[Mm][Oo][Cc][Kk][Yy]\.[Ii][Oo]\/.*/)

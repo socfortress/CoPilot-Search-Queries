@@ -1,0 +1,204 @@
+name: GetCurrent User with PowerShell
+id: 7eb9c3d5-c98c-4088-acc5-8240bad15379
+version: 1
+schema_version: "1.0"
+date: "2026-04-27"
+author: SOCFortress LLC
+status: production
+type: Hunting
+
+description: >
+  This analytic detects the execution of powershell.exe or pwsh.exe with
+  command-line arguments invoking the GetCurrent() method of the
+  System.Security.Principal.WindowsIdentity .NET class. Sysmon EventID
+  1 is used to match process creation events where the image or
+  OriginalFileName is one of the PowerShell binaries AND the command
+  line contains either "System.Security.Principal.WindowsIdentity" or
+  "GetCurrent()". This .NET API call returns information about the
+  current Windows identity (user account, SID, authentication type,
+  group memberships) running the PowerShell session, providing a
+  programmatic alternative to whoami.exe or $env:USERNAME. This
+  activity is significant as adversaries may use this method to
+  identify the logged-in user on a compromised endpoint while avoiding
+  command-line tools that may be more heavily monitored. This is a
+  known T1033 (System Owner/User Discovery) technique commonly used in
+  early reconnaissance phases. If confirmed malicious, this could
+  allow attackers to gain insights into user context (privilege level,
+  group membership), determine whether they have administrative
+  rights, and plan further exploitation including privilege escalation
+  attempts and lateral movement decisions based on the discovered
+  user identity.
+
+data_source:
+  - Sysmon EventID 1
+
+search:
+  index_pattern: "${INDEX_PATTERN}"
+  size: 100
+  sort:
+    - timestamp: desc
+  query:
+    bool:
+      must:
+        - term:
+            agent_name: "${AGENT_NAME}"
+        - term:
+            agent_labels_customer: "${CUSTOMER_CODE}"
+        - term:
+            data_win_system_eventID: "1"
+        - bool:
+            should:
+              - wildcard:
+                  data_win_eventdata_image: "*powershell*.exe"
+              - wildcard:
+                  data_win_eventdata_image: "*pwsh.exe"
+              - term:
+                  data_win_eventdata_originalFileName: "PowerShell.EXE"
+              - term:
+                  data_win_eventdata_originalFileName: "pwsh.dll"
+            minimum_should_match: 1
+        - bool:
+            should:
+              - wildcard:
+                  data_win_eventdata_commandLine:
+                    value: "*System.Security.Principal.WindowsIdentity*"
+                    case_insensitive: true
+              - wildcard:
+                  data_win_eventdata_commandLine:
+                    value: "*GetCurrent()*"
+                    case_insensitive: true
+            minimum_should_match: 1
+        - range:
+            timestamp:
+              gte: "${START_TIME}"
+              lte: "${END_TIME}"
+  _source:
+    - timestamp
+    - agent_name
+    - data_win_eventdata_image
+    - data_win_eventdata_originalFileName
+    - data_win_eventdata_commandLine
+    - data_win_eventdata_parentImage
+    - data_win_eventdata_parentCommandLine
+    - data_win_eventdata_user
+    - data_win_eventdata_processId
+    - data_win_eventdata_processGuid
+    - data_win_eventdata_parentProcessId
+    - data_win_eventdata_parentProcessGuid
+    - data_win_eventdata_hashes
+    - data_win_eventdata_integrityLevel
+    - data_win_eventdata_currentDirectory
+
+parameters:
+  AGENT_NAME:
+    description: "Target agent/host name"
+    type: string
+    required: true
+    example: "DESKTOP-AM0HLGE"
+  CUSTOMER_CODE:
+    description: "Customer label for filtering"
+    type: string
+    required: true
+    example: "lab"
+  INDEX_PATTERN:
+    description: "Elasticsearch index pattern"
+    type: string
+    required: true
+    example: "wazuh-lab_*"
+  START_TIME:
+    description: "Query start time (ISO 8601 or relative)"
+    type: datetime
+    required: false
+    default: "now-24h"
+    example: "2026-04-27 00:00:00.000"
+  END_TIME:
+    description: "Query end time (ISO 8601 or relative)"
+    type: datetime
+    required: false
+    default: "now"
+    example: "2026-04-27 23:59:59.999"
+
+how_to_implement: >
+  This detection requires Sysmon EventID 1 (Process Creation) logs to be forwarded
+  from Windows endpoints to Wazuh Indexer. Ensure Sysmon is deployed with a
+  configuration that captures Image, OriginalFileName, and CommandLine fields
+  (SwiftOnSecurity or Olaf Hartong Sysmon modular config recommended). The
+  detection matches PowerShell binaries (powershell.exe or pwsh.exe) by
+  Image path or PE OriginalFileName, combined with either
+  System.Security.Principal.WindowsIdentity (the .NET class name) or
+  GetCurrent() (the static method invocation). Case-insensitive matching
+  is used on the .NET strings to handle PowerShell's flexible casing.
+  The ES DSL uses case_insensitive wildcard option (OpenSearch 2.x /
+  Elasticsearch 7.10+); Graylog equivalent uses character classes with
+  escaped dots and parentheses. For deeper coverage, also enable
+  PowerShell Script Block Logging (EventID 4104) and correlate against
+  the same .NET API patterns in script blocks.
+
+known_false_positives: >
+  System administrators, developers, or security tools may
+  legitimately use the WindowsIdentity .NET class for permission
+  checks, identity-aware logging, or privilege validation. Many
+  legitimate PowerShell scripts include a privilege check via
+  [System.Security.Principal.WindowsPrincipal]::IsInRole() which
+  internally calls GetCurrent(). Review the parent process lineage,
+  user context, and surrounding command-line content (full script
+  vs. one-liner identity check) to distinguish legitimate use from
+  reconnaissance. Concurrent execution of multiple discovery commands
+  on a single host within a short window should be treated as
+  high-priority regardless of context.
+
+references:
+  - https://attack.mitre.org/techniques/T1033/
+  - https://learn.microsoft.com/en-us/dotnet/api/system.security.principal.windowsidentity.getcurrent
+
+response:
+  message: >
+    PowerShell System.Security.Principal.WindowsIdentity GetCurrent()
+    user-context discovery was identified on endpoint $agent_name$ by
+    user $data_win_eventdata_user$. Process image:
+    $data_win_eventdata_image$. Parent process:
+    $data_win_eventdata_parentImage$. Command line:
+    $data_win_eventdata_commandLine$. This is consistent with current-user
+    discovery via .NET reflection commonly preceding privilege checks
+    or lateral movement decisions; investigate parent process lineage
+    and concurrent discovery activity.
+  risk_score: 40
+  severity: medium
+  risk_objects:
+    - field: agent_name
+      type: system
+      score: 30
+    - field: data_win_eventdata_user
+      type: user
+      score: 30
+  threat_objects:
+    - field: data_win_eventdata_image
+      type: process_name
+    - field: data_win_eventdata_parentImage
+      type: parent_process_name
+    - field: data_win_eventdata_commandLine
+      type: command_line
+
+tags:
+  analytic_story:
+    - Active Directory Discovery
+    - System Owner User Discovery
+    - PowerShell Reconnaissance
+  asset_type: Endpoint
+  mitre_attack_id:
+    - T1033
+  custom_tags:
+    - powershell
+    - dotnet
+    - windowsidentity
+    - getcurrent
+    - user_discovery
+    - reconnaissance
+    - system_owner_discovery
+    - privilege_check
+  product:
+    - Wazuh
+  security_domain: endpoint
+
+graylog:
+  query: data_win_system_eventID:"1" AND (data_win_eventdata_image:/.*[Pp][Oo][Ww][Ee][Rr][Ss][Hh][Ee][Ll][Ll].*\.exe.*/ OR data_win_eventdata_image:/.*[Pp][Ww][Ss][Hh]\.exe.*/ OR data_win_eventdata_originalFileName:"PowerShell.EXE" OR data_win_eventdata_originalFileName:"pwsh.dll") AND (data_win_eventdata_commandLine:/.*[Ss][Yy][Ss][Tt][Ee][Mm]\.[Ss][Ee][Cc][Uu][Rr][Ii][Tt][Yy]\.[Pp][Rr][Ii][Nn][Cc][Ii][Pp][Aa][Ll]\.[Ww][Ii][Nn][Dd][Oo][Ww][Ss][Ii][Dd][Ee][Nn][Tt][Ii][Tt][Yy].*/ OR data_win_eventdata_commandLine:/.*[Gg][Ee][Tt][Cc][Uu][Rr][Rr][Ee][Nn][Tt]\(\).*/)

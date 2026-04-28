@@ -1,0 +1,224 @@
+name: Impacket Lateral Movement smbexec CommandLine Parameters
+id: bb3c1bac-6bdf-4aa0-8dc9-068b8b712a76
+version: 1
+schema_version: "1.0"
+date: "2026-04-28"
+author: SOCFortress LLC
+status: production
+type: TTP
+
+description: >
+  This analytic identifies the canonical command-line signature
+  produced by Impacket's smbexec.py lateral-movement module. Sysmon
+  EventID 1 is used to match process creation events where the image
+  or OriginalFileName is cmd.exe AND the command line contains all of
+  the following highly specific markers: cmd.exe /Q /c (quiet
+  run-and-terminate flags), the literal "echo cd" string (smbexec
+  always prepends "echo cd <dir>" to its commands), the "__output"
+  marker (smbexec writes results to a UNC path ending in __output),
+  a UNC path to an admin share (\\<host>\<share>\__output), and a
+  reference to a temporary batch script under C:\Windows\<1-8 random
+  letters>.bat. smbexec.py operates by creating a temporary Windows
+  service that executes a small .bat file dropped to C:\Windows; the
+  .bat file runs the attacker's command and redirects output to a
+  UNC path on an administrative share so the attacker can retrieve
+  results from the source host. This combination of markers is
+  effectively unique to smbexec and unlikely to appear in legitimate
+  software. This is a known T1021.002 (SMB/Admin Shares),
+  T1021.003 (DCOM), T1047 (WMI), and T1543.003 (Service Creation)
+  technique observed in named threat activity including WhisperGate,
+  Industroyer2, Prestige Ransomware, Volt Typhoon, and the Graceful
+  Wipe Out Attack. If confirmed malicious, this could allow attackers
+  to execute commands on remote endpoints, potentially leading to
+  unauthorized access, lateral movement, credential theft, persistence
+  via service creation, and data exfiltration.
+
+data_source:
+  - Sysmon EventID 1
+
+search:
+  index_pattern: "${INDEX_PATTERN}"
+  size: 100
+  sort:
+    - timestamp: desc
+  query:
+    bool:
+      must:
+        - term:
+            agent_name: "${AGENT_NAME}"
+        - term:
+            agent_labels_customer: "${CUSTOMER_CODE}"
+        - term:
+            data_win_system_eventID: "1"
+        - bool:
+            should:
+              - wildcard:
+                  data_win_eventdata_image: "*cmd.exe"
+              - term:
+                  data_win_eventdata_originalFileName: "Cmd.Exe"
+            minimum_should_match: 1
+        - wildcard:
+            data_win_eventdata_commandLine:
+              value: "*cmd.exe*/Q /c*"
+              case_insensitive: true
+        - wildcard:
+            data_win_eventdata_commandLine:
+              value: "*echo cd*"
+              case_insensitive: true
+        - wildcard:
+            data_win_eventdata_commandLine:
+              value: "*__output*"
+              case_insensitive: true
+        - wildcard:
+            data_win_eventdata_commandLine: "*127.0.0.1*"
+        - regexp:
+            data_win_eventdata_commandLine:
+              value: ".*[Cc]:\\\\\\\\[Ww]indows\\\\\\\\[a-zA-Z]{1,8}\\.bat.*"
+              case_insensitive: true
+        - range:
+            timestamp:
+              gte: "${START_TIME}"
+              lte: "${END_TIME}"
+  _source:
+    - timestamp
+    - agent_name
+    - data_win_eventdata_image
+    - data_win_eventdata_originalFileName
+    - data_win_eventdata_commandLine
+    - data_win_eventdata_parentImage
+    - data_win_eventdata_parentCommandLine
+    - data_win_eventdata_user
+    - data_win_eventdata_processId
+    - data_win_eventdata_processGuid
+    - data_win_eventdata_parentProcessId
+    - data_win_eventdata_parentProcessGuid
+    - data_win_eventdata_hashes
+    - data_win_eventdata_integrityLevel
+    - data_win_eventdata_currentDirectory
+
+parameters:
+  AGENT_NAME:
+    description: "Target agent/host name"
+    type: string
+    required: true
+    example: "DESKTOP-AM0HLGE"
+  CUSTOMER_CODE:
+    description: "Customer label for filtering"
+    type: string
+    required: true
+    example: "lab"
+  INDEX_PATTERN:
+    description: "Elasticsearch index pattern"
+    type: string
+    required: true
+    example: "wazuh-lab_*"
+  START_TIME:
+    description: "Query start time (ISO 8601 or relative)"
+    type: datetime
+    required: false
+    default: "now-24h"
+    example: "2026-04-28 00:00:00.000"
+  END_TIME:
+    description: "Query end time (ISO 8601 or relative)"
+    type: datetime
+    required: false
+    default: "now"
+    example: "2026-04-28 23:59:59.999"
+
+how_to_implement: >
+  This detection requires Sysmon EventID 1 (Process Creation) logs to be forwarded
+  from Windows endpoints to Wazuh Indexer. Ensure Sysmon is deployed with a
+  configuration that captures Image, OriginalFileName, and CommandLine fields
+  (SwiftOnSecurity or Olaf Hartong Sysmon modular config recommended). The
+  Elasticsearch query matches the smbexec loopback variant (127.0.0.1) per
+  the published Splunk rule. The Graylog query uses Lucene regex with a
+  generalized UNC-host pattern \\\\<host>\\<share>\\__output that matches
+  any IP, hostname, or FQDN as the UNC server - making it suitable for
+  detecting real lateral movement against remote targets, not just the
+  loopback local-execution variant. The C:\Windows\<1-8 letters>.bat
+  pattern is matched via regex/regexp queries since standard wildcards
+  cannot enforce length constraints on the random filename portion. The
+  combination of /Q /c + "echo cd" + "__output" + UNC + the .bat pattern
+  is essentially unique to smbexec and produces minimal false positives.
+
+known_false_positives: >
+  Although uncommon, system administrators may leverage Impacket tools
+  for legitimate system administration or automation use cases. The
+  highly specific multi-marker combination required by this detection
+  makes false positives extremely rare in normal environments.
+
+references:
+  - https://attack.mitre.org/techniques/T1021/002/
+  - https://attack.mitre.org/techniques/T1021/003/
+  - https://attack.mitre.org/techniques/T1047/
+  - https://attack.mitre.org/techniques/T1543/003/
+  - https://github.com/SecureAuthCorp/impacket
+  - https://www.microsoft.com/en-us/security/blog/2023/05/24/volt-typhoon-targets-us-critical-infrastructure-with-living-off-the-land-techniques/
+  - https://www.microsoft.com/security/blog/2022/01/15/destructive-malware-targeting-ukrainian-organizations/
+
+response:
+  message: >
+    Suspicious cmd.exe command line consistent with Impacket smbexec
+    lateral movement was detected on endpoint $agent_name$ by user
+    $data_win_eventdata_user$. Process image: $data_win_eventdata_image$.
+    Parent process: $data_win_eventdata_parentImage$. Command line:
+    $data_win_eventdata_commandLine$. The combination of /Q /c, "echo cd",
+    "__output", and a temporary C:\Windows\<random>.bat batch file is
+    the canonical signature for smbexec.py - this is essentially never
+    a false positive. Investigate immediately, identify the source of
+    execution (incoming SMB session creating a service), look for the
+    associated service-creation event (System EID 7045 or Sysmon EID 1
+    services.exe parent), and hunt for credential theft or follow-on
+    lateral movement.
+  risk_score: 90
+  severity: critical
+  risk_objects:
+    - field: agent_name
+      type: system
+      score: 80
+    - field: data_win_eventdata_user
+      type: user
+      score: 80
+  threat_objects:
+    - field: data_win_eventdata_image
+      type: process_name
+    - field: data_win_eventdata_parentImage
+      type: parent_process_name
+    - field: data_win_eventdata_commandLine
+      type: command_line
+
+tags:
+  analytic_story:
+    - WhisperGate
+    - Active Directory Lateral Movement
+    - Volt Typhoon
+    - Prestige Ransomware
+    - Industroyer2
+    - Data Destruction
+    - Graceful Wipe Out Attack
+    - Compromised Windows Host
+    - CISA AA22-277A
+    - Impacket Lateral Movement
+    - Smbexec
+  asset_type: Endpoint
+  mitre_attack_id:
+    - T1021.002
+    - T1021.003
+    - T1047
+    - T1543.003
+  custom_tags:
+    - impacket
+    - smbexec
+    - lateral_movement
+    - admin_share_abuse
+    - service_creation
+    - unc_redirection
+    - cmd_exe
+    - apt_lateral_movement
+    - high_fidelity
+  product:
+    - Wazuh
+  security_domain: endpoint
+
+graylog:
+  query: data_win_system_eventID:"1" AND (data_win_eventdata_image:/.*[Cc][Mm][Dd]\.exe.*/ OR data_win_eventdata_originalFileName:"Cmd.Exe") AND data_win_eventdata_commandLine:/.*[Cc][Mm][Dd]\.exe.*\/[Qq] \/[Cc].*/ AND data_win_eventdata_commandLine:/.*[Ee][Cc][Hh][Oo] [Cc][Dd].*/ AND data_win_eventdata_commandLine:/.*__[Oo][Uu][Tt][Pp][Uu][Tt].*/ AND data_win_eventdata_commandLine:/.*\\\\\\\\[^\\\\]+\\\\[^\\\\]+\\\\__[Oo][Uu][Tt][Pp][Uu][Tt].*/ AND data_win_eventdata_commandLine:/.*[Cc]:\\\\[Ww][Ii][Nn][Dd][Oo][Ww][Ss]\\\\[a-zA-Z]{1,8}\.bat.*/

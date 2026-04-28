@@ -1,0 +1,226 @@
+name: ICACLS Grant Command
+id: b1b1e316-accc-11eb-a9b4-acde48001122
+version: 1
+schema_version: "1.0"
+date: "2026-04-28"
+author: SOCFortress LLC
+status: production
+type: Anomaly
+
+description: >
+  This analytic detects the use of icacls.exe, cacls.exe, or xcacls.exe
+  with grant-permission flags (/grant, /g:, or /g) to add Access
+  Control Entries to files or directories. Sysmon EventID 1 is used to
+  match process creation events where the image or OriginalFileName is
+  one of the ACL modification utilities AND the command line contains
+  one of the grant flag patterns. icacls.exe (and its predecessors
+  cacls.exe and xcacls.exe) are built-in Windows utilities for
+  displaying and modifying file system Access Control Lists. The
+  /grant flag adds an explicit allow ACE for a specified principal,
+  granting that user or group the specified access rights to the
+  targeted file or directory. This activity is significant because
+  granting overly permissive access (commonly Everyone:F or
+  Authenticated Users:F) is a technique used by Advanced Persistent
+  Threats (APTs), ransomware operators, and coinminer scripts to
+  ensure their dropped payloads, staging directories, or persistence
+  artifacts can be accessed and modified by any user account on the
+  system - bypassing standard NTFS permission inheritance. This is a
+  known T1222 (File and Directory Permissions Modification) technique
+  observed in named threat activity including ransomware operations,
+  XMRig coinminer campaigns, NetSupport RMM tool abuse, and various
+  crypto stealers. If confirmed malicious, this behavior could allow
+  attackers to manipulate file permissions, ensure persistent access
+  to staged artifacts, evade access controls, potentially leading to
+  unauthorized access, data exfiltration, or further system
+  compromise.
+
+data_source:
+  - Sysmon EventID 1
+
+search:
+  index_pattern: "${INDEX_PATTERN}"
+  size: 100
+  sort:
+    - timestamp: desc
+  query:
+    bool:
+      must:
+        - term:
+            agent_name: "${AGENT_NAME}"
+        - term:
+            agent_labels_customer: "${CUSTOMER_CODE}"
+        - term:
+            data_win_system_eventID: "1"
+        - bool:
+            should:
+              - wildcard:
+                  data_win_eventdata_image: "*icacls.exe"
+              - wildcard:
+                  data_win_eventdata_image: "*cacls.exe"
+              - wildcard:
+                  data_win_eventdata_image: "*xcacls.exe"
+              - wildcard:
+                  data_win_eventdata_originalFileName:
+                    value: "icacls.exe"
+                    case_insensitive: true
+              - wildcard:
+                  data_win_eventdata_originalFileName:
+                    value: "cacls.exe"
+                    case_insensitive: true
+              - wildcard:
+                  data_win_eventdata_originalFileName:
+                    value: "xcacls.exe"
+                    case_insensitive: true
+            minimum_should_match: 1
+        - bool:
+            should:
+              - wildcard:
+                  data_win_eventdata_commandLine:
+                    value: "*/grant*"
+                    case_insensitive: true
+              - wildcard:
+                  data_win_eventdata_commandLine:
+                    value: "*/g:*"
+                    case_insensitive: true
+              - wildcard:
+                  data_win_eventdata_commandLine:
+                    value: "*/g *"
+                    case_insensitive: true
+            minimum_should_match: 1
+        - range:
+            timestamp:
+              gte: "${START_TIME}"
+              lte: "${END_TIME}"
+  _source:
+    - timestamp
+    - agent_name
+    - data_win_eventdata_image
+    - data_win_eventdata_originalFileName
+    - data_win_eventdata_commandLine
+    - data_win_eventdata_parentImage
+    - data_win_eventdata_parentCommandLine
+    - data_win_eventdata_user
+    - data_win_eventdata_processId
+    - data_win_eventdata_processGuid
+    - data_win_eventdata_parentProcessId
+    - data_win_eventdata_parentProcessGuid
+    - data_win_eventdata_hashes
+    - data_win_eventdata_integrityLevel
+    - data_win_eventdata_currentDirectory
+
+parameters:
+  AGENT_NAME:
+    description: "Target agent/host name"
+    type: string
+    required: true
+    example: "DESKTOP-AM0HLGE"
+  CUSTOMER_CODE:
+    description: "Customer label for filtering"
+    type: string
+    required: true
+    example: "lab"
+  INDEX_PATTERN:
+    description: "Elasticsearch index pattern"
+    type: string
+    required: true
+    example: "wazuh-lab_*"
+  START_TIME:
+    description: "Query start time (ISO 8601 or relative)"
+    type: datetime
+    required: false
+    default: "now-24h"
+    example: "2026-04-28 00:00:00.000"
+  END_TIME:
+    description: "Query end time (ISO 8601 or relative)"
+    type: datetime
+    required: false
+    default: "now"
+    example: "2026-04-28 23:59:59.999"
+
+how_to_implement: >
+  This detection requires Sysmon EventID 1 (Process Creation) logs to be forwarded
+  from Windows endpoints to Wazuh Indexer. Ensure Sysmon is deployed with a
+  configuration that captures Image, OriginalFileName, and CommandLine fields
+  (SwiftOnSecurity or Olaf Hartong Sysmon modular config recommended). The
+  detection matches ACL modification utilities (icacls.exe, cacls.exe,
+  xcacls.exe) by Image path or PE OriginalFileName, combined with one of
+  the grant flag patterns (/grant, /g:, or /g) in the command line. Note
+  that PE OriginalFileName for icacls.exe appears as "iCACLS.EXE" with
+  mixed case in stored events - case-insensitive matching is used
+  throughout. The forward slash in grant flags must be escaped in
+  Graylog regex as \/. For higher fidelity, pair this detection with
+  monitoring of the principal being granted access (Everyone, Authenticated
+  Users, or specific accounts) and the target path - grants of full control
+  to broad principals on user-writable paths are highest-priority.
+
+known_false_positives: >
+  No false positives have been identified at this time, but
+  legitimate use cases exist - software installers (especially MSI
+  packages and InstallShield wrappers), software-deployment tools,
+  configuration management systems, and security hardening scripts
+  legitimately use icacls /grant during installation and post-install
+  setup. Filter as needed by allow-listing approved parent processes
+  (msiexec.exe, deployment frameworks) or specific target paths
+  (Program Files, ProgramData).
+
+references:
+  - https://attack.mitre.org/techniques/T1222/
+  - https://thedfirreport.com/2020/04/20/sqlserver-or-the-miner-in-the-basement/
+  - https://learn.microsoft.com/en-us/windows-server/administration/windows-commands/icacls
+
+response:
+  message: >
+    ACL grant modification was detected on endpoint $agent_name$ by
+    user $data_win_eventdata_user$. Process image:
+    $data_win_eventdata_image$. Parent process:
+    $data_win_eventdata_parentImage$. Command line:
+    $data_win_eventdata_commandLine$. This is commonly used by
+    ransomware, coinminers, and APTs to grant overly permissive
+    access (often Everyone:F) to malware staging artifacts;
+    investigate the target file or directory whose permissions were
+    modified, identify what principal was granted access and what
+    rights, and review parent process lineage for malicious context.
+  risk_score: 40
+  severity: medium
+  risk_objects:
+    - field: agent_name
+      type: system
+      score: 30
+    - field: data_win_eventdata_user
+      type: user
+      score: 30
+  threat_objects:
+    - field: data_win_eventdata_image
+      type: process_name
+    - field: data_win_eventdata_parentImage
+      type: parent_process_name
+    - field: data_win_eventdata_commandLine
+      type: command_line
+
+tags:
+  analytic_story:
+    - Ransomware
+    - Crypto Stealer
+    - XMRig
+    - Defense Evasion or Unauthorized Access Via SDDL Tampering
+    - NetSupport RMM Tool Abuse
+    - File Permissions Modification
+  asset_type: Endpoint
+  mitre_attack_id:
+    - T1222
+  custom_tags:
+    - icacls
+    - cacls
+    - xcacls
+    - acl_modification
+    - grant_ace
+    - file_permissions
+    - defense_evasion
+    - ransomware_precursor
+    - lolbin
+  product:
+    - Wazuh
+  security_domain: endpoint
+
+graylog:
+  query: data_win_system_eventID:"1" AND (data_win_eventdata_image:/.*[Ii][Cc][Aa][Cc][Ll][Ss]\.exe.*/ OR data_win_eventdata_image:/.*[Cc][Aa][Cc][Ll][Ss]\.exe.*/ OR data_win_eventdata_image:/.*[Xx][Cc][Aa][Cc][Ll][Ss]\.exe.*/ OR data_win_eventdata_originalFileName:/[Ii][Cc][Aa][Cc][Ll][Ss]\.[Ee][Xx][Ee]/ OR data_win_eventdata_originalFileName:/[Cc][Aa][Cc][Ll][Ss]\.[Ee][Xx][Ee]/ OR data_win_eventdata_originalFileName:/[Xx][Cc][Aa][Cc][Ll][Ss]\.[Ee][Xx][Ee]/) AND (data_win_eventdata_commandLine:/.*\/[Gg][Rr][Aa][Nn][Tt].*/ OR data_win_eventdata_commandLine:/.*\/[Gg]:.*/ OR data_win_eventdata_commandLine:/.*\/[Gg] .*/)

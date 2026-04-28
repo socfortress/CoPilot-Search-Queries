@@ -1,0 +1,205 @@
+name: Headless Browser Usage
+id: 869ba261-c272-47d7-affe-5c0aa85c93d6
+version: 1
+schema_version: "1.0"
+date: "2026-04-28"
+author: SOCFortress LLC
+status: production
+type: Anomaly
+
+description: >
+  This analytic detects the usage of headless Chromium-based browsers
+  on a Windows endpoint. Sysmon EventID 1 is used to match process
+  creation events where the image path ends with one of the known
+  Chromium-family browser executables (chrome.exe, brave.exe,
+  opera.exe, vivaldi.exe, msedge.exe) AND the command line contains
+  both --headless and --disable-gpu flags. These two flags together
+  are the canonical invocation for running a Chromium browser without
+  a visible window or GPU acceleration - the browser still executes
+  fully (JavaScript, network requests, DOM rendering) but is
+  invisible to the user. Monitoring headless browser usage is
+  significant because while these tools have legitimate developer
+  uses (automated testing, web scraping, PDF generation), they are
+  increasingly exploited by adversaries for malicious activities
+  including credential phishing automation, OAuth token theft,
+  in-the-browser data exfiltration that bypasses traditional file
+  monitoring, and covert C2 channels through legitimate websites.
+  This is a known T1497 (Virtualization/Sandbox Evasion) and
+  T1564.003 (Hide Artifacts: Hidden Window) technique observed in
+  named threat activity including the Evelyn Stealer campaign and
+  Forest Blizzard intrusions. If confirmed malicious, this activity
+  could lead to unauthorized data extraction, automated credential
+  harvesting, browser-based persistence, or other covert operations
+  on web applications - investigate the parent process, the URLs
+  targeted, and any concurrent browser-data access.
+
+data_source:
+  - Sysmon EventID 1
+
+search:
+  index_pattern: "${INDEX_PATTERN}"
+  size: 100
+  sort:
+    - timestamp: desc
+  query:
+    bool:
+      must:
+        - term:
+            agent_name: "${AGENT_NAME}"
+        - term:
+            agent_labels_customer: "${CUSTOMER_CODE}"
+        - term:
+            data_win_system_eventID: "1"
+        - bool:
+            should:
+              - wildcard:
+                  data_win_eventdata_image: "*chrome.exe"
+              - wildcard:
+                  data_win_eventdata_image: "*brave.exe"
+              - wildcard:
+                  data_win_eventdata_image: "*opera.exe"
+              - wildcard:
+                  data_win_eventdata_image: "*vivaldi.exe"
+              - wildcard:
+                  data_win_eventdata_image: "*msedge.exe"
+            minimum_should_match: 1
+        - wildcard:
+            data_win_eventdata_commandLine: "*--headless*"
+        - wildcard:
+            data_win_eventdata_commandLine: "*--disable-gpu*"
+        - range:
+            timestamp:
+              gte: "${START_TIME}"
+              lte: "${END_TIME}"
+  _source:
+    - timestamp
+    - agent_name
+    - data_win_eventdata_image
+    - data_win_eventdata_originalFileName
+    - data_win_eventdata_commandLine
+    - data_win_eventdata_parentImage
+    - data_win_eventdata_parentCommandLine
+    - data_win_eventdata_user
+    - data_win_eventdata_processId
+    - data_win_eventdata_processGuid
+    - data_win_eventdata_parentProcessId
+    - data_win_eventdata_parentProcessGuid
+    - data_win_eventdata_hashes
+    - data_win_eventdata_integrityLevel
+    - data_win_eventdata_currentDirectory
+
+parameters:
+  AGENT_NAME:
+    description: "Target agent/host name"
+    type: string
+    required: true
+    example: "DESKTOP-AM0HLGE"
+  CUSTOMER_CODE:
+    description: "Customer label for filtering"
+    type: string
+    required: true
+    example: "lab"
+  INDEX_PATTERN:
+    description: "Elasticsearch index pattern"
+    type: string
+    required: true
+    example: "wazuh-lab_*"
+  START_TIME:
+    description: "Query start time (ISO 8601 or relative)"
+    type: datetime
+    required: false
+    default: "now-24h"
+    example: "2026-04-28 00:00:00.000"
+  END_TIME:
+    description: "Query end time (ISO 8601 or relative)"
+    type: datetime
+    required: false
+    default: "now"
+    example: "2026-04-28 23:59:59.999"
+
+how_to_implement: >
+  This detection requires Sysmon EventID 1 (Process Creation) logs to be forwarded
+  from Windows endpoints to Wazuh Indexer. Ensure Sysmon is deployed with a
+  configuration that captures Image, OriginalFileName, and CommandLine fields
+  (SwiftOnSecurity or Olaf Hartong Sysmon modular config recommended). The
+  detection matches Chromium-family browsers (chrome.exe, brave.exe,
+  opera.exe, vivaldi.exe, msedge.exe) by Image path, combined with both
+  --headless and --disable-gpu flags in the command line. Case-insensitive
+  matching is used in Graylog via character classes. Note that some
+  organizations may have legitimate developer use cases for headless
+  browsers - in such environments, allow-list specific approved parent
+  processes (CI/CD agents, test runners, documented automation
+  frameworks) rather than removing the detection.
+
+known_false_positives: >
+  Administrators, developers, QA engineers, and CI/CD pipelines may
+  legitimately use headless browser features for automated testing,
+  web scraping, page rendering, or PDF generation. Documented
+  legitimate uses should be allow-listed by parent process or user
+  context. Pair this detection with risk-based scoring against the
+  destination (URL, domain, or downstream network destination) to
+  prioritize investigations of headless browsers reaching unusual
+  targets.
+
+references:
+  - https://attack.mitre.org/techniques/T1497/
+  - https://attack.mitre.org/techniques/T1564/003/
+  - https://www.trendmicro.com/en_us/research/26/a/analysis-of-the-evelyn-stealer-campaign.html
+  - https://cert.gov.ua/article/5702579
+
+response:
+  message: >
+    A Chromium-based browser process $data_win_eventdata_image$ was
+    launched in headless mode by parent process
+    $data_win_eventdata_parentImage$ on endpoint $agent_name$ by user
+    $data_win_eventdata_user$. Command line:
+    $data_win_eventdata_commandLine$. Headless browsers can be used
+    for legitimate automation but are also abused by adversaries for
+    credential harvesting, in-browser data exfiltration, and covert
+    C2 channels - investigate parent process lineage, target URLs,
+    and concurrent browser-profile or cookie access activity.
+  risk_score: 40
+  severity: medium
+  risk_objects:
+    - field: agent_name
+      type: system
+      score: 30
+    - field: data_win_eventdata_user
+      type: user
+      score: 30
+  threat_objects:
+    - field: data_win_eventdata_image
+      type: process_name
+    - field: data_win_eventdata_parentImage
+      type: parent_process_name
+    - field: data_win_eventdata_commandLine
+      type: command_line
+
+tags:
+  analytic_story:
+    - Browser Hijacking
+    - Forest Blizzard
+    - Evelyn Stealer
+    - Hide Artifacts
+    - Headless Browser Abuse
+  asset_type: Endpoint
+  mitre_attack_id:
+    - T1497
+    - T1564.003
+  custom_tags:
+    - headless_browser
+    - chrome_headless
+    - edge_headless
+    - brave_headless
+    - opera_headless
+    - vivaldi_headless
+    - chromium_automation
+    - hide_artifacts
+    - sandbox_evasion
+    - browser_automation
+  product:
+    - Wazuh
+  security_domain: endpoint
+
+graylog:
+  query: data_win_system_eventID:"1" AND (data_win_eventdata_image:/.*[Cc][Hh][Rr][Oo][Mm][Ee]\.exe.*/ OR data_win_eventdata_image:/.*[Bb][Rr][Aa][Vv][Ee]\.exe.*/ OR data_win_eventdata_image:/.*[Oo][Pp][Ee][Rr][Aa]\.exe.*/ OR data_win_eventdata_image:/.*[Vv][Ii][Vv][Aa][Ll][Dd][Ii]\.exe.*/ OR data_win_eventdata_image:/.*[Mm][Ss][Ee][Dd][Gg][Ee]\.exe.*/) AND data_win_eventdata_commandLine:/.*\-\-[Hh][Ee][Aa][Dd][Ll][Ee][Ss][Ss].*/ AND data_win_eventdata_commandLine:/.*\-\-[Dd][Ii][Ss][Aa][Bb][Ll][Ee]\-[Gg][Pp][Uu].*/

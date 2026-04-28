@@ -1,0 +1,192 @@
+name: GetAdComputer with PowerShell
+id: c5a31f80-5888-4d81-9f78-1cc65026316e
+version: 1
+schema_version: "1.0"
+date: "2026-04-27"
+author: SOCFortress LLC
+status: production
+type: Hunting
+
+description: >
+  This analytic detects the execution of powershell.exe or pwsh.exe with
+  the Get-ADComputer cmdlet referenced in the command line. Sysmon
+  EventID 1 is used to match process creation events where the image or
+  OriginalFileName is one of the PowerShell binaries AND the command
+  line contains Get-ADComputer. Get-ADComputer is part of the Microsoft
+  ActiveDirectory PowerShell module and is used to discover and
+  enumerate computer objects (workstations, servers, domain
+  controllers) within an Active Directory domain. This activity is
+  significant because it indicates potential reconnaissance efforts by
+  adversaries to map out domain computer assets - a common step in the
+  attack lifecycle that supports target selection for lateral
+  movement, identification of high-value systems (domain controllers,
+  file servers, database hosts), and discovery of potential exploit
+  targets. This is a known T1018 (Remote System Discovery) technique
+  and has been observed in real-world ransomware operations including
+  Medusa Ransomware. If confirmed malicious, this behavior could
+  allow attackers to gain situational awareness, identify lateral
+  movement targets, and plan further attacks potentially leading to
+  unauthorized access, credential theft, and data exfiltration.
+
+data_source:
+  - Sysmon EventID 1
+
+search:
+  index_pattern: "${INDEX_PATTERN}"
+  size: 100
+  sort:
+    - timestamp: desc
+  query:
+    bool:
+      must:
+        - term:
+            agent_name: "${AGENT_NAME}"
+        - term:
+            agent_labels_customer: "${CUSTOMER_CODE}"
+        - term:
+            data_win_system_eventID: "1"
+        - bool:
+            should:
+              - wildcard:
+                  data_win_eventdata_image: "*powershell*.exe"
+              - wildcard:
+                  data_win_eventdata_image: "*pwsh.exe"
+              - term:
+                  data_win_eventdata_originalFileName: "PowerShell.EXE"
+              - term:
+                  data_win_eventdata_originalFileName: "pwsh.dll"
+            minimum_should_match: 1
+        - wildcard:
+            data_win_eventdata_commandLine:
+              value: "*Get-AdComputer*"
+              case_insensitive: true
+        - range:
+            timestamp:
+              gte: "${START_TIME}"
+              lte: "${END_TIME}"
+  _source:
+    - timestamp
+    - agent_name
+    - data_win_eventdata_image
+    - data_win_eventdata_originalFileName
+    - data_win_eventdata_commandLine
+    - data_win_eventdata_parentImage
+    - data_win_eventdata_parentCommandLine
+    - data_win_eventdata_user
+    - data_win_eventdata_processId
+    - data_win_eventdata_processGuid
+    - data_win_eventdata_parentProcessId
+    - data_win_eventdata_parentProcessGuid
+    - data_win_eventdata_hashes
+    - data_win_eventdata_integrityLevel
+    - data_win_eventdata_currentDirectory
+
+parameters:
+  AGENT_NAME:
+    description: "Target agent/host name"
+    type: string
+    required: true
+    example: "DESKTOP-AM0HLGE"
+  CUSTOMER_CODE:
+    description: "Customer label for filtering"
+    type: string
+    required: true
+    example: "lab"
+  INDEX_PATTERN:
+    description: "Elasticsearch index pattern"
+    type: string
+    required: true
+    example: "wazuh-lab_*"
+  START_TIME:
+    description: "Query start time (ISO 8601 or relative)"
+    type: datetime
+    required: false
+    default: "now-24h"
+    example: "2026-04-27 00:00:00.000"
+  END_TIME:
+    description: "Query end time (ISO 8601 or relative)"
+    type: datetime
+    required: false
+    default: "now"
+    example: "2026-04-27 23:59:59.999"
+
+how_to_implement: >
+  This detection requires Sysmon EventID 1 (Process Creation) logs to be forwarded
+  from Windows endpoints to Wazuh Indexer. Ensure Sysmon is deployed with a
+  configuration that captures Image, OriginalFileName, and CommandLine fields
+  (SwiftOnSecurity or Olaf Hartong Sysmon modular config recommended). The
+  detection matches PowerShell binaries (powershell.exe or pwsh.exe) by
+  Image path or PE OriginalFileName, combined with Get-ADComputer in the
+  command line. Case-insensitive matching is used on the cmdlet name to
+  handle PowerShell's flexible casing. The ES DSL uses case_insensitive
+  wildcard option (OpenSearch 2.x / Elasticsearch 7.10+); Graylog
+  equivalent uses character classes. For deeper coverage, also enable
+  PowerShell Script Block Logging (EventID 4104) and correlate against
+  the same cmdlet name in script blocks.
+
+known_false_positives: >
+  System administrators, helpdesk staff, or domain admins may
+  legitimately use Get-ADComputer for AD audit, asset inventory, or
+  troubleshooting. Review the parent process lineage (legitimate admin
+  session vs. unexpected parent), user context (admin account vs.
+  standard user vs. service account), and timing (scheduled audit
+  window vs. unexpected hours) to distinguish authorized administrative
+  activity from reconnaissance. Concurrent use of multiple AD
+  discovery cmdlets (Get-ADComputer, Get-ADUser, Get-ADGroup,
+  Get-ADDomain) on a single host within a short window should be
+  treated as high-priority regardless of user context.
+
+references:
+  - https://attack.mitre.org/techniques/T1018/
+  - https://docs.microsoft.com/en-us/powershell/module/activedirectory/get-adcomputer
+
+response:
+  message: >
+    PowerShell Get-ADComputer enumeration was identified on endpoint
+    $agent_name$ by user $data_win_eventdata_user$. Process image:
+    $data_win_eventdata_image$. Parent process:
+    $data_win_eventdata_parentImage$. Command line:
+    $data_win_eventdata_commandLine$. This is consistent with Active
+    Directory remote system discovery commonly preceding lateral
+    movement; investigate parent process lineage and concurrent AD
+    discovery activity.
+  risk_score: 40
+  severity: medium
+  risk_objects:
+    - field: agent_name
+      type: system
+      score: 30
+    - field: data_win_eventdata_user
+      type: user
+      score: 30
+  threat_objects:
+    - field: data_win_eventdata_image
+      type: process_name
+    - field: data_win_eventdata_parentImage
+      type: parent_process_name
+    - field: data_win_eventdata_commandLine
+      type: command_line
+
+tags:
+  analytic_story:
+    - Active Directory Discovery
+    - Medusa Ransomware
+    - Active Directory Reconnaissance
+    - Remote System Discovery
+  asset_type: Endpoint
+  mitre_attack_id:
+    - T1018
+  custom_tags:
+    - powershell
+    - get_adcomputer
+    - active_directory
+    - ad_enumeration
+    - reconnaissance
+    - remote_system_discovery
+    - lateral_movement_precursor
+  product:
+    - Wazuh
+  security_domain: endpoint
+
+graylog:
+  query: data_win_system_eventID:"1" AND (data_win_eventdata_image:/.*[Pp][Oo][Ww][Ee][Rr][Ss][Hh][Ee][Ll][Ll].*\.exe.*/ OR data_win_eventdata_image:/.*[Pp][Ww][Ss][Hh]\.exe.*/ OR data_win_eventdata_originalFileName:"PowerShell.EXE" OR data_win_eventdata_originalFileName:"pwsh.dll") AND data_win_eventdata_commandLine:/.*[Gg][Ee][Tt]\-[Aa][Dd][Cc][Oo][Mm][Pp][Uu][Tt][Ee][Rr].*/

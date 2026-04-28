@@ -1,0 +1,219 @@
+name: Icacls Deny Command
+id: cf8d753e-a8fe-11eb-8f58-acde48001122
+version: 1
+schema_version: "1.0"
+date: "2026-04-28"
+author: SOCFortress LLC
+status: production
+type: Anomaly
+
+description: >
+  This analytic detects the use of icacls.exe, cacls.exe, or xcacls.exe
+  with deny-permission flags (/deny, /d:, or /d) to modify NTFS access
+  control entries. Sysmon EventID 1 is used to match process creation
+  events where the image or OriginalFileName is one of the ACL
+  modification utilities AND the command line contains one of the deny
+  flag patterns. icacls.exe (and its predecessors cacls.exe and
+  xcacls.exe) are built-in Windows utilities for displaying and
+  modifying file system Access Control Lists. The /deny flag adds an
+  explicit deny ACE for a specified principal, blocking that user or
+  group from accessing the targeted file or directory. This activity
+  is significant because explicit deny ACEs are commonly used by
+  Advanced Persistent Threats (APTs) and coinminer scripts as an
+  anti-analysis and anti-IR technique - by denying SYSTEM, Administrators,
+  or specific user accounts access to malware files, attackers prevent
+  responders, AV scanners, and forensic tools from reading, deleting,
+  or analyzing dropped artifacts. This is a known T1222 (File and
+  Directory Permissions Modification) technique observed in named
+  threat activity including Sandworm tools, Azorult, XMRig coinminer
+  campaigns, and various crypto stealers. If confirmed malicious, this
+  could allow attackers to maintain persistence on locked artifacts,
+  hinder incident response efforts, prevent removal of staged
+  payloads, and complicate forensic recovery.
+
+data_source:
+  - Sysmon EventID 1
+
+search:
+  index_pattern: "${INDEX_PATTERN}"
+  size: 100
+  sort:
+    - timestamp: desc
+  query:
+    bool:
+      must:
+        - term:
+            agent_name: "${AGENT_NAME}"
+        - term:
+            agent_labels_customer: "${CUSTOMER_CODE}"
+        - term:
+            data_win_system_eventID: "1"
+        - bool:
+            should:
+              - wildcard:
+                  data_win_eventdata_image: "*icacls.exe"
+              - wildcard:
+                  data_win_eventdata_image: "*cacls.exe"
+              - wildcard:
+                  data_win_eventdata_image: "*xcacls.exe"
+              - wildcard:
+                  data_win_eventdata_originalFileName:
+                    value: "icacls.exe"
+                    case_insensitive: true
+              - wildcard:
+                  data_win_eventdata_originalFileName:
+                    value: "cacls.exe"
+                    case_insensitive: true
+              - wildcard:
+                  data_win_eventdata_originalFileName:
+                    value: "xcacls.exe"
+                    case_insensitive: true
+            minimum_should_match: 1
+        - bool:
+            should:
+              - wildcard:
+                  data_win_eventdata_commandLine:
+                    value: "*/deny*"
+                    case_insensitive: true
+              - wildcard:
+                  data_win_eventdata_commandLine:
+                    value: "*/d:*"
+                    case_insensitive: true
+              - wildcard:
+                  data_win_eventdata_commandLine:
+                    value: "*/d *"
+                    case_insensitive: true
+            minimum_should_match: 1
+        - range:
+            timestamp:
+              gte: "${START_TIME}"
+              lte: "${END_TIME}"
+  _source:
+    - timestamp
+    - agent_name
+    - data_win_eventdata_image
+    - data_win_eventdata_originalFileName
+    - data_win_eventdata_commandLine
+    - data_win_eventdata_parentImage
+    - data_win_eventdata_parentCommandLine
+    - data_win_eventdata_user
+    - data_win_eventdata_processId
+    - data_win_eventdata_processGuid
+    - data_win_eventdata_parentProcessId
+    - data_win_eventdata_parentProcessGuid
+    - data_win_eventdata_hashes
+    - data_win_eventdata_integrityLevel
+    - data_win_eventdata_currentDirectory
+
+parameters:
+  AGENT_NAME:
+    description: "Target agent/host name"
+    type: string
+    required: true
+    example: "DESKTOP-AM0HLGE"
+  CUSTOMER_CODE:
+    description: "Customer label for filtering"
+    type: string
+    required: true
+    example: "lab"
+  INDEX_PATTERN:
+    description: "Elasticsearch index pattern"
+    type: string
+    required: true
+    example: "wazuh-lab_*"
+  START_TIME:
+    description: "Query start time (ISO 8601 or relative)"
+    type: datetime
+    required: false
+    default: "now-24h"
+    example: "2026-04-28 00:00:00.000"
+  END_TIME:
+    description: "Query end time (ISO 8601 or relative)"
+    type: datetime
+    required: false
+    default: "now"
+    example: "2026-04-28 23:59:59.999"
+
+how_to_implement: >
+  This detection requires Sysmon EventID 1 (Process Creation) logs to be forwarded
+  from Windows endpoints to Wazuh Indexer. Ensure Sysmon is deployed with a
+  configuration that captures Image, OriginalFileName, and CommandLine fields
+  (SwiftOnSecurity or Olaf Hartong Sysmon modular config recommended). The
+  detection matches ACL modification utilities (icacls.exe, cacls.exe,
+  xcacls.exe) by Image path or PE OriginalFileName, combined with one of
+  the deny flag patterns (/deny, /d:, or /d) in the command line. Note that
+  PE OriginalFileName for icacls.exe appears as "iCACLS.EXE" with mixed
+  case in stored events - case-insensitive matching is used throughout.
+  The forward slash in deny flags must be escaped in Graylog regex as \/.
+
+known_false_positives: >
+  No false positives have been identified at this time, but
+  legitimate use cases exist - system administrators, software
+  installers, security hardening scripts (CIS benchmarks, STIG
+  applications), and software-deployment tools may set deny ACEs
+  legitimately to restrict access to sensitive configuration files,
+  application data, or system directories. Filter as needed by
+  allow-listing approved parent processes (deployment frameworks,
+  hardening scripts) or specific target paths.
+
+references:
+  - https://attack.mitre.org/techniques/T1222/
+  - https://thedfirreport.com/2020/04/20/sqlserver-or-the-miner-in-the-basement/
+  - https://learn.microsoft.com/en-us/windows-server/administration/windows-commands/icacls
+
+response:
+  message: >
+    ACL deny modification was detected on endpoint $agent_name$ by
+    user $data_win_eventdata_user$. Process image:
+    $data_win_eventdata_image$. Parent process:
+    $data_win_eventdata_parentImage$. Command line:
+    $data_win_eventdata_commandLine$. This is a known anti-IR /
+    anti-forensics technique used to lock responders out of malware
+    artifacts; investigate the target file or directory whose
+    permissions were modified, identify what is being protected, and
+    review parent process lineage for malicious context.
+  risk_score: 40
+  severity: medium
+  risk_objects:
+    - field: agent_name
+      type: system
+      score: 30
+    - field: data_win_eventdata_user
+      type: user
+      score: 30
+  threat_objects:
+    - field: data_win_eventdata_image
+      type: process_name
+    - field: data_win_eventdata_parentImage
+      type: parent_process_name
+    - field: data_win_eventdata_commandLine
+      type: command_line
+
+tags:
+  analytic_story:
+    - Azorult
+    - Sandworm Tools
+    - Compromised Windows Host
+    - XMRig
+    - Crypto Stealer
+    - Defense Evasion or Unauthorized Access Via SDDL Tampering
+    - Anti-Forensics
+  asset_type: Endpoint
+  mitre_attack_id:
+    - T1222
+  custom_tags:
+    - icacls
+    - cacls
+    - xcacls
+    - acl_modification
+    - deny_ace
+    - file_permissions
+    - defense_evasion
+    - anti_forensics
+    - lolbin
+  product:
+    - Wazuh
+  security_domain: endpoint
+
+graylog:
+  query: data_win_system_eventID:"1" AND (data_win_eventdata_image:/.*[Ii][Cc][Aa][Cc][Ll][Ss]\.exe.*/ OR data_win_eventdata_image:/.*[Cc][Aa][Cc][Ll][Ss]\.exe.*/ OR data_win_eventdata_image:/.*[Xx][Cc][Aa][Cc][Ll][Ss]\.exe.*/ OR data_win_eventdata_originalFileName:/[Ii][Cc][Aa][Cc][Ll][Ss]\.[Ee][Xx][Ee]/ OR data_win_eventdata_originalFileName:/[Cc][Aa][Cc][Ll][Ss]\.[Ee][Xx][Ee]/ OR data_win_eventdata_originalFileName:/[Xx][Cc][Aa][Cc][Ll][Ss]\.[Ee][Xx][Ee]/) AND (data_win_eventdata_commandLine:/.*\/[Dd][Ee][Nn][Yy].*/ OR data_win_eventdata_commandLine:/.*\/[Dd]:.*/ OR data_win_eventdata_commandLine:/.*\/[Dd] .*/)

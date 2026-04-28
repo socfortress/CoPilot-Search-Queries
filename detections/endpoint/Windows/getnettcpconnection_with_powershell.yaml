@@ -1,0 +1,193 @@
+name: GetNetTcpconnection with PowerShell
+id: e02af35c-1de5-4afe-b4be-f45aba57272b
+version: 1
+schema_version: "1.0"
+date: "2026-04-28"
+author: SOCFortress LLC
+status: production
+type: Hunting
+
+description: >
+  This analytic identifies the execution of powershell.exe or pwsh.exe
+  with the Get-NetTCPConnection cmdlet referenced in the command line.
+  Sysmon EventID 1 is used to match process creation events where the
+  image or OriginalFileName is one of the PowerShell binaries AND the
+  command line contains Get-NetTcpConnection. Get-NetTCPConnection is a
+  built-in Microsoft PowerShell cmdlet (part of the NetTCPIP module)
+  that returns the current TCP connections on a Windows system,
+  including local/remote addresses, ports, state (Established,
+  Listen, TimeWait), and owning process ID. It is the modern
+  PowerShell-native equivalent of the legacy netstat.exe utility.
+  Monitoring this activity is significant as it may indicate an
+  adversary or Red Team performing network reconnaissance and
+  situational awareness during the discovery phase of an intrusion -
+  enumerating active connections helps attackers identify
+  administrator sessions, RDP/SSH connections to other hosts, C2
+  beacon traffic from other compromised assets, and pivot
+  opportunities. This is a known T1049 (System Network Connections
+  Discovery) technique. If confirmed malicious, this activity could
+  allow attackers to map network connections, identify lateral
+  movement targets, plan further exploitation, and detect security
+  monitoring connections (SIEM forwarders, EDR cloud connections).
+
+data_source:
+  - Sysmon EventID 1
+
+search:
+  index_pattern: "${INDEX_PATTERN}"
+  size: 100
+  sort:
+    - timestamp: desc
+  query:
+    bool:
+      must:
+        - term:
+            agent_name: "${AGENT_NAME}"
+        - term:
+            agent_labels_customer: "${CUSTOMER_CODE}"
+        - term:
+            data_win_system_eventID: "1"
+        - bool:
+            should:
+              - wildcard:
+                  data_win_eventdata_image: "*powershell*.exe"
+              - wildcard:
+                  data_win_eventdata_image: "*pwsh.exe"
+              - term:
+                  data_win_eventdata_originalFileName: "PowerShell.EXE"
+              - term:
+                  data_win_eventdata_originalFileName: "pwsh.dll"
+            minimum_should_match: 1
+        - wildcard:
+            data_win_eventdata_commandLine:
+              value: "*Get-NetTcpConnection*"
+              case_insensitive: true
+        - range:
+            timestamp:
+              gte: "${START_TIME}"
+              lte: "${END_TIME}"
+  _source:
+    - timestamp
+    - agent_name
+    - data_win_eventdata_image
+    - data_win_eventdata_originalFileName
+    - data_win_eventdata_commandLine
+    - data_win_eventdata_parentImage
+    - data_win_eventdata_parentCommandLine
+    - data_win_eventdata_user
+    - data_win_eventdata_processId
+    - data_win_eventdata_processGuid
+    - data_win_eventdata_parentProcessId
+    - data_win_eventdata_parentProcessGuid
+    - data_win_eventdata_hashes
+    - data_win_eventdata_integrityLevel
+    - data_win_eventdata_currentDirectory
+
+parameters:
+  AGENT_NAME:
+    description: "Target agent/host name"
+    type: string
+    required: true
+    example: "DESKTOP-AM0HLGE"
+  CUSTOMER_CODE:
+    description: "Customer label for filtering"
+    type: string
+    required: true
+    example: "lab"
+  INDEX_PATTERN:
+    description: "Elasticsearch index pattern"
+    type: string
+    required: true
+    example: "wazuh-lab_*"
+  START_TIME:
+    description: "Query start time (ISO 8601 or relative)"
+    type: datetime
+    required: false
+    default: "now-24h"
+    example: "2026-04-28 00:00:00.000"
+  END_TIME:
+    description: "Query end time (ISO 8601 or relative)"
+    type: datetime
+    required: false
+    default: "now"
+    example: "2026-04-28 23:59:59.999"
+
+how_to_implement: >
+  This detection requires Sysmon EventID 1 (Process Creation) logs to be forwarded
+  from Windows endpoints to Wazuh Indexer. Ensure Sysmon is deployed with a
+  configuration that captures Image, OriginalFileName, and CommandLine fields
+  (SwiftOnSecurity or Olaf Hartong Sysmon modular config recommended). The
+  detection matches PowerShell binaries (powershell.exe or pwsh.exe) by
+  Image path or PE OriginalFileName, combined with Get-NetTcpConnection in
+  the command line. Case-insensitive matching is used on the cmdlet name
+  to handle PowerShell's flexible casing. The ES DSL uses case_insensitive
+  wildcard option (OpenSearch 2.x / Elasticsearch 7.10+); Graylog
+  equivalent uses character classes. For deeper coverage, also enable
+  PowerShell Script Block Logging (EventID 4104) and correlate against
+  the same cmdlet name in script blocks.
+
+known_false_positives: >
+  System administrators, helpdesk staff, network engineers, or
+  monitoring scripts may legitimately use Get-NetTCPConnection for
+  network troubleshooting, performance monitoring, or audit purposes.
+  Review the parent process lineage (legitimate admin session vs.
+  unexpected parent), user context (admin account vs. standard user
+  vs. service account), and timing to distinguish authorized
+  administrative activity from reconnaissance. Concurrent use of
+  multiple discovery commands (network, account, group, system) on a
+  single host within a short window should be treated as
+  high-priority regardless of context.
+
+references:
+  - https://attack.mitre.org/techniques/T1049/
+  - https://docs.microsoft.com/en-us/powershell/module/nettcpip/get-nettcpconnection
+
+response:
+  message: >
+    PowerShell Get-NetTCPConnection network connection enumeration was
+    identified on endpoint $agent_name$ by user
+    $data_win_eventdata_user$. Process image: $data_win_eventdata_image$.
+    Parent process: $data_win_eventdata_parentImage$. Command line:
+    $data_win_eventdata_commandLine$. This is consistent with system
+    network connection discovery commonly preceding lateral movement,
+    pivoting, or evasion of network monitoring; investigate parent
+    process lineage and concurrent discovery activity.
+  risk_score: 40
+  severity: medium
+  risk_objects:
+    - field: agent_name
+      type: system
+      score: 30
+    - field: data_win_eventdata_user
+      type: user
+      score: 30
+  threat_objects:
+    - field: data_win_eventdata_image
+      type: process_name
+    - field: data_win_eventdata_parentImage
+      type: parent_process_name
+    - field: data_win_eventdata_commandLine
+      type: command_line
+
+tags:
+  analytic_story:
+    - Active Directory Discovery
+    - System Network Connections Discovery
+    - PowerShell Reconnaissance
+  asset_type: Endpoint
+  mitre_attack_id:
+    - T1049
+  custom_tags:
+    - powershell
+    - get_nettcpconnection
+    - network_discovery
+    - reconnaissance
+    - system_network_connections
+    - lateral_movement_precursor
+    - netstat_replacement
+  product:
+    - Wazuh
+  security_domain: endpoint
+
+graylog:
+  query: data_win_system_eventID:"1" AND (data_win_eventdata_image:/.*[Pp][Oo][Ww][Ee][Rr][Ss][Hh][Ee][Ll][Ll].*\.exe.*/ OR data_win_eventdata_image:/.*[Pp][Ww][Ss][Hh]\.exe.*/ OR data_win_eventdata_originalFileName:"PowerShell.EXE" OR data_win_eventdata_originalFileName:"pwsh.dll") AND data_win_eventdata_commandLine:/.*[Gg][Ee][Tt]\-[Nn][Ee][Tt][Tt][Cc][Pp][Cc][Oo][Nn][Nn][Ee][Cc][Tt][Ii][Oo][Nn].*/

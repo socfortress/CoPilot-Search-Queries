@@ -1,0 +1,222 @@
+name: GetWmiObject Ds Computer with PowerShell
+id: 7141122c-3bc2-4aaa-ab3b-7a85a0bbefc3
+version: 1
+schema_version: "1.0"
+date: "2026-04-28"
+author: SOCFortress LLC
+status: production
+type: Anomaly
+
+description: >
+  This analytic detects the execution of powershell.exe, pwsh.exe, or
+  cmd.exe with command-line arguments that combine the Get-WmiObject
+  cmdlet with the WMI LDAP namespace (root\directory\ldap) targeting
+  the ds_computer class. Sysmon EventID 1 is used to match process
+  creation events where the image or OriginalFileName is one of the
+  PowerShell or Command Prompt binaries AND the command line contains
+  Get-WmiObject, namespace, root\directory\ldap, class, and
+  ds_computer simultaneously. The root\directory\ldap WMI namespace is
+  a less commonly known interface that exposes Active Directory
+  objects through WMI - querying the ds_computer class returns all
+  domain computer objects (workstations, servers, domain controllers)
+  similar to LDAP-based AD enumeration but via the WMI provider. This
+  activity is significant as it indicates potential reconnaissance
+  efforts by adversaries to enumerate domain computers using a less
+  monitored channel than direct LDAP queries or the standard
+  Get-ADComputer/Get-DomainComputer cmdlets. This is a known T1018
+  (Remote System Discovery) technique. If confirmed malicious, this
+  behavior could allow attackers to map the network, identify critical
+  systems while evading detection of more common AD enumeration
+  cmdlets, and plan further attacks potentially leading to
+  unauthorized access and data exfiltration.
+
+data_source:
+  - Sysmon EventID 1
+
+search:
+  index_pattern: "${INDEX_PATTERN}"
+  size: 100
+  sort:
+    - timestamp: desc
+  query:
+    bool:
+      must:
+        - term:
+            agent_name: "${AGENT_NAME}"
+        - term:
+            agent_labels_customer: "${CUSTOMER_CODE}"
+        - term:
+            data_win_system_eventID: "1"
+        - bool:
+            should:
+              - wildcard:
+                  data_win_eventdata_image: "*powershell*.exe"
+              - wildcard:
+                  data_win_eventdata_image: "*pwsh.exe"
+              - wildcard:
+                  data_win_eventdata_image: "*cmd.exe"
+              - term:
+                  data_win_eventdata_originalFileName: "PowerShell.EXE"
+              - term:
+                  data_win_eventdata_originalFileName: "pwsh.dll"
+              - term:
+                  data_win_eventdata_originalFileName: "Cmd.Exe"
+            minimum_should_match: 1
+        - wildcard:
+            data_win_eventdata_commandLine:
+              value: "*Get-WmiObject*"
+              case_insensitive: true
+        - wildcard:
+            data_win_eventdata_commandLine:
+              value: "*namespace *"
+              case_insensitive: true
+        - wildcard:
+            data_win_eventdata_commandLine:
+              value: "*root*directory*ldap*"
+              case_insensitive: true
+        - wildcard:
+            data_win_eventdata_commandLine:
+              value: "*class *"
+              case_insensitive: true
+        - wildcard:
+            data_win_eventdata_commandLine:
+              value: "*ds_computer*"
+              case_insensitive: true
+        - range:
+            timestamp:
+              gte: "${START_TIME}"
+              lte: "${END_TIME}"
+  _source:
+    - timestamp
+    - agent_name
+    - data_win_eventdata_image
+    - data_win_eventdata_originalFileName
+    - data_win_eventdata_commandLine
+    - data_win_eventdata_parentImage
+    - data_win_eventdata_parentCommandLine
+    - data_win_eventdata_user
+    - data_win_eventdata_processId
+    - data_win_eventdata_processGuid
+    - data_win_eventdata_parentProcessId
+    - data_win_eventdata_parentProcessGuid
+    - data_win_eventdata_hashes
+    - data_win_eventdata_integrityLevel
+    - data_win_eventdata_currentDirectory
+
+parameters:
+  AGENT_NAME:
+    description: "Target agent/host name"
+    type: string
+    required: true
+    example: "DESKTOP-AM0HLGE"
+  CUSTOMER_CODE:
+    description: "Customer label for filtering"
+    type: string
+    required: true
+    example: "lab"
+  INDEX_PATTERN:
+    description: "Elasticsearch index pattern"
+    type: string
+    required: true
+    example: "wazuh-lab_*"
+  START_TIME:
+    description: "Query start time (ISO 8601 or relative)"
+    type: datetime
+    required: false
+    default: "now-24h"
+    example: "2026-04-28 00:00:00.000"
+  END_TIME:
+    description: "Query end time (ISO 8601 or relative)"
+    type: datetime
+    required: false
+    default: "now"
+    example: "2026-04-28 23:59:59.999"
+
+how_to_implement: >
+  This detection requires Sysmon EventID 1 (Process Creation) logs to be forwarded
+  from Windows endpoints to Wazuh Indexer. Ensure Sysmon is deployed with a
+  configuration that captures Image, OriginalFileName, and CommandLine fields
+  (SwiftOnSecurity or Olaf Hartong Sysmon modular config recommended). The
+  detection requires all five command-line keywords (Get-WmiObject, namespace,
+  root\directory\ldap, class, ds_computer) to be present simultaneously in
+  the same command line, which keeps fidelity high. Note that backslash
+  matching in OpenSearch wildcard requires careful escaping - this
+  detection uses a permissive root*directory*ldap pattern (any character
+  between the keywords) which functionally matches the literal
+  root\directory\ldap path in real-world commands while avoiding
+  backslash-escaping complexity. Case-insensitive matching is used on
+  PowerShell strings. The ES DSL uses case_insensitive wildcard option
+  (OpenSearch 2.x / Elasticsearch 7.10+); Graylog equivalent uses
+  character classes.
+
+known_false_positives: >
+  System administrators or directory infrastructure tools may
+  legitimately use the root\directory\ldap WMI namespace for AD
+  troubleshooting, custom inventory scripts, or specialized monitoring
+  tools. However, this WMI namespace is not commonly used in standard
+  administrative workflows - most admins use LDAP queries via ADSI or
+  the ActiveDirectory PowerShell module. Review the parent process
+  lineage, user context, and timing carefully. Concurrent use of
+  multiple AD discovery techniques on a single host within a short
+  window should be treated as high-priority regardless of context.
+
+references:
+  - https://attack.mitre.org/techniques/T1018/
+  - https://learn.microsoft.com/en-us/windows/win32/wmisdk/wmi-isolation
+  - https://docs.microsoft.com/en-us/powershell/module/microsoft.powershell.management/get-wmiobject
+
+response:
+  message: >
+    PowerShell Get-WmiObject WMI-based AD computer enumeration via
+    root\directory\ldap namespace was identified on endpoint
+    $agent_name$ by user $data_win_eventdata_user$. Process image:
+    $data_win_eventdata_image$. Parent process:
+    $data_win_eventdata_parentImage$. Command line:
+    $data_win_eventdata_commandLine$. This is consistent with stealthy
+    AD computer enumeration via the less-monitored WMI LDAP namespace,
+    commonly used by adversaries to evade detection of standard AD
+    discovery cmdlets; investigate parent process lineage and
+    concurrent discovery activity.
+  risk_score: 40
+  severity: medium
+  risk_objects:
+    - field: agent_name
+      type: system
+      score: 30
+    - field: data_win_eventdata_user
+      type: user
+      score: 30
+  threat_objects:
+    - field: data_win_eventdata_image
+      type: process_name
+    - field: data_win_eventdata_parentImage
+      type: parent_process_name
+    - field: data_win_eventdata_commandLine
+      type: command_line
+
+tags:
+  analytic_story:
+    - Active Directory Discovery
+    - Active Directory Reconnaissance
+    - Remote System Discovery
+    - WMI Reconnaissance
+  asset_type: Endpoint
+  mitre_attack_id:
+    - T1018
+  custom_tags:
+    - powershell
+    - wmi
+    - get_wmiobject
+    - ds_computer
+    - root_directory_ldap
+    - active_directory
+    - ad_enumeration
+    - reconnaissance
+    - remote_system_discovery
+    - stealthy_enumeration
+  product:
+    - Wazuh
+  security_domain: endpoint
+
+graylog:
+  query: data_win_system_eventID:"1" AND (data_win_eventdata_image:/.*[Pp][Oo][Ww][Ee][Rr][Ss][Hh][Ee][Ll][Ll].*\.exe.*/ OR data_win_eventdata_image:/.*[Pp][Ww][Ss][Hh]\.exe.*/ OR data_win_eventdata_image:/.*[Cc][Mm][Dd]\.exe.*/ OR data_win_eventdata_originalFileName:"PowerShell.EXE" OR data_win_eventdata_originalFileName:"pwsh.dll" OR data_win_eventdata_originalFileName:"Cmd.Exe") AND data_win_eventdata_commandLine:/.*[Gg][Ee][Tt]\-[Ww][Mm][Ii][Oo][Bb][Jj][Ee][Cc][Tt].*/ AND data_win_eventdata_commandLine:/.*[Nn][Aa][Mm][Ee][Ss][Pp][Aa][Cc][Ee] .*/ AND data_win_eventdata_commandLine:/.*[Rr][Oo][Oo][Tt].*[Dd][Ii][Rr][Ee][Cc][Tt][Oo][Rr][Yy].*[Ll][Dd][Aa][Pp].*/ AND data_win_eventdata_commandLine:/.*[Cc][Ll][Aa][Ss][Ss] .*/ AND data_win_eventdata_commandLine:/.*[Dd][Ss]_[Cc][Oo][Mm][Pp][Uu][Tt][Ee][Rr].*/

@@ -1,0 +1,199 @@
+name: Get-ForestTrust with PowerShell
+id: 584f4884-0bf1-11ec-a5ec-acde48001122
+version: 1
+schema_version: "1.0"
+date: "2026-04-27"
+author: SOCFortress LLC
+status: production
+type: TTP
+
+description: >
+  This analytic detects the execution of powershell.exe, pwsh.exe, or
+  cmd.exe with the Get-ForestTrust function referenced in the command
+  line. Sysmon EventID 1 is used to match process creation events where
+  the image or OriginalFileName is one of the PowerShell or Command
+  Prompt binaries AND the command line contains Get-ForestTrust.
+  Get-ForestTrust is a function from PowerSploit/PowerView - a
+  well-known offensive PowerShell toolkit - used to enumerate Active
+  Directory forest trust relationships. The presence of this
+  PowerSploit-specific function name in a command line is a strong
+  indicator of attacker tooling rather than legitimate administrative
+  activity. This activity is significant as it indicates potential
+  reconnaissance efforts to map forest trusts, which can inform
+  cross-forest attack chains including SID History abuse, trust ticket
+  forgery, and exploitation of trust relationship misconfigurations
+  spanning multiple forests. If confirmed malicious, this could allow
+  attackers to understand forest-level trust topology, identify
+  cross-forest attack paths, and plan multi-forest lateral movement
+  or privilege escalation campaigns.
+
+data_source:
+  - Sysmon EventID 1
+
+search:
+  index_pattern: "${INDEX_PATTERN}"
+  size: 100
+  sort:
+    - timestamp: desc
+  query:
+    bool:
+      must:
+        - term:
+            agent_name: "${AGENT_NAME}"
+        - term:
+            agent_labels_customer: "${CUSTOMER_CODE}"
+        - term:
+            data_win_system_eventID: "1"
+        - bool:
+            should:
+              - wildcard:
+                  data_win_eventdata_image: "*cmd.exe"
+              - wildcard:
+                  data_win_eventdata_image: "*powershell*.exe"
+              - wildcard:
+                  data_win_eventdata_image: "*pwsh.exe"
+              - term:
+                  data_win_eventdata_originalFileName: "Cmd.Exe"
+              - term:
+                  data_win_eventdata_originalFileName: "PowerShell.EXE"
+              - term:
+                  data_win_eventdata_originalFileName: "pwsh.dll"
+            minimum_should_match: 1
+        - wildcard:
+            data_win_eventdata_commandLine:
+              value: "*get-foresttrust*"
+              case_insensitive: true
+        - range:
+            timestamp:
+              gte: "${START_TIME}"
+              lte: "${END_TIME}"
+  _source:
+    - timestamp
+    - agent_name
+    - data_win_eventdata_image
+    - data_win_eventdata_originalFileName
+    - data_win_eventdata_commandLine
+    - data_win_eventdata_parentImage
+    - data_win_eventdata_parentCommandLine
+    - data_win_eventdata_user
+    - data_win_eventdata_processId
+    - data_win_eventdata_processGuid
+    - data_win_eventdata_parentProcessId
+    - data_win_eventdata_parentProcessGuid
+    - data_win_eventdata_hashes
+    - data_win_eventdata_integrityLevel
+    - data_win_eventdata_currentDirectory
+
+parameters:
+  AGENT_NAME:
+    description: "Target agent/host name"
+    type: string
+    required: true
+    example: "DESKTOP-AM0HLGE"
+  CUSTOMER_CODE:
+    description: "Customer label for filtering"
+    type: string
+    required: true
+    example: "lab"
+  INDEX_PATTERN:
+    description: "Elasticsearch index pattern"
+    type: string
+    required: true
+    example: "wazuh-lab_*"
+  START_TIME:
+    description: "Query start time (ISO 8601 or relative)"
+    type: datetime
+    required: false
+    default: "now-24h"
+    example: "2026-04-27 00:00:00.000"
+  END_TIME:
+    description: "Query end time (ISO 8601 or relative)"
+    type: datetime
+    required: false
+    default: "now"
+    example: "2026-04-27 23:59:59.999"
+
+how_to_implement: >
+  This detection requires Sysmon EventID 1 (Process Creation) logs to be forwarded
+  from Windows endpoints to Wazuh Indexer. Ensure Sysmon is deployed with a
+  configuration that captures Image, OriginalFileName, and CommandLine fields
+  (SwiftOnSecurity or Olaf Hartong Sysmon modular config recommended). The
+  detection matches Windows shells (PowerShell or Command Prompt) by Image
+  path or PE OriginalFileName, combined with Get-ForestTrust in the command
+  line. Case-insensitive matching is used on the function name to handle
+  PowerShell's flexible casing. The ES DSL uses case_insensitive wildcard
+  option (OpenSearch 2.x / Elasticsearch 7.10+); Graylog equivalent uses
+  character classes. For deeper coverage, also enable PowerShell Script
+  Block Logging (EventID 4104) and correlate against the same function
+  name in script blocks - script block logging will catch in-memory
+  PowerSploit imports that don't appear on the command line.
+
+known_false_positives: >
+  Limited false positives expected. Get-ForestTrust is a
+  PowerSploit/PowerView offensive function, not a built-in Microsoft
+  cmdlet, so legitimate administrative use is rare. Penetration
+  testers, Red Teamers, and authorized internal security assessors may
+  produce true-positive alerts that are not malicious - these should
+  be tuned via approved-source allow-listing (specific parent process
+  or user account) rather than removing the detection.
+
+references:
+  - https://attack.mitre.org/techniques/T1482/
+  - https://powersploit.readthedocs.io/en/latest/Recon/Get-ForestTrust/
+  - https://blog.harmj0y.net/redteaming/a-guide-to-attacking-domain-trusts/
+
+response:
+  message: >
+    Suspicious PowerSploit Get-ForestTrust execution was identified on
+    endpoint $agent_name$ by user $data_win_eventdata_user$. Process
+    image: $data_win_eventdata_image$. Parent process:
+    $data_win_eventdata_parentImage$. Command line:
+    $data_win_eventdata_commandLine$. This is a high-confidence
+    indicator of offensive AD forest trust enumeration commonly
+    preceding cross-forest attacks; investigate immediately, review
+    parent process lineage, in-memory PowerShell module loads, and
+    concurrent discovery activity.
+  risk_score: 72
+  severity: high
+  risk_objects:
+    - field: agent_name
+      type: system
+      score: 60
+    - field: data_win_eventdata_user
+      type: user
+      score: 60
+  threat_objects:
+    - field: data_win_eventdata_image
+      type: process_name
+    - field: data_win_eventdata_parentImage
+      type: parent_process_name
+    - field: data_win_eventdata_commandLine
+      type: command_line
+
+tags:
+  analytic_story:
+    - Active Directory Discovery
+    - Active Directory Reconnaissance
+    - Domain Trust Discovery
+    - PowerSploit
+    - PowerView
+    - Offensive PowerShell Toolkit
+  asset_type: Endpoint
+  mitre_attack_id:
+    - T1482
+  custom_tags:
+    - powershell
+    - powersploit
+    - powerview
+    - get_foresttrust
+    - forest_trust_discovery
+    - active_directory
+    - reconnaissance
+    - cross_forest_attack
+    - offensive_toolkit
+  product:
+    - Wazuh
+  security_domain: endpoint
+
+graylog:
+  query: data_win_system_eventID:"1" AND (data_win_eventdata_image:/.*[Cc][Mm][Dd]\.exe.*/ OR data_win_eventdata_image:/.*[Pp][Oo][Ww][Ee][Rr][Ss][Hh][Ee][Ll][Ll].*\.exe.*/ OR data_win_eventdata_image:/.*[Pp][Ww][Ss][Hh]\.exe.*/ OR data_win_eventdata_originalFileName:"Cmd.Exe" OR data_win_eventdata_originalFileName:"PowerShell.EXE" OR data_win_eventdata_originalFileName:"pwsh.dll") AND data_win_eventdata_commandLine:/.*[Gg][Ee][Tt]\-[Ff][Oo][Rr][Ee][Ss][Tt][Tt][Rr][Uu][Ss][Tt].*/

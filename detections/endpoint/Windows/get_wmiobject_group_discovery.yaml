@@ -1,0 +1,197 @@
+name: Get WMIObject Group Discovery
+id: 5434f670-155d-11ec-8cca-acde48001122
+version: 1
+schema_version: "1.0"
+date: "2026-04-27"
+author: SOCFortress LLC
+status: production
+type: Hunting
+
+description: >
+  This analytic detects the use of Get-WMIObject combined with the
+  Win32_Group class via PowerShell or cmd.exe to enumerate local
+  groups on an endpoint. Sysmon EventID 1 is used to match process
+  creation events where the image or OriginalFileName is a PowerShell
+  or Command Prompt binary AND the command line contains both
+  "Get-WMIObject" and "Win32_Group". Win32_Group is the WMI class that
+  represents Windows local groups, and Get-WMIObject (the legacy WMI
+  query cmdlet) querying this class returns all local group objects
+  with their names, descriptions, and SIDs. This activity is
+  significant as identifying local groups - particularly privileged
+  ones like Administrators, Backup Operators, Remote Desktop Users -
+  is a common precursor to privilege escalation or lateral movement.
+  This is a known T1069.001 (Local Group Discovery) technique
+  documented in Atomic Red Team. If confirmed malicious, this activity
+  could allow an attacker to map out group memberships, identify
+  high-value local accounts, and plan further exploitation including
+  privileged user targeting, credential theft, and unauthorized access
+  to sensitive resources.
+
+data_source:
+  - Sysmon EventID 1
+
+search:
+  index_pattern: "${INDEX_PATTERN}"
+  size: 100
+  sort:
+    - timestamp: desc
+  query:
+    bool:
+      must:
+        - term:
+            agent_name: "${AGENT_NAME}"
+        - term:
+            agent_labels_customer: "${CUSTOMER_CODE}"
+        - term:
+            data_win_system_eventID: "1"
+        - bool:
+            should:
+              - wildcard:
+                  data_win_eventdata_image: "*cmd.exe"
+              - wildcard:
+                  data_win_eventdata_image: "*powershell*.exe"
+              - wildcard:
+                  data_win_eventdata_image: "*pwsh.exe"
+              - term:
+                  data_win_eventdata_originalFileName: "Cmd.Exe"
+              - term:
+                  data_win_eventdata_originalFileName: "PowerShell.EXE"
+              - term:
+                  data_win_eventdata_originalFileName: "pwsh.dll"
+            minimum_should_match: 1
+        - wildcard:
+            data_win_eventdata_commandLine:
+              value: "*Get-WMIObject*"
+              case_insensitive: true
+        - wildcard:
+            data_win_eventdata_commandLine:
+              value: "*Win32_Group*"
+              case_insensitive: true
+        - range:
+            timestamp:
+              gte: "${START_TIME}"
+              lte: "${END_TIME}"
+  _source:
+    - timestamp
+    - agent_name
+    - data_win_eventdata_image
+    - data_win_eventdata_originalFileName
+    - data_win_eventdata_commandLine
+    - data_win_eventdata_parentImage
+    - data_win_eventdata_parentCommandLine
+    - data_win_eventdata_user
+    - data_win_eventdata_processId
+    - data_win_eventdata_processGuid
+    - data_win_eventdata_parentProcessId
+    - data_win_eventdata_parentProcessGuid
+    - data_win_eventdata_hashes
+    - data_win_eventdata_integrityLevel
+    - data_win_eventdata_currentDirectory
+
+parameters:
+  AGENT_NAME:
+    description: "Target agent/host name"
+    type: string
+    required: true
+    example: "DESKTOP-AM0HLGE"
+  CUSTOMER_CODE:
+    description: "Customer label for filtering"
+    type: string
+    required: true
+    example: "lab"
+  INDEX_PATTERN:
+    description: "Elasticsearch index pattern"
+    type: string
+    required: true
+    example: "wazuh-lab_*"
+  START_TIME:
+    description: "Query start time (ISO 8601 or relative)"
+    type: datetime
+    required: false
+    default: "now-24h"
+    example: "2026-04-27 00:00:00.000"
+  END_TIME:
+    description: "Query end time (ISO 8601 or relative)"
+    type: datetime
+    required: false
+    default: "now"
+    example: "2026-04-27 23:59:59.999"
+
+how_to_implement: >
+  This detection requires Sysmon EventID 1 (Process Creation) logs to be forwarded
+  from Windows endpoints to Wazuh Indexer. Ensure Sysmon is deployed with a
+  configuration that captures Image, OriginalFileName, and CommandLine fields
+  (SwiftOnSecurity or Olaf Hartong Sysmon modular config recommended). The
+  detection matches Windows shells (PowerShell or Command Prompt) by Image
+  path or PE OriginalFileName, combined with both "Get-WMIObject" and
+  "Win32_Group" in the command line. Case-insensitive matching is used on
+  cmdlet/class names to handle PowerShell's flexible casing. The ES DSL
+  uses case_insensitive wildcard option (OpenSearch 2.x / Elasticsearch
+  7.10+); Graylog equivalent uses character classes. For deeper coverage,
+  also enable PowerShell Script Block Logging (EventID 4104) and
+  correlate against the same patterns in script blocks.
+
+known_false_positives: >
+  False positives may be present from system administrators, helpdesk
+  staff, or automation scripts that legitimately query local group
+  memberships for inventory, audit, or troubleshooting purposes. Note
+  that Get-WMIObject is the legacy WMI cmdlet largely replaced by
+  Get-CimInstance in modern PowerShell - its continued use, especially
+  on newer endpoints, may itself be an indicator of older offensive
+  tooling. Review parent process lineage, user context, and timing to
+  distinguish authorized administrative activity from reconnaissance.
+
+references:
+  - https://attack.mitre.org/techniques/T1069/001/
+  - https://github.com/redcanaryco/atomic-red-team/blob/master/atomics/T1069.001/T1069.001.md
+  - https://learn.microsoft.com/en-us/windows/win32/cimwin32prov/win32-group
+
+response:
+  message: >
+    PowerShell Get-WMIObject Win32_Group local group enumeration was
+    identified on endpoint $agent_name$ by user $data_win_eventdata_user$.
+    Process image: $data_win_eventdata_image$. Parent process:
+    $data_win_eventdata_parentImage$. Command line:
+    $data_win_eventdata_commandLine$. This is consistent with local
+    group discovery commonly preceding privilege escalation or lateral
+    movement; investigate parent process lineage and concurrent
+    discovery activity.
+  risk_score: 40
+  severity: medium
+  risk_objects:
+    - field: agent_name
+      type: system
+      score: 30
+    - field: data_win_eventdata_user
+      type: user
+      score: 30
+  threat_objects:
+    - field: data_win_eventdata_image
+      type: process_name
+    - field: data_win_eventdata_parentImage
+      type: parent_process_name
+    - field: data_win_eventdata_commandLine
+      type: command_line
+
+tags:
+  analytic_story:
+    - Active Directory Discovery
+    - Local Group Discovery
+    - WMI Reconnaissance
+  asset_type: Endpoint
+  mitre_attack_id:
+    - T1069.001
+  custom_tags:
+    - powershell
+    - wmi
+    - get_wmiobject
+    - win32_group
+    - local_group_discovery
+    - reconnaissance
+    - privilege_escalation_precursor
+  product:
+    - Wazuh
+  security_domain: endpoint
+
+graylog:
+  query: data_win_system_eventID:"1" AND (data_win_eventdata_image:/.*[Cc][Mm][Dd]\.exe.*/ OR data_win_eventdata_image:/.*[Pp][Oo][Ww][Ee][Rr][Ss][Hh][Ee][Ll][Ll].*\.exe.*/ OR data_win_eventdata_image:/.*[Pp][Ww][Ss][Hh]\.exe.*/ OR data_win_eventdata_originalFileName:"Cmd.Exe" OR data_win_eventdata_originalFileName:"PowerShell.EXE" OR data_win_eventdata_originalFileName:"pwsh.dll") AND data_win_eventdata_commandLine:/.*[Gg][Ee][Tt]\-[Ww][Mm][Ii][Oo][Bb][Jj][Ee][Cc][Tt].*/ AND data_win_eventdata_commandLine:/.*[Ww][Ii][Nn]32_[Gg][Rr][Oo][Uu][Pp].*/

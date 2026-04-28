@@ -1,0 +1,216 @@
+name: Impacket Lateral Movement WMIExec Commandline Parameters
+id: d6e464e4-5c6a-474e-82d2-aed616a3a492
+version: 1
+schema_version: "1.0"
+date: "2026-04-28"
+author: SOCFortress LLC
+status: production
+type: TTP
+
+description: >
+  This analytic identifies the canonical command-line signature
+  produced by Impacket's wmiexec.py lateral-movement module. Sysmon
+  EventID 1 is used to match process creation events whose
+  parentImage is wmiprvse.exe (the WMI Provider Host) AND whose
+  command line contains all of the following highly specific markers:
+  cmd.exe /Q /c (quiet run-and-terminate flags), the loopback address
+  127.0.0.1 in a UNC path to an admin share, and the Impacket-style
+  temporary output filename pattern __<unix_timestamp>.<microseconds>.
+  wmiexec.py operates by invoking the WMI Win32_Process.Create method
+  on the target host, which causes WmiPrvSE.exe to spawn cmd.exe as a
+  child process with a command line that redirects output to a UNC
+  path on an administrative share so the attacker can retrieve the
+  results. The combination of WmiPrvSE parentage plus the canonical
+  /Q /c + UNC + __<timestamp> command-line pattern is essentially
+  unique to wmiexec and unlikely to appear in legitimate software.
+  This is a known T1021.002 (SMB/Admin Shares), T1021.003 (DCOM),
+  T1047 (Windows Management Instrumentation), and T1543.003 (Service
+  Creation) technique observed in named threat activity including
+  WhisperGate, Industroyer2, Prestige Ransomware, Volt Typhoon,
+  Storm-0501 Ransomware, Gozi Malware, and the Graceful Wipe Out
+  Attack. If confirmed malicious, this could allow attackers to
+  execute commands on remote endpoints, potentially leading to
+  unauthorized access, lateral movement, credential theft,
+  persistence, and data exfiltration.
+
+data_source:
+  - Sysmon EventID 1
+
+search:
+  index_pattern: "${INDEX_PATTERN}"
+  size: 100
+  sort:
+    - timestamp: desc
+  query:
+    bool:
+      must:
+        - term:
+            agent_name: "${AGENT_NAME}"
+        - term:
+            agent_labels_customer: "${CUSTOMER_CODE}"
+        - term:
+            data_win_system_eventID: "1"
+        - wildcard:
+            data_win_eventdata_parentImage: "*wmiprvse.exe"
+        - wildcard:
+            data_win_eventdata_commandLine:
+              value: "*cmd.exe*/Q /c*"
+              case_insensitive: true
+        - wildcard:
+            data_win_eventdata_commandLine: "*127.0.0.1*"
+        - regexp:
+            data_win_eventdata_commandLine:
+              value: ".*__[0-9]{1,10}\\.[0-9]{1,10}.*"
+        - range:
+            timestamp:
+              gte: "${START_TIME}"
+              lte: "${END_TIME}"
+  _source:
+    - timestamp
+    - agent_name
+    - data_win_eventdata_image
+    - data_win_eventdata_originalFileName
+    - data_win_eventdata_commandLine
+    - data_win_eventdata_parentImage
+    - data_win_eventdata_parentCommandLine
+    - data_win_eventdata_user
+    - data_win_eventdata_processId
+    - data_win_eventdata_processGuid
+    - data_win_eventdata_parentProcessId
+    - data_win_eventdata_parentProcessGuid
+    - data_win_eventdata_hashes
+    - data_win_eventdata_integrityLevel
+    - data_win_eventdata_currentDirectory
+
+parameters:
+  AGENT_NAME:
+    description: "Target agent/host name"
+    type: string
+    required: true
+    example: "DESKTOP-AM0HLGE"
+  CUSTOMER_CODE:
+    description: "Customer label for filtering"
+    type: string
+    required: true
+    example: "lab"
+  INDEX_PATTERN:
+    description: "Elasticsearch index pattern"
+    type: string
+    required: true
+    example: "wazuh-lab_*"
+  START_TIME:
+    description: "Query start time (ISO 8601 or relative)"
+    type: datetime
+    required: false
+    default: "now-24h"
+    example: "2026-04-28 00:00:00.000"
+  END_TIME:
+    description: "Query end time (ISO 8601 or relative)"
+    type: datetime
+    required: false
+    default: "now"
+    example: "2026-04-28 23:59:59.999"
+
+how_to_implement: >
+  This detection requires Sysmon EventID 1 (Process Creation) logs to be forwarded
+  from Windows endpoints to Wazuh Indexer. Ensure Sysmon is deployed with a
+  configuration that captures Image, OriginalFileName, ParentImage, and
+  CommandLine fields, and that cmd.exe processes spawned by WmiPrvSE.exe are
+  NOT excluded by the Sysmon configuration (some default configurations
+  suppress these events as noise - this exclusion must be removed for the
+  detection to fire). The Elasticsearch query matches the wmiexec loopback
+  variant (127.0.0.1) per the published Splunk source rule. The Graylog
+  query uses Lucene regex with a generalized UNC-host pattern
+  \\\\<host>\\<share>\\__<digits>.<digits> that matches any IP, hostname,
+  or FQDN as the UNC server, making it suitable for detecting real lateral
+  movement against remote targets. The __<timestamp>.<microseconds> filename
+  pattern is matched via regex/regexp queries since standard wildcards cannot
+  enforce length constraints on the random numeric portions. The combination
+  of wmiprvse.exe parent + cmd.exe /Q /c + UNC + __<digits>.<digits> is
+  essentially unique to wmiexec.py and produces minimal false positives.
+
+known_false_positives: >
+  Although uncommon, system administrators may leverage Impacket tools
+  for legitimate system administration or automation use cases. The
+  highly specific multi-marker combination required by this detection
+  makes false positives extremely rare in normal environments.
+
+references:
+  - https://attack.mitre.org/techniques/T1021/002/
+  - https://attack.mitre.org/techniques/T1021/003/
+  - https://attack.mitre.org/techniques/T1047/
+  - https://attack.mitre.org/techniques/T1543/003/
+  - https://github.com/SecureAuthCorp/impacket
+  - https://www.microsoft.com/en-us/security/blog/2023/05/24/volt-typhoon-targets-us-critical-infrastructure-with-living-off-the-land-techniques/
+  - https://www.microsoft.com/security/blog/2022/01/15/destructive-malware-targeting-ukrainian-organizations/
+
+response:
+  message: >
+    Suspicious cmd.exe process spawned by WmiPrvSE.exe with a command
+    line consistent with Impacket wmiexec lateral movement was detected
+    on endpoint $agent_name$ by user $data_win_eventdata_user$. Process
+    image: $data_win_eventdata_image$. Parent process:
+    $data_win_eventdata_parentImage$. Command line:
+    $data_win_eventdata_commandLine$. The combination of WmiPrvSE
+    parentage, /Q /c flags, UNC output redirection to an admin share,
+    and the __<timestamp>.<microseconds> output filename is the
+    canonical signature for wmiexec.py - this is essentially never a
+    false positive. Investigate immediately, identify the source of
+    the WMI invocation (incoming network session creating the WMI
+    process), look for credential-theft activity, and hunt for
+    follow-on lateral movement.
+  risk_score: 90
+  severity: critical
+  risk_objects:
+    - field: agent_name
+      type: system
+      score: 80
+    - field: data_win_eventdata_user
+      type: user
+      score: 80
+  threat_objects:
+    - field: data_win_eventdata_image
+      type: process_name
+    - field: data_win_eventdata_parentImage
+      type: parent_process_name
+    - field: data_win_eventdata_commandLine
+      type: command_line
+
+tags:
+  analytic_story:
+    - WhisperGate
+    - Gozi Malware
+    - Active Directory Lateral Movement
+    - Volt Typhoon
+    - Prestige Ransomware
+    - Industroyer2
+    - Data Destruction
+    - Graceful Wipe Out Attack
+    - Compromised Windows Host
+    - CISA AA22-277A
+    - Storm-0501 Ransomware
+    - Impacket Lateral Movement
+    - WMIExec
+  asset_type: Endpoint
+  mitre_attack_id:
+    - T1021.002
+    - T1021.003
+    - T1047
+    - T1543.003
+  custom_tags:
+    - impacket
+    - wmiexec
+    - lateral_movement
+    - wmi_abuse
+    - admin_share_abuse
+    - unc_redirection
+    - cmd_exe
+    - wmiprvse
+    - apt_lateral_movement
+    - high_fidelity
+  product:
+    - Wazuh
+  security_domain: endpoint
+
+graylog:
+  query: data_win_system_eventID:"1" AND data_win_eventdata_parentImage:/.*[Ww][Mm][Ii][Pp][Rr][Vv][Ss][Ee]\.exe.*/ AND data_win_eventdata_commandLine:/.*[Cc][Mm][Dd]\.exe.*\/[Qq] \/[Cc].*/ AND data_win_eventdata_commandLine:/.*\\\\\\\\[^\\\\]+\\\\[^\\\\]+\\\\__[0-9]{1,10}\.[0-9]{1,10}.*/

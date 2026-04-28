@@ -1,0 +1,191 @@
+name: Hiding Files And Directories With Attrib exe
+id: 6e5a3ae4-90a3-462d-9aa6-0119f638c0f1
+version: 1
+schema_version: "1.0"
+date: "2026-04-28"
+author: SOCFortress LLC
+status: production
+type: TTP
+
+description: >
+  This analytic detects the use of attrib.exe with the +h (hidden)
+  flag to mark files or directories as hidden on a Windows endpoint.
+  Sysmon EventID 1 is used to match process creation events where the
+  image or OriginalFileName is attrib.exe AND the command line contains
+  "+h". attrib.exe is the built-in Windows utility for managing file
+  attributes (hidden, system, read-only, archive). The +h flag sets
+  the hidden attribute, causing the target file or directory to not
+  appear in standard directory listings (Explorer, dir command without
+  /a) by default. This activity is significant because hiding files is
+  a tactic commonly used by adversaries to conceal malicious files,
+  staging directories, dropped tools, persistence artifacts, or
+  exfiltration data from users and casual security inspection. This is
+  a known T1222.001 (File and Directory Permissions Modification:
+  Windows File and Directory Permissions Modification) technique
+  observed in multiple malware families including Azorult,
+  cryptocurrency stealers, malicious Inno Setup loaders, and various
+  Windows persistence-focused implants. If confirmed malicious, this
+  behavior could allow an attacker to persist in the environment
+  undetected, hide additional payloads or staging artifacts,
+  potentially leading to further compromise, lateral movement, or
+  data exfiltration that goes unnoticed during initial response.
+
+data_source:
+  - Sysmon EventID 1
+
+search:
+  index_pattern: "${INDEX_PATTERN}"
+  size: 100
+  sort:
+    - timestamp: desc
+  query:
+    bool:
+      must:
+        - term:
+            agent_name: "${AGENT_NAME}"
+        - term:
+            agent_labels_customer: "${CUSTOMER_CODE}"
+        - term:
+            data_win_system_eventID: "1"
+        - bool:
+            should:
+              - wildcard:
+                  data_win_eventdata_image: "*attrib.exe"
+              - term:
+                  data_win_eventdata_originalFileName: "ATTRIB.EXE"
+            minimum_should_match: 1
+        - wildcard:
+            data_win_eventdata_commandLine: "*+h*"
+        - range:
+            timestamp:
+              gte: "${START_TIME}"
+              lte: "${END_TIME}"
+  _source:
+    - timestamp
+    - agent_name
+    - data_win_eventdata_image
+    - data_win_eventdata_originalFileName
+    - data_win_eventdata_commandLine
+    - data_win_eventdata_parentImage
+    - data_win_eventdata_parentCommandLine
+    - data_win_eventdata_user
+    - data_win_eventdata_processId
+    - data_win_eventdata_processGuid
+    - data_win_eventdata_parentProcessId
+    - data_win_eventdata_parentProcessGuid
+    - data_win_eventdata_hashes
+    - data_win_eventdata_integrityLevel
+    - data_win_eventdata_currentDirectory
+
+parameters:
+  AGENT_NAME:
+    description: "Target agent/host name"
+    type: string
+    required: true
+    example: "DESKTOP-AM0HLGE"
+  CUSTOMER_CODE:
+    description: "Customer label for filtering"
+    type: string
+    required: true
+    example: "lab"
+  INDEX_PATTERN:
+    description: "Elasticsearch index pattern"
+    type: string
+    required: true
+    example: "wazuh-lab_*"
+  START_TIME:
+    description: "Query start time (ISO 8601 or relative)"
+    type: datetime
+    required: false
+    default: "now-24h"
+    example: "2026-04-28 00:00:00.000"
+  END_TIME:
+    description: "Query end time (ISO 8601 or relative)"
+    type: datetime
+    required: false
+    default: "now"
+    example: "2026-04-28 23:59:59.999"
+
+how_to_implement: >
+  This detection requires Sysmon EventID 1 (Process Creation) logs to be forwarded
+  from Windows endpoints to Wazuh Indexer. Ensure Sysmon is deployed with a
+  configuration that captures Image, OriginalFileName, and CommandLine fields
+  (SwiftOnSecurity or Olaf Hartong Sysmon modular config recommended). The
+  detection matches attrib.exe by Image path or PE OriginalFileName, combined
+  with "+h" in the command line. Note that the "+" character is a regex
+  metacharacter and must be escaped in Graylog as "\+". Pair this detection
+  with file-creation monitoring of the target paths to identify what was
+  hidden. For higher fidelity in noisy environments, allow-list specific
+  legitimate parent processes (installer frameworks, system maintenance
+  tools) rather than removing the detection.
+
+known_false_positives: >
+  Some installers, software-deployment tools, system maintenance
+  scripts, and individual users may legitimately use attrib.exe with
+  the +h flag to hide configuration files or temporary directories
+  (e.g., desktop.ini, application data folders). Review the parent
+  process lineage (legitimate installer/setup vs. unexpected parent
+  like Office, browser, or unsigned binary), the target path being
+  hidden (system/program directory vs. user-writable temp/AppData
+  paths), and the user context. Tune as needed by allow-listing
+  approved parent processes.
+
+references:
+  - https://attack.mitre.org/techniques/T1222/001/
+  - https://learn.microsoft.com/en-us/windows-server/administration/windows-commands/attrib
+  - https://github.com/redcanaryco/atomic-red-team/blob/master/atomics/T1222.001/T1222.001.md
+
+response:
+  message: >
+    attrib.exe was used with the +h flag to hide files or directories
+    on endpoint $agent_name$ by user $data_win_eventdata_user$.
+    Process image: $data_win_eventdata_image$. Parent process:
+    $data_win_eventdata_parentImage$. Command line:
+    $data_win_eventdata_commandLine$. This activity is commonly
+    associated with malware staging, persistence concealment, and
+    anti-forensics; investigate the target path that was hidden,
+    review parent process lineage, and look for concurrent file
+    creation or download activity in the same directory.
+  risk_score: 56
+  severity: medium
+  risk_objects:
+    - field: agent_name
+      type: system
+      score: 50
+    - field: data_win_eventdata_user
+      type: user
+      score: 50
+  threat_objects:
+    - field: data_win_eventdata_image
+      type: process_name
+    - field: data_win_eventdata_parentImage
+      type: parent_process_name
+    - field: data_win_eventdata_commandLine
+      type: command_line
+
+tags:
+  analytic_story:
+    - Windows Persistence Techniques
+    - Malicious Inno Setup Loader
+    - Azorult
+    - Compromised Windows Host
+    - Windows Defense Evasion Tactics
+    - Crypto Stealer
+    - Defense Evasion
+  asset_type: Endpoint
+  mitre_attack_id:
+    - T1222.001
+  custom_tags:
+    - attrib
+    - hidden_attribute
+    - file_hiding
+    - defense_evasion
+    - anti_forensics
+    - persistence_concealment
+    - lolbin
+  product:
+    - Wazuh
+  security_domain: endpoint
+
+graylog:
+  query: data_win_system_eventID:"1" AND (data_win_eventdata_image:/.*[Aa][Tt][Tt][Rr][Ii][Bb]\.exe.*/ OR data_win_eventdata_originalFileName:"ATTRIB.EXE") AND data_win_eventdata_commandLine:/.*\+[Hh].*/

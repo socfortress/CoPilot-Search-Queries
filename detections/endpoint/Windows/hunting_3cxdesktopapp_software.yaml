@@ -1,0 +1,200 @@
+name: Hunting 3CXDesktopApp Software
+id: 553d0429-1a1c-44bf-b3f5-a8513deb9ee5
+version: 1
+schema_version: "1.0"
+date: "2026-04-28"
+author: SOCFortress LLC
+status: production
+type: Hunting
+
+description: >
+  This analytic detects the presence of any version of the 3CX Desktop
+  App (3CXDesktopApp.exe on Windows, "3CX Desktop App" on macOS) on
+  monitored endpoints. Sysmon EventID 1 is used to match process
+  creation events where the image path or PE OriginalFileName indicates
+  the 3CX Desktop App. This is a hunting detection - it alerts on any
+  presence of the 3CX client regardless of version, providing visibility
+  into where the software is installed and running across the
+  environment. The detection is significant in the context of the
+  March 2023 supply-chain attack (CVE-2023-29059, also known as
+  SmoothOperator) in which trojanized 3CXDesktopApp installers were
+  distributed through 3CX's official update channel, infecting
+  thousands of systems with infostealer malware. Versions 18.12.407
+  and 18.12.416 (Windows) and 18.11.1213 (macOS) were confirmed
+  compromised. This is a known T1195.002 (Compromise Software Supply
+  Chain) technique. While most installations have since been patched,
+  this hunting query helps blue teams continuously inventory 3CX
+  Desktop App presence, identify outdated installations that may
+  still be vulnerable, and support compliance/audit requirements
+  around supply-chain risk management. If confirmed malicious or
+  outdated, the affected installation could lead to unauthorized
+  access, credential theft, data exfiltration, or further compromise
+  of the affected systems.
+
+data_source:
+  - Sysmon EventID 1
+
+search:
+  index_pattern: "${INDEX_PATTERN}"
+  size: 100
+  sort:
+    - timestamp: desc
+  query:
+    bool:
+      must:
+        - term:
+            agent_name: "${AGENT_NAME}"
+        - term:
+            agent_labels_customer: "${CUSTOMER_CODE}"
+        - term:
+            data_win_system_eventID: "1"
+        - bool:
+            should:
+              - wildcard:
+                  data_win_eventdata_image:
+                    value: "*3CXDesktopApp.exe"
+                    case_insensitive: true
+              - wildcard:
+                  data_win_eventdata_image:
+                    value: "*3CX Desktop App*"
+                    case_insensitive: true
+              - wildcard:
+                  data_win_eventdata_originalFileName:
+                    value: "3CXDesktopApp.exe"
+                    case_insensitive: true
+            minimum_should_match: 1
+        - range:
+            timestamp:
+              gte: "${START_TIME}"
+              lte: "${END_TIME}"
+  _source:
+    - timestamp
+    - agent_name
+    - data_win_eventdata_image
+    - data_win_eventdata_originalFileName
+    - data_win_eventdata_commandLine
+    - data_win_eventdata_parentImage
+    - data_win_eventdata_parentCommandLine
+    - data_win_eventdata_user
+    - data_win_eventdata_processId
+    - data_win_eventdata_processGuid
+    - data_win_eventdata_parentProcessId
+    - data_win_eventdata_parentProcessGuid
+    - data_win_eventdata_hashes
+    - data_win_eventdata_integrityLevel
+    - data_win_eventdata_currentDirectory
+
+parameters:
+  AGENT_NAME:
+    description: "Target agent/host name"
+    type: string
+    required: true
+    example: "DESKTOP-AM0HLGE"
+  CUSTOMER_CODE:
+    description: "Customer label for filtering"
+    type: string
+    required: true
+    example: "lab"
+  INDEX_PATTERN:
+    description: "Elasticsearch index pattern"
+    type: string
+    required: true
+    example: "wazuh-lab_*"
+  START_TIME:
+    description: "Query start time (ISO 8601 or relative)"
+    type: datetime
+    required: false
+    default: "now-24h"
+    example: "2026-04-28 00:00:00.000"
+  END_TIME:
+    description: "Query end time (ISO 8601 or relative)"
+    type: datetime
+    required: false
+    default: "now"
+    example: "2026-04-28 23:59:59.999"
+
+how_to_implement: >
+  This detection requires Sysmon EventID 1 (Process Creation) logs to be forwarded
+  from Windows endpoints to Wazuh Indexer. Ensure Sysmon is deployed with a
+  configuration that captures Image, OriginalFileName, and CommandLine fields
+  (SwiftOnSecurity or Olaf Hartong Sysmon modular config recommended). The
+  detection matches the 3CX Desktop App by Image path or PE OriginalFileName
+  on Windows, or by the macOS app bundle name. Case-insensitive matching is
+  used throughout. This is a hunting query - it is intentionally broad and
+  expected to generate true-positive matches in environments where 3CX is
+  legitimately deployed. The output should be used to inventory installations
+  and verify versions are current. For continuous risk reduction, pair this
+  hunt with file-version inspection (PE FileVersion field, hash lookups
+  against known-good 3CX hashes) to flag specific compromised versions
+  (18.12.407, 18.12.416 on Windows; 18.11.1213 on macOS) for elevated
+  alerting and immediate remediation.
+
+known_false_positives: >
+  Legitimate 3CX Desktop App installations on user workstations
+  generate true-positive matches. Since this is a hunting detection,
+  matches are expected and intended for inventory/audit purposes
+  rather than direct alerting. The detection cannot distinguish
+  vulnerable from patched versions based on process metadata alone -
+  combine with PE file-version inspection or known-good hash lookups
+  to identify specifically vulnerable installations.
+
+references:
+  - https://attack.mitre.org/techniques/T1195/002/
+  - https://www.sentinelone.com/blog/smoothoperator-ongoing-campaign-trojanizes-3cx-software-in-software-supply-chain-attack/
+  - https://www.cisa.gov/news-events/alerts/2023/03/30/supply-chain-attack-against-3cxdesktopapp
+  - https://nvd.nist.gov/vuln/detail/CVE-2023-29059
+
+response:
+  message: >
+    3CX Desktop App execution was identified on endpoint $agent_name$
+    by user $data_win_eventdata_user$. Process image:
+    $data_win_eventdata_image$. Parent process:
+    $data_win_eventdata_parentImage$. Command line:
+    $data_win_eventdata_commandLine$. This is a hunting alert - the
+    3CX Desktop App is legitimate software but was the subject of the
+    March 2023 SmoothOperator supply-chain attack (CVE-2023-29059).
+    Verify the installed version is current (>= 18.12.422 on Windows
+    or >= 18.11.1214 on macOS), validate the binary hash against
+    known-good 3CX releases, and audit network egress from the
+    process for indicators of trojanized behavior.
+  risk_score: 30
+  severity: low
+  risk_objects:
+    - field: agent_name
+      type: system
+      score: 25
+    - field: data_win_eventdata_user
+      type: user
+      score: 25
+  threat_objects:
+    - field: data_win_eventdata_image
+      type: process_name
+    - field: data_win_eventdata_parentImage
+      type: parent_process_name
+    - field: data_win_eventdata_commandLine
+      type: command_line
+
+tags:
+  analytic_story:
+    - 3CX Supply Chain Attack
+    - SmoothOperator
+    - Supply Chain Compromise
+  asset_type: Endpoint
+  cve:
+    - CVE-2023-29059
+  mitre_attack_id:
+    - T1195.002
+  custom_tags:
+    - 3cx
+    - 3cxdesktopapp
+    - supply_chain
+    - smoothoperator
+    - cve_2023_29059
+    - software_inventory
+    - hunting
+  product:
+    - Wazuh
+  security_domain: endpoint
+
+graylog:
+  query: data_win_system_eventID:"1" AND (data_win_eventdata_image:/.*3[Cc][Xx][Dd][Ee][Ss][Kk][Tt][Oo][Pp][Aa][Pp][Pp]\.exe.*/ OR data_win_eventdata_image:/.*3[Cc][Xx] [Dd][Ee][Ss][Kk][Tt][Oo][Pp] [Aa][Pp][Pp].*/ OR data_win_eventdata_originalFileName:/3[Cc][Xx][Dd][Ee][Ss][Kk][Tt][Oo][Pp][Aa][Pp][Pp]\.exe/)
