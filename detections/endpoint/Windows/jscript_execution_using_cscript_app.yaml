@@ -1,0 +1,203 @@
+name: Jscript Execution Using Cscript App
+id: 002f1e24-146e-11ec-a470-acde48001122
+version: 1
+schema_version: "1.0"
+date: "2026-04-28"
+author: SOCFortress LLC
+status: production
+type: TTP
+
+description: >
+  This analytic detects the execution of JScript via the cscript.exe
+  process. Sysmon EventID 1 is used to match process creation events
+  where either the process Image OR the parentImage is cscript.exe AND
+  the corresponding command line contains the //e:jscript engine
+  selector flag. cscript.exe is the Windows Script Host console
+  interpreter and by default executes VBScript - explicitly forcing
+  the JScript engine via //e:jscript is unusual in normal
+  administration and is a known FIN7 tradecraft for executing
+  malicious JavaScript payloads delivered through Office macro chains
+  or staged text/no-extension files. By forcing cscript.exe to the
+  JScript engine, adversaries bypass file-extension based detections
+  that focus on .js or .jse files and avoid invoking wscript.exe,
+  which is more commonly monitored. This is a known T1059.007
+  (Command and Scripting Interpreter: JavaScript) technique observed
+  in named threat activity including FIN7 and Remcos RAT campaigns.
+  If confirmed malicious, this activity could allow attackers to
+  execute arbitrary script code, download additional payloads, perform
+  in-memory execution that evades traditional file scanning, achieve
+  initial foothold, perform credential theft, or pivot to further
+  post-exploitation actions on the compromised host.
+
+data_source:
+  - Sysmon EventID 1
+
+search:
+  index_pattern: "${INDEX_PATTERN}"
+  size: 100
+  sort:
+    - timestamp: desc
+  query:
+    bool:
+      must:
+        - term:
+            agent_name: "${AGENT_NAME}"
+        - term:
+            agent_labels_customer: "${CUSTOMER_CODE}"
+        - term:
+            data_win_system_eventID: "1"
+        - bool:
+            should:
+              - bool:
+                  must:
+                    - wildcard:
+                        data_win_eventdata_image: "*cscript.exe"
+                    - wildcard:
+                        data_win_eventdata_commandLine:
+                          value: "*//e:jscript*"
+                          case_insensitive: true
+              - bool:
+                  must:
+                    - wildcard:
+                        data_win_eventdata_parentImage: "*cscript.exe"
+                    - wildcard:
+                        data_win_eventdata_parentCommandLine:
+                          value: "*//e:jscript*"
+                          case_insensitive: true
+            minimum_should_match: 1
+        - range:
+            timestamp:
+              gte: "${START_TIME}"
+              lte: "${END_TIME}"
+  _source:
+    - timestamp
+    - agent_name
+    - data_win_eventdata_image
+    - data_win_eventdata_originalFileName
+    - data_win_eventdata_commandLine
+    - data_win_eventdata_parentImage
+    - data_win_eventdata_parentCommandLine
+    - data_win_eventdata_user
+    - data_win_eventdata_processId
+    - data_win_eventdata_processGuid
+    - data_win_eventdata_parentProcessId
+    - data_win_eventdata_parentProcessGuid
+    - data_win_eventdata_hashes
+    - data_win_eventdata_integrityLevel
+    - data_win_eventdata_currentDirectory
+
+parameters:
+  AGENT_NAME:
+    description: "Target agent/host name"
+    type: string
+    required: true
+    example: "DESKTOP-AM0HLGE"
+  CUSTOMER_CODE:
+    description: "Customer label for filtering"
+    type: string
+    required: true
+    example: "lab"
+  INDEX_PATTERN:
+    description: "Elasticsearch index pattern"
+    type: string
+    required: true
+    example: "wazuh-lab_*"
+  START_TIME:
+    description: "Query start time (ISO 8601 or relative)"
+    type: datetime
+    required: false
+    default: "now-24h"
+    example: "2026-04-28 00:00:00.000"
+  END_TIME:
+    description: "Query end time (ISO 8601 or relative)"
+    type: datetime
+    required: false
+    default: "now"
+    example: "2026-04-28 23:59:59.999"
+
+how_to_implement: >
+  This detection requires Sysmon EventID 1 (Process Creation) logs to be
+  forwarded from Windows endpoints to Wazuh Indexer. Ensure Sysmon is
+  deployed with a configuration that captures Image, OriginalFileName,
+  ParentImage, CommandLine, and ParentCommandLine fields (SwiftOnSecurity
+  or Olaf Hartong Sysmon modular config recommended). The detection
+  matches two scenarios: (1) cscript.exe is the executing process with
+  //e:jscript on its own command line, OR (2) cscript.exe with
+  //e:jscript is the parent process and a child has been spawned. The
+  //e:jscript flag is matched case-insensitively in both Elasticsearch
+  (via case_insensitive: true on the wildcard) and Graylog (via Lucene
+  character classes [Ee] and [Jj]script). Forward-slash characters
+  inside the Graylog regex are escaped as \/ to avoid clashing with
+  Lucene regex delimiters. False positives are minimal because
+  legitimate scripted automation almost always uses VBScript with
+  cscript or invokes JScript through wscript.exe.
+
+known_false_positives: >
+  No false positives have been identified at this time. Some
+  legitimate vendor installers or in-house automation may invoke
+  cscript with //e:jscript - if such a use case exists in the
+  environment, allow-list specific approved parent processes, script
+  file paths, or user contexts rather than removing the detection.
+
+references:
+  - https://attack.mitre.org/techniques/T1059/007/
+  - https://attack.mitre.org/groups/G0046/
+  - https://www.mandiant.com/resources/fin7-pursuing-an-enigmatic-and-evasive-global-criminal-operation
+  - https://learn.microsoft.com/en-us/previous-versions/windows/it-pro/windows-xp/bb490887(v=technet.10)
+
+response:
+  message: >
+    Suspicious cscript.exe execution forcing the JScript engine via
+    //e:jscript was detected on endpoint $agent_name$ by user
+    $data_win_eventdata_user$. Process image:
+    $data_win_eventdata_image$. Parent process:
+    $data_win_eventdata_parentImage$. Command line:
+    $data_win_eventdata_commandLine$. cscript.exe defaults to
+    VBScript - explicitly invoking JScript is a known FIN7 / Remcos
+    pattern and warrants investigation. Identify the script file
+    being executed, its origin (email attachment, web download,
+    shared drive), the parent process lineage, and any concurrent
+    network egress or follow-on process activity from the host.
+  risk_score: 50
+  severity: medium
+  risk_objects:
+    - field: agent_name
+      type: system
+      score: 50
+    - field: data_win_eventdata_user
+      type: user
+      score: 50
+  threat_objects:
+    - field: data_win_eventdata_image
+      type: process_name
+    - field: data_win_eventdata_parentImage
+      type: parent_process_name
+    - field: data_win_eventdata_commandLine
+      type: command_line
+
+tags:
+  analytic_story:
+    - FIN7
+    - Remcos
+    - Malicious Scripting
+    - Suspicious Command-Line Executions
+    - Compromised Windows Host
+  asset_type: Endpoint
+  mitre_attack_id:
+    - T1059.007
+  custom_tags:
+    - jscript
+    - cscript
+    - windows_script_host
+    - wsh_abuse
+    - script_engine_selector
+    - fin7
+    - remcos
+    - javascript_execution
+    - lolbin
+  product:
+    - Wazuh
+  security_domain: endpoint
+
+graylog:
+  query: data_win_system_eventID:"1" AND ((data_win_eventdata_image:/.*[Cc]script\.exe/ AND data_win_eventdata_commandLine:/.*\/\/[Ee]:[Jj]script.*/) OR (data_win_eventdata_parentImage:/.*[Cc]script\.exe/ AND data_win_eventdata_parentCommandLine:/.*\/\/[Ee]:[Jj]script.*/))
