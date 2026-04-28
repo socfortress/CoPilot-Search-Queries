@@ -1,0 +1,204 @@
+name: Local Account Discovery With Wmic
+id: 4902d7aa-0134-11ec-9d65-acde48001122
+version: 1
+schema_version: "1.0"
+date: "2026-04-28"
+author: SOCFortress LLC
+status: production
+type: Hunting
+
+description: >
+  This analytic detects the execution of wmic.exe with the
+  useraccount command-line argument, used to enumerate local user
+  accounts on a Windows endpoint. Sysmon EventID 1 is used to match
+  process creation events where either the Image path ends with
+  wmic.exe (covering both 64-bit C:\Windows\System32\wbem\wmic.exe
+  and 32-bit C:\Windows\SysWOW64\wbem\wmic.exe locations) OR the
+  OriginalFileName field equals wmic.exe (catching renamed binaries
+  whose PE metadata preserves the original wmic.exe name) AND the
+  command line contains the keyword useraccount. The
+  Win32_UserAccount WMI class returned by `wmic useraccount`
+  enumerates local user accounts including their names, SIDs,
+  disabled state, lockout status, and password policy attributes -
+  this is a common situational-awareness step performed by
+  adversaries early in the attack chain to identify high-value
+  targets such as the built-in Administrator (RID 500) and Guest
+  (RID 501) accounts. This is a known T1087.001 (Account Discovery:
+  Local Account) technique observed in named threat activity
+  including the Active Directory Discovery analytic story and the
+  Scattered Lapsus$ Hunters intrusions. If confirmed malicious, this
+  reconnaissance behavior could be a precursor to credential theft,
+  privilege escalation by targeting weak local accounts, lateral
+  movement using harvested credentials, or persistence via account
+  manipulation - investigate the parent process, the user context,
+  and any concurrent or follow-on discovery commands from the host.
+
+data_source:
+  - Sysmon EventID 1
+
+search:
+  index_pattern: "${INDEX_PATTERN}"
+  size: 100
+  sort:
+    - timestamp: desc
+  query:
+    bool:
+      must:
+        - term:
+            agent_name: "${AGENT_NAME}"
+        - term:
+            agent_labels_customer: "${CUSTOMER_CODE}"
+        - term:
+            data_win_system_eventID: "1"
+        - bool:
+            should:
+              - wildcard:
+                  data_win_eventdata_image:
+                    value: "*wmic.exe"
+                    case_insensitive: true
+              - term:
+                  data_win_eventdata_originalFileName: "wmic.exe"
+            minimum_should_match: 1
+        - wildcard:
+            data_win_eventdata_commandLine:
+              value: "*useraccount*"
+              case_insensitive: true
+        - range:
+            timestamp:
+              gte: "${START_TIME}"
+              lte: "${END_TIME}"
+  _source:
+    - timestamp
+    - agent_name
+    - data_win_eventdata_image
+    - data_win_eventdata_originalFileName
+    - data_win_eventdata_commandLine
+    - data_win_eventdata_parentImage
+    - data_win_eventdata_parentCommandLine
+    - data_win_eventdata_user
+    - data_win_eventdata_processId
+    - data_win_eventdata_processGuid
+    - data_win_eventdata_parentProcessId
+    - data_win_eventdata_parentProcessGuid
+    - data_win_eventdata_hashes
+    - data_win_eventdata_integrityLevel
+    - data_win_eventdata_currentDirectory
+
+parameters:
+  AGENT_NAME:
+    description: "Target agent/host name"
+    type: string
+    required: true
+    example: "DESKTOP-AM0HLGE"
+  CUSTOMER_CODE:
+    description: "Customer label for filtering"
+    type: string
+    required: true
+    example: "lab"
+  INDEX_PATTERN:
+    description: "Elasticsearch index pattern"
+    type: string
+    required: true
+    example: "wazuh-lab_*"
+  START_TIME:
+    description: "Query start time (ISO 8601 or relative)"
+    type: datetime
+    required: false
+    default: "now-24h"
+    example: "2026-04-28 00:00:00.000"
+  END_TIME:
+    description: "Query end time (ISO 8601 or relative)"
+    type: datetime
+    required: false
+    default: "now"
+    example: "2026-04-28 23:59:59.999"
+
+how_to_implement: >
+  This detection requires Sysmon EventID 1 (Process Creation) logs to be
+  forwarded from Windows endpoints to Wazuh Indexer. Ensure Sysmon is
+  deployed with a configuration that captures Image, OriginalFileName,
+  and CommandLine fields (SwiftOnSecurity or Olaf Hartong Sysmon modular
+  config recommended). The detection matches both 64-bit
+  (C:\Windows\System32\wbem\wmic.exe) and 32-bit
+  (C:\Windows\SysWOW64\wbem\wmic.exe) wmic.exe paths via a single
+  case-insensitive *wmic.exe wildcard on the Image field, and also
+  matches renamed wmic binaries via the OriginalFileName field which
+  preserves the original PE filename even when the executable on disk
+  has been renamed by an adversary. The useraccount keyword is matched
+  case-insensitively in both Elasticsearch (case_insensitive: true on
+  the wildcard) and Graylog (Lucene character classes). Because this
+  is a Hunting-type analytic, expect to see legitimate administrative
+  use of `wmic useraccount` in normal IT operations - tune by
+  parent-process or user-context allow-listing rather than by removing
+  the detection.
+
+known_false_positives: >
+  Administrators, IT support staff, audit/compliance scripts, and
+  some configuration management tooling may legitimately invoke
+  `wmic useraccount` to enumerate local accounts during routine
+  health checks, license audits, or password-policy reviews.
+  Allow-list specific approved parent processes (audit agents,
+  configuration management agents), known administrative service
+  accounts, or scheduled-task contexts as needed.
+
+references:
+  - https://attack.mitre.org/techniques/T1087/001/
+  - https://learn.microsoft.com/en-us/windows/win32/cimwin32prov/win32-useraccount
+  - https://lolbas-project.github.io/lolbas/Binaries/Wmic/
+
+response:
+  message: >
+    Local account discovery via wmic.exe was detected on endpoint
+    $agent_name$ by user $data_win_eventdata_user$. Process image:
+    $data_win_eventdata_image$. Parent process:
+    $data_win_eventdata_parentImage$. Command line:
+    $data_win_eventdata_commandLine$. wmic useraccount enumerates
+    local users (including built-in Administrator RID 500 and Guest
+    RID 501 accounts) and is a common situational-awareness step
+    performed by adversaries early in the attack chain - investigate
+    the parent process lineage, the user context, and any concurrent
+    or follow-on discovery commands (`net user`, `net localgroup`,
+    `whoami /priv`) from the host.
+  risk_score: 40
+  severity: medium
+  risk_objects:
+    - field: agent_name
+      type: system
+      score: 30
+    - field: data_win_eventdata_user
+      type: user
+      score: 30
+  threat_objects:
+    - field: data_win_eventdata_image
+      type: process_name
+    - field: data_win_eventdata_parentImage
+      type: parent_process_name
+    - field: data_win_eventdata_commandLine
+      type: command_line
+
+tags:
+  analytic_story:
+    - Active Directory Discovery
+    - Scattered Lapsus$ Hunters
+    - Local Account Discovery
+    - Reconnaissance
+    - Suspicious WMI Use
+  asset_type: Endpoint
+  mitre_attack_id:
+    - T1087.001
+  custom_tags:
+    - wmic
+    - wmi_abuse
+    - local_account_discovery
+    - account_enumeration
+    - reconnaissance
+    - lolbin
+    - situational_awareness
+    - active_directory_discovery
+    - hunting
+  product:
+    - Wazuh
+  security_domain: endpoint
+
+graylog:
+  query: data_win_system_eventID:"1" AND (data_win_eventdata_image:/.*[Ww][Mm][Ii][Cc]\.exe/ OR data_win_eventdata_originalFileName:/[Ww][Mm][Ii][Cc]\.exe/) AND data_win_eventdata_commandLine:/.*[Uu][Ss][Ee][Rr][Aa][Cc][Cc][Oo][Uu][Nn][Tt].*/

@@ -1,0 +1,222 @@
+name: Mshta spawning Rundll32 OR Regsvr32 Process
+id: 4aa5d062-e893-11eb-9eb2-acde48001122
+version: 1
+schema_version: "1.0"
+date: "2026-04-28"
+author: SOCFortress LLC
+status: production
+type: TTP
+
+description: >
+  This analytic detects a suspicious mshta.exe process spawning
+  rundll32.exe or regsvr32.exe child processes. Sysmon EventID 1 is
+  used to match process creation events where the Image path ends
+  with rundll32.exe or regsvr32.exe (or the OriginalFileName field
+  equals RUNDLL32.EXE / REGSVR32.EXE, catching renamed binaries) AND
+  the ParentImage path ends with mshta.exe. mshta.exe is the
+  Microsoft HTML Application Host - a Microsoft-signed LOLBin that
+  executes .hta files as if they were standalone applications, with
+  full access to ActiveX, the Windows Script Host, and arbitrary
+  command execution. Adversaries abuse mshta.exe in phishing chains
+  by delivering a malicious .hta payload (or a remote
+  mshta.exe https://attacker.com/payload.hta invocation) that
+  embeds VBScript or JScript which then proxies execution through
+  rundll32.exe or regsvr32.exe to load a malicious DLL or to invoke
+  the Squiblydoo / Squiblytwo COM-scriptlet pattern. The mshta →
+  rundll32/regsvr32 parent-child relationship is essentially never
+  observed in normal user activity - it is a strong signal of
+  malware delivery, particularly the Trickbot, IcedID, and similar
+  banking-trojan loader chains. This is a known T1218.005 (System
+  Binary Proxy Execution: Mshta) technique observed in named threat
+  activity including Trickbot, IcedID, the Living Off The Land
+  analytic story, and the APT37 Rustonotto / FadeStealer campaigns.
+  If confirmed malicious, this activity could allow attackers to
+  execute arbitrary code under the cover of trusted Microsoft-signed
+  binaries, evade application allow-listing, deliver in-memory
+  payloads, achieve initial foothold, escalate privileges, or
+  download additional malware - posing a severe threat to the
+  environment.
+
+data_source:
+  - Sysmon EventID 1
+
+search:
+  index_pattern: "${INDEX_PATTERN}"
+  size: 100
+  sort:
+    - timestamp: desc
+  query:
+    bool:
+      must:
+        - term:
+            agent_name: "${AGENT_NAME}"
+        - term:
+            agent_labels_customer: "${CUSTOMER_CODE}"
+        - term:
+            data_win_system_eventID: "1"
+        - bool:
+            should:
+              - wildcard:
+                  data_win_eventdata_image:
+                    value: "*rundll32.exe"
+                    case_insensitive: true
+              - wildcard:
+                  data_win_eventdata_image:
+                    value: "*regsvr32.exe"
+                    case_insensitive: true
+              - term:
+                  data_win_eventdata_originalFileName: "RUNDLL32.EXE"
+              - term:
+                  data_win_eventdata_originalFileName: "REGSVR32.EXE"
+            minimum_should_match: 1
+        - wildcard:
+            data_win_eventdata_parentImage:
+              value: "*mshta.exe"
+              case_insensitive: true
+        - range:
+            timestamp:
+              gte: "${START_TIME}"
+              lte: "${END_TIME}"
+  _source:
+    - timestamp
+    - agent_name
+    - data_win_eventdata_image
+    - data_win_eventdata_originalFileName
+    - data_win_eventdata_commandLine
+    - data_win_eventdata_parentImage
+    - data_win_eventdata_parentCommandLine
+    - data_win_eventdata_user
+    - data_win_eventdata_processId
+    - data_win_eventdata_processGuid
+    - data_win_eventdata_parentProcessId
+    - data_win_eventdata_parentProcessGuid
+    - data_win_eventdata_hashes
+    - data_win_eventdata_integrityLevel
+    - data_win_eventdata_currentDirectory
+
+parameters:
+  AGENT_NAME:
+    description: "Target agent/host name"
+    type: string
+    required: true
+    example: "DESKTOP-AM0HLGE"
+  CUSTOMER_CODE:
+    description: "Customer label for filtering"
+    type: string
+    required: true
+    example: "lab"
+  INDEX_PATTERN:
+    description: "Elasticsearch index pattern"
+    type: string
+    required: true
+    example: "wazuh-lab_*"
+  START_TIME:
+    description: "Query start time (ISO 8601 or relative)"
+    type: datetime
+    required: false
+    default: "now-24h"
+    example: "2026-04-28 00:00:00.000"
+  END_TIME:
+    description: "Query end time (ISO 8601 or relative)"
+    type: datetime
+    required: false
+    default: "now"
+    example: "2026-04-28 23:59:59.999"
+
+how_to_implement: >
+  This detection requires Sysmon EventID 1 (Process Creation) logs to be
+  forwarded from Windows endpoints to Wazuh Indexer. Ensure Sysmon is
+  deployed with a configuration that captures Image, OriginalFileName,
+  and ParentImage fields (SwiftOnSecurity or Olaf Hartong Sysmon
+  modular config recommended). The detection matches rundll32.exe or
+  regsvr32.exe by Image path with OriginalFileName fallbacks
+  (RUNDLL32.EXE / REGSVR32.EXE) to catch renamed binaries, combined
+  with mshta.exe as the parent process. Both parent and child checks
+  use case-insensitive matching in Elasticsearch (case_insensitive:
+  true on the wildcards) and in Graylog (Lucene character classes).
+  No command-line filter is applied because the parent-child
+  relationship alone is the high-fidelity indicator - mshta.exe
+  legitimately never spawns rundll32 or regsvr32 in normal user or
+  administrative activity. The detection fires regardless of whether
+  the .hta payload is delivered locally or fetched from a remote URL
+  via the mshta http(s)://... invocation pattern.
+
+known_false_positives: >
+  False positives are limited - this anomaly behavior is not
+  commonly seen on clean hosts. mshta.exe is rarely invoked in
+  normal end-user or administrative workflows, and when it is
+  invoked it does not typically spawn rundll32 or regsvr32 as
+  children. If the organization has a documented legitimate
+  vendor-supplied .hta application that requires this behavior,
+  allow-list the specific approved .hta file path, parent command
+  line, or user context rather than removing the detection.
+
+references:
+  - https://attack.mitre.org/techniques/T1218/005/
+  - https://lolbas-project.github.io/lolbas/Binaries/Mshta/
+  - https://twitter.com/cyb3rops/status/1416050325870587910
+  - https://learn.microsoft.com/en-us/previous-versions/windows/internet-explorer/ie-developer/platform-apis/aa741336(v=vs.85)
+
+response:
+  message: >
+    mshta.exe spawned a rundll32.exe or regsvr32.exe child process
+    on endpoint $agent_name$ by user $data_win_eventdata_user$.
+    Process image: $data_win_eventdata_image$. Process command line:
+    $data_win_eventdata_commandLine$. Parent process:
+    $data_win_eventdata_parentImage$. Parent command line:
+    $data_win_eventdata_parentCommandLine$. This parent-child
+    relationship is essentially never benign - it is a strong
+    signal of phishing-delivered .hta malware (Trickbot, IcedID,
+    APT37 / FadeStealer style loader chains). Investigate
+    immediately, identify the .hta file or remote URL invoked by
+    mshta, examine the rundll32/regsvr32 arguments for malicious
+    DLL loads or Squiblydoo / Squiblytwo COM-scriptlet patterns,
+    look for follow-on process and network activity, and isolate
+    the host pending further analysis.
+  risk_score: 50
+  severity: medium
+  risk_objects:
+    - field: agent_name
+      type: system
+      score: 50
+    - field: data_win_eventdata_user
+      type: user
+      score: 50
+  threat_objects:
+    - field: data_win_eventdata_image
+      type: process_name
+    - field: data_win_eventdata_parentImage
+      type: parent_process_name
+    - field: data_win_eventdata_commandLine
+      type: command_line
+
+tags:
+  analytic_story:
+    - Trickbot
+    - IcedID
+    - Living Off The Land
+    - APT37 Rustonotto and FadeStealer
+    - Phishing Payload Execution
+    - LOLBin Abuse
+    - Compromised Windows Host
+    - Suspicious Command-Line Executions
+  asset_type: Endpoint
+  mitre_attack_id:
+    - T1218.005
+  custom_tags:
+    - mshta
+    - rundll32
+    - regsvr32
+    - lolbin
+    - hta_abuse
+    - signed_binary_abuse
+    - proxy_execution
+    - phishing_payload
+    - squiblydoo
+    - applocker_bypass
+  product:
+    - Wazuh
+  security_domain: endpoint
+
+graylog:
+  query: data_win_system_eventID:"1" AND (data_win_eventdata_image:/.*[Rr][Uu][Nn][Dd][Ll][Ll]32\.exe/ OR data_win_eventdata_image:/.*[Rr][Ee][Gg][Ss][Vv][Rr]32\.exe/ OR data_win_eventdata_originalFileName:/[Rr][Uu][Nn][Dd][Ll][Ll]32\.[Ee][Xx][Ee]/ OR data_win_eventdata_originalFileName:/[Rr][Ee][Gg][Ss][Vv][Rr]32\.[Ee][Xx][Ee]/) AND data_win_eventdata_parentImage:/.*[Mm][Ss][Hh][Tt][Aa]\.exe/

@@ -1,0 +1,241 @@
+name: NLTest Domain Trust Discovery
+id: c3e05466-5f22-11eb-ae93-0242ac130002
+version: 1
+schema_version: "1.0"
+date: "2026-04-28"
+author: SOCFortress LLC
+status: production
+type: TTP
+
+description: >
+  This analytic identifies the execution of nltest.exe with the
+  /domain_trusts or /all_trusts command-line arguments to enumerate
+  Active Directory domain trust relationships. Sysmon EventID 1 is
+  used to match process creation events where the Image path is
+  anchored to \nltest.exe (preventing false positives from binaries
+  whose names merely end with nltest.exe) OR the OriginalFileName
+  field equals nltest.exe / nltestrk.exe (the latter is the original
+  resource-kit heritage filename preserved in the PE metadata of
+  Windows-shipped nltest.exe), AND the command line contains
+  /domain_trusts (lists all directly-trusted domains for the current
+  domain) or /all_trusts (lists ALL trusted domains in the forest,
+  including transitive trusts). nltest.exe is a Microsoft-shipped
+  Active Directory utility - the trust-enumeration commands return
+  the names, types (parent-child, tree-root, external, forest), and
+  directionality (incoming, outgoing, bidirectional) of every trust
+  relationship the host's domain participates in. This information
+  is essentially a map of the broader AD environment beyond the
+  immediate domain and is critical to adversaries planning lateral
+  movement across forest boundaries, identifying high-value targets
+  in trusted domains, or pivoting to less-monitored environments
+  via trust relationships. Domain trust discovery is a hallmark of
+  the situational-awareness phase performed by post-exploitation
+  toolkits, ransomware affiliate playbooks, and APT operators on a
+  freshly compromised domain-joined host. This is a known T1482
+  (Domain Trust Discovery) technique observed in named threat
+  activity including Qakbot, IcedID, Ryuk Ransomware, Medusa
+  Ransomware, Rhysida Ransomware, Storm-0501 Ransomware, the Cleo
+  File Transfer Software intrusions, and the Active Directory
+  Discovery / Domain Trust Discovery analytic stories. If
+  confirmed malicious, this reconnaissance behavior could be a
+  precursor to cross-forest lateral movement, identification of
+  high-value targets in trusted domains, planning of
+  forest-traversal attacks (Kerberos golden ticket abuse, SID
+  history attacks), or selection of less-monitored pivot
+  environments - investigate the parent process, the user context,
+  and any concurrent or follow-on AD discovery commands from the
+  host.
+
+data_source:
+  - Sysmon EventID 1
+
+search:
+  index_pattern: "${INDEX_PATTERN}"
+  size: 100
+  sort:
+    - timestamp: desc
+  query:
+    bool:
+      must:
+        - term:
+            agent_name: "${AGENT_NAME}"
+        - term:
+            agent_labels_customer: "${CUSTOMER_CODE}"
+        - term:
+            data_win_system_eventID: "1"
+        - bool:
+            should:
+              - wildcard:
+                  data_win_eventdata_image:
+                    value: "*\\\\nltest.exe"
+                    case_insensitive: true
+              - term:
+                  data_win_eventdata_originalFileName: "nltestrk.exe"
+              - term:
+                  data_win_eventdata_originalFileName: "nltest.exe"
+            minimum_should_match: 1
+        - bool:
+            should:
+              - wildcard:
+                  data_win_eventdata_commandLine:
+                    value: "*/domain_trusts*"
+                    case_insensitive: true
+              - wildcard:
+                  data_win_eventdata_commandLine:
+                    value: "*/all_trusts*"
+                    case_insensitive: true
+            minimum_should_match: 1
+        - range:
+            timestamp:
+              gte: "${START_TIME}"
+              lte: "${END_TIME}"
+  _source:
+    - timestamp
+    - agent_name
+    - data_win_eventdata_image
+    - data_win_eventdata_originalFileName
+    - data_win_eventdata_commandLine
+    - data_win_eventdata_parentImage
+    - data_win_eventdata_parentCommandLine
+    - data_win_eventdata_user
+    - data_win_eventdata_processId
+    - data_win_eventdata_processGuid
+    - data_win_eventdata_parentProcessId
+    - data_win_eventdata_parentProcessGuid
+    - data_win_eventdata_hashes
+    - data_win_eventdata_integrityLevel
+    - data_win_eventdata_currentDirectory
+
+parameters:
+  AGENT_NAME:
+    description: "Target agent/host name"
+    type: string
+    required: true
+    example: "DESKTOP-AM0HLGE"
+  CUSTOMER_CODE:
+    description: "Customer label for filtering"
+    type: string
+    required: true
+    example: "lab"
+  INDEX_PATTERN:
+    description: "Elasticsearch index pattern"
+    type: string
+    required: true
+    example: "wazuh-lab_*"
+  START_TIME:
+    description: "Query start time (ISO 8601 or relative)"
+    type: datetime
+    required: false
+    default: "now-24h"
+    example: "2026-04-28 00:00:00.000"
+  END_TIME:
+    description: "Query end time (ISO 8601 or relative)"
+    type: datetime
+    required: false
+    default: "now"
+    example: "2026-04-28 23:59:59.999"
+
+how_to_implement: >
+  This detection requires Sysmon EventID 1 (Process Creation) logs to be
+  forwarded from Windows endpoints to Wazuh Indexer. Ensure Sysmon is
+  deployed with a configuration that captures Image, OriginalFileName,
+  and CommandLine fields (SwiftOnSecurity or Olaf Hartong Sysmon modular
+  config recommended). The detection matches nltest.exe by Image path
+  anchored to the path separator (*\\nltest.exe) to avoid false
+  positives from binaries whose filenames merely end with nltest.exe,
+  with OriginalFileName fallbacks to catch renamed binaries (the
+  canonical Windows-shipped nltest.exe carries OriginalFileName
+  nltestrk.exe due to its Resource Kit heritage; both nltest.exe and
+  nltestrk.exe are matched). Both trust-enumeration flags
+  (/domain_trusts and /all_trusts) are matched case-insensitively in
+  Elasticsearch (case_insensitive: true on the wildcards) and Graylog
+  (Lucene character classes with escaped forward slashes). The
+  combination of nltest.exe binary identity plus the
+  /domain_trusts or /all_trusts arguments produces a high-fidelity
+  detection - legitimate use of these specific flags is rare outside
+  of administrator troubleshooting and AD assessment activity.
+
+known_false_positives: >
+  Active Directory administrators and domain engineers may use
+  nltest.exe /domain_trusts or /all_trusts for legitimate
+  troubleshooting of trust replication, post-domain-join validation,
+  or AD assessment activity. Configuration management agents,
+  monitoring tools, or scheduled compliance scripts may also invoke
+  these flags routinely. Allow-list specific approved parent
+  processes (administrative tooling, monitoring agents), known
+  administrative service accounts, or scheduled-task contexts as
+  needed. Outside of administrator activity, nltest trust-discovery
+  flags are rarely used.
+
+references:
+  - https://attack.mitre.org/techniques/T1482/
+  - https://github.com/redcanaryco/atomic-red-team/blob/master/atomics/T1482/T1482.md
+  - https://learn.microsoft.com/en-us/previous-versions/windows/it-pro/windows-server-2012-r2-and-2012/cc731935(v=ws.11)
+  - https://redcanary.com/threat-detection-report/techniques/domain-trust-discovery/
+  - https://thedfirreport.com/2020/10/08/ryuks-return/
+
+response:
+  message: >
+    Domain trust discovery via nltest.exe was detected on endpoint
+    $agent_name$ by user $data_win_eventdata_user$. Process image:
+    $data_win_eventdata_image$. Parent process:
+    $data_win_eventdata_parentImage$. Command line:
+    $data_win_eventdata_commandLine$. The /domain_trusts and
+    /all_trusts flags enumerate Active Directory trust relationships -
+    a common situational-awareness step performed by adversaries
+    planning cross-forest lateral movement, ransomware affiliate
+    playbooks, and APT operators after gaining initial access to a
+    domain-joined host. Investigate the parent process lineage, the
+    user context, and any concurrent or follow-on AD discovery
+    commands (`net group "Domain Admins" /domain`, `whoami /groups`,
+    `dsquery`, `Get-ADUser`, `Get-ADComputer`, `Invoke-BloodHound`)
+    from the host.
+  risk_score: 50
+  severity: medium
+  risk_objects:
+    - field: agent_name
+      type: system
+      score: 50
+    - field: data_win_eventdata_user
+      type: user
+      score: 50
+  threat_objects:
+    - field: data_win_eventdata_image
+      type: process_name
+    - field: data_win_eventdata_parentImage
+      type: parent_process_name
+    - field: data_win_eventdata_commandLine
+      type: command_line
+
+tags:
+  analytic_story:
+    - Active Directory Discovery
+    - Qakbot
+    - Domain Trust Discovery
+    - Medusa Ransomware
+    - Cleo File Transfer Software
+    - Rhysida Ransomware
+    - IcedID
+    - Ryuk Ransomware
+    - Storm-0501 Ransomware
+    - Reconnaissance
+    - Compromised Windows Host
+  asset_type: Endpoint
+  mitre_attack_id:
+    - T1482
+  custom_tags:
+    - nltest
+    - domain_trust_discovery
+    - active_directory_discovery
+    - reconnaissance
+    - lolbin
+    - situational_awareness
+    - post_exploitation
+    - cross_forest_movement
+    - ad_enumeration
+  product:
+    - Wazuh
+  security_domain: endpoint
+
+graylog:
+  query: data_win_system_eventID:"1" AND (data_win_eventdata_image:/.*\\\\[Nn][Ll][Tt][Ee][Ss][Tt]\.exe/ OR data_win_eventdata_originalFileName:/[Nn][Ll][Tt][Ee][Ss][Tt][Rr][Kk]?\.exe/) AND (data_win_eventdata_commandLine:/.*\/[Dd][Oo][Mm][Aa][Ii][Nn]_[Tt][Rr][Uu][Ss][Tt][Ss].*/ OR data_win_eventdata_commandLine:/.*\/[Aa][Ll][Ll]_[Tt][Rr][Uu][Ss][Tt][Ss].*/)

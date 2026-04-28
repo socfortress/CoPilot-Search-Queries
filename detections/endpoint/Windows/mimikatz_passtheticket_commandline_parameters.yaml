@@ -1,0 +1,225 @@
+name: Mimikatz PassTheTicket CommandLine Parameters
+id: 13bbd574-83ac-11ec-99d4-acde48001122
+version: 1
+schema_version: "1.0"
+date: "2026-04-28"
+author: SOCFortress LLC
+status: production
+type: TTP
+
+description: >
+  This analytic detects the use of Mimikatz command-line parameters
+  associated with pass-the-ticket attacks. Sysmon EventID 1 is used
+  to match process creation events whose command line contains
+  either of the two canonical Mimikatz Kerberos commands:
+  sekurlsa::tickets /export (which dumps and exports all Kerberos
+  tickets currently held in LSASS memory to .kirbi files on disk)
+  OR kerberos::ptt (which loads a previously stolen .kirbi ticket
+  into the current logon session, allowing the attacker to
+  impersonate the ticket's owner). These two commands together form
+  the complete pass-the-ticket workflow: harvest tickets from a
+  compromised host, then inject those tickets on a different host
+  to authenticate as the original user without needing their
+  password. The detection is process-agnostic - it matches the
+  Mimikatz syntax markers wherever they appear in a command line,
+  whether invoked through mimikatz.exe directly, through a renamed
+  binary, through PowerShell wrappers (Invoke-Mimikatz,
+  PowerSploit), through Cobalt Strike's mimikatz module, or through
+  any other LOLBin chain that surfaces the literal Mimikatz syntax
+  in argv. Pass-the-ticket bypasses Kerberos pre-authentication and
+  password-reset controls because the stolen TGT or service ticket
+  remains valid for its full lifetime even after the underlying
+  password is changed. This is a known T1550.003 (Use Alternate
+  Authentication Material: Pass the Ticket) technique observed in
+  named threat activity including Sandworm Tools, the Active
+  Directory Kerberos Attacks analytic story, Scattered Lapsus$
+  Hunters, and the CISA AA22-320A and AA23-347A advisories. If
+  confirmed malicious, this activity could allow attackers to
+  escalate privileges, move laterally to high-value targets,
+  access sensitive resources as impersonated users, and maintain
+  persistence within the network.
+
+data_source:
+  - Sysmon EventID 1
+
+search:
+  index_pattern: "${INDEX_PATTERN}"
+  size: 100
+  sort:
+    - timestamp: desc
+  query:
+    bool:
+      must:
+        - term:
+            agent_name: "${AGENT_NAME}"
+        - term:
+            agent_labels_customer: "${CUSTOMER_CODE}"
+        - term:
+            data_win_system_eventID: "1"
+        - bool:
+            should:
+              - wildcard:
+                  data_win_eventdata_commandLine:
+                    value: "*sekurlsa::tickets /export*"
+                    case_insensitive: true
+              - wildcard:
+                  data_win_eventdata_commandLine:
+                    value: "*kerberos::ptt*"
+                    case_insensitive: true
+            minimum_should_match: 1
+        - range:
+            timestamp:
+              gte: "${START_TIME}"
+              lte: "${END_TIME}"
+  _source:
+    - timestamp
+    - agent_name
+    - data_win_eventdata_image
+    - data_win_eventdata_originalFileName
+    - data_win_eventdata_commandLine
+    - data_win_eventdata_parentImage
+    - data_win_eventdata_parentCommandLine
+    - data_win_eventdata_user
+    - data_win_eventdata_processId
+    - data_win_eventdata_processGuid
+    - data_win_eventdata_parentProcessId
+    - data_win_eventdata_parentProcessGuid
+    - data_win_eventdata_hashes
+    - data_win_eventdata_integrityLevel
+    - data_win_eventdata_currentDirectory
+
+parameters:
+  AGENT_NAME:
+    description: "Target agent/host name"
+    type: string
+    required: true
+    example: "DESKTOP-AM0HLGE"
+  CUSTOMER_CODE:
+    description: "Customer label for filtering"
+    type: string
+    required: true
+    example: "lab"
+  INDEX_PATTERN:
+    description: "Elasticsearch index pattern"
+    type: string
+    required: true
+    example: "wazuh-lab_*"
+  START_TIME:
+    description: "Query start time (ISO 8601 or relative)"
+    type: datetime
+    required: false
+    default: "now-24h"
+    example: "2026-04-28 00:00:00.000"
+  END_TIME:
+    description: "Query end time (ISO 8601 or relative)"
+    type: datetime
+    required: false
+    default: "now"
+    example: "2026-04-28 23:59:59.999"
+
+how_to_implement: >
+  This detection requires Sysmon EventID 1 (Process Creation) logs to be
+  forwarded from Windows endpoints to Wazuh Indexer. Ensure Sysmon is
+  deployed with a configuration that captures Image, OriginalFileName,
+  and CommandLine fields (SwiftOnSecurity or Olaf Hartong Sysmon modular
+  config recommended). The detection is process-agnostic - it matches
+  the Mimikatz Kerberos command-line markers (sekurlsa::tickets /export
+  and kerberos::ptt) wherever they appear in a command line, regardless
+  of whether they are invoked through mimikatz.exe directly, through a
+  renamed binary, through PowerShell wrappers (Invoke-Mimikatz,
+  PowerSploit), through Cobalt Strike's mimikatz module, or through any
+  other LOLBin chain. The double-colon Mimikatz syntax is essentially
+  unique to Mimikatz and Mimikatz-derived tooling, so case-insensitive
+  substring matching is sufficient and produces minimal false positives.
+  In environments where Microsoft Defender or another EDR is enabled,
+  legitimate Mimikatz binaries will typically be blocked from execution
+  - this detection still catches the activity through the recorded
+  command line in Sysmon EventID 1 even when the spawned process is
+  immediately killed, since the process creation event is logged
+  before the AV scan completes.
+
+known_false_positives: >
+  Although highly unlikely, legitimate applications may use the same
+  command-line parameters as Mimikatz - for example, internal red-team
+  tooling, security training materials, or compliance assessment
+  scripts. Validate the parent process, the user context, and the
+  business justification before clearing. Allow-list specific known
+  authorized testing tools, scheduled tasks, or user accounts rather
+  than removing the detection. Note that Mimikatz syntax appearing in
+  documentation, scripts, or configuration files that are merely
+  read into memory (not executed as a process) will NOT trigger this
+  detection - only actual process command lines are matched.
+
+references:
+  - https://attack.mitre.org/techniques/T1550/003/
+  - https://github.com/gentilkiwi/mimikatz
+  - https://www.cisa.gov/news-events/cybersecurity-advisories/aa22-320a
+  - https://www.cisa.gov/news-events/cybersecurity-advisories/aa23-347a
+  - https://adsecurity.org/?page_id=1821
+
+response:
+  message: >
+    Mimikatz pass-the-ticket command-line parameters were detected on
+    endpoint $agent_name$ by user $data_win_eventdata_user$. Process
+    image: $data_win_eventdata_image$. Parent process:
+    $data_win_eventdata_parentImage$. Command line:
+    $data_win_eventdata_commandLine$. The presence of
+    sekurlsa::tickets /export or kerberos::ptt in a process command
+    line is essentially never benign - these are the canonical
+    Mimikatz commands for harvesting and replaying Kerberos tickets.
+    Investigate immediately, identify the source of the invocation
+    (parent process lineage, originating user, network session if
+    applicable), check for credential-theft activity in surrounding
+    Sysmon and Security event logs, hunt for follow-on lateral
+    movement to other hosts using the stolen tickets, and consider
+    forcing Kerberos ticket invalidation (TGT reset, password reset
+    of impacted users, krbtgt rotation if a Golden Ticket scenario
+    is suspected).
+  risk_score: 80
+  severity: high
+  risk_objects:
+    - field: agent_name
+      type: system
+      score: 70
+    - field: data_win_eventdata_user
+      type: user
+      score: 70
+  threat_objects:
+    - field: data_win_eventdata_image
+      type: process_name
+    - field: data_win_eventdata_parentImage
+      type: parent_process_name
+    - field: data_win_eventdata_commandLine
+      type: command_line
+
+tags:
+  analytic_story:
+    - Sandworm Tools
+    - CISA AA23-347A
+    - CISA AA22-320A
+    - Active Directory Kerberos Attacks
+    - Scattered Lapsus$ Hunters
+    - Credential Access
+    - Mimikatz Activity
+    - Pass the Ticket
+    - Compromised Windows Host
+  asset_type: Endpoint
+  mitre_attack_id:
+    - T1550.003
+  custom_tags:
+    - mimikatz
+    - pass_the_ticket
+    - kerberos_attack
+    - credential_theft
+    - lateral_movement
+    - active_directory
+    - ticket_harvesting
+    - kerberos_ptt
+    - sekurlsa
+    - high_fidelity
+  product:
+    - Wazuh
+  security_domain: endpoint
+
+graylog:
+  query: data_win_system_eventID:"1" AND (data_win_eventdata_commandLine:/.*[Ss][Ee][Kk][Uu][Rr][Ll][Ss][Aa]::[Tt][Ii][Cc][Kk][Ee][Tt][Ss] \/[Ee][Xx][Pp][Oo][Rr][Tt].*/ OR data_win_eventdata_commandLine:/.*[Kk][Ee][Rr][Bb][Ee][Rr][Oo][Ss]::[Pp][Tt][Tt].*/)

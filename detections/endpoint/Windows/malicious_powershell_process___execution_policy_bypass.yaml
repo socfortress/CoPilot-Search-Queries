@@ -1,0 +1,233 @@
+name: Malicious PowerShell Process - Execution Policy Bypass
+id: 9be56c82-b1cc-4318-87eb-d138afaaca39
+version: 1
+schema_version: "1.0"
+date: "2026-04-28"
+author: SOCFortress LLC
+status: production
+type: Anomaly
+
+description: >
+  This analytic detects PowerShell process invocations that combine
+  the -ExecutionPolicy parameter (or any of its abbreviated forms
+  starting with -ex) with the Bypass argument value, indicating an
+  attempt to disable PowerShell's local script execution policy for
+  the duration of the session. Sysmon EventID 1 is used to match
+  process creation events where the Image path ends with
+  powershell.exe or pwsh.exe (or the OriginalFileName field equals
+  PowerShell.EXE / pwsh.dll, catching renamed binaries) AND the
+  command line contains both a space-prefixed -ex* token AND a
+  space-bounded bypass keyword. PowerShell uniquely accepts ANY
+  unambiguous prefix of a parameter name, so -ExecutionPolicy can be
+  abbreviated to -ex, -exe, -exec, -execu, -execut, -executi,
+  -executio, -execution, -executionp, -executionpo, -executionpol,
+  -executionpoli, -executionpolic, or -executionpolicy. The Splunk
+  source rule deliberately uses a broad space + -ex* prefix match to
+  catch all of these abbreviations in a single pattern. Bypassing the
+  PowerShell execution policy is a hallmark technique used by
+  adversaries to allow execution of unsigned, downloaded, or
+  in-memory scripts that would otherwise be blocked by the default
+  Restricted policy. While IT administrators do legitimately use
+  this flag during automation, the combination of -ex* + Bypass on
+  a Windows endpoint warrants triage to verify the legitimacy of the
+  script being executed. This is a known T1059.001 (Command and
+  Scripting Interpreter: PowerShell) technique observed in named
+  threat activity including Volt Typhoon, HAFNIUM, Salt Typhoon,
+  AsyncRAT, XWorm, DarkCrystal RAT, MuddyWater, APT37 / FadeStealer,
+  0bj3ctivity Stealer, BlankGrabber Stealer, and the DHS report
+  TA18-074A. If confirmed malicious, this activity could allow
+  attackers to execute arbitrary unsigned code, leading to further
+  system compromise, data exfiltration, credential theft, lateral
+  movement, or persistent access.
+
+data_source:
+  - Sysmon EventID 1
+
+search:
+  index_pattern: "${INDEX_PATTERN}"
+  size: 100
+  sort:
+    - timestamp: desc
+  query:
+    bool:
+      must:
+        - term:
+            agent_name: "${AGENT_NAME}"
+        - term:
+            agent_labels_customer: "${CUSTOMER_CODE}"
+        - term:
+            data_win_system_eventID: "1"
+        - bool:
+            should:
+              - wildcard:
+                  data_win_eventdata_image:
+                    value: "*powershell.exe"
+                    case_insensitive: true
+              - wildcard:
+                  data_win_eventdata_image: "*pwsh.exe"
+              - term:
+                  data_win_eventdata_originalFileName: "PowerShell.EXE"
+              - term:
+                  data_win_eventdata_originalFileName: "pwsh.dll"
+            minimum_should_match: 1
+        - wildcard:
+            data_win_eventdata_commandLine:
+              value: "* -ex*"
+              case_insensitive: true
+        - wildcard:
+            data_win_eventdata_commandLine:
+              value: "* bypass *"
+              case_insensitive: true
+        - range:
+            timestamp:
+              gte: "${START_TIME}"
+              lte: "${END_TIME}"
+  _source:
+    - timestamp
+    - agent_name
+    - data_win_eventdata_image
+    - data_win_eventdata_originalFileName
+    - data_win_eventdata_commandLine
+    - data_win_eventdata_parentImage
+    - data_win_eventdata_parentCommandLine
+    - data_win_eventdata_user
+    - data_win_eventdata_processId
+    - data_win_eventdata_processGuid
+    - data_win_eventdata_parentProcessId
+    - data_win_eventdata_parentProcessGuid
+    - data_win_eventdata_hashes
+    - data_win_eventdata_integrityLevel
+    - data_win_eventdata_currentDirectory
+
+parameters:
+  AGENT_NAME:
+    description: "Target agent/host name"
+    type: string
+    required: true
+    example: "DESKTOP-AM0HLGE"
+  CUSTOMER_CODE:
+    description: "Customer label for filtering"
+    type: string
+    required: true
+    example: "lab"
+  INDEX_PATTERN:
+    description: "Elasticsearch index pattern"
+    type: string
+    required: true
+    example: "wazuh-lab_*"
+  START_TIME:
+    description: "Query start time (ISO 8601 or relative)"
+    type: datetime
+    required: false
+    default: "now-24h"
+    example: "2026-04-28 00:00:00.000"
+  END_TIME:
+    description: "Query end time (ISO 8601 or relative)"
+    type: datetime
+    required: false
+    default: "now"
+    example: "2026-04-28 23:59:59.999"
+
+how_to_implement: >
+  This detection requires Sysmon EventID 1 (Process Creation) logs to be
+  forwarded from Windows endpoints to Wazuh Indexer. Ensure Sysmon is
+  deployed with a configuration that captures Image, OriginalFileName,
+  and CommandLine fields (SwiftOnSecurity or Olaf Hartong Sysmon modular
+  config recommended). The detection matches both Windows PowerShell
+  (powershell.exe) and PowerShell Core (pwsh.exe) by Image path, with
+  OriginalFileName fallbacks (PowerShell.EXE / pwsh.dll) to catch
+  renamed binaries. The two key markers - a space-prefixed -ex* token
+  AND a space-bounded bypass keyword - are matched case-insensitively
+  in both Elasticsearch (case_insensitive: true on the wildcards) and
+  Graylog (Lucene character classes). The space-prefix on -ex* mirrors
+  Splunk's exact pattern and prevents false positives from substring
+  matches inside file paths. Because legitimate IT automation does
+  invoke -ExecutionPolicy Bypass, expect routine hits from
+  configuration management tools, vendor installers, and admin
+  scripts - tune by allow-listing specific approved parent processes,
+  user accounts, or scheduled-task contexts rather than removing the
+  detection.
+
+known_false_positives: >
+  There may be legitimate reasons to bypass the PowerShell execution
+  policy. Configuration management agents (SCCM, Intune, Ansible,
+  Chef, Puppet), vendor installers, CI/CD pipeline runners, and
+  administrative scripts commonly use -ExecutionPolicy Bypass to
+  ensure consistent script execution across endpoints regardless of
+  the configured policy. Validate the script being run, the parent
+  process lineage, and the user context to confirm legitimacy.
+  Allow-list known administrative tooling rather than removing the
+  detection.
+
+references:
+  - https://attack.mitre.org/techniques/T1059/001/
+  - https://www.microsoft.com/en-us/security/blog/2023/05/24/volt-typhoon-targets-us-critical-infrastructure-with-living-off-the-land-techniques/
+  - https://www.cisa.gov/news-events/cybersecurity-advisories/aa18-074a
+  - https://learn.microsoft.com/en-us/powershell/module/microsoft.powershell.core/about/about_execution_policies
+
+response:
+  message: >
+    PowerShell execution policy bypass attempt detected on endpoint
+    $agent_name$ by user $data_win_eventdata_user$. Process image:
+    $data_win_eventdata_image$. Parent process:
+    $data_win_eventdata_parentImage$. Command line:
+    $data_win_eventdata_commandLine$. The combination of -ex* and
+    Bypass indicates an attempt to disable the local script execution
+    policy for the session - while legitimate IT automation does use
+    this flag, validate the script being executed, the parent
+    process, and the user context before clearing. Investigate any
+    concurrent file-write, network egress, or follow-on process
+    activity from the host.
+  risk_score: 30
+  severity: low
+  risk_objects:
+    - field: agent_name
+      type: system
+      score: 20
+    - field: data_win_eventdata_user
+      type: user
+      score: 20
+  threat_objects:
+    - field: data_win_eventdata_image
+      type: process_name
+    - field: data_win_eventdata_parentImage
+      type: parent_process_name
+    - field: data_win_eventdata_commandLine
+      type: command_line
+
+tags:
+  analytic_story:
+    - DHS Report TA18-074A
+    - Volt Typhoon
+    - China-Nexus Threat Activity
+    - AsyncRAT
+    - HAFNIUM Group
+    - Salt Typhoon
+    - XWorm
+    - DarkCrystal RAT
+    - 0bj3ctivity Stealer
+    - APT37 Rustonotto and FadeStealer
+    - BlankGrabber Stealer
+    - MuddyWater
+    - Malicious PowerShell
+    - Suspicious Command-Line Executions
+    - Compromised Windows Host
+  asset_type: Endpoint
+  mitre_attack_id:
+    - T1059.001
+  custom_tags:
+    - powershell
+    - execution_policy_bypass
+    - powershell_abuse
+    - malicious_powershell
+    - lolbin
+    - defense_evasion
+    - script_execution
+    - command_line_abuse
+    - policy_bypass
+  product:
+    - Wazuh
+  security_domain: endpoint
+
+graylog:
+  query: data_win_system_eventID:"1" AND (data_win_eventdata_image:/.*[Pp][Oo][Ww][Ee][Rr][Ss][Hh][Ee][Ll][Ll]\.exe/ OR data_win_eventdata_image:/.*[Pp][Ww][Ss][Hh]\.exe/ OR data_win_eventdata_originalFileName:/[Pp][Oo][Ww][Ee][Rr][Ss][Hh][Ee][Ll][Ll]\.EXE/ OR data_win_eventdata_originalFileName:/[Pp][Ww][Ss][Hh]\.dll/) AND data_win_eventdata_commandLine:/.* \-[Ee][Xx].*/ AND data_win_eventdata_commandLine:/.* [Bb][Yy][Pp][Aa][Ss][Ss] .*/

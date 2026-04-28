@@ -1,0 +1,216 @@
+name: Network Connection Discovery With Netstat
+id: 2cf5cc25-f39a-436d-a790-4857e5995ede
+version: 1
+schema_version: "1.0"
+date: "2026-04-28"
+author: SOCFortress LLC
+status: production
+type: Hunting
+
+description: >
+  This analytic detects the execution of netstat.exe with command-line
+  arguments used to list network connections on a Windows endpoint.
+  Sysmon EventID 1 is used to match process creation events where the
+  Image path ends with netstat.exe (or the OriginalFileName field
+  equals netstat.exe, catching renamed binaries) AND the command line
+  contains a -a switch in any of its abbreviated forms (-a, -an, -ano,
+  -anob, -anobv, etc.). netstat.exe is the Microsoft TCP/IP
+  network-statistics utility - the -a flag enumerates all active
+  TCP/UDP listeners and connections, -n disables name resolution to
+  speed up enumeration, -o adds the owning process ID, and -b adds
+  the owning binary name (requires elevated privileges). The -ano /
+  -anob combination is the canonical situational-awareness query
+  performed by adversaries early in the post-exploitation chain to
+  enumerate established network connections, listening services,
+  and the processes behind them - this informs decisions about
+  lateral movement targets, command-and-control channels to blend
+  in with, and persistence opportunities. Both Red Teams and
+  adversaries routinely run netstat -ano during the discovery
+  phase. This is a known T1049 (System Network Connections
+  Discovery) technique observed in named threat activity including
+  Volt Typhoon, Prestige Ransomware, Qakbot, PlugX, Medusa
+  Ransomware, the Windows Post-Exploitation analytic story, and
+  the CISA AA22-277A and AA23-347A advisories. If confirmed
+  malicious, this reconnaissance behavior could be a precursor to
+  lateral movement, identification of high-value services to
+  target, planning of data exfiltration channels, or selection of
+  legitimate network connections for C2 traffic blending -
+  investigate the parent process, the user context, and any
+  concurrent or follow-on discovery commands from the host.
+
+data_source:
+  - Sysmon EventID 1
+
+search:
+  index_pattern: "${INDEX_PATTERN}"
+  size: 100
+  sort:
+    - timestamp: desc
+  query:
+    bool:
+      must:
+        - term:
+            agent_name: "${AGENT_NAME}"
+        - term:
+            agent_labels_customer: "${CUSTOMER_CODE}"
+        - term:
+            data_win_system_eventID: "1"
+        - bool:
+            should:
+              - wildcard:
+                  data_win_eventdata_image:
+                    value: "*netstat.exe"
+                    case_insensitive: true
+              - term:
+                  data_win_eventdata_originalFileName: "netstat.exe"
+            minimum_should_match: 1
+        - wildcard:
+            data_win_eventdata_commandLine:
+              value: "*-a*"
+              case_insensitive: true
+        - range:
+            timestamp:
+              gte: "${START_TIME}"
+              lte: "${END_TIME}"
+  _source:
+    - timestamp
+    - agent_name
+    - data_win_eventdata_image
+    - data_win_eventdata_originalFileName
+    - data_win_eventdata_commandLine
+    - data_win_eventdata_parentImage
+    - data_win_eventdata_parentCommandLine
+    - data_win_eventdata_user
+    - data_win_eventdata_processId
+    - data_win_eventdata_processGuid
+    - data_win_eventdata_parentProcessId
+    - data_win_eventdata_parentProcessGuid
+    - data_win_eventdata_hashes
+    - data_win_eventdata_integrityLevel
+    - data_win_eventdata_currentDirectory
+
+parameters:
+  AGENT_NAME:
+    description: "Target agent/host name"
+    type: string
+    required: true
+    example: "DESKTOP-AM0HLGE"
+  CUSTOMER_CODE:
+    description: "Customer label for filtering"
+    type: string
+    required: true
+    example: "lab"
+  INDEX_PATTERN:
+    description: "Elasticsearch index pattern"
+    type: string
+    required: true
+    example: "wazuh-lab_*"
+  START_TIME:
+    description: "Query start time (ISO 8601 or relative)"
+    type: datetime
+    required: false
+    default: "now-24h"
+    example: "2026-04-28 00:00:00.000"
+  END_TIME:
+    description: "Query end time (ISO 8601 or relative)"
+    type: datetime
+    required: false
+    default: "now"
+    example: "2026-04-28 23:59:59.999"
+
+how_to_implement: >
+  This detection requires Sysmon EventID 1 (Process Creation) logs to be
+  forwarded from Windows endpoints to Wazuh Indexer. Ensure Sysmon is
+  deployed with a configuration that captures Image, OriginalFileName,
+  and CommandLine fields (SwiftOnSecurity or Olaf Hartong Sysmon modular
+  config recommended). The detection matches netstat.exe by Image path
+  with an OriginalFileName fallback to catch renamed binaries, combined
+  with a loose -a* command-line wildcard that mirrors the Splunk source
+  rule and catches all common abbreviations (-a, -an, -ano, -anob).
+  Case-insensitive matching is used in both Elasticsearch
+  (case_insensitive: true on the wildcard) and Graylog (Lucene
+  character classes). Because this is a Hunting-type analytic, expect
+  to see legitimate administrative use of netstat -a* in normal IT
+  troubleshooting - tune by parent-process, scheduled-task, or
+  user-context allow-listing rather than by removing the detection.
+  For higher fidelity, pair this analytic with parent-process risk
+  scoring (cmd.exe / powershell.exe spawned from suspicious origins
+  such as Office, browsers, document readers, or unsigned binaries).
+
+known_false_positives: >
+  Administrators, IT support staff, network engineers, monitoring
+  agents, and power users may legitimately use netstat -a* for
+  troubleshooting connectivity, port-conflict diagnosis, service
+  inventory, or compliance auditing. Allow-list specific approved
+  parent processes (monitoring agents, administrative scheduled
+  tasks), known administrative service accounts, or documented
+  troubleshooting contexts as needed.
+
+references:
+  - https://attack.mitre.org/techniques/T1049/
+  - https://www.microsoft.com/en-us/security/blog/2023/05/24/volt-typhoon-targets-us-critical-infrastructure-with-living-off-the-land-techniques/
+  - https://learn.microsoft.com/en-us/windows-server/administration/windows-commands/netstat
+  - https://lolbas-project.github.io/lolbas/Binaries/Netstat/
+
+response:
+  message: >
+    Network connection discovery via netstat.exe was detected on
+    endpoint $agent_name$ by user $data_win_eventdata_user$. Process
+    image: $data_win_eventdata_image$. Parent process:
+    $data_win_eventdata_parentImage$. Command line:
+    $data_win_eventdata_commandLine$. The -a* flag enumerates all
+    active TCP/UDP listeners and connections - a common
+    situational-awareness step performed by adversaries early in
+    the post-exploitation chain. Investigate the parent process
+    lineage, the user context, and any concurrent or follow-on
+    discovery commands (`ipconfig /all`, `route print`,
+    `arp -a`, `nslookup`, `whoami`) from the host.
+  risk_score: 40
+  severity: medium
+  risk_objects:
+    - field: agent_name
+      type: system
+      score: 30
+    - field: data_win_eventdata_user
+      type: user
+      score: 30
+  threat_objects:
+    - field: data_win_eventdata_image
+      type: process_name
+    - field: data_win_eventdata_parentImage
+      type: parent_process_name
+    - field: data_win_eventdata_commandLine
+      type: command_line
+
+tags:
+  analytic_story:
+    - CISA AA22-277A
+    - Windows Post-Exploitation
+    - Active Directory Discovery
+    - CISA AA23-347A
+    - Prestige Ransomware
+    - Qakbot
+    - PlugX
+    - Medusa Ransomware
+    - Volt Typhoon
+    - Network Discovery
+    - Reconnaissance
+  asset_type: Endpoint
+  mitre_attack_id:
+    - T1049
+  custom_tags:
+    - netstat
+    - network_discovery
+    - connection_enumeration
+    - reconnaissance
+    - lolbin
+    - situational_awareness
+    - post_exploitation
+    - hunting
+    - tcp_udp_enumeration
+  product:
+    - Wazuh
+  security_domain: endpoint
+
+graylog:
+  query: data_win_system_eventID:"1" AND (data_win_eventdata_image:/.*[Nn][Ee][Tt][Ss][Tt][Aa][Tt]\.exe/ OR data_win_eventdata_originalFileName:/[Nn][Ee][Tt][Ss][Tt][Aa][Tt]\.exe/) AND data_win_eventdata_commandLine:/.*\-[Aa].*/

@@ -1,0 +1,221 @@
+name: MSBuild Suspicious Spawned By Script Process
+id: 213b3148-24ea-11ec-93a2-acde48001122
+version: 1
+schema_version: "1.0"
+date: "2026-04-28"
+author: SOCFortress LLC
+status: production
+type: TTP
+
+description: >
+  This analytic detects the suspicious spawning of MSBuild.exe by
+  Windows Script Host processes (cscript.exe or wscript.exe).
+  Sysmon EventID 1 is used to match process creation events where
+  the Image path ends with msbuild.exe (or the OriginalFileName
+  field equals MSBuild.exe, catching renamed binaries) AND the
+  ParentImage path ends with cscript.exe or wscript.exe. MSBuild.exe
+  is a Microsoft-signed developer utility that ships with the .NET
+  Framework and is permitted to execute by most application
+  allow-listing solutions (AppLocker, WDAC) - adversaries abuse
+  this trust relationship to run inline C# tasks embedded in
+  attacker-supplied .csproj or .xml project files, achieving
+  arbitrary code execution under the guise of a legitimate signed
+  Microsoft binary. The script-host parentage (cscript.exe /
+  wscript.exe) is highly anomalous because legitimate developers
+  do not invoke MSBuild from VBScript or JScript - it is almost
+  always invoked from cmd.exe, powershell.exe, devenv.exe (Visual
+  Studio), or a CI/CD agent. The combination of MSBuild as child +
+  Windows Script Host as parent is essentially unique to the
+  malware delivery chain where a phishing-delivered .vbs or .js
+  payload uses MSBuild as a downstream proxy execution vehicle.
+  This is a known T1127.001 (Trusted Developer Utilities Proxy
+  Execution: MSBuild) technique observed in named threat activity
+  including the Trusted Developer Utilities Proxy Execution MSBuild
+  analytic story and the Storm-2460 CLFS Zero Day Exploitation
+  campaign. If confirmed malicious, this activity could allow
+  attackers to execute arbitrary code under a trusted Microsoft
+  signature, evade application allow-listing and signature-based
+  defenses, deliver in-memory payloads, achieve initial foothold,
+  or pivot to further post-exploitation actions on the host.
+
+data_source:
+  - Sysmon EventID 1
+
+search:
+  index_pattern: "${INDEX_PATTERN}"
+  size: 100
+  sort:
+    - timestamp: desc
+  query:
+    bool:
+      must:
+        - term:
+            agent_name: "${AGENT_NAME}"
+        - term:
+            agent_labels_customer: "${CUSTOMER_CODE}"
+        - term:
+            data_win_system_eventID: "1"
+        - bool:
+            should:
+              - wildcard:
+                  data_win_eventdata_image:
+                    value: "*msbuild.exe"
+                    case_insensitive: true
+              - term:
+                  data_win_eventdata_originalFileName: "MSBuild.exe"
+            minimum_should_match: 1
+        - bool:
+            should:
+              - wildcard:
+                  data_win_eventdata_parentImage:
+                    value: "*wscript.exe"
+                    case_insensitive: true
+              - wildcard:
+                  data_win_eventdata_parentImage:
+                    value: "*cscript.exe"
+                    case_insensitive: true
+            minimum_should_match: 1
+        - range:
+            timestamp:
+              gte: "${START_TIME}"
+              lte: "${END_TIME}"
+  _source:
+    - timestamp
+    - agent_name
+    - data_win_eventdata_image
+    - data_win_eventdata_originalFileName
+    - data_win_eventdata_commandLine
+    - data_win_eventdata_parentImage
+    - data_win_eventdata_parentCommandLine
+    - data_win_eventdata_user
+    - data_win_eventdata_processId
+    - data_win_eventdata_processGuid
+    - data_win_eventdata_parentProcessId
+    - data_win_eventdata_parentProcessGuid
+    - data_win_eventdata_hashes
+    - data_win_eventdata_integrityLevel
+    - data_win_eventdata_currentDirectory
+
+parameters:
+  AGENT_NAME:
+    description: "Target agent/host name"
+    type: string
+    required: true
+    example: "DESKTOP-AM0HLGE"
+  CUSTOMER_CODE:
+    description: "Customer label for filtering"
+    type: string
+    required: true
+    example: "lab"
+  INDEX_PATTERN:
+    description: "Elasticsearch index pattern"
+    type: string
+    required: true
+    example: "wazuh-lab_*"
+  START_TIME:
+    description: "Query start time (ISO 8601 or relative)"
+    type: datetime
+    required: false
+    default: "now-24h"
+    example: "2026-04-28 00:00:00.000"
+  END_TIME:
+    description: "Query end time (ISO 8601 or relative)"
+    type: datetime
+    required: false
+    default: "now"
+    example: "2026-04-28 23:59:59.999"
+
+how_to_implement: >
+  This detection requires Sysmon EventID 1 (Process Creation) logs to be
+  forwarded from Windows endpoints to Wazuh Indexer. Ensure Sysmon is
+  deployed with a configuration that captures Image, OriginalFileName,
+  and ParentImage fields (SwiftOnSecurity or Olaf Hartong Sysmon
+  modular config recommended). The detection matches MSBuild.exe by
+  Image path with an OriginalFileName fallback to catch renamed
+  binaries, combined with cscript.exe or wscript.exe as the parent
+  process. Both parent and child checks use case-insensitive matching
+  in Elasticsearch (case_insensitive: true on the wildcards) and in
+  Graylog (Lucene character classes). MSBuild is part of the .NET
+  Framework and is present at
+  C:\Windows\Microsoft.NET\Framework\v4.0.30319\MSBuild.exe (and the
+  v2.0.50727 / Framework64 equivalents) on most Windows endpoints. No
+  command-line filter is applied because the parent-child relationship
+  alone is the high-fidelity indicator - legitimate developers and
+  CI/CD pipelines do not invoke MSBuild from a Windows Script Host
+  parent.
+
+known_false_positives: >
+  False positives should be limited as developers do not spawn
+  MSBuild via a Windows Script Host. If the organization has a
+  documented legitimate use case (for example, a vendor installer
+  or in-house automation that wraps an MSBuild invocation in a
+  .vbs or .js wrapper), allow-list the specific approved script
+  files, parent command lines, or user contexts rather than
+  removing the detection.
+
+references:
+  - https://attack.mitre.org/techniques/T1127/001/
+  - https://lolbas-project.github.io/lolbas/Binaries/Msbuild/
+  - https://app.any.run/tasks/dc93ee63-050c-4ff8-b07e-8277af9ab939/
+  - https://learn.microsoft.com/en-us/visualstudio/msbuild/msbuild
+
+response:
+  message: >
+    MSBuild.exe was spawned by a Windows Script Host process
+    ($data_win_eventdata_parentImage$) on endpoint $agent_name$ by
+    user $data_win_eventdata_user$. Process image:
+    $data_win_eventdata_image$. Command line:
+    $data_win_eventdata_commandLine$. Parent command line:
+    $data_win_eventdata_parentCommandLine$. This parent-child
+    relationship is essentially never benign - MSBuild is a trusted
+    Microsoft-signed developer utility frequently abused for proxy
+    execution under attacker-supplied .csproj or .xml project files.
+    Investigate immediately, identify the script file invoked by
+    cscript/wscript, examine the MSBuild project file passed as an
+    argument (likely in temp paths or user profile directories),
+    look for inline C# tasks or downloader logic, and hunt for
+    follow-on process and network activity from the host.
+  risk_score: 50
+  severity: medium
+  risk_objects:
+    - field: agent_name
+      type: system
+      score: 50
+    - field: data_win_eventdata_user
+      type: user
+      score: 50
+  threat_objects:
+    - field: data_win_eventdata_image
+      type: process_name
+    - field: data_win_eventdata_parentImage
+      type: parent_process_name
+    - field: data_win_eventdata_commandLine
+      type: command_line
+
+tags:
+  analytic_story:
+    - Trusted Developer Utilities Proxy Execution MSBuild
+    - Storm-2460 CLFS Zero Day Exploitation
+    - Suspicious Command-Line Executions
+    - Compromised Windows Host
+    - LOLBin Abuse
+  asset_type: Endpoint
+  mitre_attack_id:
+    - T1127.001
+  custom_tags:
+    - msbuild
+    - lolbin
+    - trusted_developer_utility
+    - proxy_execution
+    - script_host_abuse
+    - cscript
+    - wscript
+    - signed_binary_abuse
+    - applocker_bypass
+    - phishing_payload
+  product:
+    - Wazuh
+  security_domain: endpoint
+
+graylog:
+  query: data_win_system_eventID:"1" AND (data_win_eventdata_image:/.*[Mm][Ss][Bb][Uu][Ii][Ll][Dd]\.exe/ OR data_win_eventdata_originalFileName:/[Mm][Ss][Bb][Uu][Ii][Ll][Dd]\.exe/) AND (data_win_eventdata_parentImage:/.*[Ww][Ss][Cc][Rr][Ii][Pp][Tt]\.exe/ OR data_win_eventdata_parentImage:/.*[Cc][Ss][Cc][Rr][Ii][Pp][Tt]\.exe/)

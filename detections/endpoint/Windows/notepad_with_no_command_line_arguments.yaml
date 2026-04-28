@@ -1,0 +1,224 @@
+name: Notepad with no Command Line Arguments
+id: 5adbc5f1-9a2f-41c1-a810-f37e015f8179
+version: 1
+schema_version: "1.0"
+date: "2026-04-28"
+author: SOCFortress LLC
+status: production
+type: TTP
+
+description: >
+  This analytic identifies instances where notepad.exe is launched
+  without any command-line arguments - a behavior commonly
+  associated with the SliverC2 framework and other shellcode
+  injection techniques. Sysmon EventID 1 is used to match process
+  creation events where the Image path is anchored to \notepad.exe
+  (preventing false positives from binaries whose names merely end
+  with notepad.exe) OR the OriginalFileName field equals NOTEPAD.EXE,
+  AND the command line ends within 4 characters of notepad.exe
+  itself - in other words, no file path or other argument is passed
+  to the editor. The SliverC2 implant routinely spawns a fresh
+  notepad.exe instance with no arguments specifically to use it as
+  an injection target: SliverC2 then calls VirtualAllocEx,
+  WriteProcessMemory, and CreateRemoteThread against the new
+  notepad.exe to deliver implant shellcode into a benign-looking
+  Microsoft-signed process. Legitimate notepad.exe invocations
+  almost always carry a file path argument because the typical user
+  workflow is double-clicking a .txt file or running notepad with a
+  file argument from cmd / Run dialog. A bare notepad.exe with no
+  arguments and the window suppressed is therefore a high-fidelity
+  indicator of code-injection activity, particularly on
+  workstation-class endpoints. This is a known T1055 (Process
+  Injection) technique observed in named threat activity including
+  the BishopFox Sliver Adversary Emulation Framework intrusions.
+  If confirmed malicious, this activity could allow an attacker to
+  execute arbitrary code under cover of a Microsoft-signed editor
+  process, evade application allow-listing and signature-based
+  defenses, persist in memory, and pivot to further
+  post-exploitation actions on the host - investigate the parent
+  process, the user context, integrity level, the absence of an
+  associated open-window event, and any concurrent network egress
+  or follow-on process activity from the host.
+
+data_source:
+  - Sysmon EventID 1
+
+search:
+  index_pattern: "${INDEX_PATTERN}"
+  size: 100
+  sort:
+    - timestamp: desc
+  query:
+    bool:
+      must:
+        - term:
+            agent_name: "${AGENT_NAME}"
+        - term:
+            agent_labels_customer: "${CUSTOMER_CODE}"
+        - term:
+            data_win_system_eventID: "1"
+        - bool:
+            should:
+              - wildcard:
+                  data_win_eventdata_image:
+                    value: "*\\\\notepad.exe"
+                    case_insensitive: true
+              - term:
+                  data_win_eventdata_originalFileName: "NOTEPAD.EXE"
+            minimum_should_match: 1
+        - regexp:
+            data_win_eventdata_commandLine:
+              value: ".*notepad\\.exe.{0,4}"
+              case_insensitive: true
+        - range:
+            timestamp:
+              gte: "${START_TIME}"
+              lte: "${END_TIME}"
+  _source:
+    - timestamp
+    - agent_name
+    - data_win_eventdata_image
+    - data_win_eventdata_originalFileName
+    - data_win_eventdata_commandLine
+    - data_win_eventdata_parentImage
+    - data_win_eventdata_parentCommandLine
+    - data_win_eventdata_user
+    - data_win_eventdata_processId
+    - data_win_eventdata_processGuid
+    - data_win_eventdata_parentProcessId
+    - data_win_eventdata_parentProcessGuid
+    - data_win_eventdata_hashes
+    - data_win_eventdata_integrityLevel
+    - data_win_eventdata_currentDirectory
+
+parameters:
+  AGENT_NAME:
+    description: "Target agent/host name"
+    type: string
+    required: true
+    example: "DESKTOP-AM0HLGE"
+  CUSTOMER_CODE:
+    description: "Customer label for filtering"
+    type: string
+    required: true
+    example: "lab"
+  INDEX_PATTERN:
+    description: "Elasticsearch index pattern"
+    type: string
+    required: true
+    example: "wazuh-lab_*"
+  START_TIME:
+    description: "Query start time (ISO 8601 or relative)"
+    type: datetime
+    required: false
+    default: "now-24h"
+    example: "2026-04-28 00:00:00.000"
+  END_TIME:
+    description: "Query end time (ISO 8601 or relative)"
+    type: datetime
+    required: false
+    default: "now"
+    example: "2026-04-28 23:59:59.999"
+
+how_to_implement: >
+  This detection requires Sysmon EventID 1 (Process Creation) logs to be
+  forwarded from Windows endpoints to Wazuh Indexer. Ensure Sysmon is
+  deployed with a configuration that captures Image, OriginalFileName,
+  and CommandLine fields (SwiftOnSecurity or Olaf Hartong Sysmon modular
+  config recommended). The detection matches notepad.exe by Image path
+  anchored to the path separator with an OriginalFileName fallback to
+  catch renamed binaries, combined with a regex on the command line
+  that requires it to terminate within 4 characters of the notepad.exe
+  string itself. The 4-character allowance accommodates a closing
+  double-quote or trailing whitespace following a quoted-path
+  invocation. The Splunk source rule uses `regex
+  process="(?i)(notepad\.exe.{0,4}$)"` and this analytic mirrors the
+  same semantic in both Elasticsearch (regexp query, implicitly
+  anchored to the whole field) and Graylog (Lucene regex, also
+  implicitly anchored). Because workstation users may legitimately
+  launch notepad with no arguments via Start menu or Run dialog, tune
+  by allow-listing specific known interactive parent processes
+  (explorer.exe with interactive user session) or pair this analytic
+  with concurrent EID 8 (CreateRemoteThread) or EID 10 (ProcessAccess)
+  events that target the same notepad.exe processGuid for a
+  high-fidelity injection-into-notepad detection.
+
+known_false_positives: >
+  False positives may be present when users launch Notepad with no
+  arguments from the Start menu, Run dialog, or shortcut. Filter as
+  needed based on organization endpoint behavior - allow-list
+  interactive parent processes (typically explorer.exe under an
+  interactive user session) or pair with additional injection
+  indicators (subsequent CreateRemoteThread, suspicious memory-region
+  allocations, immediate network egress from the spawned notepad
+  process) to focus on high-confidence injection scenarios.
+
+references:
+  - https://attack.mitre.org/techniques/T1055/
+  - https://www.microsoft.com/en-us/security/blog/2022/08/24/looking-for-the-sliver-lining-hunting-for-emerging-command-and-control-frameworks/
+  - https://www.cybereason.com/blog/sliver-c2-leveraged-by-many-threat-actors
+  - https://github.com/BishopFox/sliver
+
+response:
+  message: >
+    notepad.exe was launched with no command-line arguments on
+    endpoint $agent_name$ by user $data_win_eventdata_user$. Process
+    image: $data_win_eventdata_image$. Parent process:
+    $data_win_eventdata_parentImage$. Command line:
+    $data_win_eventdata_commandLine$. A bare notepad.exe invocation
+    with no file path argument is unusual outside of interactive
+    Start-menu / Run-dialog launches and is a known SliverC2 and
+    shellcode-injection pattern - the attacker spawns a fresh
+    notepad.exe process specifically as an injection target, then
+    uses VirtualAllocEx + WriteProcessMemory + CreateRemoteThread to
+    deliver implant code into the benign-looking Microsoft-signed
+    process. Investigate the parent process lineage (suspicious
+    parents include unsigned binaries, Office, browsers, document
+    readers, scripting hosts), check for absence of an associated
+    interactive window event, look for concurrent CreateRemoteThread
+    or suspicious memory-region access from another process, and hunt
+    for outbound network egress originating from the notepad.exe
+    PID.
+  risk_score: 50
+  severity: medium
+  risk_objects:
+    - field: agent_name
+      type: system
+      score: 50
+    - field: data_win_eventdata_user
+      type: user
+      score: 50
+  threat_objects:
+    - field: data_win_eventdata_image
+      type: process_name
+    - field: data_win_eventdata_parentImage
+      type: parent_process_name
+    - field: data_win_eventdata_commandLine
+      type: command_line
+
+tags:
+  analytic_story:
+    - BishopFox Sliver Adversary Emulation Framework
+    - Process Injection
+    - Sliver C2
+    - Compromised Windows Host
+    - Shellcode Injection Targets
+  asset_type: Endpoint
+  mitre_attack_id:
+    - T1055
+  custom_tags:
+    - notepad
+    - process_injection
+    - sliver_c2
+    - shellcode_injection
+    - signed_binary_abuse
+    - injection_target
+    - lolbin
+    - applocker_bypass
+    - no_command_line
+  product:
+    - Wazuh
+  security_domain: endpoint
+
+graylog:
+  query: data_win_system_eventID:"1" AND (data_win_eventdata_image:/.*\\\\[Nn][Oo][Tt][Ee][Pp][Aa][Dd]\.exe/ OR data_win_eventdata_originalFileName:/[Nn][Oo][Tt][Ee][Pp][Aa][Dd]\.[Ee][Xx][Ee]/) AND data_win_eventdata_commandLine:/.*[Nn][Oo][Tt][Ee][Pp][Aa][Dd]\.exe.{0,4}/

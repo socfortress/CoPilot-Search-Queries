@@ -1,0 +1,237 @@
+name: Malicious PowerShell Process - Encoded Command
+id: c4db14d9-7909-48b4-a054-aa14d89dbb19
+version: 1
+schema_version: "1.0"
+date: "2026-04-28"
+author: SOCFortress LLC
+status: production
+type: Hunting
+
+description: >
+  This analytic detects PowerShell process invocations that use the
+  -EncodedCommand parameter (or any of its abbreviated forms) to
+  execute a Base64-encoded payload. Sysmon EventID 1 is used to match
+  process creation events where the Image path ends with
+  powershell.exe or pwsh.exe (or the OriginalFileName field equals
+  PowerShell.EXE / pwsh.dll, catching renamed binaries) AND the
+  command line contains any switch-prefix variant of -EncodedCommand
+  followed by a Base64 string. PowerShell uniquely accepts ANY
+  unambiguous prefix of a parameter name, so adversaries can invoke
+  the same flag as -e, -en, -enc, -enco, -encod, -encode, -encoded,
+  -encodedc, -encodedco, -encodedcom, -encodedcomm, -encodedcomma,
+  -encodedcomman, or the full -EncodedCommand. They can also use any
+  of three switch-prefix styles: hyphen (-), double-hyphen (--), or
+  forward-slash (/). The regex covers all 13 prefix abbreviations
+  across all three switch styles. Encoded PowerShell command lines
+  are a common adversary technique used to obfuscate malicious
+  payloads, evade command-line based detections, and bypass simple
+  string-matching content filters - the Base64 payload is decoded
+  in-memory by PowerShell at runtime, leaving no plaintext on disk.
+  This is a known T1027 (Obfuscated Files or Information) technique
+  observed in named threat activity including Hermetic Wiper,
+  WhisperGate, Volt Typhoon, NOBELIUM, Sandworm, Qakbot, Lumma
+  Stealer, DarkCrystal RAT, Scattered Spider, Crypto Stealer,
+  GhostRedirector / Rungan Backdoor, and the SolarWinds WHD RCE Post
+  Exploitation chain. If confirmed malicious, this activity could
+  allow attackers to execute hidden code in memory, leading to
+  unauthorized access, privilege escalation, credential theft,
+  lateral movement, or persistent threats - investigate the parent
+  process, decode the Base64 payload to reveal its intent, and
+  review concurrent process and network activity from the host.
+
+data_source:
+  - Sysmon EventID 1
+
+search:
+  index_pattern: "${INDEX_PATTERN}"
+  size: 100
+  sort:
+    - timestamp: desc
+  query:
+    bool:
+      must:
+        - term:
+            agent_name: "${AGENT_NAME}"
+        - term:
+            agent_labels_customer: "${CUSTOMER_CODE}"
+        - term:
+            data_win_system_eventID: "1"
+        - bool:
+            should:
+              - wildcard:
+                  data_win_eventdata_image:
+                    value: "*powershell.exe"
+                    case_insensitive: true
+              - wildcard:
+                  data_win_eventdata_image: "*pwsh.exe"
+              - term:
+                  data_win_eventdata_originalFileName: "PowerShell.EXE"
+              - term:
+                  data_win_eventdata_originalFileName: "pwsh.dll"
+            minimum_should_match: 1
+        - regexp:
+            data_win_eventdata_commandLine:
+              value: ".*[ /-]-?(ec|en|enc|enco|encod|encode|encoded|encodedc|encodedco|encodedcom|encodedcomm|encodedcomma|encodedcomman|encodedcommand) +[A-Za-z0-9+/=]{5,}.*"
+              case_insensitive: true
+        - range:
+            timestamp:
+              gte: "${START_TIME}"
+              lte: "${END_TIME}"
+  _source:
+    - timestamp
+    - agent_name
+    - data_win_eventdata_image
+    - data_win_eventdata_originalFileName
+    - data_win_eventdata_commandLine
+    - data_win_eventdata_parentImage
+    - data_win_eventdata_parentCommandLine
+    - data_win_eventdata_user
+    - data_win_eventdata_processId
+    - data_win_eventdata_processGuid
+    - data_win_eventdata_parentProcessId
+    - data_win_eventdata_parentProcessGuid
+    - data_win_eventdata_hashes
+    - data_win_eventdata_integrityLevel
+    - data_win_eventdata_currentDirectory
+
+parameters:
+  AGENT_NAME:
+    description: "Target agent/host name"
+    type: string
+    required: true
+    example: "DESKTOP-AM0HLGE"
+  CUSTOMER_CODE:
+    description: "Customer label for filtering"
+    type: string
+    required: true
+    example: "lab"
+  INDEX_PATTERN:
+    description: "Elasticsearch index pattern"
+    type: string
+    required: true
+    example: "wazuh-lab_*"
+  START_TIME:
+    description: "Query start time (ISO 8601 or relative)"
+    type: datetime
+    required: false
+    default: "now-24h"
+    example: "2026-04-28 00:00:00.000"
+  END_TIME:
+    description: "Query end time (ISO 8601 or relative)"
+    type: datetime
+    required: false
+    default: "now"
+    example: "2026-04-28 23:59:59.999"
+
+how_to_implement: >
+  This detection requires Sysmon EventID 1 (Process Creation) logs to be
+  forwarded from Windows endpoints to Wazuh Indexer. Ensure Sysmon is
+  deployed with a configuration that captures Image, OriginalFileName,
+  and CommandLine fields (SwiftOnSecurity or Olaf Hartong Sysmon modular
+  config recommended). The detection matches both Windows PowerShell
+  (powershell.exe) and PowerShell Core (pwsh.exe) by Image path, with
+  OriginalFileName fallbacks (PowerShell.EXE / pwsh.dll) to catch
+  renamed binaries whose PE metadata preserves the original PowerShell
+  filename. The regex covers all PowerShell command-line abbreviations
+  of the -EncodedCommand parameter (from the shortest -e through the
+  full -EncodedCommand), across all three switch-prefix styles
+  (hyphen, double-hyphen, forward-slash), followed by a Base64 string
+  of at least 5 characters. The Graylog query additionally excludes
+  Enter-PSSession from matching to prevent the en prefix from
+  false-positiving on PowerShell remoting commands. Because this is
+  a Hunting-type analytic, expect to see legitimate use of encoded
+  PowerShell from administrative scripts, configuration management
+  tools, and CI/CD pipelines - tune by parent-process or
+  user-context allow-listing rather than by removing the detection.
+
+known_false_positives: >
+  False positives are expected from legitimate PowerShell scripts,
+  system administrators, configuration management agents (SCCM,
+  Intune, Ansible), CI/CD pipelines, and applications that
+  legitimately wrap encoded payloads (notably Microsoft installers,
+  Citrix tools, and various MDM agents). Tune by allow-listing
+  specific approved parent processes, scheduled-task contexts, or
+  user accounts rather than by removing the detection. For higher
+  fidelity, pair this analytic with PowerShell Script Block Logging
+  (EventID 4104) to inspect the decoded payload, and prioritize
+  alerts where the parent process is unexpected (Office, browsers,
+  document readers, archive utilities).
+
+references:
+  - https://attack.mitre.org/techniques/T1027/
+  - https://github.com/redcanaryco/AtomicTestHarnesses/blob/master/Windows/TestHarnesses/T1059.001_PowerShell/OutPowerShellCommandLineParameter.ps1
+  - https://www.microsoft.com/security/blog/2022/01/15/destructive-malware-targeting-ukrainian-organizations/
+  - https://www.microsoft.com/en-us/security/blog/2023/05/24/volt-typhoon-targets-us-critical-infrastructure-with-living-off-the-land-techniques/
+  - https://learn.microsoft.com/en-us/powershell/module/microsoft.powershell.core/about/about_powershell_exe
+
+response:
+  message: >
+    PowerShell process execution with -EncodedCommand (or an
+    abbreviated form) was detected on endpoint $agent_name$ by user
+    $data_win_eventdata_user$. Process image:
+    $data_win_eventdata_image$. Parent process:
+    $data_win_eventdata_parentImage$. Command line:
+    $data_win_eventdata_commandLine$. Encoded PowerShell is a common
+    adversary obfuscation technique - decode the Base64 payload to
+    reveal the intent, investigate the parent process lineage
+    (suspicious parents include Office, browsers, document readers,
+    and archive utilities), and review concurrent network egress and
+    follow-on process activity from the host.
+  risk_score: 50
+  severity: medium
+  risk_objects:
+    - field: agent_name
+      type: system
+      score: 50
+    - field: data_win_eventdata_user
+      type: user
+      score: 50
+  threat_objects:
+    - field: data_win_eventdata_image
+      type: process_name
+    - field: data_win_eventdata_parentImage
+      type: parent_process_name
+    - field: data_win_eventdata_commandLine
+      type: command_line
+
+tags:
+  analytic_story:
+    - SolarWinds WHD RCE Post Exploitation
+    - CISA AA22-320A
+    - Hermetic Wiper
+    - Sandworm Tools
+    - Qakbot
+    - Volt Typhoon
+    - NOBELIUM Group
+    - Data Destruction
+    - Lumma Stealer
+    - Malicious PowerShell
+    - DarkCrystal RAT
+    - WhisperGate
+    - Crypto Stealer
+    - Microsoft SharePoint Vulnerabilities
+    - Scattered Spider
+    - GhostRedirector IIS Module and Rungan Backdoor
+    - Microsoft WSUS CVE-2025-59287
+    - Suspicious Command-Line Executions
+    - Compromised Windows Host
+  asset_type: Endpoint
+  mitre_attack_id:
+    - T1027
+  custom_tags:
+    - powershell
+    - encoded_command
+    - base64_payload
+    - obfuscation
+    - powershell_abuse
+    - malicious_powershell
+    - lolbin
+    - defense_evasion
+    - command_line_obfuscation
+    - in_memory_execution
+  product:
+    - Wazuh
+  security_domain: endpoint
+
+graylog:
+  query: data_win_system_eventID:"1" AND (data_win_eventdata_image:/.*[Pp][Oo][Ww][Ee][Rr][Ss][Hh][Ee][Ll][Ll]\.exe/ OR data_win_eventdata_image:/.*[Pp][Ww][Ss][Hh]\.exe/ OR data_win_eventdata_originalFileName:/[Pp][Oo][Ww][Ee][Rr][Ss][Hh][Ee][Ll][Ll]\.EXE/ OR data_win_eventdata_originalFileName:/[Pp][Ww][Ss][Hh]\.dll/) AND data_win_eventdata_commandLine:/.*[ \/\-]\-?([Ee][Cc]|[Ee][Nn]|[Ee][Nn][Cc]|[Ee][Nn][Cc][Oo]|[Ee][Nn][Cc][Oo][Dd]|[Ee][Nn][Cc][Oo][Dd][Ee]|[Ee][Nn][Cc][Oo][Dd][Ee][Dd]|[Ee][Nn][Cc][Oo][Dd][Ee][Dd][Cc]|[Ee][Nn][Cc][Oo][Dd][Ee][Dd][Cc][Oo]|[Ee][Nn][Cc][Oo][Dd][Ee][Dd][Cc][Oo][Mm]|[Ee][Nn][Cc][Oo][Dd][Ee][Dd][Cc][Oo][Mm][Mm]|[Ee][Nn][Cc][Oo][Dd][Ee][Dd][Cc][Oo][Mm][Mm][Aa]|[Ee][Nn][Cc][Oo][Dd][Ee][Dd][Cc][Oo][Mm][Mm][Aa][Nn]|[Ee][Nn][Cc][Oo][Dd][Ee][Dd][Cc][Oo][Mm][Mm][Aa][Nn][Dd]) +[A-Za-z0-9+\/=]{5,}.*/ AND NOT data_win_eventdata_commandLine:/.*[Ee]nter\-[Pp][Ss][Ss]ession.*/

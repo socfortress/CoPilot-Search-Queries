@@ -1,0 +1,215 @@
+name: Network Discovery Using Route Windows App
+id: dd83407e-439f-11ec-ab8e-acde48001122
+version: 1
+schema_version: "1.0"
+date: "2026-04-28"
+author: SOCFortress LLC
+status: production
+type: Hunting
+
+description: >
+  This analytic detects the execution of the route.exe Windows
+  application, commonly used for network routing-table discovery.
+  Sysmon EventID 1 is used to match process creation events where
+  the Image path ends with \route.exe (anchored to the path
+  separator to avoid false positives from binaries whose names
+  merely end with route.exe such as enroute.exe) OR the
+  OriginalFileName field equals route.exe (catching renamed
+  binaries whose PE metadata preserves the original route.exe
+  name). route.exe is the Microsoft TCP/IP routing-table utility
+  bundled with Windows - the route print command displays the
+  active routing table including IPv4/IPv6 interface bindings,
+  default gateways, persistent routes, and on-link networks. This
+  information is essentially the host's view of network topology
+  and is highly valuable to adversaries early in the
+  post-exploitation chain: it reveals reachable subnets for
+  lateral movement, identifies pivot points through multi-homed
+  interfaces, surfaces VPN tunnels and management networks, and
+  exposes routes added by security tools or container runtimes.
+  Route enumeration is a hallmark of the situational-awareness
+  phase performed by both Red Teams and adversaries on a freshly
+  compromised host. This is a known T1016.001 (System Network
+  Configuration Discovery: Internet Connection Discovery)
+  technique observed in named threat activity including Qakbot,
+  Prestige Ransomware, the Active Directory Discovery and Windows
+  Post-Exploitation analytic stories, and the CISA AA22-277A
+  advisory. If confirmed malicious, this reconnaissance behavior
+  could be a precursor to lateral movement, identification of
+  pivot interfaces, mapping of segmented networks for follow-on
+  attack, or selection of network paths for command-and-control
+  and exfiltration channels - investigate the parent process,
+  the user context, and any concurrent or follow-on discovery
+  commands from the host.
+
+data_source:
+  - Sysmon EventID 1
+
+search:
+  index_pattern: "${INDEX_PATTERN}"
+  size: 100
+  sort:
+    - timestamp: desc
+  query:
+    bool:
+      must:
+        - term:
+            agent_name: "${AGENT_NAME}"
+        - term:
+            agent_labels_customer: "${CUSTOMER_CODE}"
+        - term:
+            data_win_system_eventID: "1"
+        - bool:
+            should:
+              - wildcard:
+                  data_win_eventdata_image:
+                    value: "*\\\\route.exe"
+                    case_insensitive: true
+              - term:
+                  data_win_eventdata_originalFileName: "route.exe"
+            minimum_should_match: 1
+        - range:
+            timestamp:
+              gte: "${START_TIME}"
+              lte: "${END_TIME}"
+  _source:
+    - timestamp
+    - agent_name
+    - data_win_eventdata_image
+    - data_win_eventdata_originalFileName
+    - data_win_eventdata_commandLine
+    - data_win_eventdata_parentImage
+    - data_win_eventdata_parentCommandLine
+    - data_win_eventdata_user
+    - data_win_eventdata_processId
+    - data_win_eventdata_processGuid
+    - data_win_eventdata_parentProcessId
+    - data_win_eventdata_parentProcessGuid
+    - data_win_eventdata_hashes
+    - data_win_eventdata_integrityLevel
+    - data_win_eventdata_currentDirectory
+
+parameters:
+  AGENT_NAME:
+    description: "Target agent/host name"
+    type: string
+    required: true
+    example: "DESKTOP-AM0HLGE"
+  CUSTOMER_CODE:
+    description: "Customer label for filtering"
+    type: string
+    required: true
+    example: "lab"
+  INDEX_PATTERN:
+    description: "Elasticsearch index pattern"
+    type: string
+    required: true
+    example: "wazuh-lab_*"
+  START_TIME:
+    description: "Query start time (ISO 8601 or relative)"
+    type: datetime
+    required: false
+    default: "now-24h"
+    example: "2026-04-28 00:00:00.000"
+  END_TIME:
+    description: "Query end time (ISO 8601 or relative)"
+    type: datetime
+    required: false
+    default: "now"
+    example: "2026-04-28 23:59:59.999"
+
+how_to_implement: >
+  This detection requires Sysmon EventID 1 (Process Creation) logs to be
+  forwarded from Windows endpoints to Wazuh Indexer. Ensure Sysmon is
+  deployed with a configuration that captures Image, OriginalFileName,
+  and CommandLine fields (SwiftOnSecurity or Olaf Hartong Sysmon modular
+  config recommended). The detection matches route.exe by Image path
+  with the wildcard anchored to the path separator (*\\route.exe in
+  the Elasticsearch wildcard, equivalent to /.*\\\\route\.exe/ in the
+  Graylog Lucene regex) to avoid false positives from binaries whose
+  filenames merely end with route.exe (such as enroute.exe). An
+  OriginalFileName fallback catches renamed binaries whose PE
+  metadata preserves the original route.exe name. Case-insensitive
+  matching is used in both Elasticsearch (case_insensitive: true on
+  the wildcard) and Graylog (Lucene character classes). No
+  command-line filter is applied - the Splunk source rule deliberately
+  detects ANY route.exe invocation. Because this is a Hunting-type
+  analytic, expect to see legitimate administrative use of route.exe
+  in network troubleshooting, EC2 host-discovery scripts, and VPN
+  client setup - tune by parent-process or user-context allow-listing
+  rather than by removing the detection.
+
+known_false_positives: >
+  A network operator or system administrator may legitimately use
+  route.exe for troubleshooting connectivity, configuring persistent
+  routes, or diagnosing routing-table issues. Automated host
+  discovery applications, EC2 user-data scripts, VPN client startup
+  routines, and network monitoring agents may also invoke route.exe
+  routinely. Allow-list specific approved parent processes
+  (configuration management agents, monitoring tools), administrative
+  scheduled tasks, or known IT user accounts as needed.
+
+references:
+  - https://attack.mitre.org/techniques/T1016/001/
+  - https://learn.microsoft.com/en-us/windows-server/administration/windows-commands/route_ws2008
+  - https://lolbas-project.github.io/lolbas/Binaries/Route/
+  - https://app.any.run/tasks/ad4c3cda-41f2-4401-8dba-56cc2d245488/
+
+response:
+  message: >
+    Network routing-table discovery via route.exe was detected on
+    endpoint $agent_name$ by user $data_win_eventdata_user$. Process
+    image: $data_win_eventdata_image$. Parent process:
+    $data_win_eventdata_parentImage$. Command line:
+    $data_win_eventdata_commandLine$. route.exe enumerates the host's
+    routing table - a common situational-awareness step performed by
+    adversaries early in the post-exploitation chain to identify
+    reachable subnets, pivot points, and network paths for lateral
+    movement and exfiltration. Investigate the parent process
+    lineage, the user context, and any concurrent or follow-on
+    discovery commands (`ipconfig /all`, `arp -a`, `netstat -ano`,
+    `nslookup`, `whoami`) from the host.
+  risk_score: 30
+  severity: low
+  risk_objects:
+    - field: agent_name
+      type: system
+      score: 20
+    - field: data_win_eventdata_user
+      type: user
+      score: 20
+  threat_objects:
+    - field: data_win_eventdata_image
+      type: process_name
+    - field: data_win_eventdata_parentImage
+      type: parent_process_name
+    - field: data_win_eventdata_commandLine
+      type: command_line
+
+tags:
+  analytic_story:
+    - Active Directory Discovery
+    - Qakbot
+    - CISA AA22-277A
+    - Windows Post-Exploitation
+    - Prestige Ransomware
+    - Network Discovery
+    - Reconnaissance
+  asset_type: Endpoint
+  mitre_attack_id:
+    - T1016.001
+  custom_tags:
+    - route
+    - network_discovery
+    - routing_table_enumeration
+    - reconnaissance
+    - lolbin
+    - situational_awareness
+    - post_exploitation
+    - hunting
+    - network_topology_discovery
+  product:
+    - Wazuh
+  security_domain: endpoint
+
+graylog:
+  query: data_win_system_eventID:"1" AND (data_win_eventdata_image:/.*\\\\[Rr][Oo][Uu][Tt][Ee]\.exe/ OR data_win_eventdata_originalFileName:/[Rr][Oo][Uu][Tt][Ee]\.exe/)
