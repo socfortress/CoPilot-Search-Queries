@@ -1,0 +1,241 @@
+name: Potential Telegram API Request Via CommandLine
+id: d6b0d627-d0bf-46b1-936f-c48284767d21
+version: 1
+schema_version: "1.0"
+date: "2026-04-28"
+author: SOCFortress LLC
+status: production
+type: Anomaly
+
+description: >
+  This analytic detects the presence of api.telegram.org in the
+  command line of a process. Sysmon EventID 1 is used to match
+  process creation events whose command line contains the
+  Telegram Bot API hostname AND that do NOT contain the common
+  benign markers -osint -url (used by various OSINT lookup tools
+  that include api.telegram.org as a reference target) or
+  --single-argument (a Chromium / Edge command-line flag that
+  often surfaces full URLs without indicating malicious intent).
+  The Telegram Bot API exposes endpoints at
+  https://api.telegram.org/bot<TOKEN>/sendMessage,
+  /sendDocument, /sendPhoto, /getUpdates, and /sendAudio that
+  are designed for legitimate bot automation - free, encrypted,
+  and routed through a Microsoft / CDN-fronted infrastructure
+  that blends in with normal HTTPS traffic. Adversaries -
+  particularly commodity stealer and ransomware operators -
+  abuse this same surface as a low-cost C2 / exfiltration
+  channel: the malware contains a hardcoded bot token and chat
+  ID, and at runtime POSTs harvested credentials, screenshots,
+  or victim metadata directly to the attacker's Telegram chat
+  via /sendDocument. This evades traditional network-monitoring
+  defenses because the destination is a legitimate
+  Microsoft-fronted service over standard HTTPS, and many
+  enterprise allow-lists permit api.telegram.org for genuine
+  bot automation. Surfacing the URL in a process command line
+  (rather than buried in TLS-encrypted payload) typically
+  happens when the malware uses curl.exe, wget.exe, the
+  built-in PowerShell Invoke-WebRequest / Invoke-RestMethod
+  cmdlets, or other living-off-the-land HTTP clients to make
+  the request. This is a known T1102.002 (Web Service:
+  Bidirectional Communication) and T1041 (Exfiltration Over C2
+  Channel) technique observed in named threat activity
+  including XMRig droppers, Water Gamayun campaigns,
+  0bj3ctivity Stealer, Hellcat Ransomware, and BlankGrabber
+  Stealer. If confirmed malicious, this activity could allow an
+  attacker or malware to exfiltrate sensitive data to an
+  attacker-controlled Telegram chat, receive additional C2
+  instructions through the same channel, achieve persistent
+  command-and-control via a legitimate cloud service, and
+  bypass network defenses that allow Telegram API traffic -
+  investigate the parent process, the bot token and chat ID
+  in the URL, the user context, and any concurrent file-read
+  or credential-access activity that may indicate what is
+  being exfiltrated.
+
+data_source:
+  - Sysmon EventID 1
+
+search:
+  index_pattern: "${INDEX_PATTERN}"
+  size: 100
+  sort:
+    - timestamp: desc
+  query:
+    bool:
+      must:
+        - term:
+            agent_name: "${AGENT_NAME}"
+        - term:
+            agent_labels_customer: "${CUSTOMER_CODE}"
+        - term:
+            data_win_system_eventID: "1"
+        - wildcard:
+            data_win_eventdata_commandLine:
+              value: "*api.telegram.org*"
+              case_insensitive: true
+        - range:
+            timestamp:
+              gte: "${START_TIME}"
+              lte: "${END_TIME}"
+      must_not:
+        - wildcard:
+            data_win_eventdata_commandLine:
+              value: "*-osint -url*"
+              case_insensitive: true
+        - wildcard:
+            data_win_eventdata_commandLine:
+              value: "* --single-argument*"
+              case_insensitive: true
+  _source:
+    - timestamp
+    - agent_name
+    - data_win_eventdata_image
+    - data_win_eventdata_originalFileName
+    - data_win_eventdata_commandLine
+    - data_win_eventdata_parentImage
+    - data_win_eventdata_parentCommandLine
+    - data_win_eventdata_user
+    - data_win_eventdata_processId
+    - data_win_eventdata_processGuid
+    - data_win_eventdata_parentProcessId
+    - data_win_eventdata_parentProcessGuid
+    - data_win_eventdata_hashes
+    - data_win_eventdata_integrityLevel
+    - data_win_eventdata_currentDirectory
+
+parameters:
+  AGENT_NAME:
+    description: "Target agent/host name"
+    type: string
+    required: true
+    example: "DESKTOP-AM0HLGE"
+  CUSTOMER_CODE:
+    description: "Customer label for filtering"
+    type: string
+    required: true
+    example: "lab"
+  INDEX_PATTERN:
+    description: "Elasticsearch index pattern"
+    type: string
+    required: true
+    example: "wazuh-lab_*"
+  START_TIME:
+    description: "Query start time (ISO 8601 or relative)"
+    type: datetime
+    required: false
+    default: "now-24h"
+    example: "2026-04-28 00:00:00.000"
+  END_TIME:
+    description: "Query end time (ISO 8601 or relative)"
+    type: datetime
+    required: false
+    default: "now"
+    example: "2026-04-28 23:59:59.999"
+
+how_to_implement: >
+  This detection requires Sysmon EventID 1 (Process Creation) logs to be
+  forwarded from Windows endpoints to Wazuh Indexer. Ensure Sysmon is
+  deployed with a configuration that captures Image, OriginalFileName,
+  and CommandLine fields (SwiftOnSecurity or Olaf Hartong Sysmon modular
+  config recommended). The detection is process-agnostic - it matches
+  the api.telegram.org substring wherever it appears in a command line,
+  case-insensitively, and filters out the two common benign patterns
+  (-osint -url from OSINT lookup utilities, --single-argument from
+  Chromium-based browsers) that legitimately surface the URL without
+  indicating malicious intent. The detection deliberately does not
+  filter by parent process or specific HTTP-client binaries because
+  attackers may invoke the API through curl.exe, wget.exe,
+  PowerShell Invoke-WebRequest, .NET WebClient, custom binaries, or
+  any other HTTP tooling that emits the URL in the command line -
+  catching all of them is the goal. Pair this analytic with network
+  monitoring for outbound TLS connections to api.telegram.org for
+  full-coverage detection where the URL is buried inside encrypted
+  payload rather than the command line. For higher fidelity,
+  prioritize alerts where the parent process is suspicious (Office,
+  browsers acting as parents to script hosts, document readers, or
+  unsigned binaries).
+
+known_false_positives: >
+  False positives may stem from administrators or legitimate
+  applications requesting the Telegram Bot API directly via the
+  command line for testing, monitoring, or in-house bot automation.
+  Investigate matches and apply allow-listing for specific approved
+  parent processes, known automation user accounts, scheduled
+  tasks, or documented bot-development scenarios as needed. The
+  -osint -url and --single-argument exclusions already eliminate
+  the most common benign signal sources.
+
+references:
+  - https://attack.mitre.org/techniques/T1102/002/
+  - https://attack.mitre.org/techniques/T1041/
+  - https://core.telegram.org/bots/api
+  - https://www.virustotal.com/gui/file/0b3ef5e04329cefb5bb4bf30b3edcb32d1ec6bbcb29d22695a079bfb5b56e8ac/behavior
+  - https://www.virustotal.com/gui/file/72c59eeb15b5ec1d95e72e4b06a030bc058822bc10e5cb807e78a4624d329666/behavior
+
+response:
+  message: >
+    Telegram Bot API request observed in process command line on
+    endpoint $agent_name$ by user $data_win_eventdata_user$. Process
+    image: $data_win_eventdata_image$. Parent process:
+    $data_win_eventdata_parentImage$. Command line:
+    $data_win_eventdata_commandLine$. The Telegram Bot API
+    (api.telegram.org) is routinely abused as a low-cost C2 and
+    exfiltration channel by commodity stealer and ransomware
+    operators (XMRig droppers, BlankGrabber Stealer, 0bj3ctivity
+    Stealer, Hellcat Ransomware, Water Gamayun) because it offers
+    a free, encrypted, Microsoft-fronted service that blends in
+    with legitimate HTTPS traffic. Investigate immediately,
+    extract the bot token and chat ID from the URL (these can be
+    used to retrieve historical messages from the attacker's
+    Telegram chat via the API itself - effectively recovering
+    exfiltrated data), identify the parent process lineage, hunt
+    for concurrent file-read or credential-access activity, and
+    isolate the host pending further analysis.
+  risk_score: 30
+  severity: low
+  risk_objects:
+    - field: agent_name
+      type: system
+      score: 20
+    - field: data_win_eventdata_user
+      type: user
+      score: 20
+  threat_objects:
+    - field: data_win_eventdata_image
+      type: process_name
+    - field: data_win_eventdata_parentImage
+      type: parent_process_name
+    - field: data_win_eventdata_commandLine
+      type: command_line
+
+tags:
+  analytic_story:
+    - XMRig
+    - Water Gamayun
+    - 0bj3ctivity Stealer
+    - Hellcat Ransomware
+    - BlankGrabber Stealer
+    - Telegram C2 Abuse
+    - Data Exfiltration via Cloud Services
+    - Compromised Windows Host
+  asset_type: Endpoint
+  mitre_attack_id:
+    - T1102.002
+    - T1041
+  custom_tags:
+    - telegram_api
+    - bot_api_abuse
+    - c2_via_legitimate_service
+    - data_exfiltration
+    - cloud_c2
+    - bidirectional_c2
+    - stealer_c2
+    - ransomware_c2
+    - api_telegram_org
+    - lolbin_http_client
+  product:
+    - Wazuh
+  security_domain: endpoint
+
+graylog:
+  query: data_win_system_eventID:"1" AND data_win_eventdata_commandLine:/.*[Aa][Pp][Ii]\.[Tt][Ee][Ll][Ee][Gg][Rr][Aa][Mm]\.[Oo][Rr][Gg].*/ AND NOT data_win_eventdata_commandLine:/.*\-[Oo][Ss][Ii][Nn][Tt] \-[Uu][Rr][Ll].*/ AND NOT data_win_eventdata_commandLine:/.* \-\-[Ss][Ii][Nn][Gg][Ll][Ee]\-[Aa][Rr][Gg][Uu][Mm][Ee][Nn][Tt].*/

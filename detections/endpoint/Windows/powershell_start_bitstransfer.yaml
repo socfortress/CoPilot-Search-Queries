@@ -1,0 +1,237 @@
+name: PowerShell Start-BitsTransfer
+id: 39e2605a-90d8-11eb-899e-acde48001122
+version: 1
+schema_version: "1.0"
+date: "2026-04-28"
+author: SOCFortress LLC
+status: production
+type: TTP
+
+description: >
+  This analytic detects the execution of the PowerShell cmdlet
+  Start-BitsTransfer, which can be used for file transfers
+  including download of attacker-supplied payloads and upload
+  of harvested data for exfiltration. Sysmon EventID 1 is used
+  to match process creation events where the Image path is
+  anchored to \powershell.exe or \pwsh.exe (or the
+  OriginalFileName field equals PowerShell.EXE / pwsh.dll,
+  catching renamed binaries) AND the command line contains the
+  start-bitstransfer cmdlet name. Start-BitsTransfer is the
+  PowerShell wrapper around the Windows Background Intelligent
+  Transfer Service (BITS), a Microsoft-built file-transfer
+  framework originally designed to make Windows Update resilient
+  against unreliable network connections. BITS is highly
+  attractive to adversaries because: (1) transfers survive
+  reboots, network disconnections, and user logoffs - they
+  resume automatically when connectivity returns, making BITS
+  ideal for slow exfiltration that won't be interrupted by
+  defensive actions; (2) the actual transfer runs inside
+  svchost.exe under the BITS service, masking the network
+  connection from process-to-network attribution that focuses on
+  PowerShell or other scripting hosts; (3) BITS uses standard
+  HTTP/HTTPS, blending with normal web traffic; and (4) many
+  host-based firewalls and EDR rules permit BITS by default
+  because it is integral to Windows Update and SCCM. Adversaries
+  use Start-BitsTransfer as a low-noise alternative to
+  Invoke-WebRequest or curl.exe for both stage-one downloads
+  (-Source <attacker-url> -Destination <local-path>) and stage-N
+  exfiltration (-TransferType Upload -Source <local-path>
+  -Destination <attacker-url>). This is a known T1197 (BITS
+  Jobs) technique observed in named threat activity including
+  the BITS Jobs analytic story and the Gozi Malware family. If
+  confirmed malicious, this activity could allow attackers to
+  silently download additional malware components, exfiltrate
+  sensitive data with built-in resume support, evade
+  process-to-network attribution by hiding the transfer in
+  svchost.exe, and bypass network defenses that allow BITS by
+  default - investigate the parent process, the user context,
+  the source and destination URLs / paths, the TransferType
+  parameter (Download vs Upload), and any concurrent or
+  follow-on file-write, process, and network egress activity
+  from the host.
+
+data_source:
+  - Sysmon EventID 1
+
+search:
+  index_pattern: "${INDEX_PATTERN}"
+  size: 100
+  sort:
+    - timestamp: desc
+  query:
+    bool:
+      must:
+        - term:
+            agent_name: "${AGENT_NAME}"
+        - term:
+            agent_labels_customer: "${CUSTOMER_CODE}"
+        - term:
+            data_win_system_eventID: "1"
+        - bool:
+            should:
+              - wildcard:
+                  data_win_eventdata_image:
+                    value: "*\\\\powershell.exe"
+                    case_insensitive: true
+              - wildcard:
+                  data_win_eventdata_image:
+                    value: "*\\\\pwsh.exe"
+                    case_insensitive: true
+              - term:
+                  data_win_eventdata_originalFileName: "PowerShell.EXE"
+              - term:
+                  data_win_eventdata_originalFileName: "pwsh.dll"
+            minimum_should_match: 1
+        - wildcard:
+            data_win_eventdata_commandLine:
+              value: "*start-bitstransfer*"
+              case_insensitive: true
+        - range:
+            timestamp:
+              gte: "${START_TIME}"
+              lte: "${END_TIME}"
+  _source:
+    - timestamp
+    - agent_name
+    - data_win_eventdata_image
+    - data_win_eventdata_originalFileName
+    - data_win_eventdata_commandLine
+    - data_win_eventdata_parentImage
+    - data_win_eventdata_parentCommandLine
+    - data_win_eventdata_user
+    - data_win_eventdata_processId
+    - data_win_eventdata_processGuid
+    - data_win_eventdata_parentProcessId
+    - data_win_eventdata_parentProcessGuid
+    - data_win_eventdata_hashes
+    - data_win_eventdata_integrityLevel
+    - data_win_eventdata_currentDirectory
+
+parameters:
+  AGENT_NAME:
+    description: "Target agent/host name"
+    type: string
+    required: true
+    example: "DESKTOP-AM0HLGE"
+  CUSTOMER_CODE:
+    description: "Customer label for filtering"
+    type: string
+    required: true
+    example: "lab"
+  INDEX_PATTERN:
+    description: "Elasticsearch index pattern"
+    type: string
+    required: true
+    example: "wazuh-lab_*"
+  START_TIME:
+    description: "Query start time (ISO 8601 or relative)"
+    type: datetime
+    required: false
+    default: "now-24h"
+    example: "2026-04-28 00:00:00.000"
+  END_TIME:
+    description: "Query end time (ISO 8601 or relative)"
+    type: datetime
+    required: false
+    default: "now"
+    example: "2026-04-28 23:59:59.999"
+
+how_to_implement: >
+  This detection requires Sysmon EventID 1 (Process Creation) logs to be
+  forwarded from Windows endpoints to Wazuh Indexer. Ensure Sysmon is
+  deployed with a configuration that captures Image, OriginalFileName,
+  and CommandLine fields (SwiftOnSecurity or Olaf Hartong Sysmon modular
+  config recommended). The detection matches both Windows PowerShell
+  (powershell.exe) and PowerShell Core (pwsh.exe) by Image path with
+  OriginalFileName fallbacks for renamed binaries, combined with a
+  case-insensitive start-bitstransfer substring match in the command
+  line. Pair this analytic with BITS-Client log monitoring (Microsoft
+  -Windows-Bits-Client/Operational EventID 59 / 60 / 61) for a
+  full-coverage view of BITS usage including transfers initiated by
+  compiled binaries (bitsadmin.exe, custom .NET clients) that bypass
+  the PowerShell cmdlet entirely. For higher fidelity, prioritize
+  alerts where the Source or Destination URL is an unfamiliar domain,
+  where the parent process is suspicious (Office, browsers, document
+  readers, scripting hosts, unsigned binaries), or where TransferType
+  Upload is specified (uploads are far more rarely seen in
+  legitimate use than downloads).
+
+known_false_positives: >
+  Limited false positives are expected. System administrators may
+  legitimately use Start-BitsTransfer for SCCM/MECM deployments,
+  Windows Update troubleshooting, software-distribution scripts,
+  and large-file transfers that benefit from BITS resume support.
+  Allow-list specific approved parent processes (configuration
+  management agents, vendor installers), known administrative
+  service accounts, scheduled-task contexts, or documented
+  internal automation scripts as needed. Otherwise filter based on
+  parent process or command-line arguments.
+
+references:
+  - https://attack.mitre.org/techniques/T1197/
+  - https://learn.microsoft.com/en-us/windows/win32/bits/using-windows-powershell-to-create-bits-transfer-jobs
+  - https://learn.microsoft.com/en-us/powershell/module/bitstransfer/start-bitstransfer
+  - https://isc.sans.edu/diary/Investigating+Microsoft+BITS+Activity/23281
+
+response:
+  message: >
+    PowerShell Start-BitsTransfer cmdlet execution detected on
+    endpoint $agent_name$ by user $data_win_eventdata_user$.
+    Process image: $data_win_eventdata_image$. Parent process:
+    $data_win_eventdata_parentImage$. Command line:
+    $data_win_eventdata_commandLine$. Start-BitsTransfer is
+    routinely abused by adversaries (notably the Gozi Malware
+    family) for both stage-one payload download and stage-N
+    data exfiltration because BITS transfers survive reboots and
+    disconnections, run in svchost.exe context, and blend with
+    normal web traffic. Investigate the parent process lineage,
+    the Source and Destination URLs / paths, the TransferType
+    parameter (Download vs Upload - upload is far more rare in
+    legitimate use and a strong exfiltration indicator), hunt for
+    follow-on execution of any newly-downloaded files, and
+    isolate the host pending further analysis.
+  risk_score: 50
+  severity: medium
+  risk_objects:
+    - field: agent_name
+      type: system
+      score: 50
+    - field: data_win_eventdata_user
+      type: user
+      score: 50
+  threat_objects:
+    - field: data_win_eventdata_image
+      type: process_name
+    - field: data_win_eventdata_parentImage
+      type: parent_process_name
+    - field: data_win_eventdata_commandLine
+      type: command_line
+
+tags:
+  analytic_story:
+    - BITS Jobs
+    - Gozi Malware
+    - Living Off The Land
+    - Compromised Windows Host
+    - Suspicious Command-Line Executions
+    - Data Exfiltration
+  asset_type: Endpoint
+  mitre_attack_id:
+    - T1197
+  custom_tags:
+    - powershell
+    - bits_jobs
+    - bits_transfer
+    - lolbin
+    - data_exfiltration
+    - payload_download
+    - background_intelligent_transfer_service
+    - svchost_proxy
+    - persistent_transfer
+    - powershell_abuse
+  product:
+    - Wazuh
+  security_domain: endpoint
+
+graylog:
+  query: data_win_system_eventID:"1" AND (data_win_eventdata_image:/.*\\\\[Pp][Oo][Ww][Ee][Rr][Ss][Hh][Ee][Ll][Ll]\.exe/ OR data_win_eventdata_image:/.*\\\\[Pp][Ww][Ss][Hh]\.exe/ OR data_win_eventdata_originalFileName:/[Pp][Oo][Ww][Ee][Rr][Ss][Hh][Ee][Ll][Ll]\.EXE/ OR data_win_eventdata_originalFileName:/[Pp][Ww][Ss][Hh]\.dll/) AND data_win_eventdata_commandLine:/.*[Ss][Tt][Aa][Rr][Tt]\-[Bb][Ii][Tt][Ss][Tt][Rr][Aa][Nn][Ss][Ff][Ee][Rr].*/

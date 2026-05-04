@@ -1,0 +1,276 @@
+name: Ping Sleep Batch Command
+id: ce058d6c-79f2-11ec-b476-acde48001122
+version: 1
+schema_version: "1.0"
+date: "2026-04-28"
+author: SOCFortress LLC
+status: production
+type: Anomaly
+
+description: >
+  This analytic identifies the execution of ping-sleep batch
+  commands - a time-based sandbox-evasion technique where
+  ping.exe is used as an inline sleep primitive within a cmd.exe
+  command chain. Sysmon EventID 1 is used to match process
+  creation events via two complementary branches: (1) the parent
+  branch matches when the parentCommandLine contains the ping
+  keyword AND the -n count flag AND a shell chain operator (& ,
+  &amp;, &C:, &gt;, or >), capturing the canonical pattern
+  `ping -n N 127.0.0.1 > nul && <next_command>` where the parent
+  cmd.exe is observed; (2) the self branch matches when the
+  Image is anchored to \ping.exe (or OriginalFileName is
+  ping.exe) AND the command line itself contains -n AND a chain
+  operator. Sysmon stores command-line text in XML, so the shell
+  metacharacters > and & appear in the indexed events as &gt;
+  and &amp; respectively - the rule matches BOTH the literal and
+  XML-escaped forms to remain robust across parser variations.
+  Adversaries use ping -n as a sleep primitive because the
+  default Windows ping waits 1 second between echo requests, so
+  `ping -n 30 127.0.0.1 > nul` produces a ~29-second pause without
+  invoking Start-Sleep, timeout.exe, or other commonly-signatured
+  delay APIs - this evades sandbox analysis (which often executes
+  payloads with shorter timeouts than the embedded sleep) and
+  bypasses detection rules that focus on PowerShell sleep calls.
+  This is a known T1497.003 (Virtualization/Sandbox Evasion: Time
+  Based Evasion) technique observed in named threat activity
+  including the WhisperGate destructive malware campaign, Quasar
+  RAT, Warzone RAT, BlackByte Ransomware, Void Manticore,
+  Gh0st RAT, Meduza Stealer, and the broader Data Destruction
+  analytic story. If confirmed malicious, this technique allows
+  attackers to delay payload execution, evade automated sandbox
+  analysis, hide malicious activity within seemingly inert
+  command chains, and increase the chances of prolonged
+  unauthorized access - investigate the parent process lineage,
+  the user context, the full command chain following the ping
+  delay, and any concurrent or follow-on file-write, process,
+  and network egress activity from the host.
+
+data_source:
+  - Sysmon EventID 1
+
+search:
+  index_pattern: "${INDEX_PATTERN}"
+  size: 100
+  sort:
+    - timestamp: desc
+  query:
+    bool:
+      must:
+        - term:
+            agent_name: "${AGENT_NAME}"
+        - term:
+            agent_labels_customer: "${CUSTOMER_CODE}"
+        - term:
+            data_win_system_eventID: "1"
+        - bool:
+            should:
+              - bool:
+                  must:
+                    - wildcard:
+                        data_win_eventdata_parentCommandLine:
+                          value: "*ping*"
+                          case_insensitive: true
+                    - wildcard:
+                        data_win_eventdata_parentCommandLine:
+                          value: "*-n*"
+                          case_insensitive: true
+                    - bool:
+                        should:
+                          - wildcard:
+                              data_win_eventdata_parentCommandLine: "*& *"
+                          - wildcard:
+                              data_win_eventdata_parentCommandLine: "*&amp;*"
+                          - wildcard:
+                              data_win_eventdata_parentCommandLine: "*&C:*"
+                          - wildcard:
+                              data_win_eventdata_parentCommandLine: "*&gt;*"
+                          - wildcard:
+                              data_win_eventdata_parentCommandLine: "*>*"
+                        minimum_should_match: 1
+              - bool:
+                  must:
+                    - bool:
+                        should:
+                          - wildcard:
+                              data_win_eventdata_image:
+                                value: "*\\\\ping.exe"
+                                case_insensitive: true
+                          - term:
+                              data_win_eventdata_originalFileName: "ping.exe"
+                        minimum_should_match: 1
+                    - wildcard:
+                        data_win_eventdata_commandLine:
+                          value: "*-n*"
+                          case_insensitive: true
+                    - bool:
+                        should:
+                          - wildcard:
+                              data_win_eventdata_commandLine: "*& *"
+                          - wildcard:
+                              data_win_eventdata_commandLine: "*&amp;*"
+                          - wildcard:
+                              data_win_eventdata_commandLine: "*&C:*"
+                          - wildcard:
+                              data_win_eventdata_commandLine: "*&gt;*"
+                          - wildcard:
+                              data_win_eventdata_commandLine: "*>*"
+                        minimum_should_match: 1
+            minimum_should_match: 1
+        - range:
+            timestamp:
+              gte: "${START_TIME}"
+              lte: "${END_TIME}"
+  _source:
+    - timestamp
+    - agent_name
+    - data_win_eventdata_image
+    - data_win_eventdata_originalFileName
+    - data_win_eventdata_commandLine
+    - data_win_eventdata_parentImage
+    - data_win_eventdata_parentCommandLine
+    - data_win_eventdata_user
+    - data_win_eventdata_processId
+    - data_win_eventdata_processGuid
+    - data_win_eventdata_parentProcessId
+    - data_win_eventdata_parentProcessGuid
+    - data_win_eventdata_hashes
+    - data_win_eventdata_integrityLevel
+    - data_win_eventdata_currentDirectory
+
+parameters:
+  AGENT_NAME:
+    description: "Target agent/host name"
+    type: string
+    required: true
+    example: "DESKTOP-AM0HLGE"
+  CUSTOMER_CODE:
+    description: "Customer label for filtering"
+    type: string
+    required: true
+    example: "lab"
+  INDEX_PATTERN:
+    description: "Elasticsearch index pattern"
+    type: string
+    required: true
+    example: "wazuh-lab_*"
+  START_TIME:
+    description: "Query start time (ISO 8601 or relative)"
+    type: datetime
+    required: false
+    default: "now-24h"
+    example: "2026-04-28 00:00:00.000"
+  END_TIME:
+    description: "Query end time (ISO 8601 or relative)"
+    type: datetime
+    required: false
+    default: "now"
+    example: "2026-04-28 23:59:59.999"
+
+how_to_implement: >
+  This detection requires Sysmon EventID 1 (Process Creation) logs to be
+  forwarded from Windows endpoints to Wazuh Indexer. Ensure Sysmon is
+  deployed with a configuration that captures Image, OriginalFileName,
+  CommandLine, and ParentCommandLine fields (SwiftOnSecurity or Olaf
+  Hartong Sysmon modular config recommended). The detection uses two
+  complementary branches: the parent branch matches when the spawning
+  cmd.exe carries the ping-sleep pattern in its parentCommandLine
+  (catching every child process the chained command chain produces),
+  and the self branch matches when ping.exe itself is observed with
+  chain operators in its command line. Critically, Sysmon stores
+  command-line text in XML format, so the shell metacharacters >
+  and & appear in the indexed events as &gt; and &amp; respectively -
+  the rule matches both the literal and XML-escaped forms to remain
+  robust across log parser configurations. Case-insensitive matching
+  is used in both Elasticsearch (case_insensitive: true on the
+  ping/-n wildcards) and Graylog (Lucene character classes). The
+  Graylog query requires careful escaping of the & character because
+  Graylog treats & as the AND-intersection operator - all & wildcards
+  use the \& escaped form. Because legitimate batch scripts may
+  combine ping -n with chain operators for connectivity checks
+  (for example, `ping -n 1 server > nul && net use ...`), tune by
+  parent-process or user-context allow-listing.
+
+known_false_positives: >
+  System administrators, network operators, batch scripts, and
+  installation routines may legitimately use ping -n combined
+  with chain operators for connectivity checks, retry loops, or
+  installer pre-flight validation. Allow-list specific approved
+  parent processes (administrative tooling, configuration
+  management agents, installer wrappers), known administrative
+  user accounts, or scheduled-task contexts as needed. The
+  technique is most suspicious when ping is being used solely as
+  a delay (typically with -n values >= 5 and 127.0.0.1 as the
+  target) rather than to test reachability of a real host.
+
+references:
+  - https://attack.mitre.org/techniques/T1497/003/
+  - https://www.microsoft.com/security/blog/2022/01/15/destructive-malware-targeting-ukrainian-organizations/
+  - https://learn.microsoft.com/en-us/windows-server/administration/windows-commands/ping
+  - https://attack.mitre.org/techniques/T1497/
+
+response:
+  message: >
+    Ping-sleep batch command pattern detected on endpoint
+    $agent_name$ by user $data_win_eventdata_user$. Process image:
+    $data_win_eventdata_image$. Parent process:
+    $data_win_eventdata_parentImage$. Command line:
+    $data_win_eventdata_commandLine$. Parent command line:
+    $data_win_eventdata_parentCommandLine$. ping -n combined with
+    a shell chain operator (&, &&, >, &gt;, &amp;) is a known
+    sandbox-evasion sleep primitive used by destructive malware
+    (WhisperGate), commodity RATs (Quasar, Warzone, Gh0st),
+    ransomware (BlackByte), and stealers (Meduza). Investigate
+    the full command chain that follows the ping delay, the
+    parent process lineage (suspicious parents include Office,
+    browsers, document readers, scripting hosts, and unsigned
+    binaries), and any concurrent or follow-on file-write,
+    process, and network egress activity from the host.
+  risk_score: 30
+  severity: low
+  risk_objects:
+    - field: agent_name
+      type: system
+      score: 20
+    - field: data_win_eventdata_user
+      type: user
+      score: 20
+  threat_objects:
+    - field: data_win_eventdata_image
+      type: process_name
+    - field: data_win_eventdata_parentImage
+      type: parent_process_name
+    - field: data_win_eventdata_commandLine
+      type: command_line
+
+tags:
+  analytic_story:
+    - Warzone RAT
+    - Quasar RAT
+    - Data Destruction
+    - Meduza Stealer
+    - WhisperGate
+    - BlackByte Ransomware
+    - Void Manticore
+    - Gh0st RAT
+    - Sandbox Evasion
+    - Compromised Windows Host
+  asset_type: Endpoint
+  mitre_attack_id:
+    - T1497.003
+  custom_tags:
+    - ping_sleep
+    - sandbox_evasion
+    - time_based_evasion
+    - lolbin
+    - delay_execution
+    - batch_chaining
+    - sleep_primitive
+    - whispergate
+    - ping_chain
+    - shell_chain_operator
+  product:
+    - Wazuh
+  security_domain: endpoint
+
+graylog:
+  query: data_win_system_eventID:"1" AND ((data_win_eventdata_parentCommandLine:/.*[Pp][Ii][Nn][Gg].*/ AND data_win_eventdata_parentCommandLine:/.*\-[Nn].*/ AND (data_win_eventdata_parentCommandLine:/.*\& .*/ OR data_win_eventdata_parentCommandLine:/.*\&[Aa][Mm][Pp]\;.*/ OR data_win_eventdata_parentCommandLine:/.*\&[Cc]\:.*/ OR data_win_eventdata_parentCommandLine:/.*\&[Gg][Tt]\;.*/ OR data_win_eventdata_parentCommandLine:/.*\>.*/)) OR ((data_win_eventdata_image:/.*\\\\[Pp][Ii][Nn][Gg]\.exe/ OR data_win_eventdata_originalFileName:/[Pp][Ii][Nn][Gg]\.exe/) AND data_win_eventdata_commandLine:/.*\-[Nn].*/ AND (data_win_eventdata_commandLine:/.*\& .*/ OR data_win_eventdata_commandLine:/.*\&[Aa][Mm][Pp]\;.*/ OR data_win_eventdata_commandLine:/.*\&[Cc]\:.*/ OR data_win_eventdata_commandLine:/.*\&[Gg][Tt]\;.*/ OR data_win_eventdata_commandLine:/.*\>.*/)))

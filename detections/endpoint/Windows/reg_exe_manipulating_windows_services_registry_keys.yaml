@@ -1,0 +1,271 @@
+name: Reg exe Manipulating Windows Services Registry Keys
+id: 8470d755-0c13-45b3-bd63-387a373c10cf
+version: 1
+schema_version: "1.0"
+date: "2026-04-28"
+author: SOCFortress LLC
+status: production
+type: TTP
+
+description: >
+  This analytic detects the use of reg.exe to add or modify
+  registry keys associated with Windows services and their
+  configurations under HKLM\SYSTEM\CurrentControlSet\Services\.
+  Sysmon EventID 1 is used to match process creation events
+  where the Image path is anchored to \reg.exe (or the
+  OriginalFileName field equals reg.exe, catching renamed
+  binaries) AND the command line contains all three keywords:
+  reg, add, and Services. The combination targets the
+  authoritative Windows service-configuration registry
+  namespace, where each subkey under
+  HKLM\SYSTEM\CurrentControlSet\Services\<service-name>
+  defines an installed service and its configuration values:
+  ImagePath (the binary that runs when the service starts),
+  ServiceDll (the DLL loaded into svchost.exe for shared-host
+  services), Start (the service start type - 2 = automatic,
+  3 = manual, 4 = disabled), DisplayName, Description,
+  ObjectName (the account context the service runs under),
+  and the Parameters subkey for service-specific configuration.
+  Direct manipulation of these registry keys via reg.exe is
+  highly malicious-specific because legitimate service
+  installation overwhelmingly goes through the Service Control
+  Manager API (sc.exe create, New-Service, MSI installers,
+  vendor-supplied service-installation utilities) - all of
+  which create the registry keys as a side effect AND emit
+  Service Control Manager event logs. Direct registry
+  manipulation via reg.exe specifically bypasses the Service
+  Control Manager event log (Event ID 7045 - "A new service
+  was installed in the system") and bypasses any host-based
+  monitoring that watches the service-installation API
+  surface. Common malicious uses include: hijacking an
+  existing service's ImagePath to redirect execution to an
+  attacker binary (privilege escalation when the service
+  runs as SYSTEM); installing a new persistence service
+  without triggering Service Control Manager event logs;
+  modifying ServiceDll to load attacker DLLs into legitimate
+  svchost.exe processes (process-hollowing-style persistence
+  + LSASS-protected execution context); or modifying
+  ObjectName to elevate an existing service's run context.
+  This is a known T1574.011 (Hijack Execution Flow: Services
+  Registry Permissions Weakness) technique observed in
+  named threat activity including the Windows Service Abuse
+  analytic story, Windows Persistence Techniques analytic
+  story, and the broader Living Off The Land toolkit. If
+  confirmed malicious, this could allow an attacker to
+  control service behavior, achieve persistent SYSTEM-level
+  code execution, hijack legitimate services for
+  privilege-escalation pivots, load attacker DLLs into
+  trusted processes via the svchost service-host pattern,
+  and operate without triggering Service Control Manager
+  event logs - investigate the parent process, the user
+  context (the operation requires admin privileges),
+  the target service name (whether it is a new attacker
+  service, an existing legitimate service being modified,
+  or a service-name collision with a real Windows
+  service), the value being written (ImagePath / ServiceDll
+  / Start / ObjectName each indicate different attack
+  patterns), and any concurrent file-write activity
+  delivering the binary that the registry change points to.
+
+data_source:
+  - Sysmon EventID 1
+
+search:
+  index_pattern: "${INDEX_PATTERN}"
+  size: 100
+  sort:
+    - timestamp: desc
+  query:
+    bool:
+      must:
+        - term:
+            agent_name: "${AGENT_NAME}"
+        - term:
+            agent_labels_customer: "${CUSTOMER_CODE}"
+        - term:
+            data_win_system_eventID: "1"
+        - bool:
+            should:
+              - wildcard:
+                  data_win_eventdata_image:
+                    value: "*\\\\reg.exe"
+                    case_insensitive: true
+              - term:
+                  data_win_eventdata_originalFileName: "reg.exe"
+            minimum_should_match: 1
+        - wildcard:
+            data_win_eventdata_commandLine:
+              value: "*reg*"
+              case_insensitive: true
+        - wildcard:
+            data_win_eventdata_commandLine:
+              value: "*add*"
+              case_insensitive: true
+        - wildcard:
+            data_win_eventdata_commandLine:
+              value: "*Services*"
+              case_insensitive: true
+        - range:
+            timestamp:
+              gte: "${START_TIME}"
+              lte: "${END_TIME}"
+  _source:
+    - timestamp
+    - agent_name
+    - data_win_eventdata_image
+    - data_win_eventdata_originalFileName
+    - data_win_eventdata_commandLine
+    - data_win_eventdata_parentImage
+    - data_win_eventdata_parentCommandLine
+    - data_win_eventdata_user
+    - data_win_eventdata_processId
+    - data_win_eventdata_processGuid
+    - data_win_eventdata_parentProcessId
+    - data_win_eventdata_parentProcessGuid
+    - data_win_eventdata_hashes
+    - data_win_eventdata_integrityLevel
+    - data_win_eventdata_currentDirectory
+
+parameters:
+  AGENT_NAME:
+    description: "Target agent/host name"
+    type: string
+    required: true
+    example: "DESKTOP-AM0HLGE"
+  CUSTOMER_CODE:
+    description: "Customer label for filtering"
+    type: string
+    required: true
+    example: "lab"
+  INDEX_PATTERN:
+    description: "Elasticsearch index pattern"
+    type: string
+    required: true
+    example: "wazuh-lab_*"
+  START_TIME:
+    description: "Query start time (ISO 8601 or relative)"
+    type: datetime
+    required: false
+    default: "now-24h"
+    example: "2026-04-28 00:00:00.000"
+  END_TIME:
+    description: "Query end time (ISO 8601 or relative)"
+    type: datetime
+    required: false
+    default: "now"
+    example: "2026-04-28 23:59:59.999"
+
+how_to_implement: >
+  This detection requires Sysmon EventID 1 (Process Creation) logs to be
+  forwarded from Windows endpoints to Wazuh Indexer. Ensure Sysmon is
+  deployed with a configuration that captures Image, OriginalFileName,
+  and CommandLine fields (SwiftOnSecurity or Olaf Hartong Sysmon modular
+  config recommended). The detection requires a reg.exe image (or
+  originalFileName reg.exe for renamed binaries) AND three
+  case-insensitive keyword matches in the command line: reg, add,
+  and Services. The keyword combination catches both the HKLM and
+  HKEY_LOCAL_MACHINE registry root aliases and is robust to whether
+  the path uses HKLM\SYSTEM\CurrentControlSet\Services\<name> or
+  the alternative HKLM\SYSTEM\CurrentControlSet\Services\<name>\
+  Parameters\ subpath. Pair this analytic with Sysmon EventID 13
+  (RegistryEvent: Set Value) on the same key paths and Windows
+  Security EventID 7045 (Service Installation) for full coverage of
+  service-creation activity by all available paths. For higher
+  fidelity, prioritize alerts where the parent process is suspicious
+  (Office, browsers, document readers, scripting hosts, unsigned
+  binaries), where the value being written is ImagePath /
+  ServiceDll / ObjectName, or where the target service name is not
+  on a documented internal IT-services allow-list. All matching is
+  case-insensitive in both Elasticsearch (case_insensitive: true on
+  the wildcards) and Graylog (Lucene character classes).
+
+known_false_positives: >
+  It is unusual for a service to be created or modified by
+  directly manipulating the registry. Some legitimate
+  configuration management and software-installation routines
+  may use reg.exe to set service values (legacy installers,
+  in-house automation scripts, scheduled tasks for service
+  remediation). Allow-list specific approved parent processes,
+  configuration management agents, vendor installers, and
+  documented administrative service accounts as needed. Outside
+  of those documented use cases, direct registry manipulation
+  of the Services namespace via reg.exe is a high-priority
+  investigation.
+
+references:
+  - https://attack.mitre.org/techniques/T1574/011/
+  - https://learn.microsoft.com/en-us/windows-server/administration/windows-commands/reg-add
+  - https://learn.microsoft.com/en-us/windows/win32/services/service-control-manager
+  - https://learn.microsoft.com/en-us/windows-hardware/drivers/install/registry-trees-and-keys
+
+response:
+  message: >
+    Direct service-registry manipulation via reg.exe detected on
+    endpoint $agent_name$ by user $data_win_eventdata_user$.
+    Process image: $data_win_eventdata_image$. Parent process:
+    $data_win_eventdata_parentImage$. Command line:
+    $data_win_eventdata_commandLine$. Direct registry
+    manipulation of the
+    HKLM\SYSTEM\CurrentControlSet\Services\ namespace via
+    reg.exe bypasses the Service Control Manager event log
+    (Event ID 7045) and is highly malicious-specific - common
+    abuse patterns include ImagePath hijacking (privilege
+    escalation), ServiceDll modification (svchost-hosted DLL
+    injection), Start value modification (auto-start
+    persistence), and ObjectName changes (service-context
+    elevation). Investigate immediately, identify the parent
+    process lineage (suspicious parents include Office, browsers,
+    document readers, scripting hosts, unsigned binaries), examine
+    which service is being modified (new attacker service, hijack
+    of existing legitimate service, or service-name collision),
+    examine which value is being written (ImagePath / ServiceDll
+    / Start / ObjectName each indicate different attack
+    patterns), confirm whether the target binary path exists,
+    hunt for concurrent file-write activity delivering the
+    referenced binary, and isolate the host pending further
+    analysis.
+  risk_score: 50
+  severity: medium
+  risk_objects:
+    - field: agent_name
+      type: system
+      score: 50
+    - field: data_win_eventdata_user
+      type: user
+      score: 50
+  threat_objects:
+    - field: data_win_eventdata_image
+      type: process_name
+    - field: data_win_eventdata_parentImage
+      type: parent_process_name
+    - field: data_win_eventdata_commandLine
+      type: command_line
+
+tags:
+  analytic_story:
+    - Windows Service Abuse
+    - Windows Persistence Techniques
+    - Living Off The Land
+    - Service Hijacking
+    - Compromised Windows Host
+    - Privilege Escalation
+  asset_type: Endpoint
+  mitre_attack_id:
+    - T1574.011
+  custom_tags:
+    - reg_exe
+    - service_registry
+    - service_hijack
+    - imagepath_hijack
+    - servicedll_hijack
+    - persistence
+    - privilege_escalation
+    - hijack_execution_flow
+    - lolbin
+    - registry_manipulation
+  product:
+    - Wazuh
+  security_domain: endpoint
+
+graylog:
+  query: data_win_system_eventID:"1" AND (data_win_eventdata_image:/.*\\\\[Rr][Ee][Gg]\.exe/ OR data_win_eventdata_originalFileName:/[Rr][Ee][Gg]\.[Ee][Xx][Ee]/) AND data_win_eventdata_commandLine:/.*[Rr][Ee][Gg].*/ AND data_win_eventdata_commandLine:/.*[Aa][Dd][Dd].*/ AND data_win_eventdata_commandLine:/.*[Ss][Ee][Rr][Vv][Ii][Cc][Ee][Ss].*/

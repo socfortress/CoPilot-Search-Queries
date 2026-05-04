@@ -1,0 +1,240 @@
+name: Process Execution via WMI
+id: 24869767-8579-485d-9a4f-d9ddfd8f0cac
+version: 1
+schema_version: "1.0"
+date: "2026-04-28"
+author: SOCFortress LLC
+status: production
+type: TTP
+
+description: >
+  This analytic detects any process spawned by WmiPrvSE.exe
+  (the Windows Management Instrumentation Provider Host),
+  indicating use of WMI for process creation. Sysmon EventID 1
+  is used to match process creation events where the
+  ParentImage path is anchored to \WmiPrvSE.exe AND the
+  spawned process Image is NOT anchored to \dismhost.exe (a
+  legitimate Microsoft DISM helper that is occasionally
+  invoked through the WMI provider during servicing
+  operations and produces benign noise). WmiPrvSE.exe is the
+  host process that hands out WMI provider DLLs to satisfy
+  WMI queries and method invocations. When WmiPrvSE.exe
+  spawns a child process, the trigger is almost always a
+  call to one of the WMI process-creation surfaces: the
+  Win32_Process Create method (used by Impacket wmiexec, by
+  the PowerShell [wmiclass] accelerator, and by direct
+  Invoke-WmiMethod / Invoke-CimMethod calls), the
+  Win32_ScheduledJob Create method, or the
+  Win32_StartupCommand class. None of these surfaces fire
+  during normal interactive desktop use - WMI process
+  creation is overwhelmingly an automation, lateral movement,
+  or remote-execution signal. This makes WmiPrvSE.exe an
+  exceptionally clean parent process to monitor: legitimate
+  uses are typically narrow and well-documented (configuration
+  management agents, backup software, DISM servicing), while
+  malicious uses span the full T1047 abuse spectrum. This is
+  a known T1047 (Windows Management Instrumentation) technique
+  observed in named threat activity including the Suspicious
+  WMI Use analytic story, Impacket lateral-movement toolkits
+  (wmiexec.py), Cobalt Strike's WMI lateral movement, and a
+  wide range of APT and ransomware playbooks that use WMI as
+  the lateral-movement primitive. If confirmed malicious, this
+  could allow an attacker to execute arbitrary commands or
+  scripts remotely from another compromised host, achieve
+  fileless lateral movement that leaves minimal disk
+  artifacts, persist through WMI event-subscription
+  consumers, deliver follow-on payloads to additional hosts,
+  and pivot through the network without dropping observable
+  remote-shell binaries - investigate the source network
+  session that triggered the WMI invocation, the spawned
+  process command line, the user context, and any concurrent
+  WMI activity in adjacent hosts that may indicate broader
+  lateral-movement campaign.
+
+data_source:
+  - Sysmon EventID 1
+
+search:
+  index_pattern: "${INDEX_PATTERN}"
+  size: 100
+  sort:
+    - timestamp: desc
+  query:
+    bool:
+      must:
+        - term:
+            agent_name: "${AGENT_NAME}"
+        - term:
+            agent_labels_customer: "${CUSTOMER_CODE}"
+        - term:
+            data_win_system_eventID: "1"
+        - wildcard:
+            data_win_eventdata_parentImage:
+              value: "*\\\\WmiPrvSE.exe"
+              case_insensitive: true
+        - range:
+            timestamp:
+              gte: "${START_TIME}"
+              lte: "${END_TIME}"
+      must_not:
+        - wildcard:
+            data_win_eventdata_image:
+              value: "*\\\\dismhost.exe"
+              case_insensitive: true
+  _source:
+    - timestamp
+    - agent_name
+    - data_win_eventdata_image
+    - data_win_eventdata_originalFileName
+    - data_win_eventdata_commandLine
+    - data_win_eventdata_parentImage
+    - data_win_eventdata_parentCommandLine
+    - data_win_eventdata_user
+    - data_win_eventdata_processId
+    - data_win_eventdata_processGuid
+    - data_win_eventdata_parentProcessId
+    - data_win_eventdata_parentProcessGuid
+    - data_win_eventdata_hashes
+    - data_win_eventdata_integrityLevel
+    - data_win_eventdata_currentDirectory
+
+parameters:
+  AGENT_NAME:
+    description: "Target agent/host name"
+    type: string
+    required: true
+    example: "DESKTOP-AM0HLGE"
+  CUSTOMER_CODE:
+    description: "Customer label for filtering"
+    type: string
+    required: true
+    example: "lab"
+  INDEX_PATTERN:
+    description: "Elasticsearch index pattern"
+    type: string
+    required: true
+    example: "wazuh-lab_*"
+  START_TIME:
+    description: "Query start time (ISO 8601 or relative)"
+    type: datetime
+    required: false
+    default: "now-24h"
+    example: "2026-04-28 00:00:00.000"
+  END_TIME:
+    description: "Query end time (ISO 8601 or relative)"
+    type: datetime
+    required: false
+    default: "now"
+    example: "2026-04-28 23:59:59.999"
+
+how_to_implement: >
+  This detection requires Sysmon EventID 1 (Process Creation) logs to be
+  forwarded from Windows endpoints to Wazuh Indexer. Ensure Sysmon is
+  deployed with a configuration that captures Image, ParentImage,
+  CommandLine, and ParentCommandLine fields (SwiftOnSecurity or Olaf
+  Hartong Sysmon modular config recommended). The detection is a
+  parent-image-only analytic: any child of WmiPrvSE.exe is reported
+  except DISM helper invocations (\dismhost.exe). The expected
+  ParentCommandLine for the WMI provider host is
+  C:\Windows\system32\wbem\wmiprvse.exe -secured -Embedding (or
+  similar) when invoked via DCOM activation - this matches both
+  local-host WMI invocations (Invoke-WmiMethod against the local
+  machine) and remote WMI invocations from another compromised
+  endpoint, and the analytic catches both. Pair this analytic with
+  Microsoft-Windows-WMI-Activity/Operational EventID 5857 / 5858
+  (provider load) and EventID 5860 / 5861 (event consumer
+  activity) for full WMI-abuse coverage. Tune by allow-listing
+  specific approved parent-of-WmiPrvSE-grandparent processes
+  (configuration management agents, backup software vendor
+  binaries) or expected child binaries (msiexec.exe for software
+  install, specific vendor helper executables). Note: the
+  legitimate parent of WmiPrvSE.exe is svchost.exe -k DcomLaunch,
+  but for this rule the relevant parent-child relationship is
+  WmiPrvSE.exe → suspicious-child, not the upstream.
+
+known_false_positives: >
+  Although unlikely, system administrators may legitimately use
+  WMI to execute commands for administrative purposes -
+  configuration management agents (SCCM, Intune, Ansible,
+  Puppet), backup-software helpers, vulnerability scanners, and
+  software-distribution tools may all spawn child processes via
+  WmiPrvSE.exe. Allow-list specific approved parent-of-WMI
+  contexts (the upstream service or user that initiates the WMI
+  call), expected child binaries (msiexec.exe, vendor helpers),
+  or known administrative service accounts as needed. The
+  \dismhost.exe exclusion already covers the most common benign
+  noise source from native Windows servicing operations.
+
+references:
+  - https://attack.mitre.org/techniques/T1047/
+  - https://learn.microsoft.com/en-us/windows/win32/wmisdk/wmi-architecture
+  - https://github.com/SecureAuthCorp/impacket/blob/master/examples/wmiexec.py
+  - https://learn.microsoft.com/en-us/windows/win32/cimwin32prov/create-method-in-class-win32-process
+
+response:
+  message: >
+    Process execution via WMI detected on endpoint $agent_name$ by
+    user $data_win_eventdata_user$. Process image:
+    $data_win_eventdata_image$. Parent process:
+    $data_win_eventdata_parentImage$. Command line:
+    $data_win_eventdata_commandLine$. Parent command line:
+    $data_win_eventdata_parentCommandLine$. WmiPrvSE.exe spawning
+    a child process is the canonical fingerprint of a WMI
+    Win32_Process.Create invocation - used legitimately by
+    configuration management agents and abused by attackers
+    (Impacket wmiexec, Cobalt Strike WMI lateral movement, APT
+    and ransomware playbooks) for fileless lateral movement and
+    remote code execution. Investigate immediately, identify the
+    source network session that triggered the WMI invocation
+    (incoming RPC connection from another host indicates
+    inbound lateral movement; local invocation indicates
+    in-host automation or local privilege escalation), examine
+    the spawned process command line and decode any encoded
+    payloads, hunt for adjacent WMI activity on related hosts,
+    review WMI event-subscription consumers for persistence
+    artifacts, and isolate the host pending further analysis.
+  risk_score: 50
+  severity: medium
+  risk_objects:
+    - field: agent_name
+      type: system
+      score: 50
+    - field: data_win_eventdata_user
+      type: user
+      score: 50
+  threat_objects:
+    - field: data_win_eventdata_image
+      type: process_name
+    - field: data_win_eventdata_parentImage
+      type: parent_process_name
+    - field: data_win_eventdata_commandLine
+      type: command_line
+
+tags:
+  analytic_story:
+    - Suspicious WMI Use
+    - Active Directory Lateral Movement
+    - Impacket Toolkit
+    - Cobalt Strike
+    - Compromised Windows Host
+    - Remote Code Execution
+  asset_type: Endpoint
+  mitre_attack_id:
+    - T1047
+  custom_tags:
+    - wmi
+    - wmi_abuse
+    - wmiprvse
+    - lateral_movement
+    - remote_code_execution
+    - fileless_execution
+    - impacket
+    - wmiexec
+    - dcom_activation
+    - parent_child_anomaly
+  product:
+    - Wazuh
+  security_domain: endpoint
+
+graylog:
+  query: data_win_system_eventID:"1" AND data_win_eventdata_parentImage:/.*\\\\[Ww][Mm][Ii][Pp][Rr][Vv][Ss][Ee]\.exe/ AND NOT data_win_eventdata_image:/.*\\\\[Dd][Ii][Ss][Mm][Hh][Oo][Ss][Tt]\.exe/

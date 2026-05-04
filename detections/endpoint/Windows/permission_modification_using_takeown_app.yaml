@@ -1,0 +1,224 @@
+name: Permission Modification using Takeown App
+id: fa7ca5c6-c9d8-11eb-bce9-acde48001122
+version: 1
+schema_version: "1.0"
+date: "2026-04-28"
+author: SOCFortress LLC
+status: production
+type: Anomaly
+
+description: >
+  This analytic detects the modification of file or directory
+  ownership using the takeown.exe Windows application. Sysmon
+  EventID 1 is used to match process creation events where the
+  Image path is anchored to \takeown.exe (preventing false
+  positives from binaries whose names merely end with takeown.exe)
+  OR the OriginalFileName field equals takeown.exe (catching
+  renamed binaries) AND the command line contains a /f switch in
+  any case (matching both /f and /F, the only required argument
+  that specifies which file or directory to claim ownership of).
+  takeown.exe is a Microsoft-signed Windows utility that allows
+  the invoking user (typically with administrator rights) to
+  replace the current owner of a file or directory with their own
+  user account, bypassing existing access-control restrictions
+  that would otherwise prevent the user from reading, modifying,
+  or deleting the target. Adversaries - particularly ransomware
+  operators - routinely abuse takeown.exe early in the encryption
+  workflow to claim ownership of protected directories before
+  invoking icacls or cipher to grant themselves full read/write
+  access. The canonical ransomware pattern is `takeown /f
+  <directory> /r /d Y` followed by `icacls <directory> /grant
+  <user>:F /T /C /Q` - takeown becomes the first link in a
+  permission-modification chain that strips the host of its
+  defensive ACLs and prepares files for bulk encryption or
+  destruction. This is a known T1222 (File and Directory
+  Permissions Modification) technique observed in named threat
+  activity including Sandworm Tools, the WastedLocker / Evil Corp
+  ransomware operations, the broader Ransomware analytic story,
+  Crypto Stealer activity, and the Scattered Lapsus$ Hunters
+  intrusions. If confirmed malicious, this activity could be a
+  precursor to mass file encryption, deletion of recovery data,
+  unauthorized access to protected user-profile or system
+  directories, or removal of protected Windows files - investigate
+  the parent process, the user context, the target paths, and
+  any concurrent or follow-on icacls / cipher / encryption
+  activity from the host.
+
+data_source:
+  - Sysmon EventID 1
+
+search:
+  index_pattern: "${INDEX_PATTERN}"
+  size: 100
+  sort:
+    - timestamp: desc
+  query:
+    bool:
+      must:
+        - term:
+            agent_name: "${AGENT_NAME}"
+        - term:
+            agent_labels_customer: "${CUSTOMER_CODE}"
+        - term:
+            data_win_system_eventID: "1"
+        - bool:
+            should:
+              - wildcard:
+                  data_win_eventdata_image:
+                    value: "*\\\\takeown.exe"
+                    case_insensitive: true
+              - term:
+                  data_win_eventdata_originalFileName: "takeown.exe"
+            minimum_should_match: 1
+        - wildcard:
+            data_win_eventdata_commandLine:
+              value: "*/f*"
+              case_insensitive: true
+        - range:
+            timestamp:
+              gte: "${START_TIME}"
+              lte: "${END_TIME}"
+  _source:
+    - timestamp
+    - agent_name
+    - data_win_eventdata_image
+    - data_win_eventdata_originalFileName
+    - data_win_eventdata_commandLine
+    - data_win_eventdata_parentImage
+    - data_win_eventdata_parentCommandLine
+    - data_win_eventdata_user
+    - data_win_eventdata_processId
+    - data_win_eventdata_processGuid
+    - data_win_eventdata_parentProcessId
+    - data_win_eventdata_parentProcessGuid
+    - data_win_eventdata_hashes
+    - data_win_eventdata_integrityLevel
+    - data_win_eventdata_currentDirectory
+
+parameters:
+  AGENT_NAME:
+    description: "Target agent/host name"
+    type: string
+    required: true
+    example: "DESKTOP-AM0HLGE"
+  CUSTOMER_CODE:
+    description: "Customer label for filtering"
+    type: string
+    required: true
+    example: "lab"
+  INDEX_PATTERN:
+    description: "Elasticsearch index pattern"
+    type: string
+    required: true
+    example: "wazuh-lab_*"
+  START_TIME:
+    description: "Query start time (ISO 8601 or relative)"
+    type: datetime
+    required: false
+    default: "now-24h"
+    example: "2026-04-28 00:00:00.000"
+  END_TIME:
+    description: "Query end time (ISO 8601 or relative)"
+    type: datetime
+    required: false
+    default: "now"
+    example: "2026-04-28 23:59:59.999"
+
+how_to_implement: >
+  This detection requires Sysmon EventID 1 (Process Creation) logs to be
+  forwarded from Windows endpoints to Wazuh Indexer. Ensure Sysmon is
+  deployed with a configuration that captures Image, OriginalFileName,
+  and CommandLine fields (SwiftOnSecurity or Olaf Hartong Sysmon modular
+  config recommended). The detection matches takeown.exe by Image path
+  anchored to the path separator (*\\takeown.exe) to avoid false
+  positives from binaries whose filenames merely end with takeown.exe,
+  with an OriginalFileName fallback to catch renamed binaries. The /f
+  switch is matched case-insensitively in both Elasticsearch
+  (case_insensitive: true on the wildcard, catching both /f and /F)
+  and Graylog (Lucene character class \/[Ff]). Because legitimate IT
+  administration does include takeown usage during system maintenance
+  (file recovery, profile cleanup, post-Windows-update permission
+  fixes), expect routine hits in active environments - tune by
+  parent-process, scheduled-task, or user-context allow-listing. For
+  higher fidelity, prioritize alerts where takeown is followed within
+  seconds by icacls or cipher invocations against the same target
+  paths, or where the parent process is suspicious (Office,
+  browsers, document readers, unsigned binaries).
+
+known_false_positives: >
+  takeown.exe is a normal Windows application that may be used by
+  network operators, system administrators, IT support staff, file
+  recovery scripts, and post-Windows-update permission-repair
+  routines. Allow-list specific approved parent processes
+  (administrative tooling, configuration management agents),
+  known administrative service accounts, or scheduled-task
+  contexts as needed.
+
+references:
+  - https://attack.mitre.org/techniques/T1222/
+  - https://learn.microsoft.com/en-us/windows-server/administration/windows-commands/takeown
+  - https://lolbas-project.github.io/lolbas/Binaries/Takeown/
+  - https://research.nccgroup.com/2020/06/23/wastedlocker-a-new-ransomware-variant-developed-by-the-evil-corp-group/
+
+response:
+  message: >
+    File or directory ownership modification via takeown.exe was
+    detected on endpoint $agent_name$ by user
+    $data_win_eventdata_user$. Process image:
+    $data_win_eventdata_image$. Parent process:
+    $data_win_eventdata_parentImage$. Command line:
+    $data_win_eventdata_commandLine$. takeown is routinely abused
+    by ransomware operators (notably WastedLocker / Evil Corp and
+    Sandworm Tools) early in the encryption workflow to claim
+    ownership of protected directories before invoking icacls or
+    cipher to grant full read/write access. Investigate the parent
+    process lineage (suspicious parents include Office, browsers,
+    document readers, and unsigned binaries), the target paths
+    being claimed, the user context, and any concurrent or
+    follow-on icacls / cipher / encryption activity from the host.
+  risk_score: 30
+  severity: low
+  risk_objects:
+    - field: agent_name
+      type: system
+      score: 20
+    - field: data_win_eventdata_user
+      type: user
+      score: 20
+  threat_objects:
+    - field: data_win_eventdata_image
+      type: process_name
+    - field: data_win_eventdata_parentImage
+      type: parent_process_name
+    - field: data_win_eventdata_commandLine
+      type: command_line
+
+tags:
+  analytic_story:
+    - Sandworm Tools
+    - Ransomware
+    - Crypto Stealer
+    - Scattered Lapsus$ Hunters
+    - WastedLocker
+    - Permission Modification
+    - Pre-Encryption Activity
+    - Compromised Windows Host
+  asset_type: Endpoint
+  mitre_attack_id:
+    - T1222
+  custom_tags:
+    - takeown
+    - permission_modification
+    - file_ownership
+    - lolbin
+    - ransomware_precursor
+    - acl_manipulation
+    - pre_encryption
+    - file_directory_permissions
+    - defense_evasion
+  product:
+    - Wazuh
+  security_domain: endpoint
+
+graylog:
+  query: data_win_system_eventID:"1" AND (data_win_eventdata_image:/.*\\\\[Tt][Aa][Kk][Ee][Oo][Ww][Nn]\.exe/ OR data_win_eventdata_originalFileName:/[Tt][Aa][Kk][Ee][Oo][Ww][Nn]\.exe/) AND data_win_eventdata_commandLine:/.*\/[Ff].*/

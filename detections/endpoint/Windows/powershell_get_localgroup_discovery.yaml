@@ -1,0 +1,227 @@
+name: PowerShell Get LocalGroup Discovery
+id: b71adfcc-155b-11ec-9413-acde48001122
+version: 1
+schema_version: "1.0"
+date: "2026-04-28"
+author: SOCFortress LLC
+status: production
+type: Hunting
+
+description: >
+  This analytic identifies the use of the Get-LocalGroup cmdlet
+  executed via PowerShell or wrapped in cmd.exe to enumerate local
+  groups on a Windows endpoint. Sysmon EventID 1 is used to match
+  process creation events where the Image path is anchored to
+  \powershell.exe, \pwsh.exe, or \cmd.exe (or the OriginalFileName
+  field equals PowerShell.EXE / pwsh.dll / Cmd.Exe, catching renamed
+  binaries) AND the command line contains the get-localgroup
+  cmdlet invocation. Get-LocalGroup is a PowerShell cmdlet that
+  enumerates local security groups on a Windows host - returning
+  the names, descriptions, and SIDs of groups including
+  Administrators, Backup Operators, Remote Desktop Users, Hyper-V
+  Administrators, and any custom local groups. This information is
+  a key situational-awareness step performed by adversaries early
+  in the post-exploitation chain to identify privileged groups
+  whose members are worth targeting for credential theft, locate
+  membership pathways for privilege escalation, and map the local
+  security model of the compromised host before lateral movement
+  decisions. The cmd.exe branch catches the common
+  cmd /c "powershell -Command Get-LocalGroup" wrapper pattern used
+  in batch scripts and downloader chains. This is a known T1069.001
+  (Permission Groups Discovery: Local Groups) technique observed
+  in named threat activity including the Active Directory
+  Discovery analytic story and broad post-exploitation reconnaissance
+  toolkits. If confirmed malicious, this reconnaissance behavior
+  could be a precursor to privilege escalation through
+  identification of high-value local accounts, credential theft
+  targeting members of privileged groups, lateral movement using
+  harvested credentials, or persistent footholds via local-group
+  manipulation - investigate the parent process, the user context,
+  and any concurrent or follow-on local-account enumeration commands
+  (`Get-LocalUser`, `net localgroup`, `whoami /groups`,
+  `Get-WmiObject Win32_UserAccount`) from the host.
+
+data_source:
+  - Sysmon EventID 1
+
+search:
+  index_pattern: "${INDEX_PATTERN}"
+  size: 100
+  sort:
+    - timestamp: desc
+  query:
+    bool:
+      must:
+        - term:
+            agent_name: "${AGENT_NAME}"
+        - term:
+            agent_labels_customer: "${CUSTOMER_CODE}"
+        - term:
+            data_win_system_eventID: "1"
+        - bool:
+            should:
+              - wildcard:
+                  data_win_eventdata_image:
+                    value: "*\\\\powershell.exe"
+                    case_insensitive: true
+              - wildcard:
+                  data_win_eventdata_image:
+                    value: "*\\\\pwsh.exe"
+                    case_insensitive: true
+              - wildcard:
+                  data_win_eventdata_image:
+                    value: "*\\\\cmd.exe"
+                    case_insensitive: true
+              - term:
+                  data_win_eventdata_originalFileName: "PowerShell.EXE"
+              - term:
+                  data_win_eventdata_originalFileName: "pwsh.dll"
+              - term:
+                  data_win_eventdata_originalFileName: "Cmd.Exe"
+            minimum_should_match: 1
+        - wildcard:
+            data_win_eventdata_commandLine:
+              value: "*get-localgroup*"
+              case_insensitive: true
+        - range:
+            timestamp:
+              gte: "${START_TIME}"
+              lte: "${END_TIME}"
+  _source:
+    - timestamp
+    - agent_name
+    - data_win_eventdata_image
+    - data_win_eventdata_originalFileName
+    - data_win_eventdata_commandLine
+    - data_win_eventdata_parentImage
+    - data_win_eventdata_parentCommandLine
+    - data_win_eventdata_user
+    - data_win_eventdata_processId
+    - data_win_eventdata_processGuid
+    - data_win_eventdata_parentProcessId
+    - data_win_eventdata_parentProcessGuid
+    - data_win_eventdata_hashes
+    - data_win_eventdata_integrityLevel
+    - data_win_eventdata_currentDirectory
+
+parameters:
+  AGENT_NAME:
+    description: "Target agent/host name"
+    type: string
+    required: true
+    example: "DESKTOP-AM0HLGE"
+  CUSTOMER_CODE:
+    description: "Customer label for filtering"
+    type: string
+    required: true
+    example: "lab"
+  INDEX_PATTERN:
+    description: "Elasticsearch index pattern"
+    type: string
+    required: true
+    example: "wazuh-lab_*"
+  START_TIME:
+    description: "Query start time (ISO 8601 or relative)"
+    type: datetime
+    required: false
+    default: "now-24h"
+    example: "2026-04-28 00:00:00.000"
+  END_TIME:
+    description: "Query end time (ISO 8601 or relative)"
+    type: datetime
+    required: false
+    default: "now"
+    example: "2026-04-28 23:59:59.999"
+
+how_to_implement: >
+  This detection requires Sysmon EventID 1 (Process Creation) logs to be
+  forwarded from Windows endpoints to Wazuh Indexer. Ensure Sysmon is
+  deployed with a configuration that captures Image, OriginalFileName,
+  and CommandLine fields (SwiftOnSecurity or Olaf Hartong Sysmon modular
+  config recommended). The detection matches three image variants
+  (powershell.exe, pwsh.exe, cmd.exe) anchored to the path separator
+  with OriginalFileName fallbacks for renamed binaries, combined with
+  a case-insensitive get-localgroup substring match in the command
+  line. The cmd.exe inclusion catches the common wrapper pattern
+  cmd /c "powershell -Command Get-LocalGroup" used by batch scripts
+  and downloader chains. Because this is a Hunting-type analytic,
+  expect to see legitimate administrative use of Get-LocalGroup in
+  normal IT operations (audit scripts, group-membership
+  validation, local-account auditing) - tune by parent-process,
+  scheduled-task, or user-context allow-listing rather than by
+  removing the detection. For higher fidelity, prioritize alerts
+  where the parent process is suspicious (Office, browsers,
+  document readers, unsigned binaries) or where Get-LocalGroup
+  is the first of multiple sequential discovery commands run in a
+  short time window.
+
+known_false_positives: >
+  False positives may be present from legitimate administrative
+  scripts, monitoring tools, audit routines, configuration
+  management agents (SCCM, Intune, Ansible), and PowerShell-based
+  group-membership validation workflows. Tune by allow-listing
+  specific approved parent processes, known administrative service
+  accounts, or scheduled-task contexts as needed.
+
+references:
+  - https://attack.mitre.org/techniques/T1069/001/
+  - https://github.com/redcanaryco/atomic-red-team/blob/master/atomics/T1069.001/T1069.001.md
+  - https://learn.microsoft.com/en-us/powershell/module/microsoft.powershell.localaccounts/get-localgroup
+
+response:
+  message: >
+    Local-group enumeration via PowerShell Get-LocalGroup detected
+    on endpoint $agent_name$ by user $data_win_eventdata_user$.
+    Process image: $data_win_eventdata_image$. Parent process:
+    $data_win_eventdata_parentImage$. Command line:
+    $data_win_eventdata_commandLine$. Get-LocalGroup enumerates
+    local security groups (Administrators, Remote Desktop Users,
+    Backup Operators, etc.) - a common situational-awareness step
+    performed by adversaries early in the post-exploitation chain
+    to identify privileged groups for credential theft and
+    privilege escalation. Investigate the parent process lineage,
+    the user context, and any concurrent or follow-on local-account
+    enumeration commands (`Get-LocalUser`, `net localgroup`,
+    `whoami /groups`) from the host.
+  risk_score: 30
+  severity: low
+  risk_objects:
+    - field: agent_name
+      type: system
+      score: 20
+    - field: data_win_eventdata_user
+      type: user
+      score: 20
+  threat_objects:
+    - field: data_win_eventdata_image
+      type: process_name
+    - field: data_win_eventdata_parentImage
+      type: parent_process_name
+    - field: data_win_eventdata_commandLine
+      type: command_line
+
+tags:
+  analytic_story:
+    - Active Directory Discovery
+    - Local Group Discovery
+    - Permission Groups Discovery
+    - Reconnaissance
+  asset_type: Endpoint
+  mitre_attack_id:
+    - T1069.001
+  custom_tags:
+    - powershell
+    - get_localgroup
+    - local_group_discovery
+    - permission_groups_discovery
+    - reconnaissance
+    - situational_awareness
+    - post_exploitation
+    - privilege_escalation_precursor
+    - hunting
+  product:
+    - Wazuh
+  security_domain: endpoint
+
+graylog:
+  query: data_win_system_eventID:"1" AND (data_win_eventdata_image:/.*\\\\[Pp][Oo][Ww][Ee][Rr][Ss][Hh][Ee][Ll][Ll]\.exe/ OR data_win_eventdata_image:/.*\\\\[Pp][Ww][Ss][Hh]\.exe/ OR data_win_eventdata_image:/.*\\\\[Cc][Mm][Dd]\.exe/ OR data_win_eventdata_originalFileName:/[Pp][Oo][Ww][Ee][Rr][Ss][Hh][Ee][Ll][Ll]\.EXE/ OR data_win_eventdata_originalFileName:/[Pp][Ww][Ss][Hh]\.dll/ OR data_win_eventdata_originalFileName:/[Cc][Mm][Dd]\.[Ee][Xx][Ee]/) AND data_win_eventdata_commandLine:/.*[Gg][Ee][Tt]\-[Ll][Oo][Cc][Aa][Ll][Gg][Rr][Oo][Uu][Pp].*/

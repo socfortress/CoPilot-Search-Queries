@@ -1,0 +1,271 @@
+name: Regsvr32 Silent and Install Param Dll Loading
+id: f421c250-24e7-11ec-bc43-acde48001122
+version: 1
+schema_version: "1.0"
+date: "2026-04-28"
+author: SOCFortress LLC
+status: production
+type: Anomaly
+
+description: >
+  This analytic detects the execution of regsvr32.exe with both
+  the /i (DLLInstall) and /s (silent) parameters - the canonical
+  fingerprint of malicious DLL loading via the regsvr32 LOLBIN.
+  Sysmon EventID 1 is used to match process creation events
+  where the Image path is anchored to \regsvr32.exe (or the
+  OriginalFileName field equals REGSVR32.EXE / regsvr32.exe,
+  catching renamed binaries) AND the command line contains
+  BOTH a /i or -i switch (DLLInstall mode, which calls the
+  target DLL's DllInstall export instead of the standard
+  DllRegisterServer) AND a /s or -s switch (silent mode,
+  which suppresses the default success / failure message-box
+  dialog). regsvr32.exe is a Microsoft-signed Windows
+  utility primarily designed to register and unregister COM
+  components by calling the well-known DllRegisterServer
+  export of the target DLL. The /i parameter is a far-less
+  common variant that calls DllInstall instead - DllInstall
+  takes an optional command-line argument that is passed
+  through to the DLL's installation routine, giving the DLL
+  author a side-channel for execution that does not require
+  any COM registration. Adversaries abuse DllInstall mode
+  because: (1) regsvr32.exe is a Microsoft-signed binary on
+  the LOLBIN allow-list of many EDR and AppLocker policies;
+  (2) the /i argument can be used to pass arbitrary attacker
+  data into the DLL at execution time; (3) when combined with
+  /s, no GUI dialog appears, allowing fully silent execution;
+  and (4) the parent-child relationship of regsvr32 spawning
+  unusual children (scrobj.dll fetching remote scriptlets,
+  payload DLLs spawning shells) is easy to miss in busy
+  endpoint telemetry. The historic AsyncRAT delivery chain
+  used the /s /i:URL pattern with scrobj.dll
+  (a Windows-shipped Script Object DLL) to fetch and execute
+  remote scriptlets - while scrobj.dll has been mitigated in
+  newer Windows versions, the /s /i invocation pattern is
+  still observed in current Remcos, njRAT, AsyncRAT, and
+  Hermetic Wiper samples that deliver their own DLL with a
+  malicious DllInstall export. This is a known T1218.010
+  (System Binary Proxy Execution: Regsvr32) technique
+  observed in named threat activity including AsyncRAT,
+  Remcos, the broader Suspicious Regsvr32 Activity analytic
+  story, Hermetic Wiper destructive malware, the Living Off
+  The Land toolkit, and the Data Destruction analytic story.
+  If confirmed malicious, this technique could allow
+  attackers to execute arbitrary code via a Microsoft-signed
+  binary, bypass application-allow-list controls that trust
+  regsvr32, deliver follow-on payloads with full execution
+  context, maintain persistence by re-invoking the same DLL
+  load pattern, and operate without user-visible dialog
+  artifacts - investigate the parent process, the user
+  context, the specific DLL path being loaded (where it was
+  written, whether the file is signed, what its DllInstall
+  export does), the optional /i argument value (often a URL
+  for remote-scriptlet variants or attacker-controlled
+  configuration string), and any concurrent or follow-on
+  process-spawn, file-write, and network-egress activity
+  from the host.
+
+data_source:
+  - Sysmon EventID 1
+
+search:
+  index_pattern: "${INDEX_PATTERN}"
+  size: 100
+  sort:
+    - timestamp: desc
+  query:
+    bool:
+      must:
+        - term:
+            agent_name: "${AGENT_NAME}"
+        - term:
+            agent_labels_customer: "${CUSTOMER_CODE}"
+        - term:
+            data_win_system_eventID: "1"
+        - bool:
+            should:
+              - wildcard:
+                  data_win_eventdata_image:
+                    value: "*\\\\regsvr32.exe"
+                    case_insensitive: true
+              - term:
+                  data_win_eventdata_originalFileName: "REGSVR32.EXE"
+              - term:
+                  data_win_eventdata_originalFileName: "regsvr32.exe"
+            minimum_should_match: 1
+        - bool:
+            should:
+              - wildcard:
+                  data_win_eventdata_commandLine:
+                    value: "*/i*"
+                    case_insensitive: true
+              - wildcard:
+                  data_win_eventdata_commandLine:
+                    value: "*-i*"
+                    case_insensitive: true
+            minimum_should_match: 1
+        - bool:
+            should:
+              - wildcard:
+                  data_win_eventdata_commandLine:
+                    value: "*/s*"
+                    case_insensitive: true
+              - wildcard:
+                  data_win_eventdata_commandLine:
+                    value: "*-s*"
+                    case_insensitive: true
+            minimum_should_match: 1
+        - range:
+            timestamp:
+              gte: "${START_TIME}"
+              lte: "${END_TIME}"
+  _source:
+    - timestamp
+    - agent_name
+    - data_win_eventdata_image
+    - data_win_eventdata_originalFileName
+    - data_win_eventdata_commandLine
+    - data_win_eventdata_parentImage
+    - data_win_eventdata_parentCommandLine
+    - data_win_eventdata_user
+    - data_win_eventdata_processId
+    - data_win_eventdata_processGuid
+    - data_win_eventdata_parentProcessId
+    - data_win_eventdata_parentProcessGuid
+    - data_win_eventdata_hashes
+    - data_win_eventdata_integrityLevel
+    - data_win_eventdata_currentDirectory
+
+parameters:
+  AGENT_NAME:
+    description: "Target agent/host name"
+    type: string
+    required: true
+    example: "DESKTOP-AM0HLGE"
+  CUSTOMER_CODE:
+    description: "Customer label for filtering"
+    type: string
+    required: true
+    example: "lab"
+  INDEX_PATTERN:
+    description: "Elasticsearch index pattern"
+    type: string
+    required: true
+    example: "wazuh-lab_*"
+  START_TIME:
+    description: "Query start time (ISO 8601 or relative)"
+    type: datetime
+    required: false
+    default: "now-24h"
+    example: "2026-04-28 00:00:00.000"
+  END_TIME:
+    description: "Query end time (ISO 8601 or relative)"
+    type: datetime
+    required: false
+    default: "now"
+    example: "2026-04-28 23:59:59.999"
+
+how_to_implement: >
+  This detection requires Sysmon EventID 1 (Process Creation) logs to be
+  forwarded from Windows endpoints to Wazuh Indexer. Ensure Sysmon is
+  deployed with a configuration that captures Image, OriginalFileName,
+  and CommandLine fields (SwiftOnSecurity or Olaf Hartong Sysmon modular
+  config recommended). The detection requires a regsvr32.exe image
+  (or originalFileName REGSVR32.EXE / regsvr32.exe for renamed
+  binaries) AND the simultaneous presence of both the DLLInstall
+  switch (/i or -i) and the silent switch (/s or -s). Both
+  hyphen-style and forward-slash-style switch prefixes are matched,
+  and case-insensitive matching covers both lowercase and uppercase
+  variants. Pair this analytic with Sysmon EventID 7 (Image Loaded)
+  to track which DLL was actually loaded into the regsvr32 process,
+  and with Sysmon EventID 3 (Network Connection) on the regsvr32
+  PID to catch outbound C2 from the loaded DLL. For higher fidelity,
+  prioritize alerts where the loaded DLL is in a non-system-default
+  location (\Users\, \ProgramData\, \Temp\), where the parent
+  process is suspicious (Office, browsers, document readers,
+  scripting hosts, unsigned binaries), or where the /i argument
+  contains a URL.
+
+known_false_positives: >
+  Other third-party applications and installer routines may use
+  the /s /i parameter combination of regsvr32 for DLL installation,
+  but this is uncommon in a base Windows environment. Allow-list
+  specific approved configuration management agents, vendor
+  installers, scheduled-task contexts, or known administrative
+  workflows as needed. Outside of those documented use cases, the
+  /s /i invocation pattern of regsvr32.exe is highly indicative
+  of malicious DLL loading and warrants investigation.
+
+references:
+  - https://attack.mitre.org/techniques/T1218/010/
+  - https://lolbas-project.github.io/lolbas/Binaries/Regsvr32/
+  - https://learn.microsoft.com/en-us/windows-server/administration/windows-commands/regsvr32
+  - https://app.any.run/tasks/dc93ee63-050c-4ff8-b07e-8277af9ab939/
+
+response:
+  message: >
+    Regsvr32 silent DLLInstall invocation detected on endpoint
+    $agent_name$ by user $data_win_eventdata_user$. Process image:
+    $data_win_eventdata_image$. Parent process:
+    $data_win_eventdata_parentImage$. Command line:
+    $data_win_eventdata_commandLine$. The
+    `regsvr32.exe /s /i:<arg> <dll>` invocation is the canonical
+    LOLBIN fingerprint of AsyncRAT, Remcos, njRAT, and Hermetic
+    Wiper malware - it abuses regsvr32's signed-binary trust to
+    load attacker DLLs via the DllInstall export with no GUI
+    artifact. Investigate immediately, identify the parent
+    process lineage (suspicious parents include Office, browsers,
+    document readers, scripting hosts, unsigned binaries),
+    examine the loaded DLL (file path, signing status, DllInstall
+    export behavior), examine any URL or argument passed to /i
+    (often points to attacker C2 infrastructure or
+    payload-fetching endpoint), hunt for follow-on
+    process-spawn, file-write, and network-egress activity from
+    the regsvr32 process, and isolate the host pending further
+    analysis.
+  risk_score: 30
+  severity: low
+  risk_objects:
+    - field: agent_name
+      type: system
+      score: 20
+    - field: data_win_eventdata_user
+      type: user
+      score: 20
+  threat_objects:
+    - field: data_win_eventdata_image
+      type: process_name
+    - field: data_win_eventdata_parentImage
+      type: parent_process_name
+    - field: data_win_eventdata_commandLine
+      type: command_line
+
+tags:
+  analytic_story:
+    - AsyncRAT
+    - Hermetic Wiper
+    - Living Off The Land
+    - Data Destruction
+    - Remcos
+    - Suspicious Regsvr32 Activity
+    - Compromised Windows Host
+    - Signed Binary Proxy Execution
+  asset_type: Endpoint
+  mitre_attack_id:
+    - T1218.010
+  custom_tags:
+    - regsvr32
+    - dll_install
+    - silent_dll_load
+    - lolbin
+    - signed_binary_proxy
+    - dll_loading
+    - asyncrat
+    - remcos
+    - njrat
+    - defense_evasion
+  product:
+    - Wazuh
+  security_domain: endpoint
+
+graylog:
+  query: data_win_system_eventID:"1" AND (data_win_eventdata_image:/.*\\\\[Rr][Ee][Gg][Ss][Vv][Rr]32\.exe/ OR data_win_eventdata_originalFileName:/[Rr][Ee][Gg][Ss][Vv][Rr]32\.[Ee][Xx][Ee]/) AND (data_win_eventdata_commandLine:/.*\/[Ii].*/ OR data_win_eventdata_commandLine:/.*\-[Ii].*/) AND (data_win_eventdata_commandLine:/.*\/[Ss].*/ OR data_win_eventdata_commandLine:/.*\-[Ss].*/)

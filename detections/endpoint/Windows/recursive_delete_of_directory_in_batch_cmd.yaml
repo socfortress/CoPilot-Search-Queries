@@ -1,0 +1,255 @@
+name: Recursive Delete of Directory In Batch CMD
+id: ba570b3a-d356-11eb-8358-acde48001122
+version: 1
+schema_version: "1.0"
+date: "2026-04-28"
+author: SOCFortress LLC
+status: production
+type: TTP
+
+description: >
+  This analytic detects the execution of a batch command
+  designed to recursively delete files or directories without
+  prompting for confirmation. Sysmon EventID 1 is used to
+  match process creation events where the Image path is
+  anchored to \cmd.exe (or the OriginalFileName field
+  equals Cmd.Exe, catching renamed binaries) AND the
+  command line contains all four canonical keywords:
+  /c (the cmd execute-and-exit switch), space-rd-space (the
+  rd directory-removal command, with surrounding spaces to
+  avoid spurious matches inside words like "card" or
+  "redirect"), /s (recursive subdirectory traversal), and
+  /q (quiet mode that suppresses the y/n confirmation
+  prompt). The full canonical pattern is
+  `cmd /c rd /s /q <directory>` and is the standard
+  batch-script primitive for unattended recursive directory
+  deletion. This combination is a known T1070.004 (Indicator
+  Removal: File Deletion) technique observed in named threat
+  activity including Reddot ransomware (which uses this
+  pattern to wipe the recycle bin and destroy file-recovery
+  artifacts before encryption), the broader Ransomware
+  analytic story (pre- and post-encryption cleanup steps),
+  and APT37 Rustonotto / FadeStealer campaigns (cleanup
+  after credential and data harvest). The combination of
+  /s and /q together is highly malicious-specific because
+  legitimate administrative scripts typically prompt before
+  recursive delete (omitting /q) or use PowerShell
+  Remove-Item with different parameters - the unattended
+  /s + /q pair is the fingerprint of automation that does
+  not want to be interrupted. If confirmed malicious, this
+  could lead to significant data loss, destruction of
+  forensic evidence, removal of recovery artifacts (recycle
+  bin, shadow copies, backup directories), wiping of
+  malware staging directories after operations, deletion of
+  log directories to obstruct investigation, and severely
+  hindered incident-response and recovery efforts -
+  investigate the parent process, the user context, the
+  specific target directory passed to rd (the directory
+  often reveals attacker intent: C:\$Recycle.Bin,
+  C:\ProgramData\<malware-stage>, %TEMP% paths,
+  log-collection directories, backup paths), and any
+  concurrent or follow-on encryption, exfiltration, or
+  shadow-copy-deletion activity from the host.
+
+data_source:
+  - Sysmon EventID 1
+
+search:
+  index_pattern: "${INDEX_PATTERN}"
+  size: 100
+  sort:
+    - timestamp: desc
+  query:
+    bool:
+      must:
+        - term:
+            agent_name: "${AGENT_NAME}"
+        - term:
+            agent_labels_customer: "${CUSTOMER_CODE}"
+        - term:
+            data_win_system_eventID: "1"
+        - bool:
+            should:
+              - wildcard:
+                  data_win_eventdata_image:
+                    value: "*\\\\cmd.exe"
+                    case_insensitive: true
+              - term:
+                  data_win_eventdata_originalFileName: "Cmd.Exe"
+            minimum_should_match: 1
+        - wildcard:
+            data_win_eventdata_commandLine:
+              value: "*/c*"
+              case_insensitive: true
+        - wildcard:
+            data_win_eventdata_commandLine:
+              value: "* rd *"
+              case_insensitive: true
+        - wildcard:
+            data_win_eventdata_commandLine:
+              value: "*/s*"
+              case_insensitive: true
+        - wildcard:
+            data_win_eventdata_commandLine:
+              value: "*/q*"
+              case_insensitive: true
+        - range:
+            timestamp:
+              gte: "${START_TIME}"
+              lte: "${END_TIME}"
+  _source:
+    - timestamp
+    - agent_name
+    - data_win_eventdata_image
+    - data_win_eventdata_originalFileName
+    - data_win_eventdata_commandLine
+    - data_win_eventdata_parentImage
+    - data_win_eventdata_parentCommandLine
+    - data_win_eventdata_user
+    - data_win_eventdata_processId
+    - data_win_eventdata_processGuid
+    - data_win_eventdata_parentProcessId
+    - data_win_eventdata_parentProcessGuid
+    - data_win_eventdata_hashes
+    - data_win_eventdata_integrityLevel
+    - data_win_eventdata_currentDirectory
+
+parameters:
+  AGENT_NAME:
+    description: "Target agent/host name"
+    type: string
+    required: true
+    example: "DESKTOP-AM0HLGE"
+  CUSTOMER_CODE:
+    description: "Customer label for filtering"
+    type: string
+    required: true
+    example: "lab"
+  INDEX_PATTERN:
+    description: "Elasticsearch index pattern"
+    type: string
+    required: true
+    example: "wazuh-lab_*"
+  START_TIME:
+    description: "Query start time (ISO 8601 or relative)"
+    type: datetime
+    required: false
+    default: "now-24h"
+    example: "2026-04-28 00:00:00.000"
+  END_TIME:
+    description: "Query end time (ISO 8601 or relative)"
+    type: datetime
+    required: false
+    default: "now"
+    example: "2026-04-28 23:59:59.999"
+
+how_to_implement: >
+  This detection requires Sysmon EventID 1 (Process Creation) logs to be
+  forwarded from Windows endpoints to Wazuh Indexer. Ensure Sysmon is
+  deployed with a configuration that captures Image, OriginalFileName,
+  and CommandLine fields (SwiftOnSecurity or Olaf Hartong Sysmon modular
+  config recommended). The detection requires a cmd.exe image (or
+  originalFileName Cmd.Exe for renamed binaries) AND four
+  case-insensitive keyword matches in the command line: /c, the
+  ` rd ` directory-removal command (with surrounding spaces to
+  prevent false positives from substring matches inside other
+  words), /s (recursive), and /q (quiet). All four conditions are
+  AND-combined to reduce noise - removing any one of them
+  significantly increases false positive rates from legitimate
+  scripts that use partial subsets of these flags. Note that the
+  rd command is a cmd.exe internal command (not a separate
+  binary), so the Image field always points to cmd.exe rather
+  than rd.exe - this is by design. Both cmd.exe and the equivalent
+  rmdir command produce the same internal command, but the
+  rmdir alias is rare in attacker scripts; this detection focuses
+  on the rd invocation as that is what is observed in real
+  ransomware samples. All matching is case-insensitive in both
+  Elasticsearch (case_insensitive: true on the wildcards) and
+  Graylog (Lucene character classes).
+
+known_false_positives: >
+  Network operators and IT administrators may use this batch
+  command to recursively delete directory trees during cleanup
+  workflows, build pipelines, log-rotation scripts, or test
+  teardown. Allow-list specific approved parent processes
+  (configuration management agents, build runners, scheduled
+  cleanup tasks), known administrative service accounts, or
+  documented automation contexts as needed. Outside of those
+  documented use cases, the unattended rd /s /q pattern is
+  highly indicative of malicious data destruction or
+  evidence-cleanup activity.
+
+references:
+  - https://attack.mitre.org/techniques/T1070/004/
+  - https://learn.microsoft.com/en-us/windows-server/administration/windows-commands/rd
+  - https://app.any.run/tasks/c0f98850-af65-4352-9746-fbebadee4f05/
+
+response:
+  message: >
+    Recursive directory deletion via cmd /c rd /s /q detected on
+    endpoint $agent_name$ by user $data_win_eventdata_user$.
+    Process image: $data_win_eventdata_image$. Parent process:
+    $data_win_eventdata_parentImage$. Command line:
+    $data_win_eventdata_commandLine$. The unattended rd /s /q
+    pattern is the canonical batch-cleanup primitive used by
+    ransomware (Reddot family - wipes recycle bin to prevent
+    file recovery), APT37 Rustonotto and FadeStealer (post-harvest
+    cleanup), and broader malware playbooks for destroying
+    forensic evidence, recovery artifacts, and staging
+    directories. Investigate immediately, identify the parent
+    process lineage (suspicious parents include Office, browsers,
+    document readers, scripting hosts, unsigned binaries), examine
+    the specific target directory passed to rd (the directory
+    often reveals attacker intent: C:\$Recycle.Bin,
+    C:\ProgramData\<malware-stage>, %TEMP% paths, log
+    directories, backup paths), hunt for concurrent shadow-copy
+    deletion or encryption activity, attempt recovery of any
+    deleted artifacts from shadow copies if not yet purged, and
+    isolate the host pending further analysis.
+  risk_score: 50
+  severity: medium
+  risk_objects:
+    - field: agent_name
+      type: system
+      score: 50
+    - field: data_win_eventdata_user
+      type: user
+      score: 50
+  threat_objects:
+    - field: data_win_eventdata_image
+      type: process_name
+    - field: data_win_eventdata_parentImage
+      type: parent_process_name
+    - field: data_win_eventdata_commandLine
+      type: command_line
+
+tags:
+  analytic_story:
+    - Ransomware
+    - APT37 Rustonotto and FadeStealer
+    - Data Destruction
+    - Reddot Ransomware
+    - Pre-Encryption Activity
+    - Post-Compromise Cleanup
+    - Compromised Windows Host
+    - Indicator Removal
+  asset_type: Endpoint
+  mitre_attack_id:
+    - T1070.004
+  custom_tags:
+    - cmd
+    - recursive_delete
+    - rd_command
+    - indicator_removal
+    - file_deletion
+    - data_destruction
+    - ransomware_precursor
+    - recycle_bin_wipe
+    - evidence_cleanup
+    - lolbin
+  product:
+    - Wazuh
+  security_domain: endpoint
+
+graylog:
+  query: data_win_system_eventID:"1" AND (data_win_eventdata_image:/.*\\\\[Cc][Mm][Dd]\.exe/ OR data_win_eventdata_originalFileName:/[Cc][Mm][Dd]\.[Ee][Xx][Ee]/) AND data_win_eventdata_commandLine:/.*\/[Cc].*/ AND data_win_eventdata_commandLine:/.* [Rr][Dd] .*/ AND data_win_eventdata_commandLine:/.*\/[Ss].*/ AND data_win_eventdata_commandLine:/.*\/[Qq].*/

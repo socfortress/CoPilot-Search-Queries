@@ -1,0 +1,302 @@
+name: PowerShell - Connect To Internet With Hidden Window
+id: ee18ed37-0802-4268-9435-b3b91aaa18db
+version: 1
+schema_version: "1.0"
+date: "2026-04-28"
+author: SOCFortress LLC
+status: production
+type: Hunting
+
+description: >
+  This analytic detects PowerShell processes invoked with the
+  -WindowStyle parameter set to Hidden, Minimized, or Maximized
+  to suppress or alter the visible PowerShell window. Sysmon
+  EventID 1 is used to match process creation events where the
+  Image path is anchored to \powershell.exe or \pwsh.exe (or
+  the OriginalFileName field equals PowerShell.EXE / pwsh.dll,
+  catching renamed binaries) AND the command line contains a
+  -WindowStyle (or any abbreviated form: -w, -wi, -win,
+  -windowstyle) followed by one of the three valid values. Both
+  hyphen and forward-slash switch styles are supported. The
+  -WindowStyle Hidden invocation is the canonical fingerprint
+  of malware droppers and stealth payloads: when an attacker
+  delivers a malicious PowerShell command via macro, lnk shortcut,
+  scheduled task, or downloader chain, they almost always use
+  -WindowStyle Hidden in combination with -NoProfile and
+  -ExecutionPolicy Bypass to suppress the console window so the
+  user sees no indication of execution. Detecting this single
+  parameter is high-fidelity because legitimate IT automation
+  rarely uses -WindowStyle Hidden specifically (administrators
+  who want background execution typically use Start-Process
+  -WindowStyle Hidden inside a script or rely on scheduled-task
+  hidden execution at the task definition level, not on
+  PowerShell's command-line flag). This is a known T1059.001
+  (Command and Scripting Interpreter: PowerShell) technique
+  observed in named threat activity including AgentTesla, the
+  HAFNIUM Group Microsoft Exchange ProxyLogon exploitation,
+  Hermetic Wiper destructive malware, MUDCARP espionage
+  campaigns, the Malicious PowerShell analytic story, the Data
+  Destruction analytic story, and the Log4Shell CVE-2021-44228
+  post-exploitation chain. If confirmed malicious, this could
+  allow an attacker to execute commands stealthily, hide the
+  payload's execution from the interactive user, run
+  long-duration C2 beaconing or persistence loops without UI
+  artifacts, deliver downloader and stealer payloads quietly,
+  and increase the chances of prolonged unauthorized access -
+  investigate the parent process, the user context, the full
+  command line that follows the WindowStyle flag, and any
+  concurrent or follow-on file-write, process, and network
+  egress activity from the host.
+
+data_source:
+  - Sysmon EventID 1
+
+search:
+  index_pattern: "${INDEX_PATTERN}"
+  size: 100
+  sort:
+    - timestamp: desc
+  query:
+    bool:
+      must:
+        - term:
+            agent_name: "${AGENT_NAME}"
+        - term:
+            agent_labels_customer: "${CUSTOMER_CODE}"
+        - term:
+            data_win_system_eventID: "1"
+        - bool:
+            should:
+              - wildcard:
+                  data_win_eventdata_image:
+                    value: "*\\\\powershell.exe"
+                    case_insensitive: true
+              - wildcard:
+                  data_win_eventdata_image:
+                    value: "*\\\\pwsh.exe"
+                    case_insensitive: true
+              - term:
+                  data_win_eventdata_originalFileName: "PowerShell.EXE"
+              - term:
+                  data_win_eventdata_originalFileName: "pwsh.dll"
+            minimum_should_match: 1
+        - bool:
+            should:
+              - wildcard:
+                  data_win_eventdata_commandLine:
+                    value: "* -w hidden*"
+                    case_insensitive: true
+              - wildcard:
+                  data_win_eventdata_commandLine:
+                    value: "* -wi hidden*"
+                    case_insensitive: true
+              - wildcard:
+                  data_win_eventdata_commandLine:
+                    value: "* -win hidden*"
+                    case_insensitive: true
+              - wildcard:
+                  data_win_eventdata_commandLine:
+                    value: "* -windowstyle hidden*"
+                    case_insensitive: true
+              - wildcard:
+                  data_win_eventdata_commandLine:
+                    value: "* /w hidden*"
+                    case_insensitive: true
+              - wildcard:
+                  data_win_eventdata_commandLine:
+                    value: "* /wi hidden*"
+                    case_insensitive: true
+              - wildcard:
+                  data_win_eventdata_commandLine:
+                    value: "* /win hidden*"
+                    case_insensitive: true
+              - wildcard:
+                  data_win_eventdata_commandLine:
+                    value: "* /windowstyle hidden*"
+                    case_insensitive: true
+              - wildcard:
+                  data_win_eventdata_commandLine:
+                    value: "* -w minimized*"
+                    case_insensitive: true
+              - wildcard:
+                  data_win_eventdata_commandLine:
+                    value: "* -wi minimized*"
+                    case_insensitive: true
+              - wildcard:
+                  data_win_eventdata_commandLine:
+                    value: "* -windowstyle minimized*"
+                    case_insensitive: true
+              - wildcard:
+                  data_win_eventdata_commandLine:
+                    value: "* -w maximized*"
+                    case_insensitive: true
+              - wildcard:
+                  data_win_eventdata_commandLine:
+                    value: "* -wi maximized*"
+                    case_insensitive: true
+              - wildcard:
+                  data_win_eventdata_commandLine:
+                    value: "* -windowstyle maximized*"
+                    case_insensitive: true
+            minimum_should_match: 1
+        - range:
+            timestamp:
+              gte: "${START_TIME}"
+              lte: "${END_TIME}"
+  _source:
+    - timestamp
+    - agent_name
+    - data_win_eventdata_image
+    - data_win_eventdata_originalFileName
+    - data_win_eventdata_commandLine
+    - data_win_eventdata_parentImage
+    - data_win_eventdata_parentCommandLine
+    - data_win_eventdata_user
+    - data_win_eventdata_processId
+    - data_win_eventdata_processGuid
+    - data_win_eventdata_parentProcessId
+    - data_win_eventdata_parentProcessGuid
+    - data_win_eventdata_hashes
+    - data_win_eventdata_integrityLevel
+    - data_win_eventdata_currentDirectory
+
+parameters:
+  AGENT_NAME:
+    description: "Target agent/host name"
+    type: string
+    required: true
+    example: "DESKTOP-AM0HLGE"
+  CUSTOMER_CODE:
+    description: "Customer label for filtering"
+    type: string
+    required: true
+    example: "lab"
+  INDEX_PATTERN:
+    description: "Elasticsearch index pattern"
+    type: string
+    required: true
+    example: "wazuh-lab_*"
+  START_TIME:
+    description: "Query start time (ISO 8601 or relative)"
+    type: datetime
+    required: false
+    default: "now-24h"
+    example: "2026-04-28 00:00:00.000"
+  END_TIME:
+    description: "Query end time (ISO 8601 or relative)"
+    type: datetime
+    required: false
+    default: "now"
+    example: "2026-04-28 23:59:59.999"
+
+how_to_implement: >
+  This detection requires Sysmon EventID 1 (Process Creation) logs to be
+  forwarded from Windows endpoints to Wazuh Indexer. Ensure Sysmon is
+  deployed with a configuration that captures Image, OriginalFileName,
+  and CommandLine fields (SwiftOnSecurity or Olaf Hartong Sysmon modular
+  config recommended). The detection matches both Windows PowerShell
+  (powershell.exe) and PowerShell Core (pwsh.exe) by Image path with
+  OriginalFileName fallbacks (PowerShell.EXE / pwsh.dll) to catch
+  renamed binaries. The -WindowStyle parameter is matched via an
+  explicit list of valid abbreviations (w, wi, win, windowstyle)
+  combined with each of the three valid values (hidden, minimized,
+  maximized) across both switch-prefix styles (- and /). This
+  enumerated wildcard-list approach is used in place of a regex
+  because it produces no false positives - a regex that uses the
+  shorthand `w(in?d?o?w?s?t?y?l?e?)?` matches any word starting
+  with `w` followed by a space, including very common command-line
+  fragments. The wildcard patterns require an explicit space before
+  the switch and an explicit value-token after the keyword,
+  eliminating false positive matches from Write-Host, WindowsPowerShell
+  paths, or the binary name itself. All matching is case-insensitive
+  in both Elasticsearch (case_insensitive: true on the wildcards) and
+  Graylog (Lucene character classes). Because legitimate
+  administrative scripts may use -WindowStyle Hidden for legitimate
+  background automation, expect routine hits in active environments
+  - tune by parent-process or user-context allow-listing rather
+  than by removing the detection.
+
+known_false_positives: >
+  Legitimate processes can have this combination of command-line
+  options for background automation - configuration management
+  agents (SCCM, Intune, Ansible), CI/CD pipeline runners, vendor
+  installers wrapping background tasks, and in-house automation
+  scripts may use -WindowStyle Hidden. Allow-list specific approved
+  parent processes, scheduled-task contexts, and known
+  administrative service accounts as needed.
+
+references:
+  - https://attack.mitre.org/techniques/T1059/001/
+  - https://github.com/redcanaryco/AtomicTestHarnesses/blob/master/Windows/TestHarnesses/T1059.001_PowerShell/OutPowerShellCommandLineParameter.ps1
+  - https://learn.microsoft.com/en-us/powershell/module/microsoft.powershell.core/about/about_powershell_exe
+  - https://blog.netlab.360.com/ten-families-of-malicious-samples-are-spreading-using-the-log4j2-vulnerability-now/
+
+response:
+  message: >
+    PowerShell with hidden / minimized / maximized window detected
+    on endpoint $agent_name$ by user $data_win_eventdata_user$.
+    Process image: $data_win_eventdata_image$. Parent process:
+    $data_win_eventdata_parentImage$. Command line:
+    $data_win_eventdata_commandLine$. The -WindowStyle parameter
+    set to Hidden specifically is the canonical fingerprint of
+    malware droppers (AgentTesla, Hermetic Wiper, HAFNIUM and
+    MUDCARP campaigns, Log4Shell post-exploitation) - the
+    attacker uses the flag to suppress the visible PowerShell
+    window so the user sees no indication of execution.
+    Investigate the parent process lineage (suspicious parents
+    include Office, browsers, document readers, scripting hosts,
+    and unsigned binaries), decode any -EncodedCommand payload,
+    examine the full command and any scheduled-task or
+    persistence artifacts, hunt for follow-on network egress and
+    file-write activity, and isolate the host pending further
+    analysis.
+  risk_score: 30
+  severity: low
+  risk_objects:
+    - field: agent_name
+      type: system
+      score: 20
+    - field: data_win_eventdata_user
+      type: user
+      score: 20
+  threat_objects:
+    - field: data_win_eventdata_image
+      type: process_name
+    - field: data_win_eventdata_parentImage
+      type: parent_process_name
+    - field: data_win_eventdata_commandLine
+      type: command_line
+
+tags:
+  analytic_story:
+    - AgentTesla
+    - HAFNIUM Group
+    - Hermetic Wiper
+    - Possible Backdoor Activity Associated With MUDCARP Espionage Campaigns
+    - Malicious PowerShell
+    - Data Destruction
+    - Log4Shell CVE-2021-44228
+    - Compromised Windows Host
+    - Suspicious Command-Line Executions
+  asset_type: Endpoint
+  cve:
+    - CVE-2021-44228
+  mitre_attack_id:
+    - T1059.001
+  custom_tags:
+    - powershell
+    - windowstyle_hidden
+    - powershell_abuse
+    - malicious_powershell
+    - lolbin
+    - defense_evasion
+    - hidden_window
+    - background_execution
+    - dropper_pattern
+    - hunting
+  product:
+    - Wazuh
+  security_domain: endpoint
+
+graylog:
+  query: data_win_system_eventID:"1" AND (data_win_eventdata_image:/.*\\\\[Pp][Oo][Ww][Ee][Rr][Ss][Hh][Ee][Ll][Ll]\.exe/ OR data_win_eventdata_image:/.*\\\\[Pp][Ww][Ss][Hh]\.exe/ OR data_win_eventdata_originalFileName:/[Pp][Oo][Ww][Ee][Rr][Ss][Hh][Ee][Ll][Ll]\.EXE/ OR data_win_eventdata_originalFileName:/[Pp][Ww][Ss][Hh]\.dll/) AND (data_win_eventdata_commandLine:/.* [\-\/][Ww][Ii]?[Nn]?[Dd]?[Oo]?[Ww]?[Ss]?[Tt]?[Yy]?[Ll]?[Ee]? [Hh][Ii][Dd][Dd][Ee][Nn].*/ OR data_win_eventdata_commandLine:/.* [\-\/][Ww][Ii]?[Nn]?[Dd]?[Oo]?[Ww]?[Ss]?[Tt]?[Yy]?[Ll]?[Ee]? [Mm][Ii][Nn][Ii][Mm][Ii][Zz][Ee][Dd].*/ OR data_win_eventdata_commandLine:/.* [\-\/][Ww][Ii]?[Nn]?[Dd]?[Oo]?[Ww]?[Ss]?[Tt]?[Yy]?[Ll]?[Ee]? [Mm][Aa][Xx][Ii][Mm][Ii][Zz][Ee][Dd].*/)

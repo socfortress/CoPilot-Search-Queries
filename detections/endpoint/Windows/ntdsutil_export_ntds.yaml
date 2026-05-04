@@ -1,0 +1,240 @@
+name: Ntdsutil Export NTDS
+id: da63bc76-61ae-11eb-ae93-0242ac130002
+version: 1
+schema_version: "1.0"
+date: "2026-04-28"
+author: SOCFortress LLC
+status: production
+type: TTP
+
+description: >
+  This analytic detects the use of ntdsutil.exe to export the
+  Active Directory database (NTDS.dit). Sysmon EventID 1 is used
+  to match process creation events where the Image path is
+  anchored to \ntdsutil.exe (preventing false positives from
+  binaries whose names merely end with ntdsutil.exe) OR the
+  OriginalFileName field equals ntdsutil.exe (catching renamed
+  binaries), AND the command line contains BOTH the ntds keyword
+  AND the create keyword - the canonical fingerprint of the
+  Install From Media (IFM) export workflow used to dump the AD
+  database. ntdsutil.exe is a Microsoft-signed Active Directory
+  Domain Services management utility - the canonical attack
+  invocation is `ntdsutil "ac i ntds" "ifm" "create full
+  C:\temp" q q` which uses Volume Shadow Copy services to
+  consistently snapshot and export the offline NTDS.dit database
+  file along with the SYSTEM hive containing the boot key needed
+  to decrypt it. Once exported, the attacker can extract every
+  user object's Kerberos password hash (NT, LM, history),
+  computer account hashes, and the krbtgt secret (which enables
+  Golden Ticket attacks against the entire forest) using
+  offline tools such as DSInternals, secretsdump.py, or NtdsAudit.
+  The ntds + create command-line marker combination is highly
+  specific to the credential-harvest invocation - other
+  ntdsutil maintenance tasks do not combine these keywords.
+  This is a known T1003.003 (OS Credential Dumping: NTDS)
+  technique observed in named threat activity including HAFNIUM,
+  Volt Typhoon, Prestige Ransomware, Rhysida Ransomware, the
+  Living Off The Land analytic story, NetSupport RMM Tool Abuse
+  intrusions, and the Credential Dumping analytic story. If
+  confirmed malicious, this activity could allow attackers to
+  extract every password hash in Active Directory offline,
+  facilitate Golden Ticket and Silver Ticket attacks via the
+  krbtgt secret, gain access to all user and computer accounts in
+  the forest, and achieve total domain compromise - investigate
+  immediately, identify the parent process, validate whether the
+  invocation matches a documented backup or maintenance window,
+  isolate the host, and consider forcing a krbtgt password
+  rotation if the export is confirmed unauthorized.
+
+data_source:
+  - Sysmon EventID 1
+
+search:
+  index_pattern: "${INDEX_PATTERN}"
+  size: 100
+  sort:
+    - timestamp: desc
+  query:
+    bool:
+      must:
+        - term:
+            agent_name: "${AGENT_NAME}"
+        - term:
+            agent_labels_customer: "${CUSTOMER_CODE}"
+        - term:
+            data_win_system_eventID: "1"
+        - bool:
+            should:
+              - wildcard:
+                  data_win_eventdata_image:
+                    value: "*\\\\ntdsutil.exe"
+                    case_insensitive: true
+              - term:
+                  data_win_eventdata_originalFileName: "ntdsutil.exe"
+            minimum_should_match: 1
+        - wildcard:
+            data_win_eventdata_commandLine:
+              value: "*ntds*"
+              case_insensitive: true
+        - wildcard:
+            data_win_eventdata_commandLine:
+              value: "*create*"
+              case_insensitive: true
+        - range:
+            timestamp:
+              gte: "${START_TIME}"
+              lte: "${END_TIME}"
+  _source:
+    - timestamp
+    - agent_name
+    - data_win_eventdata_image
+    - data_win_eventdata_originalFileName
+    - data_win_eventdata_commandLine
+    - data_win_eventdata_parentImage
+    - data_win_eventdata_parentCommandLine
+    - data_win_eventdata_user
+    - data_win_eventdata_processId
+    - data_win_eventdata_processGuid
+    - data_win_eventdata_parentProcessId
+    - data_win_eventdata_parentProcessGuid
+    - data_win_eventdata_hashes
+    - data_win_eventdata_integrityLevel
+    - data_win_eventdata_currentDirectory
+
+parameters:
+  AGENT_NAME:
+    description: "Target agent/host name"
+    type: string
+    required: true
+    example: "DESKTOP-AM0HLGE"
+  CUSTOMER_CODE:
+    description: "Customer label for filtering"
+    type: string
+    required: true
+    example: "lab"
+  INDEX_PATTERN:
+    description: "Elasticsearch index pattern"
+    type: string
+    required: true
+    example: "wazuh-lab_*"
+  START_TIME:
+    description: "Query start time (ISO 8601 or relative)"
+    type: datetime
+    required: false
+    default: "now-24h"
+    example: "2026-04-28 00:00:00.000"
+  END_TIME:
+    description: "Query end time (ISO 8601 or relative)"
+    type: datetime
+    required: false
+    default: "now"
+    example: "2026-04-28 23:59:59.999"
+
+how_to_implement: >
+  This detection requires Sysmon EventID 1 (Process Creation) logs to be
+  forwarded from Windows endpoints to Wazuh Indexer (in particular,
+  Domain Controllers - ntdsutil.exe is part of the AD DS Tools and is
+  primarily present on Domain Controllers and machines with RSAT
+  installed). Ensure Sysmon is deployed with a configuration that
+  captures Image, OriginalFileName, and CommandLine fields
+  (SwiftOnSecurity or Olaf Hartong Sysmon modular config recommended).
+  The detection matches ntdsutil.exe by Image path anchored to the
+  path separator (*\\ntdsutil.exe) to avoid false positives from
+  binaries whose filenames merely end with ntdsutil.exe, with an
+  OriginalFileName fallback to catch renamed binaries. Both the ntds
+  and create keywords are required in the command line, matched
+  case-insensitively in Elasticsearch (case_insensitive: true on the
+  wildcards) and Graylog (Lucene character classes). The dual-keyword
+  AND requirement gives the detection high fidelity - other
+  ntdsutil.exe maintenance subcommands (such as
+  metadata cleanup or schema management) do not combine these two
+  specific tokens. Because Domain Administrators may run this
+  command for legitimate AD backup or restoration activities,
+  validate any matches against documented maintenance windows,
+  approved automation tooling, and known administrative
+  service-account invocations.
+
+known_false_positives: >
+  Highly possible Server Administrators will troubleshoot or perform
+  legitimate Install From Media (IFM) backups with ntdsutil.exe,
+  generating false positives. Validate any match against documented
+  AD maintenance windows, approved backup tooling, or scheduled
+  administrative tasks. Allow-list specific approved parent
+  processes, scheduled-task contexts, or administrative service
+  accounts rather than removing the detection - any unexpected
+  invocation outside of documented maintenance is a high-priority
+  investigation.
+
+references:
+  - https://attack.mitre.org/techniques/T1003/003/
+  - https://github.com/redcanaryco/atomic-red-team/blob/master/atomics/T1003.003/T1003.003.md
+  - https://learn.microsoft.com/en-us/previous-versions/windows/it-pro/windows-server-2012-R2-and-2012/cc753343(v=ws.11)
+  - https://www.microsoft.com/en-us/security/blog/2023/05/24/volt-typhoon-targets-us-critical-infrastructure-with-living-off-the-land-techniques/
+  - https://github.com/MichaelGrafnetter/DSInternals
+
+response:
+  message: >
+    Active Directory NTDS.dit database export via ntdsutil.exe was
+    detected on endpoint $agent_name$ by user
+    $data_win_eventdata_user$. Process image:
+    $data_win_eventdata_image$. Parent process:
+    $data_win_eventdata_parentImage$. Command line:
+    $data_win_eventdata_commandLine$. The combination of ntdsutil.exe
+    with the ntds and create keywords is the canonical Install From
+    Media (IFM) export pattern - this exfiltrates every password
+    hash in the Active Directory database, including the krbtgt
+    secret needed for Golden Ticket attacks. Investigate
+    immediately, identify the parent process lineage, validate
+    against documented AD maintenance windows, examine the
+    destination path for the exported NTDS.dit and SYSTEM hive
+    files, hunt for follow-on credential-replay activity across the
+    forest, and consider forcing a krbtgt password rotation if the
+    export is confirmed unauthorized.
+  risk_score: 80
+  severity: high
+  risk_objects:
+    - field: agent_name
+      type: system
+      score: 70
+    - field: data_win_eventdata_user
+      type: user
+      score: 70
+  threat_objects:
+    - field: data_win_eventdata_image
+      type: process_name
+    - field: data_win_eventdata_parentImage
+      type: parent_process_name
+    - field: data_win_eventdata_commandLine
+      type: command_line
+
+tags:
+  analytic_story:
+    - Credential Dumping
+    - HAFNIUM Group
+    - Living Off The Land
+    - Prestige Ransomware
+    - Volt Typhoon
+    - Rhysida Ransomware
+    - NetSupport RMM Tool Abuse
+    - Active Directory Credential Theft
+    - Domain Compromise
+  asset_type: Endpoint
+  mitre_attack_id:
+    - T1003.003
+  custom_tags:
+    - ntdsutil
+    - ntds_dit
+    - active_directory_credential_dumping
+    - credential_dumping
+    - install_from_media
+    - ifm_backup_abuse
+    - krbtgt_exposure
+    - domain_compromise
+    - lolbin
+    - high_fidelity
+  product:
+    - Wazuh
+  security_domain: endpoint
+
+graylog:
+  query: data_win_system_eventID:"1" AND (data_win_eventdata_image:/.*\\\\[Nn][Tt][Dd][Ss][Uu][Tt][Ii][Ll]\.exe/ OR data_win_eventdata_originalFileName:/[Nn][Tt][Dd][Ss][Uu][Tt][Ii][Ll]\.exe/) AND data_win_eventdata_commandLine:/.*[Nn][Tt][Dd][Ss].*/ AND data_win_eventdata_commandLine:/.*[Cc][Rr][Ee][Aa][Tt][Ee].*/

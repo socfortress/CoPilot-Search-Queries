@@ -1,0 +1,307 @@
+name: Possible Lateral Movement PowerShell Spawn
+id: cb909b3e-512b-11ec-aa31-3e22fbd008af
+version: 1
+schema_version: "1.0"
+date: "2026-04-28"
+author: SOCFortress LLC
+status: production
+type: TTP
+
+description: >
+  This analytic detects the spawning of a PowerShell process as a
+  child of system-level binaries that are commonly abused as the
+  delivery vehicle for remote code execution and lateral movement.
+  Sysmon EventID 1 is used to match process creation events where
+  the ParentImage path is anchored to one of the following:
+  mmc.exe (Microsoft Management Console - abused via DCOM
+  MMC20.Application lateral movement), services.exe (the Windows
+  Service Control Manager - abused via remote service creation
+  T1543.003), wmiprvse.exe (the WMI Provider Host - abused via
+  Win32_Process.Create T1047), wsmprovhost.exe (the WinRM /
+  WS-Management remoting host - abused via PSRemoting
+  T1021.006), or svchost.exe (the generic shared-service host -
+  abused via service hijacking). The svchost.exe branch
+  explicitly excludes the legitimate -k netsvcs hosting group
+  and the -s Schedule (Task Scheduler) service-host invocation
+  because these are the canonical paths legitimate scheduled
+  tasks take when launching child processes. The detection's
+  child-process side requires that the spawned process is
+  powershell.exe, pwsh.exe, or cmd.exe whose own command line
+  references powershell or pwsh - capturing both direct
+  PowerShell invocation and the cmd.exe /c powershell ...
+  wrapper variant. A final exclusion strips invocations from
+  the C:\Windows\CCM\ path used by the SCCM / MECM client agent
+  (legitimate enterprise endpoint management). This
+  parent-child relationship pattern is essentially never benign
+  outside of SCCM-style enterprise tooling - normal user and
+  administrator workflows do not produce PowerShell as a child
+  of services.exe, wmiprvse.exe, wsmprovhost.exe, mmc.exe, or
+  arbitrarily-hosted svchost.exe. This is a known T1021.003
+  (DCOM), T1021.006 (WinRM), T1047 (WMI), T1053.005 (Scheduled
+  Task), T1059.001 (PowerShell), T1218.014 (MMC), and T1543.003
+  (Service Creation) technique observed in named threat activity
+  including the Active Directory Lateral Movement and Malicious
+  PowerShell analytic stories, the Hermetic Wiper destructive
+  malware campaign, the Scheduled Tasks analytic story, the CISA
+  AA24-241A advisory, and the Microsoft WSUS CVE-2025-59287
+  exploitation campaign. If confirmed malicious, this activity
+  could allow attackers to execute PowerShell payloads remotely,
+  escalate privileges through service creation or COM hijacking,
+  achieve persistent footholds via service-installed payloads,
+  and pivot laterally to additional hosts in the environment.
+
+data_source:
+  - Sysmon EventID 1
+
+search:
+  index_pattern: "${INDEX_PATTERN}"
+  size: 100
+  sort:
+    - timestamp: desc
+  query:
+    bool:
+      must:
+        - term:
+            agent_name: "${AGENT_NAME}"
+        - term:
+            agent_labels_customer: "${CUSTOMER_CODE}"
+        - term:
+            data_win_system_eventID: "1"
+        - bool:
+            should:
+              - wildcard:
+                  data_win_eventdata_parentImage:
+                    value: "*\\\\mmc.exe"
+                    case_insensitive: true
+              - wildcard:
+                  data_win_eventdata_parentImage:
+                    value: "*\\\\services.exe"
+                    case_insensitive: true
+              - wildcard:
+                  data_win_eventdata_parentImage:
+                    value: "*\\\\wmiprvse.exe"
+                    case_insensitive: true
+              - wildcard:
+                  data_win_eventdata_parentImage:
+                    value: "*\\\\wsmprovhost.exe"
+                    case_insensitive: true
+              - bool:
+                  must:
+                    - wildcard:
+                        data_win_eventdata_parentImage:
+                          value: "*\\\\svchost.exe"
+                          case_insensitive: true
+                  must_not:
+                    - wildcard:
+                        data_win_eventdata_parentCommandLine:
+                          value: "*-k netsvcs*"
+                          case_insensitive: true
+                    - wildcard:
+                        data_win_eventdata_parentCommandLine:
+                          value: "*-s Schedule*"
+                          case_insensitive: true
+            minimum_should_match: 1
+        - bool:
+            should:
+              - wildcard:
+                  data_win_eventdata_image:
+                    value: "*\\\\powershell.exe"
+                    case_insensitive: true
+              - wildcard:
+                  data_win_eventdata_image:
+                    value: "*\\\\pwsh.exe"
+                    case_insensitive: true
+              - bool:
+                  must:
+                    - wildcard:
+                        data_win_eventdata_image:
+                          value: "*\\\\cmd.exe"
+                          case_insensitive: true
+                    - bool:
+                        should:
+                          - wildcard:
+                              data_win_eventdata_commandLine:
+                                value: "*powershell*"
+                                case_insensitive: true
+                          - wildcard:
+                              data_win_eventdata_commandLine:
+                                value: "*pwsh*"
+                                case_insensitive: true
+                        minimum_should_match: 1
+            minimum_should_match: 1
+        - range:
+            timestamp:
+              gte: "${START_TIME}"
+              lte: "${END_TIME}"
+      must_not:
+        - wildcard:
+            data_win_eventdata_commandLine:
+              value: "*C:\\\\Windows\\\\CCM\\\\*"
+              case_insensitive: true
+  _source:
+    - timestamp
+    - agent_name
+    - data_win_eventdata_image
+    - data_win_eventdata_originalFileName
+    - data_win_eventdata_commandLine
+    - data_win_eventdata_parentImage
+    - data_win_eventdata_parentCommandLine
+    - data_win_eventdata_user
+    - data_win_eventdata_processId
+    - data_win_eventdata_processGuid
+    - data_win_eventdata_parentProcessId
+    - data_win_eventdata_parentProcessGuid
+    - data_win_eventdata_hashes
+    - data_win_eventdata_integrityLevel
+    - data_win_eventdata_currentDirectory
+
+parameters:
+  AGENT_NAME:
+    description: "Target agent/host name"
+    type: string
+    required: true
+    example: "DESKTOP-AM0HLGE"
+  CUSTOMER_CODE:
+    description: "Customer label for filtering"
+    type: string
+    required: true
+    example: "lab"
+  INDEX_PATTERN:
+    description: "Elasticsearch index pattern"
+    type: string
+    required: true
+    example: "wazuh-lab_*"
+  START_TIME:
+    description: "Query start time (ISO 8601 or relative)"
+    type: datetime
+    required: false
+    default: "now-24h"
+    example: "2026-04-28 00:00:00.000"
+  END_TIME:
+    description: "Query end time (ISO 8601 or relative)"
+    type: datetime
+    required: false
+    default: "now"
+    example: "2026-04-28 23:59:59.999"
+
+how_to_implement: >
+  This detection requires Sysmon EventID 1 (Process Creation) logs to be
+  forwarded from Windows endpoints to Wazuh Indexer. Ensure Sysmon is
+  deployed with a configuration that captures Image, OriginalFileName,
+  ParentImage, CommandLine, and ParentCommandLine fields
+  (SwiftOnSecurity or Olaf Hartong Sysmon modular config recommended).
+  The detection is a parent-child relationship analytic with five
+  suspicious parent images (mmc.exe, services.exe, wmiprvse.exe,
+  wsmprovhost.exe, svchost.exe) and three child-process patterns
+  (powershell.exe, pwsh.exe, or cmd.exe with powershell/pwsh
+  keywords in command line). The svchost.exe branch is filtered to
+  exclude the -k netsvcs hosting group and -s Schedule Task Scheduler
+  invocation - these are the legitimate service-host paths that
+  launch scheduled tasks and shared-service children. A final
+  command-line exclusion strips C:\Windows\CCM\ paths used by the
+  SCCM / MECM client agent, which legitimately invokes PowerShell
+  in enterprise environments. All matching is case-insensitive in
+  both Elasticsearch (case_insensitive: true on the wildcards) and
+  Graylog (Lucene character classes). Note that legitimate WinRM
+  remoting (parentImage wsmprovhost.exe) will trigger this rule -
+  in environments where remoting is widely used, allow-list
+  specific approved administrator accounts or known automation
+  contexts at the parent-process level.
+
+known_false_positives: >
+  False positives are expected from legitimate use of WMI, WinRM
+  PowerShell remoting, scheduled tasks, MMC management snap-ins,
+  and certain administrator-installed services. Apply additional
+  filters as needed - allow-list specific approved
+  administrator accounts, known scheduled tasks, configuration
+  management agents, or documented automation contexts. The
+  detection deliberately excludes the SCCM client agent (
+  C:\Windows\CCM\) and the standard svchost service-host
+  variants to reduce noise from common enterprise tooling.
+
+references:
+  - https://attack.mitre.org/techniques/T1021/003/
+  - https://attack.mitre.org/techniques/T1021/006/
+  - https://attack.mitre.org/techniques/T1047/
+  - https://attack.mitre.org/techniques/T1053/005/
+  - https://attack.mitre.org/techniques/T1059/001/
+  - https://attack.mitre.org/techniques/T1218/014/
+  - https://attack.mitre.org/techniques/T1543/003/
+  - https://www.cisa.gov/news-events/cybersecurity-advisories/aa24-241a
+
+response:
+  message: >
+    A PowerShell process was spawned as a child of a typically-abused
+    system parent on endpoint $agent_name$ by user
+    $data_win_eventdata_user$. Process image:
+    $data_win_eventdata_image$. Parent process:
+    $data_win_eventdata_parentImage$. Command line:
+    $data_win_eventdata_commandLine$. Parent command line:
+    $data_win_eventdata_parentCommandLine$. The combination of a
+    suspicious system parent (services.exe, wmiprvse.exe,
+    wsmprovhost.exe, mmc.exe, or non-standard svchost.exe) with a
+    PowerShell child is a high-fidelity indicator of remote code
+    execution or lateral movement - this pattern is essentially
+    never benign outside of explicitly-authorized SCCM / MECM
+    deployments. Investigate immediately, identify the source
+    network session that triggered the parent (incoming WinRM
+    connection, WMI invocation, DCOM call, or remote service
+    install), examine the PowerShell child's command line and
+    decode any encoded payloads, hunt for follow-on lateral
+    movement to other hosts, and isolate the host pending further
+    analysis.
+  risk_score: 50
+  severity: medium
+  risk_objects:
+    - field: agent_name
+      type: system
+      score: 50
+    - field: data_win_eventdata_user
+      type: user
+      score: 50
+  threat_objects:
+    - field: data_win_eventdata_image
+      type: process_name
+    - field: data_win_eventdata_parentImage
+      type: parent_process_name
+    - field: data_win_eventdata_commandLine
+      type: command_line
+
+tags:
+  analytic_story:
+    - Active Directory Lateral Movement
+    - Malicious PowerShell
+    - Hermetic Wiper
+    - Data Destruction
+    - Scheduled Tasks
+    - CISA AA24-241A
+    - Microsoft WSUS CVE-2025-59287
+    - Compromised Windows Host
+    - Remote Code Execution
+  asset_type: Endpoint
+  mitre_attack_id:
+    - T1021.003
+    - T1021.006
+    - T1047
+    - T1053.005
+    - T1059.001
+    - T1218.014
+    - T1543.003
+  custom_tags:
+    - powershell
+    - lateral_movement
+    - wmi_abuse
+    - winrm_abuse
+    - dcom_abuse
+    - service_abuse
+    - scheduled_task_abuse
+    - mmc_abuse
+    - remote_code_execution
+    - parent_child_anomaly
+    - sccm_excluded
+  product:
+    - Wazuh
+  security_domain: endpoint
+
+graylog:
+  query: data_win_system_eventID:"1" AND (data_win_eventdata_parentImage:/.*\\\\[Mm][Mm][Cc]\.exe/ OR data_win_eventdata_parentImage:/.*\\\\[Ss][Ee][Rr][Vv][Ii][Cc][Ee][Ss]\.exe/ OR data_win_eventdata_parentImage:/.*\\\\[Ww][Mm][Ii][Pp][Rr][Vv][Ss][Ee]\.exe/ OR data_win_eventdata_parentImage:/.*\\\\[Ww][Ss][Mm][Pp][Rr][Oo][Vv][Hh][Oo][Ss][Tt]\.exe/ OR (data_win_eventdata_parentImage:/.*\\\\[Ss][Vv][Cc][Hh][Oo][Ss][Tt]\.exe/ AND NOT data_win_eventdata_parentCommandLine:/.*\-[Kk] [Nn][Ee][Tt][Ss][Vv][Cc][Ss].*/ AND NOT data_win_eventdata_parentCommandLine:/.*\-[Ss] [Ss][Cc][Hh][Ee][Dd][Uu][Ll][Ee].*/)) AND (data_win_eventdata_image:/.*\\\\[Pp][Oo][Ww][Ee][Rr][Ss][Hh][Ee][Ll][Ll]\.exe/ OR data_win_eventdata_image:/.*\\\\[Pp][Ww][Ss][Hh]\.exe/ OR (data_win_eventdata_image:/.*\\\\[Cc][Mm][Dd]\.exe/ AND (data_win_eventdata_commandLine:/.*[Pp][Oo][Ww][Ee][Rr][Ss][Hh][Ee][Ll][Ll].*/ OR data_win_eventdata_commandLine:/.*[Pp][Ww][Ss][Hh].*/))) AND NOT data_win_eventdata_commandLine:/.*[Cc]\:\\\\[Ww][Ii][Nn][Dd][Oo][Ww][Ss]\\\\[Cc][Cc][Mm]\\\\.*/

@@ -1,0 +1,296 @@
+name: Possible Browser Pass View Parameter
+id: 8ba484e8-4b97-11ec-b19a-acde48001122
+version: 1
+schema_version: "1.0"
+date: "2026-04-28"
+author: SOCFortress LLC
+status: production
+type: Hunting
+
+description: >
+  This analytic identifies processes invoked with command-line
+  parameters associated with the NirSoft web-browser
+  credential-dumping family of tools (WebBrowserPassView,
+  ChromePass, IEPV, MailPassView, OperaPassView, PasswordFox,
+  KeePass enumerator) when those processes are launched from
+  world-writable staging directories typical of malware droppers.
+  Sysmon EventID 1 is used to match process creation events whose
+  command line contains BOTH a NirSoft-style switch flag (/stext,
+  /shtml, /scomma, /stab, /stabular, /sverhtml, /sxml, /skeepass,
+  /LoadPasswordsIE, /LoadPasswordsFirefox, /LoadPasswordsChrome,
+  /LoadPasswordsOpera, /LoadPasswordsSafari,
+  /UseOperaPasswordFile, or /OperaPasswordFile) AND a path
+  fragment that contains \temp\, \users\public\, or
+  \programdata\. The NirSoft password-recovery tools were created
+  for legitimate forensic and recovery workflows but are
+  routinely repurposed by adversaries as drop-and-execute
+  credential-harvest payloads - their /stext, /scomma, and
+  /shtml flags silently dump browser-stored credentials to text,
+  CSV, or HTML files without any GUI interaction. The combination
+  of a NirSoft flag plus an execution path inside a
+  world-writable staging directory is high-fidelity because
+  legitimate administrators and forensic users typically run
+  these tools from the user's Downloads or Desktop folder, not
+  from C:\Windows\Temp\, C:\Users\Public\, or C:\ProgramData\.
+  This is a known T1555.003 (Credentials from Password Stores:
+  Credentials from Web Browsers) technique observed in named
+  threat activity including Remcos RAT, commodity stealer
+  malware, and post-exploitation toolkits. If confirmed
+  malicious, this activity could allow attackers to harvest
+  saved web credentials (banking, email, corporate SaaS,
+  cloud-console sessions), pivot to credential replay against
+  cloud and SaaS services, escalate from a single endpoint
+  compromise to broader account takeover, and exfiltrate
+  high-value sensitive data - investigate the parent process,
+  the user context, the binary file path (NirSoft tools may be
+  renamed to disguise their identity), the destination output
+  file referenced in the flag arguments, and any concurrent
+  network egress from the host.
+
+data_source:
+  - Sysmon EventID 1
+
+search:
+  index_pattern: "${INDEX_PATTERN}"
+  size: 100
+  sort:
+    - timestamp: desc
+  query:
+    bool:
+      must:
+        - term:
+            agent_name: "${AGENT_NAME}"
+        - term:
+            agent_labels_customer: "${CUSTOMER_CODE}"
+        - term:
+            data_win_system_eventID: "1"
+        - bool:
+            should:
+              - wildcard:
+                  data_win_eventdata_commandLine:
+                    value: "*/stext*"
+                    case_insensitive: true
+              - wildcard:
+                  data_win_eventdata_commandLine:
+                    value: "*/shtml*"
+                    case_insensitive: true
+              - wildcard:
+                  data_win_eventdata_commandLine:
+                    value: "*/LoadPasswordsIE*"
+                    case_insensitive: true
+              - wildcard:
+                  data_win_eventdata_commandLine:
+                    value: "*/LoadPasswordsFirefox*"
+                    case_insensitive: true
+              - wildcard:
+                  data_win_eventdata_commandLine:
+                    value: "*/LoadPasswordsChrome*"
+                    case_insensitive: true
+              - wildcard:
+                  data_win_eventdata_commandLine:
+                    value: "*/LoadPasswordsOpera*"
+                    case_insensitive: true
+              - wildcard:
+                  data_win_eventdata_commandLine:
+                    value: "*/LoadPasswordsSafari*"
+                    case_insensitive: true
+              - wildcard:
+                  data_win_eventdata_commandLine:
+                    value: "*/UseOperaPasswordFile*"
+                    case_insensitive: true
+              - wildcard:
+                  data_win_eventdata_commandLine:
+                    value: "*/OperaPasswordFile*"
+                    case_insensitive: true
+              - wildcard:
+                  data_win_eventdata_commandLine:
+                    value: "*/stab*"
+                    case_insensitive: true
+              - wildcard:
+                  data_win_eventdata_commandLine:
+                    value: "*/scomma*"
+                    case_insensitive: true
+              - wildcard:
+                  data_win_eventdata_commandLine:
+                    value: "*/stabular*"
+                    case_insensitive: true
+              - wildcard:
+                  data_win_eventdata_commandLine:
+                    value: "*/sverhtml*"
+                    case_insensitive: true
+              - wildcard:
+                  data_win_eventdata_commandLine:
+                    value: "*/sxml*"
+                    case_insensitive: true
+              - wildcard:
+                  data_win_eventdata_commandLine:
+                    value: "*/skeepass*"
+                    case_insensitive: true
+            minimum_should_match: 1
+        - bool:
+            should:
+              - wildcard:
+                  data_win_eventdata_commandLine:
+                    value: "*\\\\temp\\\\*"
+                    case_insensitive: true
+              - wildcard:
+                  data_win_eventdata_commandLine:
+                    value: "*\\\\users\\\\public\\\\*"
+                    case_insensitive: true
+              - wildcard:
+                  data_win_eventdata_commandLine:
+                    value: "*\\\\programdata\\\\*"
+                    case_insensitive: true
+            minimum_should_match: 1
+        - range:
+            timestamp:
+              gte: "${START_TIME}"
+              lte: "${END_TIME}"
+  _source:
+    - timestamp
+    - agent_name
+    - data_win_eventdata_image
+    - data_win_eventdata_originalFileName
+    - data_win_eventdata_commandLine
+    - data_win_eventdata_parentImage
+    - data_win_eventdata_parentCommandLine
+    - data_win_eventdata_user
+    - data_win_eventdata_processId
+    - data_win_eventdata_processGuid
+    - data_win_eventdata_parentProcessId
+    - data_win_eventdata_parentProcessGuid
+    - data_win_eventdata_hashes
+    - data_win_eventdata_integrityLevel
+    - data_win_eventdata_currentDirectory
+
+parameters:
+  AGENT_NAME:
+    description: "Target agent/host name"
+    type: string
+    required: true
+    example: "DESKTOP-AM0HLGE"
+  CUSTOMER_CODE:
+    description: "Customer label for filtering"
+    type: string
+    required: true
+    example: "lab"
+  INDEX_PATTERN:
+    description: "Elasticsearch index pattern"
+    type: string
+    required: true
+    example: "wazuh-lab_*"
+  START_TIME:
+    description: "Query start time (ISO 8601 or relative)"
+    type: datetime
+    required: false
+    default: "now-24h"
+    example: "2026-04-28 00:00:00.000"
+  END_TIME:
+    description: "Query end time (ISO 8601 or relative)"
+    type: datetime
+    required: false
+    default: "now"
+    example: "2026-04-28 23:59:59.999"
+
+how_to_implement: >
+  This detection requires Sysmon EventID 1 (Process Creation) logs to be
+  forwarded from Windows endpoints to Wazuh Indexer. Ensure Sysmon is
+  deployed with a configuration that captures Image, OriginalFileName,
+  and CommandLine fields (SwiftOnSecurity or Olaf Hartong Sysmon modular
+  config recommended). The detection requires BOTH a NirSoft-style
+  flag (one of 15 known switches covering the entire NirSoft
+  password-recovery tool family) AND a path fragment in one of three
+  world-writable staging directories (\Temp\, \Users\Public\,
+  \ProgramData\). All matching is case-insensitive in both
+  Elasticsearch (case_insensitive: true on the wildcards) and Graylog
+  (Lucene character classes). The two-clause AND requirement gives
+  the detection high fidelity by combining a tool-fingerprint signal
+  (the flag) with a delivery-context signal (the staging path) -
+  legitimate forensic or recovery use of NirSoft tools is rare from
+  these specific paths. Tune by allow-listing specific approved
+  forensic tooling parent processes, known administrative service
+  accounts, or documented IT troubleshooting workflows where
+  applicable.
+
+known_false_positives: >
+  False positives are limited but possible from documented forensic
+  and recovery workflows where IT staff or incident responders
+  legitimately use NirSoft password-recovery tools. Filtering may be
+  needed - allow-list specific approved parent processes, forensic
+  workstation user accounts, scheduled compliance tasks, or
+  documented credential-recovery scenarios rather than removing the
+  detection. Outside of those documented use cases, NirSoft
+  password-tool invocations from \Temp\, \Users\Public\, or
+  \ProgramData\ paths are highly indicative of malicious
+  credential-harvest activity.
+
+references:
+  - https://attack.mitre.org/techniques/T1555/003/
+  - https://www.nirsoft.net/utils/web_browser_password.html
+  - https://www.nirsoft.net/utils/chromepass.html
+  - https://www.nirsoft.net/utils/internet_explorer_password.html
+  - https://app.any.run/tasks/df0baf9f-8baf-4c32-a452-16562ecb19be/
+
+response:
+  message: >
+    Possible browser-credential-dumping tool execution detected on
+    endpoint $agent_name$ by user $data_win_eventdata_user$. Process
+    image: $data_win_eventdata_image$. Parent process:
+    $data_win_eventdata_parentImage$. Command line:
+    $data_win_eventdata_commandLine$. The presence of a NirSoft-style
+    switch flag (/stext, /shtml, /scomma, /LoadPasswordsChrome, etc.)
+    combined with execution from a world-writable staging directory
+    (\Temp\, \Users\Public\, \ProgramData\) is a high-fidelity
+    indicator of credential-harvest activity associated with Remcos
+    RAT and commodity stealer malware. Investigate immediately,
+    identify the parent process lineage, examine the binary file
+    (NirSoft tools may be renamed to disguise their identity),
+    locate the destination output file referenced in the flag
+    arguments, hunt for follow-on exfiltration of the harvested
+    credentials, and isolate the host pending further analysis.
+  risk_score: 50
+  severity: medium
+  risk_objects:
+    - field: agent_name
+      type: system
+      score: 50
+    - field: data_win_eventdata_user
+      type: user
+      score: 50
+  threat_objects:
+    - field: data_win_eventdata_image
+      type: process_name
+    - field: data_win_eventdata_parentImage
+      type: parent_process_name
+    - field: data_win_eventdata_commandLine
+      type: command_line
+
+tags:
+  analytic_story:
+    - Remcos
+    - Credential Theft
+    - Browser Credential Dumping
+    - Stealer Activity
+    - Compromised Windows Host
+    - Suspicious Command-Line Executions
+  asset_type: Endpoint
+  mitre_attack_id:
+    - T1555.003
+  custom_tags:
+    - nirsoft
+    - browser_password_dumping
+    - credential_theft
+    - webbrowserpassview
+    - chromepass
+    - iepv
+    - mailpv
+    - keepass_dump
+    - staging_directory
+    - hunting
+    - remcos
+  product:
+    - Wazuh
+  security_domain: endpoint
+
+graylog:
+  query: data_win_system_eventID:"1" AND (data_win_eventdata_commandLine:/.*\/[Ss][Tt][Ee][Xx][Tt].*/ OR data_win_eventdata_commandLine:/.*\/[Ss][Hh][Tt][Mm][Ll].*/ OR data_win_eventdata_commandLine:/.*\/[Ll][Oo][Aa][Dd][Pp][Aa][Ss][Ss][Ww][Oo][Rr][Dd][Ss][Ii][Ee].*/ OR data_win_eventdata_commandLine:/.*\/[Ll][Oo][Aa][Dd][Pp][Aa][Ss][Ss][Ww][Oo][Rr][Dd][Ss][Ff][Ii][Rr][Ee][Ff][Oo][Xx].*/ OR data_win_eventdata_commandLine:/.*\/[Ll][Oo][Aa][Dd][Pp][Aa][Ss][Ss][Ww][Oo][Rr][Dd][Ss][Cc][Hh][Rr][Oo][Mm][Ee].*/ OR data_win_eventdata_commandLine:/.*\/[Ll][Oo][Aa][Dd][Pp][Aa][Ss][Ss][Ww][Oo][Rr][Dd][Ss][Oo][Pp][Ee][Rr][Aa].*/ OR data_win_eventdata_commandLine:/.*\/[Ll][Oo][Aa][Dd][Pp][Aa][Ss][Ss][Ww][Oo][Rr][Dd][Ss][Ss][Aa][Ff][Aa][Rr][Ii].*/ OR data_win_eventdata_commandLine:/.*\/[Uu][Ss][Ee][Oo][Pp][Ee][Rr][Aa][Pp][Aa][Ss][Ss][Ww][Oo][Rr][Dd][Ff][Ii][Ll][Ee].*/ OR data_win_eventdata_commandLine:/.*\/[Oo][Pp][Ee][Rr][Aa][Pp][Aa][Ss][Ss][Ww][Oo][Rr][Dd][Ff][Ii][Ll][Ee].*/ OR data_win_eventdata_commandLine:/.*\/[Ss][Tt][Aa][Bb].*/ OR data_win_eventdata_commandLine:/.*\/[Ss][Cc][Oo][Mm][Mm][Aa].*/ OR data_win_eventdata_commandLine:/.*\/[Ss][Tt][Aa][Bb][Uu][Ll][Aa][Rr].*/ OR data_win_eventdata_commandLine:/.*\/[Ss][Vv][Ee][Rr][Hh][Tt][Mm][Ll].*/ OR data_win_eventdata_commandLine:/.*\/[Ss][Xx][Mm][Ll].*/ OR data_win_eventdata_commandLine:/.*\/[Ss][Kk][Ee][Ee][Pp][Aa][Ss][Ss].*/) AND (data_win_eventdata_commandLine:/.*\\\\[Tt][Ee][Mm][Pp]\\\\.*/ OR data_win_eventdata_commandLine:/.*\\\\[Uu][Ss][Ee][Rr][Ss]\\\\[Pp][Uu][Bb][Ll][Ii][Cc]\\\\.*/ OR data_win_eventdata_commandLine:/.*\\\\[Pp][Rr][Oo][Gg][Rr][Aa][Mm][Dd][Aa][Tt][Aa]\\\\.*/)
