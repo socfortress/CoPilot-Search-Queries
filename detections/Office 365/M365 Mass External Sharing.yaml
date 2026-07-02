@@ -1,0 +1,97 @@
+name: M365 Mass External Sharing
+id: M365_Mass_External_Sharing
+version: 1
+schema_version: "1.0"
+date: "2026-07-02"
+author: SOCFortress LLC
+status: production
+type: aggregation
+description: >
+  Detects a user externally sharing multiple SharePoint or OneDrive files within a
+  short time window, via anonymous ("anyone with the link") sharing links or by
+  granting access to external guest accounts. While occasional external sharing is
+  normal, a burst of external shares by one user is a strong data-exfiltration
+  signal: a malicious insider or a compromised account exposing corporate documents
+  to attacker-controlled anonymous links or external identities. The base query
+  isolates external and anonymous shares (ignoring the far more common internal
+  group and member shares, and automated meeting-recording shares), then counts
+  them per user.
+  MITRE ATT&CK: T1213.002 (Data from Information Repositories: SharePoint), T1567 (Exfiltration Over Web Service).
+data_source:
+  - Office 365 Management Activity API
+  - "Workload: SharePoint / OneDrive"
+workload: SharePoint
+how_to_implement: >
+  Requires the Office 365 audit log ingestion pipeline feeding Graylog via the
+  O365 Management Activity API, with SharePoint/OneDrive auditing enabled so
+  sharing operations (SharingSet, AddedToSecureLink; RecordType 14,
+  SharePointSharingOperation) are recorded. This is an aggregation detection: the
+  base graylog.query isolates external shares only, matched three ways in
+  data_office365_TargetUserOrGroupName / data_office365_TargetUserOrGroupType:
+  anonymous links (name contains "Anonymous"), external guest UPNs (name contains
+  "#ext#"), and guest targets (type "Guest"). These are standard M365 markers and
+  are consistent across tenants and locales. Internal SharePointGroup/SecurityGroup/
+  Member shares and automated app@sharepoint meeting-recording shares are naturally
+  excluded because their targets are internal. The aggregation then counts external
+  shares per user over the window. O365 CreationTime arrives with a malformed
+  timezone offset (+0000) and is replaced at ingest, so windowing keys off Graylog's
+  own timestamp.
+known_false_positives: >
+  Legitimate external collaboration (sharing documents with clients, partners, or
+  vendors via guest access or link) will trigger this if done in volume. Users who
+  routinely work with external parties, and departments that share deliverables
+  externally, are common benign causes. Review the shared file names and external
+  targets; tune the threshold per tenant and consider allowlisting known partner
+  domains if external collaboration is heavy.
+references:
+  - https://attack.mitre.org/techniques/T1213/002/
+  - https://attack.mitre.org/techniques/T1567/
+response:
+  message: >
+    Mass external sharing: $data_office365_UserId$ shared multiple files externally
+    (anonymous link or guest access) within the aggregation window from
+    $data_office365_ClientIP$ ($data_office365_ClientIP_country_code$). Latest target:
+    $data_office365_TargetUserOrGroupName$. Review for data exfiltration.
+    MITRE ATT&CK: T1213.002
+  risk_score: 70
+  severity: high
+  risk_objects:
+    - field: data_office365_UserId
+      type: user
+      score: 70
+  threat_objects:
+    - field: data_office365_ClientIP
+      type: ip_address
+    - field: data_office365_TargetUserOrGroupName
+      type: recipient
+tags:
+  analytic_story:
+    - Office 365 Data Exfiltration
+    - Insider Threat
+  asset_type: Cloud Identity
+  mitre_attack_id:
+    - T1213.002
+    - T1567
+  custom_tags:
+    - o365
+    - sharepoint
+    - onedrive
+    - external_sharing
+    - anonymous_link
+    - guest_access
+    - data_exfiltration
+    - aggregation
+  product:
+    - Office 365
+  security_domain: cloud
+graylog:
+  query: data_office365_Operation:("SharingSet" OR "AddedToSecureLink") AND (data_office365_TargetUserOrGroupName:/.*[aA]nonymous.*/ OR data_office365_TargetUserOrGroupName:/.*#ext#.*/ OR data_office365_TargetUserOrGroupType:"Guest")
+aggregation:
+  enabled: true
+  function: count
+  field: null
+  group_by:
+    - data_office365_UserId
+  window: 10m
+  threshold: 2
+  condition: ">"
