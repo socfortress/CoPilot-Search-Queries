@@ -1,0 +1,92 @@
+name: M365 Mass Email Deletion - Evidence Wipe
+id: M365_Mass_Email_Deletion_Evidence_Wipe
+version: 1
+schema_version: "1.0"
+date: "2026-07-02"
+author: SOCFortress LLC
+status: production
+type: aggregation
+description: >
+  Detects a single user deleting an unusually high volume of email messages
+  within a short time window, excluding routine cleanup of the Deleted Items
+  and Junk folders. Bulk deletion from the Inbox, Sent Items, or Drafts is a
+  common anti-forensics and evidence-destruction technique following a business
+  email compromise or account takeover, where an attacker removes traces of
+  phishing replies, fraudulent messages, or forwarded mail. Covers both
+  SoftDelete (moved to recoverable items) and HardDelete (permanent purge).
+  MITRE ATT&CK: T1070.008 (Indicator Removal: Clear Mailbox Data), T1114 (Email Collection).
+data_source:
+  - Office 365 Management Activity API
+  - "Workload: Exchange"
+workload: Exchange
+how_to_implement: >
+  Requires the Office 365 audit log ingestion pipeline feeding Graylog via the
+  O365 Management Activity API, with Exchange mailbox auditing enabled so
+  SoftDelete and HardDelete operations (RecordType 3, ExchangeItemGroup) are
+  recorded. This is an aggregation detection: the base graylog.query isolates
+  delete events and excludes deletions originating from Deleted Items and Junk
+  folders, and the aggregation block counts them per user over the window.
+  Note: data_office365_Folder_Path is localized per tenant language (e.g.
+  "Deleted Items", "Itens Excluidos", "Elementos eliminados", "Correo no deseado",
+  "Junk Email", "Lixo Eletronico"); the exclusion regex covers English, Portuguese,
+  and Spanish variants and may need additional folder names added for tenants in
+  other locales. Each delete event carries a single message in
+  data_office365_AffectedItems, so event count is a close proxy for messages
+  deleted. O365 CreationTime arrives with a malformed timezone offset (+0000) and
+  is replaced at ingest, so windowing keys off Graylog's own timestamp rather than
+  data_office365_CreationTime. Confirmed against live AGTNetworks tenant data.
+known_false_positives: >
+  Users performing legitimate bulk cleanup of their Inbox (mass-selecting and
+  deleting old mail, newsletter purges, mailbox archiving) can trigger this.
+  Automated mailbox rules and retention/cleanup tooling may also delete in bulk.
+  Emptying the Deleted Items or Junk folder is already excluded. Tune the
+  threshold per tenant and consider excluding known automation/service accounts.
+references:
+  - https://attack.mitre.org/techniques/T1070/008/
+  - https://attack.mitre.org/techniques/T1114/
+response:
+  message: >
+    Mass email deletion detected: $data_office365_UserId$ deleted a high volume
+    of messages (excluding Deleted Items/Junk cleanup) within the aggregation
+    window. Source IP: $data_office365_ClientIP$ ($data_office365_ClientIP_country_code$).
+    Possible evidence wipe following account compromise. MITRE ATT&CK: T1070.008
+  risk_score: 70
+  severity: high
+  risk_objects:
+    - field: data_office365_UserId
+      type: user
+      score: 70
+  threat_objects:
+    - field: data_office365_ClientIP
+      type: ip_address
+    - field: data_office365_Folder_Path
+      type: folder
+tags:
+  analytic_story:
+    - Office 365 Anti-Forensics
+    - Business Email Compromise
+  asset_type: Cloud Identity
+  mitre_attack_id:
+    - T1070.008
+    - T1114
+  custom_tags:
+    - o365
+    - exchange
+    - mail_deletion
+    - anti_forensics
+    - evidence_wipe
+    - aggregation
+  product:
+    - Office 365
+  security_domain: cloud
+graylog:
+  query: data_office365_Operation:("SoftDelete" OR "HardDelete") AND NOT data_office365_Folder_Path:/.*([dD]eleted [iI]tems|[jJ]unk [eE]mail|[iI]tens [eE]xclu.dos|[eE]lementos eliminados|[cC]orreo no deseado|[lL]ixo [eE]letr.nico).*/
+aggregation:
+  enabled: true
+  function: count
+  field: null
+  group_by:
+    - data_office365_UserId
+  window: 10m
+  threshold: 30
+  condition: ">"
