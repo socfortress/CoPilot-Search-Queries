@@ -1,0 +1,93 @@
+name: M365 Mass File Download
+id: M365_Mass_File_Download
+version: 1
+schema_version: "1.0"
+date: "2026-07-02"
+author: SOCFortress LLC
+status: production
+type: aggregation
+description: >
+  Detects a single user downloading an unusually high volume of files from
+  SharePoint or OneDrive within a short time window. High-volume downloads by
+  one user are a strong indicator of data exfiltration, whether by a malicious
+  insider staging data for removal or an attacker operating a compromised
+  account. Fires when a user exceeds the download threshold within the
+  aggregation window.
+  MITRE ATT&CK: T1213 (Data from Information Repositories), T1567 (Exfiltration Over Web Service).
+
+data_source:
+  - Office 365 Management Activity API
+  - Workload: SharePoint / OneDrive
+
+workload: SharePoint
+
+how_to_implement: >
+  Requires the Office 365 audit log ingestion pipeline feeding Graylog via the
+  O365 Management Activity API, with SharePoint/OneDrive auditing enabled so
+  FileDownloaded operations (RecordType 6) are recorded. This is an aggregation
+  detection: the base graylog.query isolates download events, and the
+  aggregation block counts them per user over the window. Note: O365 CreationTime
+  arrives with a malformed timezone offset (+0000) and is replaced at ingest, so
+  windowing keys off Graylog's own timestamp rather than data_office365_CreationTime.
+  Confirmed against live AGTNetworks tenant data — FileDownloaded events populate
+  data_office365_UserId, data_office365_ClientIP, and data_office365_ObjectId.
+
+known_false_positives: >
+  Legitimate bulk activity can trigger this: users syncing a large SharePoint
+  library for the first time, migrations, backups, offboarding data handovers,
+  or automated/service accounts that pull many files. Tune the threshold and
+  window per tenant, and consider excluding known service accounts by UserId.
+  A high sustained baseline for specific power users may warrant per-user tuning.
+
+references:
+  - https://attack.mitre.org/techniques/T1213/
+  - https://attack.mitre.org/techniques/T1567/
+
+response:
+  message: >
+    Mass file download detected: $data_office365_UserId$ downloaded a high volume
+    of files from SharePoint/OneDrive within the aggregation window.
+    Source IP: $data_office365_ClientIP$ ($data_office365_ClientIP_country_code$).
+    Review for potential data exfiltration. MITRE ATT&CK: T1213, T1567
+  risk_score: 75
+  severity: high
+  risk_objects:
+    - field: data_office365_UserId
+      type: user
+      score: 75
+  threat_objects:
+    - field: data_office365_ClientIP
+      type: ip_address
+    - field: data_office365_ObjectId
+      type: file_name
+
+tags:
+  analytic_story:
+    - Office 365 Data Exfiltration
+    - Insider Threat
+  asset_type: Cloud Identity
+  mitre_attack_id:
+    - T1213
+    - T1567
+  custom_tags:
+    - o365
+    - sharepoint
+    - onedrive
+    - file_download
+    - data_exfiltration
+    - aggregation
+  product:
+    - Office 365
+  security_domain: cloud
+
+graylog:
+  query: data_office365_Operation:"FileDownloaded"
+  aggregation:                                 # NEW — optional; omit it and nothing changes
+    enabled: true
+    function: count          # count | distinct_count
+    field: null              # required when distinct_count; null for count
+    group_by:
+      - data_office365_UserId
+    window: 10m
+    threshold: 21
+    condition: ">"
