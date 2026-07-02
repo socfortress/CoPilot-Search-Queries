@@ -1,0 +1,78 @@
+name: M365 Inbox Rule Created
+id: M365_Inbox_Rule_Created
+version: 1
+schema_version: "1.0"
+date: "2026-07-02"
+author: SOCFortress LLC
+status: production
+type: match
+description: >
+  Detects the creation of any Exchange inbox rule (New-InboxRule). Inbox rules
+  that forward, redirect, move, or delete incoming mail are a common persistence
+  and evidence-hiding technique following a business email compromise, where an
+  attacker auto-forwards mail externally or silently routes security and reply
+  messages to Deleted Items or an obscure folder. Inbox rule creation is a
+  low-frequency, high-value event worth reviewing on every occurrence in a
+  monitored tenant.
+  MITRE ATT&CK: T1114.003 (Email Collection: Email Forwarding Rule), T1564.008 (Hide Artifacts: Email Hiding Rules).
+data_source:
+  - Office 365 Management Activity API
+  - "Workload: Exchange"
+workload: Exchange
+how_to_implement: >
+  Requires the Office 365 audit log ingestion pipeline feeding Graylog via the
+  O365 Management Activity API, with Exchange admin auditing enabled so
+  New-InboxRule operations (RecordType 1, ExchangeAdmin) are recorded. This is a
+  single-event match detection that fires on every inbox rule creation. The rule's
+  actions and name are carried in data_office365_Parameters as a flattened string
+  of {Name=..., Value=...} pairs (e.g. RedirectTo, ForwardTo, MoveToFolder,
+  DeleteMessage, StopProcessingRules), which is surfaced in the alert for triage.
+  Note: data_office365_ClientIP includes an appended source port (e.g.
+  "203.0.113.10:12824") for these admin-log events.
+known_false_positives: >
+  Users legitimately create inbox rules to organize mail (moving newsletters to
+  folders, redirecting to shared/team mailboxes, auto-filing internal messages).
+  Review each alert: forwarding or redirecting to an external domain, or rules
+  that move mail to Deleted Items / RSS / Archive combined with marking as read,
+  are the higher-risk patterns. Given the low frequency of this operation, all
+  occurrences are alerted for analyst review.
+references:
+  - https://attack.mitre.org/techniques/T1114/003/
+  - https://attack.mitre.org/techniques/T1564/008/
+response:
+  message: >
+    Inbox rule created by $data_office365_UserId$ from $data_office365_ClientIP$.
+    Rule details: $data_office365_Parameters$.
+    Review for external forwarding/redirection or mail-hiding behavior.
+    MITRE ATT&CK: T1114.003
+  risk_score: 60
+  severity: high
+  risk_objects:
+    - field: data_office365_UserId
+      type: user
+      score: 60
+  threat_objects:
+    - field: data_office365_ClientIP
+      type: ip_address
+    - field: data_office365_ObjectId
+      type: rule_name
+tags:
+  analytic_story:
+    - Office 365 Persistence
+    - Business Email Compromise
+  asset_type: Cloud Identity
+  mitre_attack_id:
+    - T1114.003
+    - T1564.008
+  custom_tags:
+    - o365
+    - exchange
+    - inbox_rule
+    - mail_forwarding
+    - persistence
+    - bec
+  product:
+    - Office 365
+  security_domain: cloud
+graylog:
+  query: data_office365_Operation:"New-InboxRule"
