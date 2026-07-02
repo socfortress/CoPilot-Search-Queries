@@ -1,0 +1,81 @@
+name: M365 Email Forwarding Created
+id: M365_Email_Forwarding_Created
+version: 1
+schema_version: "1.0"
+date: "2026-07-02"
+author: SOCFortress LLC
+status: production
+type: match
+description: >
+  Detects mailbox-level email forwarding being configured via Set-Mailbox, where
+  either a forwarding SMTP address or a forwarding recipient is set to a non-empty
+  value. Attackers configure mailbox forwarding after compromising an account to
+  silently exfiltrate a copy of all incoming mail to an address they control,
+  supporting business email compromise and long-term collection. Both
+  ForwardingSmtpAddress (a raw external SMTP target) and ForwardingAddress (a
+  directory recipient, which can point to an attacker-created mail contact) are
+  covered, since either can be abused for exfiltration. Events that clear or
+  disable forwarding (empty value) are excluded.
+  MITRE ATT&CK: T1114.003 (Email Collection: Email Forwarding Rule).
+data_source:
+  - Office 365 Management Activity API
+  - "Workload: Exchange"
+workload: Exchange
+how_to_implement: >
+  Requires the Office 365 audit log ingestion pipeline feeding Graylog via the
+  O365 Management Activity API, with Exchange admin auditing enabled so
+  Set-Mailbox operations (RecordType 1, ExchangeAdmin) are recorded. This is a
+  single-event match detection. Set-Mailbox is a high-volume administrative
+  operation used for many settings, so the query filters on the forwarding
+  parameters specifically: ForwardingSmtpAddress and ForwardingAddress, carried
+  in data_office365_Parameters as a flattened string of {Name=..., Value=...}
+  pairs. The Value=[^}] guard requires a non-empty value so that events which
+  clear or disable forwarding (empty value) do not fire. These parameter names
+  are standard Exchange Online fields and are consistent across tenants and
+  locales. Note: data_office365_ClientIP includes an appended source port for
+  these admin-log events.
+known_false_positives: >
+  Administrators and users may configure forwarding legitimately (delegation,
+  shared-mailbox routing, temporary out-of-office forwarding to a colleague).
+  Forwarding to an external, non-corporate domain is the higher-risk case and
+  should be prioritized on review. The rule surfaces the full forwarding target
+  in the alert so the analyst can quickly judge internal vs external.
+references:
+  - https://attack.mitre.org/techniques/T1114/003/
+response:
+  message: >
+    Mailbox forwarding configured by $data_office365_UserId$ from
+    $data_office365_ClientIP$ on mailbox $data_office365_ObjectId$.
+    Forwarding details: $data_office365_Parameters$.
+    Review the forwarding target for external/attacker-controlled addresses.
+    MITRE ATT&CK: T1114.003
+  risk_score: 70
+  severity: high
+  risk_objects:
+    - field: data_office365_UserId
+      type: user
+      score: 70
+  threat_objects:
+    - field: data_office365_ClientIP
+      type: ip_address
+    - field: data_office365_ObjectId
+      type: mailbox
+tags:
+  analytic_story:
+    - Office 365 Persistence
+    - Business Email Compromise
+  asset_type: Cloud Identity
+  mitre_attack_id:
+    - T1114.003
+  custom_tags:
+    - o365
+    - exchange
+    - mail_forwarding
+    - set_mailbox
+    - persistence
+    - bec
+  product:
+    - Office 365
+  security_domain: cloud
+graylog:
+  query: data_office365_Operation:"Set-Mailbox" AND (data_office365_Parameters:/.*ForwardingSmtpAddress, Value=[^}].*/ OR data_office365_Parameters:/.*ForwardingAddress, Value=[^}].*/)
