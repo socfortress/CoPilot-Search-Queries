@@ -183,44 +183,55 @@ graylog:
   query: data_win_system_eventID:"7" AND (data_win_eventdata_imageLoaded:/.*\\[Ll][Ii][Bb][Ww][Aa][Zz][Uu][Hh][Ss][Hh][Aa][Rr][Ee][Dd]\.[Dd][Ll][Ll]/ OR data_win_eventdata_imageLoaded:/.*\\[Ll][Ii][Bb][Ww][Ii][Nn][Pp][Tt][Hh][Rr][Ee][Aa][Dd]-1\.[Dd][Ll][Ll]/) AND _exists_:data_win_eventdata_imageLoaded AND NOT (data_win_eventdata_imageLoaded:/[Cc]:\\[Pp][Rr][Oo][Gg][Rr][Aa][Mm] [Ff][Ii][Ll][Ee][Ss]\\.*/ OR data_win_eventdata_imageLoaded:/[Cc]:\\[Pp][Rr][Oo][Gg][Rr][Aa][Mm] [Ff][Ii][Ll][Ee][Ss] \([Xx]86\)\\.*/) AND _exists_:data_win_eventdata_imageLoaded AND NOT ((data_win_eventdata_imageLoaded:/.*\\[Aa][Pp][Pp][Dd][Aa][Tt][Aa]\\[Ll][Oo][Cc][Aa][Ll]\\.*/ OR data_win_eventdata_imageLoaded:/.*\\[Pp][Rr][Oo][Gg][Rr][Aa][Mm][Dd][Aa][Tt][Aa]\\.*/) AND data_win_eventdata_imageLoaded:/.*\\[Mm][Ii][Nn][Gg][Ww]64\\[Bb][Ii][Nn]\\[Ll][Ii][Bb][Ww][Ii][Nn][Pp][Tt][Hh][Rr][Ee][Aa][Dd]-1\.[Dd][Ll][Ll]/)
 
 correlation:
-  # Authored by the correlation engine for review. Related CoPilot Searches to run
-  # around an alert from this rule, scoped to the same host/user/IP within the window.
+  # Authored per-rule (behaviour-researched) for the correlation engine. Related CoPilot
+  # Searches + telemetry pivots to run around an alert, scoped to its host/user/ip/domain.
   related_rules:
-    - id: ec570e53-4c76-45a9-804d-dc3f355ff7a7
-      name: "7Zip Compressing Dump Files"
-      reason: "next kill-chain tactic: Collection"
-    - id: 0a1255c5-d732-4b62-ac02-b5152d34fb83
-      name: "ADExplorer Writing Complete AD Snapshot Into .dat File"
-      reason: "next kill-chain tactic: Discovery"
-    - id: 1ea13e8c-03ea-409b-877d-ce5c3d2c1cb3
-      name: "ADFS Database Named Pipe Connection By Uncommon Tool"
-      reason: "next kill-chain tactic: Collection"
-    - id: 75bf09fa-1dd7-4d18-9af9-dd9e492562eb
-      name: "ADSI-Cache File Creation By Uncommon Tool"
-      reason: "next kill-chain tactic: Command and Control"
-    - id: 33a2d1dd-f3b0-40bd-8baf-7974468927cc
-      name: "APT PRIVATELOG Image Load Pattern"
-      reason: "next kill-chain tactic: Privilege Escalation"
-    - id: 9aa01d62-7667-4d3b-acb8-8cb5103e2014
-      name: "APT27 - Emissary Panda Activity"
-      reason: "next kill-chain tactic: Execution"
-  window: 1h
+  - id: 552b6b65-df37-4d3e-a258-f2fc4771ae54
+    name: Potential Antivirus Software DLL Sideloading
+    reason: 'Closest conceptual sibling: the same T1574.001 image-load sideload but of security-software DLLs (McAfee/Symantec/Bitdefender log.dll, etc.). Both rules catch an attacker abusing a trusted security-product binary to load an attacker-controlled DLL from a non-install path; a hit on either on the same host in the window points at one actor attacking the endpoint''s security stack.'
+  - id: 799a5f48-0ac1-4e0f-9152-71d137d48c2a
+    name: Abusable DLL Potential Sideloading From Suspicious Location
+    reason: 'Generic sibling of the exact technique: known-abused DLLs (coreclr/libcef/zipdll...) loaded from writable locations (Users\Public, PerfLogs, Windows\Temp, user profile). An operator staging this Wazuh/MinGW sideload typically drops a second abusable DLL beside it, so a co-hit surfaces the rest of the sideloaded module set and tips a verdict toward deliberate sideloading over this rule''s many benign libwinpthread-1 loads.'
+  - id: 9e9a9002-56c4-40fd-9eff-e4b09bfa5f6c
+    name: DLL Load By System Process From Suspicious Locations
+    reason: 'Sibling for when the abused loader is a SYSTEM/trusted process - the Wazuh agent itself runs as SYSTEM: a C:\Windows\* process loading a DLL from C:\Users\Public or C:\PerfLogs. It catches sideloaded modules this rule''s two hard-coded DLL names miss and confirms an elevated process is being made to load from a world-writable path.'
+  - id: 79c7d1fc-64c7-91be-a616-ccda752efe81
+    name: Windows DLL Search Order Hijacking Hunt with Sysmon
+    reason: Broad hunt for the exact mechanism this alert is one narrow instance of - any DLL loaded from outside system32/syswow64/winsxs/wbem/Program Files. Correlating it enumerates every other search-order hijack or sideload on the host in the window, turning one DLL hit into the full campaign picture.
+  - id: b5de0c9a-6f19-43e0-af4e-55ad01f550af
+    name: Unsigned DLL Loaded by Windows Utility
+    reason: 'The signature angle on the same event: a trusted Windows utility (rundll32/regsvr32/InstallUtil/RegAsm...) loading an unsigned DLL for proxy execution. This rule captures data_win_eventdata_signed precisely so the analyst can judge the load; if the sideloaded Wazuh/MinGW DLL is unsigned and pulled in by a LOLBin, this co-fires and confirms malicious proxy execution rather than a signed-vendor false positive.'
+  - id: windows-dll-loaded-temp-dir-001
+    name: Windows DLL Module Loaded in Temp Dir
+    reason: 'Location-based sibling: a DLL loaded from %TEMP% (used by Interlock/Lokibot sideloading). This rule excludes only Program Files, so a libwazuhshared/libwinpthread-1 payload staged in Temp trips both - a co-hit confirms the module loaded from a throwaway staging dir, not an install path.'
+  - id: 9aa01d62-7667-4d3b-acb8-8cb5103e2014
+    name: APT27 - Emissary Panda Activity
+    reason: Attribution per this rule's own reference (Trend Micro 'Iron Tiger'/SysUpdate = APT27/Emissary Panda), a crew that ships MinGW-compiled tooling and side-loads exactly these libwinpthread-1-class runtime DLLs. This EID 1 rule catches that actor's sllauncher->svchost and AppData\Roaming svchost -k launch, so a co-hit on the host attributes the sideload to an active APT27 intrusion rather than a benign MinGW app.
+  window: 2h
   enrichment_searches:
-  # Rule-specific telemetry pivots the engine runs around an alert from this rule,
-  # scoped to the alert's host/user/IP within the window (behaviour-targeted, not a sweep).
-    - name: "DLL sideloading / execution from user-writable paths on this host"
-      query: '((data_win_system_eventID:"7" AND (data_win_eventdata_imageLoaded:/.*\\[Uu][Ss][Ee][Rr][Ss]\\.*/ OR data_win_eventdata_imageLoaded:/.*\\[Pp][Rr][Oo][Gg][Rr][Aa][Mm][Dd][Aa][Tt][Aa]\\.*/ OR data_win_eventdata_imageLoaded:/.*\\[Ww][Ii][Nn][Dd][Oo][Ww][Ss]\\[Tt][Ee][Mm][Pp]\\.*/ OR data_win_eventdata_imageLoaded:/.*\\[Aa][Pp][Pp][Dd][Aa][Tt][Aa]\\.*/ OR data_win_eventdata_imageLoaded:/.*\\[Pp][Uu][Bb][Ll][Ii][Cc]\\.*/ OR data_win_eventdata_imageLoaded:/.*\\\$[Rr][Ee][Cc][Yy][Cc][Ll][Ee].*/)) OR (data_win_system_eventID:"1" AND (data_win_eventdata_image:/.*\\[Uu][Ss][Ee][Rr][Ss]\\.*/ OR data_win_eventdata_image:/.*\\[Pp][Rr][Oo][Gg][Rr][Aa][Mm][Dd][Aa][Tt][Aa]\\.*/ OR data_win_eventdata_image:/.*\\[Ww][Ii][Nn][Dd][Oo][Ww][Ss]\\[Tt][Ee][Mm][Pp]\\.*/ OR data_win_eventdata_image:/.*\\[Aa][Pp][Pp][Dd][Aa][Tt][Aa]\\.*/ OR data_win_eventdata_image:/.*\\[Pp][Uu][Bb][Ll][Ii][Cc]\\.*/ OR data_win_eventdata_image:/.*\\\$[Rr][Ee][Cc][Yy][Cc][Ll][Ee].*/)))'
-      pivot_on: [host]
-      window: 2h
-    - name: "Memory/credential-dump creation & LSASS access on this host"
-      query: '((data_win_system_eventID:"1" AND data_win_eventdata_image:/.*(\\[Pp][Rr][Oo][Cc][Dd][Uu][Mm][Pp]\.[Ee][Xx][Ee]|\\[Pp][Rr][Oo][Cc][Dd][Uu][Mm][Pp]64\.[Ee][Xx][Ee]|\\[Ss][Qq][Ll][Dd][Uu][Mm][Pp][Ee][Rr]\.[Ee][Xx][Ee]|\\[Cc][Rr][Ee][Aa][Tt][Ee][Dd][Uu][Mm][Pp]\.[Ee][Xx][Ee]|\\[Rr][Dd][Rr][Ll][Ee][Aa][Kk][Dd][Ii][Aa][Gg]\.[Ee][Xx][Ee]|\\[Dd][Uu][Mm][Pp][Ee][Rr][Tt]\.[Ee][Xx][Ee]|\\[Nn][Aa][Nn][Oo][Dd][Uu][Mm][Pp]\.[Ee][Xx][Ee]|\\[Aa][Vv][Dd][Uu][Mm][Pp]\.[Ee][Xx][Ee])/) OR (data_win_system_eventID:"1" AND (data_win_eventdata_commandLine:/.*[Cc][Oo][Mm][Ss][Vv][Cc][Ss]\.[Dd][Ll][Ll].*/ OR data_win_eventdata_commandLine:/.*[Mm][Ii][Nn][Ii][Dd][Uu][Mm][Pp].*/ OR data_win_eventdata_commandLine:/.*[Dd][Uu][Mm][Pp][Ee][Rr][Tt].*/ OR data_win_eventdata_commandLine:/.*[Nn][Aa][Nn][Oo][Dd][Uu][Mm][Pp].*/ OR data_win_eventdata_commandLine:/.*[Ll][Ss][Aa][Ss][Ss].*/ OR data_win_eventdata_commandLine:/.*[Ss][Ee][Kk][Uu][Rr][Ll][Ss][Aa].*/ OR data_win_eventdata_commandLine:/.*[Nn][Tt][Dd][Ss]\.[Dd][Ii][Tt].*/ OR data_win_eventdata_commandLine:/.*[Nn][Tt][Dd][Ss][Uu][Tt][Ii][Ll].*/)) OR (data_win_system_eventID:"10" AND data_win_eventdata_targetImage:/.*(\\[Ll][Ss][Aa][Ss][Ss]\.[Ee][Xx][Ee])/))'
-      pivot_on: [host]
-      window: 1h
-    - name: "Follow-on LOLBin / signed-binary-proxy execution on this host"
-      query: 'data_win_system_eventID:"1" AND data_win_eventdata_image:/.*(\\[Rr][Uu][Nn][Dd][Ll][Ll]32\.[Ee][Xx][Ee]|\\[Rr][Ee][Gg][Ss][Vv][Rr]32\.[Ee][Xx][Ee]|\\[Mm][Ss][Hh][Tt][Aa]\.[Ee][Xx][Ee]|\\[Ii][Nn][Ss][Tt][Aa][Ll][Ll][Uu][Tt][Ii][Ll]\.[Ee][Xx][Ee]|\\[Rr][Ee][Gg][Aa][Ss][Mm]\.[Ee][Xx][Ee]|\\[Rr][Ee][Gg][Ss][Vv][Cc][Ss]\.[Ee][Xx][Ee]|\\[Mm][Ss][Bb][Uu][Ii][Ll][Dd]\.[Ee][Xx][Ee]|\\[Cc][Ee][Rr][Tt][Uu][Tt][Ii][Ll]\.[Ee][Xx][Ee]|\\[Bb][Ii][Tt][Ss][Aa][Dd][Mm][Ii][Nn]\.[Ee][Xx][Ee]|\\[Ww][Mm][Ii][Cc]\.[Ee][Xx][Ee]|\\[Cc][Mm][Ss][Tt][Pp]\.[Ee][Xx][Ee]|\\[Oo][Dd][Bb][Cc][Cc][Oo][Nn][Ff]\.[Ee][Xx][Ee]|\\[Ff][Oo][Rr][Ff][Ii][Ll][Ee][Ss]\.[Ee][Xx][Ee]|\\[Pp][Cc][Aa][Ll][Uu][Aa]\.[Ee][Xx][Ee]|\\[Mm][Aa][Vv][Ii][Nn][Jj][Ee][Cc][Tt]\.[Ee][Xx][Ee]|\\[Ss][Cc][Rr][Ii][Pp][Tt][Rr][Uu][Nn][Nn][Ee][Rr]\.[Ee][Xx][Ee])/'
-      pivot_on: [host]
-      window: 1h
-    - name: "UAC-bypass / privilege-escalation binaries on this host"
-      query: 'data_win_system_eventID:"1" AND (data_win_eventdata_image:/.*(\\[Ff][Oo][Dd][Hh][Ee][Ll][Pp][Ee][Rr]\.[Ee][Xx][Ee]|\\[Ee][Vv][Ee][Nn][Tt][Vv][Ww][Rr]\.[Ee][Xx][Ee]|\\[Ss][Dd][Cc][Ll][Tt]\.[Ee][Xx][Ee]|\\[Cc][Oo][Mm][Pp][Uu][Tt][Ee][Rr][Dd][Ee][Ff][Aa][Uu][Ll][Tt][Ss]\.[Ee][Xx][Ee]|\\[Ss][Ll][Uu][Ii]\.[Ee][Xx][Ee]|\\[Ww][Ss][Rr][Ee][Ss][Ee][Tt]\.[Ee][Xx][Ee])/ OR data_win_eventdata_parentImage:/.*(\\[Ff][Oo][Dd][Hh][Ee][Ll][Pp][Ee][Rr]\.[Ee][Xx][Ee]|\\[Ee][Vv][Ee][Nn][Tt][Vv][Ww][Rr]\.[Ee][Xx][Ee]|\\[Ss][Dd][Cc][Ll][Tt]\.[Ee][Xx][Ee]|\\[Cc][Oo][Mm][Pp][Uu][Tt][Ee][Rr][Dd][Ee][Ff][Aa][Uu][Ll][Tt][Ss]\.[Ee][Xx][Ee]|\\[Ss][Ll][Uu][Ii]\.[Ee][Xx][Ee]|\\[Ww][Ss][Rr][Ee][Ss][Ee][Tt]\.[Ee][Xx][Ee])/)'
-      pivot_on: [host]
-      window: 2h
+  # Behaviour-targeted hunts the engine runs around the alert (not a sweep).
+  - name: Sideload DLL/EXE bundle dropped on this host (incl. libwazuhshared / libwinpthread-1)
+    query: data_win_system_eventID:"11" AND (data_win_eventdata_targetFilename:/.*\\[Ll][Ii][Bb][Ww][Aa][Zz][Uu][Hh][Ss][Hh][Aa][Rr][Ee][Dd]\.[Dd][Ll][Ll]/ OR data_win_eventdata_targetFilename:/.*\\[Ll][Ii][Bb][Ww][Ii][Nn][Pp][Tt][Hh][Rr][Ee][Aa][Dd]-1\.[Dd][Ll][Ll]/ OR (data_win_eventdata_targetFilename:/.*\.([Dd][Ll][Ll]|[Ee][Xx][Ee])/ AND data_win_eventdata_targetFilename:/.*\\([Uu][Ss][Ee][Rr][Ss]\\[Pp][Uu][Bb][Ll][Ii][Cc]|[Aa][Pp][Pp][Dd][Aa][Tt][Aa]|[Pp][Rr][Oo][Gg][Rr][Aa][Mm][Dd][Aa][Tt][Aa]|[Ww][Ii][Nn][Dd][Oo][Ww][Ss]\\[Tt][Ee][Mm][Pp]|[Pp][Ee][Rr][Ff][Ll][Oo][Gg][Ss]|[Dd][Oo][Ww][Nn][Ll][Oo][Aa][Dd][Ss])\\.*/))
+    pivot_on:
+    - host
+    window: 4h
+  - name: Abused host binary launched from a user-writable location on this host
+    query: data_win_system_eventID:"1" AND data_win_eventdata_image:/.*\\([Uu][Ss][Ee][Rr][Ss]\\[Pp][Uu][Bb][Ll][Ii][Cc]|[Aa][Pp][Pp][Dd][Aa][Tt][Aa]|[Pp][Rr][Oo][Gg][Rr][Aa][Mm][Dd][Aa][Tt][Aa]|[Ww][Ii][Nn][Dd][Oo][Ww][Ss]\\[Tt][Ee][Mm][Pp]|[Pp][Ee][Rr][Ff][Ll][Oo][Gg][Ss]|[Dd][Oo][Ww][Nn][Ll][Oo][Aa][Dd][Ss])\\.*/
+    pivot_on:
+    - host
+    window: 2h
+  - name: C2 beacon or DNS lookup from a process in a user-writable location on this host
+    query: (data_win_system_eventID:"3" OR data_win_system_eventID:"22") AND data_win_eventdata_image:/.*\\([Uu][Ss][Ee][Rr][Ss]\\[Pp][Uu][Bb][Ll][Ii][Cc]|[Aa][Pp][Pp][Dd][Aa][Tt][Aa]|[Pp][Rr][Oo][Gg][Rr][Aa][Mm][Dd][Aa][Tt][Aa]|[Ww][Ii][Nn][Dd][Oo][Ww][Ss]\\[Tt][Ee][Mm][Pp]|[Pp][Ee][Rr][Ff][Ll][Oo][Gg][Ss]|[Dd][Oo][Ww][Nn][Ll][Oo][Aa][Dd][Ss])\\.*/
+    pivot_on:
+    - host
+    window: 2h
+  - name: LSASS credential access or memory-dump tooling on this host
+    query: (data_win_system_eventID:"10" AND data_win_eventdata_targetImage:/.*\\[Ll][Ss][Aa][Ss][Ss]\.[Ee][Xx][Ee]/) OR (data_win_system_eventID:"1" AND (data_win_eventdata_image:/.*\\([Pp][Rr][Oo][Cc][Dd][Uu][Mm][Pp]|[Nn][Aa][Nn][Oo][Dd][Uu][Mm][Pp]|[Dd][Uu][Mm][Pp][Ee][Rr][Tt]|[Rr][Dd][Rr][Ll][Ee][Aa][Kk][Dd][Ii][Aa][Gg]|[Cc][Rr][Ee][Aa][Tt][Ee][Dd][Uu][Mm][Pp])[A-Za-z0-9]*\.[Ee][Xx][Ee]/ OR data_win_eventdata_commandLine:/.*([Mm][Ii][Nn][Ii][Dd][Uu][Mm][Pp]|[Cc][Oo][Mm][Ss][Vv][Cc][Ss]\.[Dd][Ll][Ll]|[Ll][Ss][Aa][Ss][Ss]|[Ss][Ee][Kk][Uu][Rr][Ll][Ss][Aa]).*/))
+    pivot_on:
+    - host
+    window: 2h
+  - name: Tampering with the Wazuh/OSSEC security agent on this host
+    query: data_win_system_eventID:"1" AND (data_win_eventdata_commandLine:/.*[Ww][Aa][Zz][Uu][Hh].*/ OR data_win_eventdata_commandLine:/.*[Oo][Ss][Ss][Ee][Cc].*/) AND (data_win_eventdata_commandLine:/.*[Ss][Tt][Oo][Pp].*/ OR data_win_eventdata_commandLine:/.*[Dd][Ee][Ll][Ee][Tt][Ee].*/ OR data_win_eventdata_commandLine:/.*[Dd][Ii][Ss][Aa][Bb][Ll][Ee].*/ OR data_win_eventdata_commandLine:/.*[Tt][Aa][Ss][Kk][Kk][Ii][Ll][Ll].*/ OR data_win_eventdata_commandLine:/.*[Uu][Nn][Ii][Nn][Ss][Tt][Aa][Ll][Ll].*/)
+    pivot_on:
+    - host
+    window: 4h

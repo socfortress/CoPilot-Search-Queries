@@ -134,44 +134,58 @@ graylog:
   query: data_win_system_eventID:"7" AND data_win_eventdata_image:/.*\\[Rr][Uu][Nn][Dd][Ll][Ll]32\.[Ee][Xx][Ee]/ AND data_win_eventdata_imageLoaded:/\\\\.*/
 
 correlation:
-  # Authored by the correlation engine for review. Related CoPilot Searches to run
-  # around an alert from this rule, scoped to the same host/user/IP within the window.
+  # Authored per-rule (behaviour-researched) for the correlation engine. Related CoPilot
+  # Searches + telemetry pivots to run around an alert, scoped to its host/user/ip/domain.
   related_rules:
-    - id: ec570e53-4c76-45a9-804d-dc3f355ff7a7
-      name: "7Zip Compressing Dump Files"
-      reason: "next kill-chain tactic: Collection"
-    - id: 0a1255c5-d732-4b62-ac02-b5152d34fb83
-      name: "ADExplorer Writing Complete AD Snapshot Into .dat File"
-      reason: "next kill-chain tactic: Discovery"
-    - id: 1ea13e8c-03ea-409b-877d-ce5c3d2c1cb3
-      name: "ADFS Database Named Pipe Connection By Uncommon Tool"
-      reason: "next kill-chain tactic: Collection"
-    - id: 75bf09fa-1dd7-4d18-9af9-dd9e492562eb
-      name: "ADSI-Cache File Creation By Uncommon Tool"
-      reason: "next kill-chain tactic: Command and Control"
-    - id: 33a2d1dd-f3b0-40bd-8baf-7974468927cc
-      name: "APT PRIVATELOG Image Load Pattern"
-      reason: "next kill-chain tactic: Privilege Escalation"
-    - id: 9aa01d62-7667-4d3b-acb8-8cb5103e2014
-      name: "APT27 - Emissary Panda Activity"
-      reason: "next kill-chain tactic: Execution"
+  - id: 5cdb711b-5740-4fb2-ba88-f7945027afac
+    name: Rundll32 UNC Path Execution
+    reason: 'The EID 1 process-creation twin of this image load: it catches rundll32 launched with the UNC/remote DLL path on its command line, the same action this rule sees as the resulting remote image load. They co-fire within seconds on the same host; pairing them recovers the parent, full command line and export called.'
+  - id: 88a87a10-384b-4ad7-8871-2f9bf9259ce5
+    name: Suspicious Regsvr32 Execution From Remote Share
+    reason: Sibling signed-binary-proxy LOLBin running a DLL straight from a remote share. Same tradecraft as rundll32 proxy-loading a remote DLL; seeing both on one host points to a toolkit staging payloads on network shares instead of local disk.
+  - id: 2dbd9d3d-9e27-42a8-b8df-f13825c6c3d5
+    name: WebDav Client Execution Via Rundll32.EXE
+    reason: rundll32 davclnt.dll,DavSetCookie spins up the WebClient redirector that mounts remote WebDAV paths - a common precursor that makes a remote DLL reachable over HTTP(S) when SMB/445 egress is blocked, producing exactly this remote image load.
+  - id: ae9c6a7c-9521-42a6-915e-5aaa8689d529
+    name: CobaltStrike Load by Rundll32
+    reason: 'Names the payload: rundll32 <dll>,StartW is the canonical Cobalt Strike reflective-loader entry point, so this co-firing identifies the remote DLL as a CS beacon rather than a benign add-in.'
+  - id: 8cde342c-ba48-4b74-b615-172c330f2e93
+    name: Suspicious Renamed Comsvcs DLL Loaded By Rundll32
+    reason: Follow-on credential access through the very same rundll32 image-load vector - a renamed comsvcs.dll MiniDump of LSASS. After a remote foothold, rundll32-based LSASS dumping is the classic next step.
+  - id: a7e6b1f9-8d2c-4f1e-9a7d-63e4c8a2bf4c
+    name: Kapeka Backdoor Loaded Via Rundll32.EXE
+    reason: 'Co-occurring EID 7 rundll32 malicious-DLL load (a .wll backdoor from ProgramData/AppData): confirms rundll32 is being abused as a loader on this host and may be the locally-staged counterpart dropped alongside the remote payload.'
+  - id: c3a99af4-35a9-4668-879e-c09aeb4f2bdf
+    name: Rundll32 Execution With Uncommon DLL Extension
+    reason: Remotely-staged payloads are routinely disguised with non-.dll extensions; this flags rundll32 loading such a file - the command-line view of the same disguised remote DLL this rule catches at image load.
+  - id: 1723e720-616d-4ddc-ab02-f7e3685a4713
+    name: Rundll32 Spawned Via Explorer.EXE
+    reason: 'Raspberry Robin delivery pattern: explorer spawns rundll32 to run a DLL off removable/network media - a user-initiated precursor that lands precisely as a remote DLL load.'
   window: 1h
   enrichment_searches:
-  # Rule-specific telemetry pivots the engine runs around an alert from this rule,
-  # scoped to the alert's host/user/IP within the window (behaviour-targeted, not a sweep).
-    - name: "Office / browser spawning a script interpreter on this host"
-      query: 'data_win_system_eventID:"1" AND data_win_eventdata_parentImage:/.*(\\[Ww][Ii][Nn][Ww][Oo][Rr][Dd]\.[Ee][Xx][Ee]|\\[Ee][Xx][Cc][Ee][Ll]\.[Ee][Xx][Ee]|\\[Pp][Oo][Ww][Ee][Rr][Pp][Nn][Tt]\.[Ee][Xx][Ee]|\\[Oo][Uu][Tt][Ll][Oo][Oo][Kk]\.[Ee][Xx][Ee]|\\[Mm][Ss][Aa][Cc][Cc][Ee][Ss][Ss]\.[Ee][Xx][Ee]|\\[Mm][Ss][Pp][Uu][Bb]\.[Ee][Xx][Ee]|\\[Vv][Ii][Ss][Ii][Oo]\.[Ee][Xx][Ee]|\\[Cc][Hh][Rr][Oo][Mm][Ee]\.[Ee][Xx][Ee]|\\[Ff][Ii][Rr][Ee][Ff][Oo][Xx]\.[Ee][Xx][Ee]|\\[Mm][Ss][Ee][Dd][Gg][Ee]\.[Ee][Xx][Ee]|\\[Ii][Ee][Xx][Pp][Ll][Oo][Rr][Ee]\.[Ee][Xx][Ee])/ AND data_win_eventdata_image:/.*(\\[Pp][Oo][Ww][Ee][Rr][Ss][Hh][Ee][Ll][Ll]\.[Ee][Xx][Ee]|\\[Pp][Ww][Ss][Hh]\.[Ee][Xx][Ee]|\\[Pp][Oo][Ww][Ee][Rr][Ss][Hh][Ee][Ll][Ll]_[Ii][Ss][Ee]\.[Ee][Xx][Ee]|\\[Cc][Mm][Dd]\.[Ee][Xx][Ee]|\\[Ww][Ss][Cc][Rr][Ii][Pp][Tt]\.[Ee][Xx][Ee]|\\[Cc][Ss][Cc][Rr][Ii][Pp][Tt]\.[Ee][Xx][Ee]|\\[Mm][Ss][Hh][Tt][Aa]\.[Ee][Xx][Ee]|\\[Rr][Uu][Nn][Dd][Ll][Ll]32\.[Ee][Xx][Ee]|\\[Rr][Ee][Gg][Ss][Vv][Rr]32\.[Ee][Xx][Ee])/'
-      pivot_on: [host]
-      window: 1h
-    - name: "Autostart persistence written on this host (Run keys, services, IFEO)"
-      query: '(data_win_system_eventID:"12" OR data_win_system_eventID:"13") AND (data_win_eventdata_targetObject:/.*[Cc][Uu][Rr][Rr][Ee][Nn][Tt][Vv][Ee][Rr][Ss][Ii][Oo][Nn]\\[Rr][Uu][Nn].*/ OR data_win_eventdata_targetObject:/.*[Cc][Uu][Rr][Rr][Ee][Nn][Tt][Vv][Ee][Rr][Ss][Ii][Oo][Nn]\\[Rr][Uu][Nn][Oo][Nn][Cc][Ee].*/ OR data_win_eventdata_targetObject:/.*[Cc][Uu][Rr][Rr][Ee][Nn][Tt][Cc][Oo][Nn][Tt][Rr][Oo][Ll][Ss][Ee][Tt]\\[Ss][Ee][Rr][Vv][Ii][Cc][Ee][Ss]\\.*/ OR data_win_eventdata_targetObject:/.*[Ii][Mm][Aa][Gg][Ee] [Ff][Ii][Ll][Ee] [Ee][Xx][Ee][Cc][Uu][Tt][Ii][Oo][Nn] [Oo][Pp][Tt][Ii][Oo][Nn][Ss]\\.*/ OR data_win_eventdata_targetObject:/.*[Ww][Ii][Nn][Ll][Oo][Gg][Oo][Nn]\\[Ss][Hh][Ee][Ll][Ll].*/ OR data_win_eventdata_targetObject:/.*[Ww][Ii][Nn][Ll][Oo][Gg][Oo][Nn]\\[Uu][Ss][Ee][Rr][Ii][Nn][Ii][Tt].*/ OR data_win_eventdata_targetObject:/.*[Cc][Uu][Rr][Rr][Ee][Nn][Tt][Vv][Ee][Rr][Ss][Ii][Oo][Nn]\\[Ee][Xx][Pp][Ll][Oo][Rr][Ee][Rr]\\[Rr][Uu][Nn].*/ OR data_win_eventdata_targetObject:/.*[Pp][Oo][Ll][Ii][Cc][Ii][Ee][Ss]\\[Ee][Xx][Pp][Ll][Oo][Rr][Ee][Rr]\\[Rr][Uu][Nn].*/ OR data_win_eventdata_targetObject:/.*[Cc][Uu][Rr][Rr][Ee][Nn][Tt][Vv][Ee][Rr][Ss][Ii][Oo][Nn]\\[Ww][Ii][Nn][Dd][Oo][Ww][Ss]\\[Ll][Oo][Aa][Dd].*/)'
-      pivot_on: [host]
-      window: 4h
-    - name: "DLL sideloading / execution from user-writable paths on this host"
-      query: '((data_win_system_eventID:"7" AND (data_win_eventdata_imageLoaded:/.*\\[Uu][Ss][Ee][Rr][Ss]\\.*/ OR data_win_eventdata_imageLoaded:/.*\\[Pp][Rr][Oo][Gg][Rr][Aa][Mm][Dd][Aa][Tt][Aa]\\.*/ OR data_win_eventdata_imageLoaded:/.*\\[Ww][Ii][Nn][Dd][Oo][Ww][Ss]\\[Tt][Ee][Mm][Pp]\\.*/ OR data_win_eventdata_imageLoaded:/.*\\[Aa][Pp][Pp][Dd][Aa][Tt][Aa]\\.*/ OR data_win_eventdata_imageLoaded:/.*\\[Pp][Uu][Bb][Ll][Ii][Cc]\\.*/ OR data_win_eventdata_imageLoaded:/.*\\\$[Rr][Ee][Cc][Yy][Cc][Ll][Ee].*/)) OR (data_win_system_eventID:"1" AND (data_win_eventdata_image:/.*\\[Uu][Ss][Ee][Rr][Ss]\\.*/ OR data_win_eventdata_image:/.*\\[Pp][Rr][Oo][Gg][Rr][Aa][Mm][Dd][Aa][Tt][Aa]\\.*/ OR data_win_eventdata_image:/.*\\[Ww][Ii][Nn][Dd][Oo][Ww][Ss]\\[Tt][Ee][Mm][Pp]\\.*/ OR data_win_eventdata_image:/.*\\[Aa][Pp][Pp][Dd][Aa][Tt][Aa]\\.*/ OR data_win_eventdata_image:/.*\\[Pp][Uu][Bb][Ll][Ii][Cc]\\.*/ OR data_win_eventdata_image:/.*\\\$[Rr][Ee][Cc][Yy][Cc][Ll][Ee].*/)))'
-      pivot_on: [host]
-      window: 2h
-    - name: "Follow-on LOLBin / signed-binary-proxy execution on this host"
-      query: 'data_win_system_eventID:"1" AND data_win_eventdata_image:/.*(\\[Rr][Uu][Nn][Dd][Ll][Ll]32\.[Ee][Xx][Ee]|\\[Rr][Ee][Gg][Ss][Vv][Rr]32\.[Ee][Xx][Ee]|\\[Mm][Ss][Hh][Tt][Aa]\.[Ee][Xx][Ee]|\\[Ii][Nn][Ss][Tt][Aa][Ll][Ll][Uu][Tt][Ii][Ll]\.[Ee][Xx][Ee]|\\[Rr][Ee][Gg][Aa][Ss][Mm]\.[Ee][Xx][Ee]|\\[Rr][Ee][Gg][Ss][Vv][Cc][Ss]\.[Ee][Xx][Ee]|\\[Mm][Ss][Bb][Uu][Ii][Ll][Dd]\.[Ee][Xx][Ee]|\\[Cc][Ee][Rr][Tt][Uu][Tt][Ii][Ll]\.[Ee][Xx][Ee]|\\[Bb][Ii][Tt][Ss][Aa][Dd][Mm][Ii][Nn]\.[Ee][Xx][Ee]|\\[Ww][Mm][Ii][Cc]\.[Ee][Xx][Ee]|\\[Cc][Mm][Ss][Tt][Pp]\.[Ee][Xx][Ee]|\\[Oo][Dd][Bb][Cc][Cc][Oo][Nn][Ff]\.[Ee][Xx][Ee]|\\[Ff][Oo][Rr][Ff][Ii][Ll][Ee][Ss]\.[Ee][Xx][Ee]|\\[Pp][Cc][Aa][Ll][Uu][Aa]\.[Ee][Xx][Ee]|\\[Mm][Aa][Vv][Ii][Nn][Jj][Ee][Cc][Tt]\.[Ee][Xx][Ee]|\\[Ss][Cc][Rr][Ii][Pp][Tt][Rr][Uu][Nn][Nn][Ee][Rr]\.[Ee][Xx][Ee])/'
-      pivot_on: [host]
-      window: 1h
+  # Behaviour-targeted hunts the engine runs around the alert (not a sweep).
+  - name: Rundll32 invoked with a remote/UNC path argument on this host
+    query: data_win_system_eventID:"1" AND data_win_eventdata_image:/.*\\[Rr][Uu][Nn][Dd][Ll][Ll]32\.[Ee][Xx][Ee]/ AND data_win_eventdata_commandLine:/.* \\\\.*/
+    pivot_on:
+    - host
+    window: 1h
+  - name: Rundll32 fetching the DLL over SMB or WebDAV (outbound to 445/139/80/443) on this host
+    query: data_win_system_eventID:"3" AND data_win_eventdata_image:/.*\\[Rr][Uu][Nn][Dd][Ll][Ll]32\.[Ee][Xx][Ee]/ AND data_win_eventdata_initiated:true AND (data_win_eventdata_destinationPort:"445" OR data_win_eventdata_destinationPort:"139" OR data_win_eventdata_destinationPort:"80" OR data_win_eventdata_destinationPort:"443")
+    pivot_on:
+    - host
+    window: 1h
+  - name: 'C2 callback: DNS query made by rundll32 on this host'
+    query: data_win_system_eventID:"22" AND data_win_eventdata_image:/.*\\[Rr][Uu][Nn][Dd][Ll][Ll]32\.[Ee][Xx][Ee]/
+    pivot_on:
+    - host
+    window: 2h
+  - name: Rundll32 creating a remote thread in another process (beacon injection) on this host
+    query: data_win_system_eventID:"8" AND data_win_eventdata_sourceImage:/.*\\[Rr][Uu][Nn][Dd][Ll][Ll]32\.[Ee][Xx][Ee]/
+    pivot_on:
+    - host
+    window: 2h
+  - name: Other signed-binary LOLBins loading a DLL from a remote/UNC path on this host
+    query: data_win_system_eventID:"1" AND data_win_eventdata_image:/.*(\\[Rr][Ee][Gg][Ss][Vv][Rr]32|\\[Mm][Ss][Hh][Tt][Aa]|\\[Rr][Ee][Gg][Ss][Vv][Cc][Ss]|\\[Rr][Ee][Gg][Aa][Ss][Mm]|\\[Ii][Nn][Ss][Tt][Aa][Ll][Ll][Uu][Tt][Ii][Ll]|\\[Oo][Dd][Bb][Cc][Cc][Oo][Nn][Ff])\.[Ee][Xx][Ee]/ AND data_win_eventdata_commandLine:/.* \\\\.*/
+    pivot_on:
+    - host
+    window: 2h

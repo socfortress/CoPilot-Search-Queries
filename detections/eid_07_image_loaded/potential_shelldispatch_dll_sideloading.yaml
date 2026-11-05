@@ -160,44 +160,52 @@ graylog:
   query: data_win_system_eventID:"7" AND data_win_eventdata_imageLoaded:/.*\\[Ss][Hh][Ee][Ll][Ll][Dd][Ii][Ss][Pp][Aa][Tt][Cc][Hh]\.[Dd][Ll][Ll]/ AND _exists_:data_win_eventdata_imageLoaded AND NOT ((data_win_eventdata_imageLoaded:/.*:\\[Uu][Ss][Ee][Rr][Ss]\\.*/ AND data_win_eventdata_imageLoaded:/.*\\[Aa][Pp][Pp][Dd][Aa][Tt][Aa]\\[Ll][Oo][Cc][Aa][Ll]\\[Tt][Ee][Mm][Pp]\\.*/) OR data_win_eventdata_imageLoaded:/.*:\\[Ww][Ii][Nn][Dd][Oo][Ww][Ss]\\[Tt][Ee][Mm][Pp]\\.*/)
 
 correlation:
-  # Authored by the correlation engine for review. Related CoPilot Searches to run
-  # around an alert from this rule, scoped to the same host/user/IP within the window.
+  # Authored per-rule (behaviour-researched) for the correlation engine. Related CoPilot
+  # Searches + telemetry pivots to run around an alert, scoped to its host/user/ip/domain.
   related_rules:
-    - id: ec570e53-4c76-45a9-804d-dc3f355ff7a7
-      name: "7Zip Compressing Dump Files"
-      reason: "next kill-chain tactic: Collection"
-    - id: 0a1255c5-d732-4b62-ac02-b5152d34fb83
-      name: "ADExplorer Writing Complete AD Snapshot Into .dat File"
-      reason: "next kill-chain tactic: Discovery"
-    - id: 1ea13e8c-03ea-409b-877d-ce5c3d2c1cb3
-      name: "ADFS Database Named Pipe Connection By Uncommon Tool"
-      reason: "next kill-chain tactic: Collection"
-    - id: 75bf09fa-1dd7-4d18-9af9-dd9e492562eb
-      name: "ADSI-Cache File Creation By Uncommon Tool"
-      reason: "next kill-chain tactic: Command and Control"
-    - id: 33a2d1dd-f3b0-40bd-8baf-7974468927cc
-      name: "APT PRIVATELOG Image Load Pattern"
-      reason: "next kill-chain tactic: Privilege Escalation"
-    - id: 9aa01d62-7667-4d3b-acb8-8cb5103e2014
-      name: "APT27 - Emissary Panda Activity"
-      reason: "next kill-chain tactic: Execution"
-  window: 1h
+  - id: 82343930-652f-43f5-ab70-2ee9fdd6d5e9
+    name: Potential ShellDispatch.DLL Functionality Abuse
+    reason: The direct EID 1 payoff of this load. ShellDispatch.dll's sole offensive purpose is its RunDll_ShellExecuteW export, which rundll32 invokes to ShellExecute an arbitrary binary; this rule catches that rundll32 command line. A co-fire on the host means the DLL this alert saw being sideloaded was then used to proxy-launch a payload, and it supplies the command line, parent process and user that the image-load event does not carry.
+  - id: ee4c5d06-3abc-48cc-8885-77f1c20f4451
+    name: DLL Sideloading Of ShellChromeAPI.DLL
+    reason: 'Closest sibling: another non-existent ''Shell*'' phantom DLL abused for sideloading, from the same 0gtweet/Hexacorn phantom-LOLBIN research lineage (T1574.001). An actor working through phantom-DLL LOLBINs rarely stops at one; a co-fire on the host shows systematic phantom-DLL hijacking rather than a one-off installer false positive.'
+  - id: 799a5f48-0ac1-4e0f-9152-71d137d48c2a
+    name: Abusable DLL Potential Sideloading From Suspicious Location
+    reason: Broad companion-sideload detector for other known-abusable DLLs (coreclr, libcef, zipdll, facesdk, HPCustPartUI) loaded from world-writable/staging paths. Intrusions that sideload one DLL usually stage several in the same drop folder, so a co-fire identifies the other sideloaded modules dropped alongside ShellDispatch in the same operation.
+  - id: 6b98b92b-4f00-4f62-b4fe-4d1920215771
+    name: Potential DLL Sideloading Of Non-Existent DLLs From System Folders
+    reason: Same phantom-DLL-hijack class as this rule (its own target list even includes ShellChromeAPI.dll), catching the variant where a non-existent DLL is planted into System32 behind an unsigned / non-Microsoft gate. A co-fire confirms the host is being worked for phantom-DLL load primitives, corroborating this ShellDispatch load as deliberate abuse.
+  - id: 79c7d1fc-64c7-91be-a616-ccda752efe81
+    name: Windows DLL Search Order Hijacking Hunt with Sysmon
+    reason: The generic image-load hunt for any DLL loaded from outside the system directories - the exact mechanism this alert is one instance of. Running it on the host widens the net to any other hijacked or sideloaded module the same actor loaded in the window, catching siblings the single-DLL-name rules miss.
+  - id: dbbd9f66-2ed3-4ca2-98a4-6ea985dd1a1c
+    name: Potential Initial Access via DLL Search Order Hijacking
+    reason: 'The file-write precursor class: an unusual process dropping a .dll into an application dependency folder is how the sideload payload - the planted ShellDispatch.dll beside its hijacked loader EXE - gets staged before this load fires. A prior fire on the host pins the drop that produced this load.'
+  window: 2h
   enrichment_searches:
-  # Rule-specific telemetry pivots the engine runs around an alert from this rule,
-  # scoped to the alert's host/user/IP within the window (behaviour-targeted, not a sweep).
-    - name: "DLL sideloading / execution from user-writable paths on this host"
-      query: '((data_win_system_eventID:"7" AND (data_win_eventdata_imageLoaded:/.*\\[Uu][Ss][Ee][Rr][Ss]\\.*/ OR data_win_eventdata_imageLoaded:/.*\\[Pp][Rr][Oo][Gg][Rr][Aa][Mm][Dd][Aa][Tt][Aa]\\.*/ OR data_win_eventdata_imageLoaded:/.*\\[Ww][Ii][Nn][Dd][Oo][Ww][Ss]\\[Tt][Ee][Mm][Pp]\\.*/ OR data_win_eventdata_imageLoaded:/.*\\[Aa][Pp][Pp][Dd][Aa][Tt][Aa]\\.*/ OR data_win_eventdata_imageLoaded:/.*\\[Pp][Uu][Bb][Ll][Ii][Cc]\\.*/ OR data_win_eventdata_imageLoaded:/.*\\\$[Rr][Ee][Cc][Yy][Cc][Ll][Ee].*/)) OR (data_win_system_eventID:"1" AND (data_win_eventdata_image:/.*\\[Uu][Ss][Ee][Rr][Ss]\\.*/ OR data_win_eventdata_image:/.*\\[Pp][Rr][Oo][Gg][Rr][Aa][Mm][Dd][Aa][Tt][Aa]\\.*/ OR data_win_eventdata_image:/.*\\[Ww][Ii][Nn][Dd][Oo][Ww][Ss]\\[Tt][Ee][Mm][Pp]\\.*/ OR data_win_eventdata_image:/.*\\[Aa][Pp][Pp][Dd][Aa][Tt][Aa]\\.*/ OR data_win_eventdata_image:/.*\\[Pp][Uu][Bb][Ll][Ii][Cc]\\.*/ OR data_win_eventdata_image:/.*\\\$[Rr][Ee][Cc][Yy][Cc][Ll][Ee].*/)))'
-      pivot_on: [host]
-      window: 2h
-    - name: "Memory/credential-dump creation & LSASS access on this host"
-      query: '((data_win_system_eventID:"1" AND data_win_eventdata_image:/.*(\\[Pp][Rr][Oo][Cc][Dd][Uu][Mm][Pp]\.[Ee][Xx][Ee]|\\[Pp][Rr][Oo][Cc][Dd][Uu][Mm][Pp]64\.[Ee][Xx][Ee]|\\[Ss][Qq][Ll][Dd][Uu][Mm][Pp][Ee][Rr]\.[Ee][Xx][Ee]|\\[Cc][Rr][Ee][Aa][Tt][Ee][Dd][Uu][Mm][Pp]\.[Ee][Xx][Ee]|\\[Rr][Dd][Rr][Ll][Ee][Aa][Kk][Dd][Ii][Aa][Gg]\.[Ee][Xx][Ee]|\\[Dd][Uu][Mm][Pp][Ee][Rr][Tt]\.[Ee][Xx][Ee]|\\[Nn][Aa][Nn][Oo][Dd][Uu][Mm][Pp]\.[Ee][Xx][Ee]|\\[Aa][Vv][Dd][Uu][Mm][Pp]\.[Ee][Xx][Ee])/) OR (data_win_system_eventID:"1" AND (data_win_eventdata_commandLine:/.*[Cc][Oo][Mm][Ss][Vv][Cc][Ss]\.[Dd][Ll][Ll].*/ OR data_win_eventdata_commandLine:/.*[Mm][Ii][Nn][Ii][Dd][Uu][Mm][Pp].*/ OR data_win_eventdata_commandLine:/.*[Dd][Uu][Mm][Pp][Ee][Rr][Tt].*/ OR data_win_eventdata_commandLine:/.*[Nn][Aa][Nn][Oo][Dd][Uu][Mm][Pp].*/ OR data_win_eventdata_commandLine:/.*[Ll][Ss][Aa][Ss][Ss].*/ OR data_win_eventdata_commandLine:/.*[Ss][Ee][Kk][Uu][Rr][Ll][Ss][Aa].*/ OR data_win_eventdata_commandLine:/.*[Nn][Tt][Dd][Ss]\.[Dd][Ii][Tt].*/ OR data_win_eventdata_commandLine:/.*[Nn][Tt][Dd][Ss][Uu][Tt][Ii][Ll].*/)) OR (data_win_system_eventID:"10" AND data_win_eventdata_targetImage:/.*(\\[Ll][Ss][Aa][Ss][Ss]\.[Ee][Xx][Ee])/))'
-      pivot_on: [host]
-      window: 1h
-    - name: "Follow-on LOLBin / signed-binary-proxy execution on this host"
-      query: 'data_win_system_eventID:"1" AND data_win_eventdata_image:/.*(\\[Rr][Uu][Nn][Dd][Ll][Ll]32\.[Ee][Xx][Ee]|\\[Rr][Ee][Gg][Ss][Vv][Rr]32\.[Ee][Xx][Ee]|\\[Mm][Ss][Hh][Tt][Aa]\.[Ee][Xx][Ee]|\\[Ii][Nn][Ss][Tt][Aa][Ll][Ll][Uu][Tt][Ii][Ll]\.[Ee][Xx][Ee]|\\[Rr][Ee][Gg][Aa][Ss][Mm]\.[Ee][Xx][Ee]|\\[Rr][Ee][Gg][Ss][Vv][Cc][Ss]\.[Ee][Xx][Ee]|\\[Mm][Ss][Bb][Uu][Ii][Ll][Dd]\.[Ee][Xx][Ee]|\\[Cc][Ee][Rr][Tt][Uu][Tt][Ii][Ll]\.[Ee][Xx][Ee]|\\[Bb][Ii][Tt][Ss][Aa][Dd][Mm][Ii][Nn]\.[Ee][Xx][Ee]|\\[Ww][Mm][Ii][Cc]\.[Ee][Xx][Ee]|\\[Cc][Mm][Ss][Tt][Pp]\.[Ee][Xx][Ee]|\\[Oo][Dd][Bb][Cc][Cc][Oo][Nn][Ff]\.[Ee][Xx][Ee]|\\[Ff][Oo][Rr][Ff][Ii][Ll][Ee][Ss]\.[Ee][Xx][Ee]|\\[Pp][Cc][Aa][Ll][Uu][Aa]\.[Ee][Xx][Ee]|\\[Mm][Aa][Vv][Ii][Nn][Jj][Ee][Cc][Tt]\.[Ee][Xx][Ee]|\\[Ss][Cc][Rr][Ii][Pp][Tt][Rr][Uu][Nn][Nn][Ee][Rr]\.[Ee][Xx][Ee])/'
-      pivot_on: [host]
-      window: 1h
-    - name: "UAC-bypass / privilege-escalation binaries on this host"
-      query: 'data_win_system_eventID:"1" AND (data_win_eventdata_image:/.*(\\[Ff][Oo][Dd][Hh][Ee][Ll][Pp][Ee][Rr]\.[Ee][Xx][Ee]|\\[Ee][Vv][Ee][Nn][Tt][Vv][Ww][Rr]\.[Ee][Xx][Ee]|\\[Ss][Dd][Cc][Ll][Tt]\.[Ee][Xx][Ee]|\\[Cc][Oo][Mm][Pp][Uu][Tt][Ee][Rr][Dd][Ee][Ff][Aa][Uu][Ll][Tt][Ss]\.[Ee][Xx][Ee]|\\[Ss][Ll][Uu][Ii]\.[Ee][Xx][Ee]|\\[Ww][Ss][Rr][Ee][Ss][Ee][Tt]\.[Ee][Xx][Ee])/ OR data_win_eventdata_parentImage:/.*(\\[Ff][Oo][Dd][Hh][Ee][Ll][Pp][Ee][Rr]\.[Ee][Xx][Ee]|\\[Ee][Vv][Ee][Nn][Tt][Vv][Ww][Rr]\.[Ee][Xx][Ee]|\\[Ss][Dd][Cc][Ll][Tt]\.[Ee][Xx][Ee]|\\[Cc][Oo][Mm][Pp][Uu][Tt][Ee][Rr][Dd][Ee][Ff][Aa][Uu][Ll][Tt][Ss]\.[Ee][Xx][Ee]|\\[Ss][Ll][Uu][Ii]\.[Ee][Xx][Ee]|\\[Ww][Ss][Rr][Ee][Ss][Ee][Tt]\.[Ee][Xx][Ee])/)'
-      pivot_on: [host]
-      window: 2h
+  # Behaviour-targeted hunts the engine runs around the alert (not a sweep).
+  - name: ShellDispatch proxy-execution via rundll32 (RunDll_ShellExecute) on this host
+    query: data_win_system_eventID:"1" AND (data_win_eventdata_commandLine:/.*[Rr][Uu][Nn][Dd][Ll][Ll]_[Ss][Hh][Ee][Ll][Ll][Ee][Xx][Ee][Cc][Uu][Tt][Ee].*/ OR data_win_eventdata_commandLine:/.*[Ss][Hh][Ee][Ll][Ll][Dd][Ii][Ss][Pp][Aa][Tt][Cc][Hh]\.[Dd][Ll][Ll].*/)
+    pivot_on:
+    - host
+    window: 2h
+  - name: ShellDispatch.dll payload written to disk on this host (the plant)
+    query: data_win_system_eventID:"11" AND data_win_eventdata_targetFilename:/.*\\[Ss][Hh][Ee][Ll][Ll][Dd][Ii][Ss][Pp][Aa][Tt][Cc][Hh]\.[Dd][Ll][Ll]/
+    pivot_on:
+    - host
+    window: 6h
+  - name: Companion DLLs loaded from Public / ProgramData / Perflogs staging dirs on this host
+    query: data_win_system_eventID:"7" AND (data_win_eventdata_imageLoaded:/.*\\[Uu][Ss][Ee][Rr][Ss]\\[Pp][Uu][Bb][Ll][Ii][Cc]\\.*\.[Dd][Ll][Ll]/ OR data_win_eventdata_imageLoaded:/.*\\[Pp][Rr][Oo][Gg][Rr][Aa][Mm][Dd][Aa][Tt][Aa]\\.*\.[Dd][Ll][Ll]/ OR data_win_eventdata_imageLoaded:/.*\\[Pp][Ee][Rr][Ff][Ll][Oo][Gg][Ss]\\.*\.[Dd][Ll][Ll]/)
+    pivot_on:
+    - host
+    window: 2h
+  - name: C2 beacon or DNS from a process in a staging dir or from rundll32 on this host
+    query: (data_win_system_eventID:"3" OR data_win_system_eventID:"22") AND (data_win_eventdata_image:/.*\\[Uu][Ss][Ee][Rr][Ss]\\[Pp][Uu][Bb][Ll][Ii][Cc]\\.*/ OR data_win_eventdata_image:/.*\\[Pp][Rr][Oo][Gg][Rr][Aa][Mm][Dd][Aa][Tt][Aa]\\.*/ OR data_win_eventdata_image:/.*\\[Pp][Ee][Rr][Ff][Ll][Oo][Gg][Ss]\\.*/ OR data_win_eventdata_image:/.*\\[Rr][Uu][Nn][Dd][Ll][Ll]32\.[Ee][Xx][Ee]/)
+    pivot_on:
+    - host
+    window: 2h
+  - name: Autostart persistence written on this host (Run keys, services, IFEO, Winlogon)
+    query: (data_win_system_eventID:"12" OR data_win_system_eventID:"13") AND (data_win_eventdata_targetObject:/.*[Cc][Uu][Rr][Rr][Ee][Nn][Tt][Vv][Ee][Rr][Ss][Ii][Oo][Nn]\\[Rr][Uu][Nn].*/ OR data_win_eventdata_targetObject:/.*[Cc][Uu][Rr][Rr][Ee][Nn][Tt][Cc][Oo][Nn][Tt][Rr][Oo][Ll][Ss][Ee][Tt]\\[Ss][Ee][Rr][Vv][Ii][Cc][Ee][Ss]\\.*/ OR data_win_eventdata_targetObject:/.*[Ii][Mm][Aa][Gg][Ee] [Ff][Ii][Ll][Ee] [Ee][Xx][Ee][Cc][Uu][Tt][Ii][Oo][Nn] [Oo][Pp][Tt][Ii][Oo][Nn][Ss]\\.*/ OR data_win_eventdata_targetObject:/.*[Ww][Ii][Nn][Ll][Oo][Gg][Oo][Nn]\\[Ss][Hh][Ee][Ll][Ll].*/ OR data_win_eventdata_targetObject:/.*[Ww][Ii][Nn][Ll][Oo][Gg][Oo][Nn]\\[Uu][Ss][Ee][Rr][Ii][Nn][Ii][Tt].*/)
+    pivot_on:
+    - host
+    window: 4h
