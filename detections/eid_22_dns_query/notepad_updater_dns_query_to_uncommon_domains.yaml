@@ -189,48 +189,58 @@ graylog:
   query: data_win_system_eventID:"22" AND data_win_eventdata_image:/.*\\[Gg][Uu][Pp]\.[Ee][Xx][Ee]/ AND _exists_:data_win_eventdata_queryName AND NOT (data_win_eventdata_queryName:/[Nn][Oo][Tt][Ee][Pp][Aa][Dd]-[Pp][Ll][Uu][Ss]-[Pp][Ll][Uu][Ss]\.[Oo][Rr][Gg]/) AND _exists_:data_win_eventdata_queryName AND NOT (data_win_eventdata_queryName:/.*\.[Ss][Oo][Uu][Rr][Cc][Ee][Ff][Oo][Rr][Gg][Ee]\.[Nn][Ee][Tt]/ OR data_win_eventdata_queryName:/.*\.[Gg][Ii][Tt][Hh][Uu][Bb][Uu][Ss][Ee][Rr][Cc][Oo][Nn][Tt][Ee][Nn][Tt]\.[Cc][Oo][Mm]/ OR data_win_eventdata_queryName:/[Gg][Ii][Tt][Hh][Uu][Bb]\.[Cc][Oo][Mm]/ OR data_win_eventdata_queryName:/.*\.[Gg][Oo][Oo][Gg][Ll][Ee][Aa][Pp][Ii][Ss]\.[Cc][Oo][Mm]/ OR data_win_eventdata_queryName:/.*\.[Aa][Zz][Uu][Rr][Ee][Ww][Ee][Bb][Ss][Ii][Tt][Ee][Ss]\.[Nn][Ee][Tt]/ OR data_win_eventdata_queryName:/.*[Bb][Ll][Oo][Cc][Kk]\.[Oo][Pp][Ee][Nn][Dd][Nn][Ss]\.[Cc][Oo][Mm]/ OR data_win_eventdata_queryName:/.*[Gg][Aa][Tt][Ee][Ww][Aa][Yy]\.[Zz][Ss][Cc][Aa][Ll][Ee][Rr][Tt][Hh][Rr][Ee][Ee]\.[Nn][Ee][Tt]/)
 
 correlation:
-  # Authored by the correlation engine for review. Related CoPilot Searches to run
-  # around an alert from this rule, scoped to the same host/user/IP within the window.
+  # Authored per-rule (behaviour-researched) for the correlation engine. Related CoPilot
+  # Searches + telemetry pivots to run around an alert, scoped to its host/user/ip/domain.
   related_rules:
-    - id: ec570e53-4c76-45a9-804d-dc3f355ff7a7
-      name: "7Zip Compressing Dump Files"
-      reason: "next kill-chain tactic: Collection"
-    - id: 0a1255c5-d732-4b62-ac02-b5152d34fb83
-      name: "ADExplorer Writing Complete AD Snapshot Into .dat File"
-      reason: "next kill-chain tactic: Discovery"
-    - id: 1ea13e8c-03ea-409b-877d-ce5c3d2c1cb3
-      name: "ADFS Database Named Pipe Connection By Uncommon Tool"
-      reason: "next kill-chain tactic: Collection"
-    - id: 75bf09fa-1dd7-4d18-9af9-dd9e492562eb
-      name: "ADSI-Cache File Creation By Uncommon Tool"
-      reason: "next kill-chain tactic: Command and Control"
-    - id: 33a2d1dd-f3b0-40bd-8baf-7974468927cc
-      name: "APT PRIVATELOG Image Load Pattern"
-      reason: "next kill-chain tactic: Privilege Escalation"
-    - id: 9aa01d62-7667-4d3b-acb8-8cb5103e2014
-      name: "APT27 - Emissary Panda Activity"
-      reason: "next kill-chain tactic: Execution"
-  window: 1h
+  - id: e49b5745-1064-4ac1-9a2e-f687bc2dd37e
+    name: Potential DLL Sideloading Of Libcurl.DLL Via GUP.EXE
+    reason: 'Documented compromise mechanism for this exact binary (Rapid7 Lotus Blossom/Chrysalis reference): a planted libcurl.dll next to gup.exe does the HTTPS beaconing, so the uncommon domain this rule flags is almost certainly the sideloaded DLL''s C2 resolution. If this fired on the same host, the DNS query is the sideload phoning home.'
+  - id: 44143844-0631-49ab-97a0-96387d6b2d7c
+    name: File Download Using Notepad++ GUP Utility
+    reason: gup.exe's built-in '-unzipTo <http-url>' turns the updater into a download LOLBin. The uncommon-domain DNS query is the resolution step of exactly this download when gup is pointed at attacker infrastructure instead of notepad-plus-plus.org. Direct co-occurring cause of the flagged lookup.
+  - id: 3b8f4c92-6a51-4d7e-9c3a-8e2d1f5a7b09
+    name: Uncommon File Created by Notepad++ Updater Gup.EXE
+    reason: 'Immediate follow-on: after gup.exe resolves and connects to the attacker domain it writes the fetched payload to disk outside the legitimate update temp path. A gup.exe file-create on the same host right after this DNS query is the downloaded malware landing.'
+  - id: bb0e87ce-c89f-4857-84fa-095e4483e9cb
+    name: Suspicious Child Process of Notepad++ Updater - GUP.Exe
+    reason: 'Terminal step of the updater-hijack chain: gup.exe spawns cmd/powershell/mshta/certutil/curl/bitsadmin to run the payload it just downloaded. A suspicious gup.exe child on the same host confirms the uncommon-domain lookup resulted in code execution, not a stray query.'
+  - id: d65aee4d-2292-4cea-b832-83accd6cfa43
+    name: Arbitrary Binary Execution Using GUP Utility
+    reason: gup.exe acting as parent to launch another executable - the execution that follows the download the uncommon DNS query serviced. Co-occurring execution evidence for the same abused updater process on the same host.
+  - id: 0a4f6091-223b-41f6-8743-f322ec84930b
+    name: Suspicious GUP Usage
+    reason: gup.exe running from a directory other than the real Notepad++ updater install path - the hallmark of a planted copy used for DLL sideloading. A gup.exe outside its install dir that also resolves an uncommon domain is a relocated, weaponised updater beaconing out; strong corroboration of the sideload hypothesis.
+  - id: 54127bd4-f541-4ac3-afdb-ea073f63f692
+    name: Potential Persistence Via Notepad++ Plugins
+    reason: 'Post-compromise foothold in the same software: a non-gup process dropping a .dll into the Notepad++ plugins directory. After an updater hijack delivers a payload, planting a plugin DLL gives durable code execution every time Notepad++ launches - a plausible next move on the same host.'
+  - id: 933f0bb5-0681-4fe7-8a17-4e6cccbaac44
+    name: Potential Notepad++ CVE-2025-49144 Exploitation
+    reason: 'Alternative/paired compromise path for the same product: the Notepad++ installer calling an unqualified regsvr32 (planted binary) for local privilege escalation. A hijacked update that fetches a weaponised installer can deliver exactly this, so CVE-2025-49144 activity on the same host extends the updater-abuse incident.'
+  window: 2h
   enrichment_searches:
-  # Rule-specific telemetry pivots the engine runs around an alert from this rule,
-  # scoped to the alert's host/user/IP within the window (behaviour-targeted, not a sweep).
-    - name: "Other executions of this tool-set on this host (any arguments)"
-      query: 'data_win_system_eventID:"1" AND data_win_eventdata_image:/.*(\\[Gg][Uu][Pp]\.[Ee][Xx][Ee])/'
-      pivot_on: [host]
-      window: 2h
-    - name: "Remote-execution / lateral-movement tooling on this host"
-      query: '(data_win_system_eventID:"1" AND data_win_eventdata_image:/.*(\\[Pp][Ss][Ee][Xx][Ee][Cc]\.[Ee][Xx][Ee]|\\[Pp][Ss][Ee][Xx][Ee][Ss][Vv][Cc]\.[Ee][Xx][Ee]|\\[Pp][Aa][Ee][Xx][Ee][Cc]\.[Ee][Xx][Ee]|\\[Ww][Ii][Nn][Rr][Ss]\.[Ee][Xx][Ee]|\\[Mm][Ss][Tt][Ss][Cc]\.[Ee][Xx][Ee]|\\[Ww][Mm][Ii][Cc]\.[Ee][Xx][Ee])/) OR (data_win_system_eventID:"1" AND data_win_eventdata_image:/.*(\\[Pp][Oo][Ww][Ee][Rr][Ss][Hh][Ee][Ll][Ll]\.[Ee][Xx][Ee]|\\[Pp][Ww][Ss][Hh]\.[Ee][Xx][Ee])/ AND (data_win_eventdata_commandLine:/.*[Ii][Nn][Vv][Oo][Kk][Ee]-[Cc][Oo][Mm][Mm][Aa][Nn][Dd].*/ OR data_win_eventdata_commandLine:/.*[Nn][Ee][Ww]-[Pp][Ss][Ss][Ee][Ss][Ss][Ii][Oo][Nn].*/ OR data_win_eventdata_commandLine:/.*[Ee][Nn][Tt][Ee][Rr]-[Pp][Ss][Ss][Ee][Ss][Ss][Ii][Oo][Nn].*/ OR data_win_eventdata_commandLine:/.*-[Cc][Oo][Mm][Pp][Uu][Tt][Ee][Rr][Nn][Aa][Mm][Ee].*/))'
-      pivot_on: [host]
-      window: 2h
-    - name: "Other hosts resolving or connecting to the same domain (campaign)"
-      query: '(data_win_system_eventID:"22" OR data_win_system_eventID:"3")'
-      pivot_on: [domain]
-      window: 24h
-    - name: "DNS queries by script interpreters / LOLBins on this host"
-      query: 'data_win_system_eventID:"22" AND (data_win_eventdata_image:/.*(\\[Pp][Oo][Ww][Ee][Rr][Ss][Hh][Ee][Ll][Ll]\.[Ee][Xx][Ee]|\\[Pp][Ww][Ss][Hh]\.[Ee][Xx][Ee]|\\[Pp][Oo][Ww][Ee][Rr][Ss][Hh][Ee][Ll][Ll]_[Ii][Ss][Ee]\.[Ee][Xx][Ee]|\\[Cc][Mm][Dd]\.[Ee][Xx][Ee]|\\[Ww][Ss][Cc][Rr][Ii][Pp][Tt]\.[Ee][Xx][Ee]|\\[Cc][Ss][Cc][Rr][Ii][Pp][Tt]\.[Ee][Xx][Ee]|\\[Mm][Ss][Hh][Tt][Aa]\.[Ee][Xx][Ee]|\\[Rr][Uu][Nn][Dd][Ll][Ll]32\.[Ee][Xx][Ee]|\\[Rr][Ee][Gg][Ss][Vv][Rr]32\.[Ee][Xx][Ee]|\\[Mm][Ss][Hh][Tt][Aa]\.[Ee][Xx][Ee]|\\[Ii][Nn][Ss][Tt][Aa][Ll][Ll][Uu][Tt][Ii][Ll]\.[Ee][Xx][Ee]|\\[Rr][Ee][Gg][Aa][Ss][Mm]\.[Ee][Xx][Ee]|\\[Rr][Ee][Gg][Ss][Vv][Cc][Ss]\.[Ee][Xx][Ee]|\\[Mm][Ss][Bb][Uu][Ii][Ll][Dd]\.[Ee][Xx][Ee]|\\[Cc][Ee][Rr][Tt][Uu][Tt][Ii][Ll]\.[Ee][Xx][Ee]|\\[Bb][Ii][Tt][Ss][Aa][Dd][Mm][Ii][Nn]\.[Ee][Xx][Ee]|\\[Ww][Mm][Ii][Cc]\.[Ee][Xx][Ee]|\\[Cc][Mm][Ss][Tt][Pp]\.[Ee][Xx][Ee])/ OR data_win_eventdata_image:/.*(\\[Oo][Dd][Bb][Cc][Cc][Oo][Nn][Ff]\.[Ee][Xx][Ee]|\\[Ff][Oo][Rr][Ff][Ii][Ll][Ee][Ss]\.[Ee][Xx][Ee]|\\[Pp][Cc][Aa][Ll][Uu][Aa]\.[Ee][Xx][Ee]|\\[Mm][Aa][Vv][Ii][Nn][Jj][Ee][Cc][Tt]\.[Ee][Xx][Ee]|\\[Ss][Cc][Rr][Ii][Pp][Tt][Rr][Uu][Nn][Nn][Ee][Rr]\.[Ee][Xx][Ee])/)'
-      pivot_on: [host]
-      window: 1h
-    - name: "Downloader / C2 tooling executed on this host"
-      query: '(data_win_system_eventID:"1" AND data_win_eventdata_image:/.*(\\[Cc][Ee][Rr][Tt][Uu][Tt][Ii][Ll]\.[Ee][Xx][Ee]|\\[Bb][Ii][Tt][Ss][Aa][Dd][Mm][Ii][Nn]\.[Ee][Xx][Ee]|\\[Cc][Uu][Rr][Ll]\.[Ee][Xx][Ee]|\\[Ww][Gg][Ee][Tt]\.[Ee][Xx][Ee])/) OR (data_win_eventdata_commandLine:/.*[Dd][Oo][Ww][Nn][Ll][Oo][Aa][Dd][Ss][Tt][Rr][Ii][Nn][Gg].*/ OR data_win_eventdata_commandLine:/.*[Dd][Oo][Ww][Nn][Ll][Oo][Aa][Dd][Ff][Ii][Ll][Ee].*/ OR data_win_eventdata_commandLine:/.*[Ii][Nn][Vv][Oo][Kk][Ee]-[Ww][Ee][Bb][Rr][Ee][Qq][Uu][Ee][Ss][Tt].*/ OR data_win_eventdata_commandLine:/.*[Nn][Ee][Tt]\.[Ww][Ee][Bb][Cc][Ll][Ii][Ee][Nn][Tt].*/ OR data_win_eventdata_commandLine:/.*[Ss][Tt][Aa][Rr][Tt]-[Bb][Ii][Tt][Ss][Tt][Rr][Aa][Nn][Ss][Ff][Ee][Rr].*/ OR data_win_eventdata_commandLine:/.*[Ii][Ww][Rr] .*/ OR data_win_eventdata_commandLine:/.*[Cc][Uu][Rr][Ll] .*/ OR data_win_eventdata_commandLine:/.*[Ww][Gg][Ee][Tt] .*/)'
-      pivot_on: [host]
-      window: 1h
+  # Behaviour-targeted hunts the engine runs around the alert (not a sweep).
+  - name: gup.exe actually connected to the resolved host (network session, not just DNS)
+    query: data_win_system_eventID:"3" AND data_win_eventdata_image:/.*\\[Gg][Uu][Pp]\.[Ee][Xx][Ee]/
+    pivot_on:
+    - host
+    window: 1h
+  - name: File written to disk by gup.exe (downloaded payload landing)
+    query: data_win_system_eventID:"11" AND data_win_eventdata_image:/.*\\[Gg][Uu][Pp]\.[Ee][Xx][Ee]/
+    pivot_on:
+    - host
+    window: 2h
+  - name: 'gup.exe process context: who launched it and what it spawned'
+    query: data_win_system_eventID:"1" AND (data_win_eventdata_parentImage:/.*\\[Gg][Uu][Pp]\.[Ee][Xx][Ee]/ OR data_win_eventdata_image:/.*\\[Gg][Uu][Pp]\.[Ee][Xx][Ee]/)
+    pivot_on:
+    - host
+    window: 2h
+  - name: DLLs loaded by gup.exe (libcurl.dll / non-standard module sideload)
+    query: data_win_system_eventID:"7" AND data_win_eventdata_image:/.*\\[Gg][Uu][Pp]\.[Ee][Xx][Ee]/
+    pivot_on:
+    - host
+    window: 2h
+  - name: Other hosts resolving or connecting to the same domain (campaign spread)
+    query: (data_win_system_eventID:"22" OR data_win_system_eventID:"3")
+    pivot_on:
+    - domain
+    window: 24h

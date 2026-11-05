@@ -140,23 +140,58 @@ graylog:
   query: data_process_exec_process_binary:/.*[Bb][Pp][Ff][Tt][Rr][Aa][Cc][Ee]/ AND data_process_exec_process_arguments:/.*--[Uu][Nn][Ss][Aa][Ff][Ee].*/
 
 correlation:
-  # Authored by the correlation engine for review.
+  # Authored per-rule (behaviour-researched) for the correlation engine. Related CoPilot
+  # Searches + telemetry pivots to run around an alert, scoped to its host/user/ip/domain.
+  related_rules:
+  - id: 7692f583-bd30-4008-8615-75dab3f08a99
+    name: Enable BPF Kprobes Tracing
+    reason: 'Same offensive-BPF tradecraft - cites the identical embracethered ''offensive bpftrace'' and bpftrace.org references. Hand-wiring kprobe tracing through /sys/kernel/debug/tracing on the same host means the operator is building kernel-event hooks alongside the unsafe bpftrace program: one eBPF/kprobe manipulation session, not debugging.'
+  - id: 22236d75-d5a0-4287-bf06-c93b1770860f
+    name: Triple Cross eBPF Rootkit Install Commands
+    reason: eBPF abuse escalating into an eBPF rootkit - Triple Cross installs tc/qdisc/filter hooks to backdoor the kernel. bpftrace --unsafe is a lighter form of the same weaponized-eBPF capability; both firing on one host points to deliberate kernel-level implantation.
+  - id: 0326c3c8-7803-4a0f-8c5c-368f747f7c3e
+    name: Triple Cross eBPF Rootkit Execve Hijack
+    reason: The privesc/stealth component of the same Triple Cross eBPF rootkit (execve_hijack). Confirms the host's eBPF subsystem is being used to hijack syscalls and elevate - the natural escalation of the kernel-event code execution that --unsafe's system() already grants.
+  - id: e3a8a052-111f-4606-9aee-f28ebeb76776
+    name: Disabling Security Tools
+    reason: bpftrace --unsafe's system() built-in is a prime way to stop/disable EDR, firewalld or falcon-sensor straight from a kernel-event hook, and operators routinely blind monitoring before running offensive eBPF. Co-occurring defense evasion that raises incident severity.
+  - id: 880973f3-9708-491c-a77b-2a35a1921158
+    name: Linux Shell Pipe to Shell
+    reason: The payload of --unsafe is arbitrary shell execution via system(); a download-piped-to-shell stager (curl ... | bash) is exactly the kind of command the eBPF program fires. Catches the command execution the bpftrace alert itself cannot show.
+  - id: fa4aaed5-4fe0-498d-bbc0-08e3346387ba
+    name: Copy Passwd Or Shadow From TMP Path
+    reason: Post-root credential harvesting. bpftrace requires root/CAP_BPF; with that privilege, copying /etc/passwd or /etc/shadow out of a tmp staging path is a common immediate follow-on and a credential-access objective eBPF sniffing also serves.
+  - id: a2d9e2f3-0f43-4c7a-bcd9-9acfc0d723aa
+    name: Suspicious Download and Execute Pattern via Curl/Wget
+    reason: Likely precursor - the offensive bpftrace program/scripts are staged into /tmp or /dev/shm via curl/wget and executed just before bpftrace --unsafe runs them. Links the tool-delivery stage to the execution stage on the same host.
+  - id: 0f79c4d2-4e1f-4683-9c36-b5469a665e06
+    name: Access of Sudoers File Content
+    reason: Precursor reconnaissance - reading /etc/sudoers to enumerate who holds sudo is a standard step while escalating to the root privilege bpftrace --unsafe requires. Places the 'how did they get root' stage ahead of the eBPF weaponization.
+  window: 2h
   enrichment_searches:
-  # Rule-specific telemetry pivots the engine runs around an alert from this rule,
-  # scoped to the alert's host/user/IP within the window (behaviour-targeted, not a sweep).
-    - name: "Shell / interpreter execution on this host"
-      query: '((data_process_exec_process_binary:/.*(\/[Bb][Aa][Ss][Hh]|\/[Ss][Hh]|\/[Dd][Aa][Ss][Hh]|\/[Zz][Ss][Hh]|\/[Kk][Ss][Hh]|\/[Aa][Ss][Hh]|\/[Bb][Uu][Ss][Yy][Bb][Oo][Xx])/) OR (data_process_exec_process_binary:/.*(\/[Pp][Yy][Tt][Hh][Oo][Nn]|\/[Pp][Yy][Tt][Hh][Oo][Nn]3|\/[Pp][Ee][Rr][Ll]|\/[Rr][Uu][Bb][Yy]|\/[Pp][Hh][Pp]|\/[Nn][Oo][Dd][Ee]|\/[Ll][Uu][Aa]|\/[Aa][Ww][Kk])/))'
-      pivot_on: [host]
-      window: 1h
-    - name: "Other executions of this tool-set on this host (any arguments)"
-      query: 'data_process_exec_process_binary:/.*(\/[Bb][Pp][Ff][Tt][Rr][Aa][Cc][Ee])/'
-      pivot_on: [host]
-      window: 2h
-    - name: "Persistence via cron / systemd / shell profiles on this host"
-      query: '((data_process_exec_process_binary:/.*(\/[Cc][Rr][Oo][Nn][Tt][Aa][Bb]|\/[Ss][Yy][Ss][Tt][Ee][Mm][Cc][Tt][Ll]|\/[Aa][Tt]|\/[Uu][Pp][Dd][Aa][Tt][Ee]-[Rr][Cc]\.[Dd])/) OR (data_process_exec_process_arguments:/.*\/[Ee][Tt][Cc]\/[Cc][Rr][Oo][Nn].*/) OR (data_process_exec_process_arguments:/.*\/[Ee][Tt][Cc]\/[Ss][Yy][Ss][Tt][Ee][Mm][Dd].*/) OR (data_process_exec_process_arguments:/.*[Rr][Cc]\.[Ll][Oo][Cc][Aa][Ll].*/) OR (data_process_exec_process_arguments:/.*\.[Bb][Aa][Ss][Hh][Rr][Cc].*/) OR (data_process_exec_process_arguments:/.*\.[Bb][Aa][Ss][Hh]_[Pp][Rr][Oo][Ff][Ii][Ll][Ee].*/) OR (data_process_exec_process_arguments:/.*\/[Ee][Tt][Cc]\/[Pp][Rr][Oo][Ff][Ii][Ll][Ee].*/) OR (data_process_exec_process_arguments:/.*[Aa][Uu][Tt][Hh][Oo][Rr][Ii][Zz][Ee][Dd]_[Kk][Ee][Yy][Ss].*/) OR (data_process_exec_process_arguments:/.*\/[Ee][Tt][Cc]\/[Ii][Nn][Ii][Tt]\.[Dd].*/))'
-      pivot_on: [host]
-      window: 4h
-    - name: "Reconnaissance commands on this host"
-      query: 'data_process_exec_process_binary:/.*(\/[Ww][Hh][Oo][Aa][Mm][Ii]|\/[Ii][Dd]|\/[Uu][Nn][Aa][Mm][Ee]|\/[Hh][Oo][Ss][Tt][Nn][Aa][Mm][Ee]|\/[Hh][Oo][Ss][Tt][Nn][Aa][Mm][Ee][Cc][Tt][Ll]|\/[Ss][Ss]|\/[Nn][Ee][Tt][Ss][Tt][Aa][Tt]|\/[Ii][Ff][Cc][Oo][Nn][Ff][Ii][Gg]|\/[Aa][Rr][Pp]|\/[Ww]|\/[Ww][Hh][Oo]|\/[Ll][Aa][Ss][Tt]|\/[Ll][Ss][Oo][Ff]|\/[Nn][Mm][Aa][Pp]|\/[Dd][Ii][Gg]|\/[Ff][Ii][Nn][Dd])/'
-      pivot_on: [host]
-      window: 1h
+  # Behaviour-targeted hunts the engine runs around the alert (not a sweep).
+  - name: Child processes spawned by bpftrace (the --unsafe system() payload)
+    query: data_process_exec_parent_binary:/.*[Bb][Pp][Ff][Tt][Rr][Aa][Cc][Ee]/
+    pivot_on:
+    - host
+    window: 1h
+  - name: Other eBPF / kernel-tracing tooling on this host
+    query: ((data_process_exec_process_binary:/.*(\/[Bb][Pp][Ff][Tt][Oo][Oo][Ll]|\/[Bb][Pp][Ff][Tt][Rr][Aa][Cc][Ee]|\/[Pp][Ee][Rr][Ff]|\/[Tt][Rr][Aa][Cc][Ee]-[Cc][Mm][Dd])/) OR (data_process_exec_process_arguments:/.*\/[Ss][Yy][Ss]\/[Kk][Ee][Rr][Nn][Ee][Ll]\/[Dd][Ee][Bb][Uu][Gg]\/[Tt][Rr][Aa][Cc][Ii][Nn][Gg].*/) OR (data_process_exec_process_arguments:/.*[Bb][Cc][Cc]\/[Tt][Oo][Oo][Ll][Ss].*/))
+    pivot_on:
+    - host
+    window: 2h
+  - name: Privilege escalation to the root bpftrace requires
+    query: data_process_exec_process_binary:/.*(\/[Ss][Uu][Dd][Oo]|\/[Ss][Uu]|\/[Pp][Kk][Ee][Xx][Ee][Cc]|\/[Dd][Oo][Aa][Ss]|\/[Ss][Ee][Tt][Cc][Aa][Pp]|\/[Cc][Aa][Pp][Ss][Hh])/
+    pivot_on:
+    - host
+    window: 2h
+  - name: Security / audit tooling stopped or killed on this host
+    query: ((data_process_exec_process_binary:/.*(\/[Kk][Ii][Ll][Ll]|\/[Pp][Kk][Ii][Ll][Ll]|\/[Kk][Ii][Ll][Ll][Aa][Ll][Ll]|\/[Ss][Yy][Ss][Tt][Ee][Mm][Cc][Tt][Ll]|\/[Ss][Ee][Rr][Vv][Ii][Cc][Ee])/ AND data_process_exec_process_arguments:/.*([Ff][Aa][Ll][Cc][Oo]|[Aa][Uu][Dd][Ii][Tt][Dd]|[Ww][Aa][Zz][Uu][Hh]|[Tt][Ee][Tt][Rr][Aa][Gg][Oo][Nn]|[Oo][Ss][Qq][Uu][Ee][Rr][Yy][Dd]).*/) OR (data_process_exec_process_binary:/.*\/[Aa][Uu][Dd][Ii][Tt][Cc][Tt][Ll]/ AND data_process_exec_process_arguments:/.* -[Dd].*/) OR (data_process_exec_process_binary:/.*\/[Ss][Ee][Tt][Ee][Nn][Ff][Oo][Rr][Cc][Ee]/ AND data_process_exec_process_arguments:/.* 0.*/))
+    pivot_on:
+    - host
+    window: 2h
+  - name: Secret / credential-file access on this host
+    query: ((data_process_exec_process_arguments:/.*\/[Ee][Tt][Cc]\/[Ss][Hh][Aa][Dd][Oo][Ww].*/) OR (data_process_exec_process_arguments:/.*\/[Ee][Tt][Cc]\/[Ss][Uu][Dd][Oo][Ee][Rr][Ss].*/) OR (data_process_exec_process_arguments:/.*[Ii][Dd]_[Rr][Ss][Aa].*/) OR (data_process_exec_process_arguments:/.*\.[Ss][Ss][Hh]\/.*/) OR (data_process_exec_process_arguments:/.*\/[Ee][Tt][Cc]\/[Gg][Ss][Hh][Aa][Dd][Oo][Ww].*/))
+    pivot_on:
+    - host
+    window: 2h

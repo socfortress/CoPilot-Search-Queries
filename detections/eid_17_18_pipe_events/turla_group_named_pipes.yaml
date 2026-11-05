@@ -158,44 +158,58 @@ graylog:
   query: (data_win_system_eventID:"17" OR data_win_system_eventID:"18") AND (data_win_eventdata_pipeName:/\\[Aa][Tt][Cc][Tt][Ll]/ OR data_win_eventdata_pipeName:/\\[Cc][Oo][Mm][Nn][Aa][Pp]/ OR data_win_eventdata_pipeName:/\\[Ii][Ee][Hh][Ee][Ll][Pp][Ee][Rr]/ OR data_win_eventdata_pipeName:/\\[Ss][Dd][Ll][Rr][Pp][Cc]/ OR data_win_eventdata_pipeName:/\\[Uu][Ss][Ee][Rr][Pp][Ii][Pp][Ee]/)
 
 correlation:
-  # Authored by the correlation engine for review. Related CoPilot Searches to run
-  # around an alert from this rule, scoped to the same host/user/IP within the window.
+  # Authored per-rule (behaviour-researched) for the correlation engine. Related CoPilot
+  # Searches + telemetry pivots to run around an alert, scoped to its host/user/ip/domain.
   related_rules:
-    - id: ec570e53-4c76-45a9-804d-dc3f355ff7a7
-      name: "7Zip Compressing Dump Files"
-      reason: "next kill-chain tactic: Collection"
-    - id: 0a1255c5-d732-4b62-ac02-b5152d34fb83
-      name: "ADExplorer Writing Complete AD Snapshot Into .dat File"
-      reason: "next kill-chain tactic: Discovery"
-    - id: 1ea13e8c-03ea-409b-877d-ce5c3d2c1cb3
-      name: "ADFS Database Named Pipe Connection By Uncommon Tool"
-      reason: "next kill-chain tactic: Collection"
-    - id: 75bf09fa-1dd7-4d18-9af9-dd9e492562eb
-      name: "ADSI-Cache File Creation By Uncommon Tool"
-      reason: "next kill-chain tactic: Command and Control"
-    - id: 33a2d1dd-f3b0-40bd-8baf-7974468927cc
-      name: "APT PRIVATELOG Image Load Pattern"
-      reason: "next kill-chain tactic: Privilege Escalation"
-    - id: 9aa01d62-7667-4d3b-acb8-8cb5103e2014
-      name: "APT27 - Emissary Panda Activity"
-      reason: "next kill-chain tactic: Execution"
-  window: 1h
+  - id: f7536642-4a08-4dd9-b6d5-c3286d8975ed
+    name: Potential SNAKE Malware Persistence Service Execution
+    reason: 'Co-occurring on the same host: services.exe launching C:\Windows\winsxs\...\werfault.exe is the SNAKE/Turla implant service process itself - the very process that opens these IPC named pipes. If it fired here, the pipe server has a confirmed owner.'
+  - id: d6d9d23f-69c1-41b5-8305-fa8250bd027f
+    name: SNAKE Malware Kernel Driver File Indicator
+    reason: 'Co-occurring implant component: comadmin.dat in system32\com is the Uroburos/SNAKE kernel rootkit driver that pairs with the user-mode pipe server. Its presence on the same host confirms the full SNAKE stack, not an isolated pipe artifact.'
+  - id: d0fa35db-0e92-400e-aa16-d32ae2521618
+    name: SNAKE Malware Covert Store Registry Key
+    reason: 'Co-occurring implant component: the SECURITY\Policy\Secrets\N covert store is where SNAKE stashes its encrypted config/payload on the same host, read by the pipe-using implant at runtime.'
+  - id: 1df8b3da-b0ac-4d8a-b7c7-6cb7c24160e4
+    name: Turla Service Install
+    reason: 'Precursor install on this host: a 7045 service event named srservice / ipvpn / hkmsvc is how Turla registers the implant that subsequently opens these pipes - the plant step preceding runtime.'
+  - id: 1228f8e2-7e79-4dea-b0ad-c91f1d5016c1
+    name: Turla PNG Dropper Service
+    reason: 'Precursor install on this host: the WerFaultSvc 7045 service is the PNG-stego dropper that unpacks and launches the implant whose pipes this rule detects; it typically precedes the named-pipe runtime on the same box.'
+  - id: d91ff53f-fd0c-419d-a6b8-ae038d5c3733
+    name: Potential SNAKE Malware Installation Binary Indicator
+    reason: 'Precursor install on this host: execution of the jpsetup.exe / jpinst.exe SNAKE installer binaries is the deployment step that drops the implant later seen opening these pipes.'
+  - id: 9e2e51c5-c699-4794-ba5a-29f5da40ac0c
+    name: Turla Group Commands May 2020
+    reason: 'Follow-on operator activity: once the pipe-based channel is live the operator runs Turla''s hands-on-keyboard recon/exfil one-liners (tracert -h 10 yahoo.com, wsqmcons|iex, net use to docs.live.net) - same host, hands-on-keyboard phase.'
+  - id: c601f20d-570a-4cde-a7d6-e17f99cb8e7f
+    name: Turla Group Lateral Movement
+    reason: 'Follow-on operator activity: net use \\%DOMAINCONTROLLER%\C$ and dir C:\*.doc /s document discovery are Turla''s post-foothold lateral-movement and collection steps launched from this compromised host.'
+  window: 24h
   enrichment_searches:
-  # Rule-specific telemetry pivots the engine runs around an alert from this rule,
-  # scoped to the alert's host/user/IP within the window (behaviour-targeted, not a sweep).
-    - name: "Autostart persistence written on this host (Run keys, services, IFEO)"
-      query: '(data_win_system_eventID:"12" OR data_win_system_eventID:"13") AND (data_win_eventdata_targetObject:/.*[Cc][Uu][Rr][Rr][Ee][Nn][Tt][Vv][Ee][Rr][Ss][Ii][Oo][Nn]\\[Rr][Uu][Nn].*/ OR data_win_eventdata_targetObject:/.*[Cc][Uu][Rr][Rr][Ee][Nn][Tt][Vv][Ee][Rr][Ss][Ii][Oo][Nn]\\[Rr][Uu][Nn][Oo][Nn][Cc][Ee].*/ OR data_win_eventdata_targetObject:/.*[Cc][Uu][Rr][Rr][Ee][Nn][Tt][Cc][Oo][Nn][Tt][Rr][Oo][Ll][Ss][Ee][Tt]\\[Ss][Ee][Rr][Vv][Ii][Cc][Ee][Ss]\\.*/ OR data_win_eventdata_targetObject:/.*[Ii][Mm][Aa][Gg][Ee] [Ff][Ii][Ll][Ee] [Ee][Xx][Ee][Cc][Uu][Tt][Ii][Oo][Nn] [Oo][Pp][Tt][Ii][Oo][Nn][Ss]\\.*/ OR data_win_eventdata_targetObject:/.*[Ww][Ii][Nn][Ll][Oo][Gg][Oo][Nn]\\[Ss][Hh][Ee][Ll][Ll].*/ OR data_win_eventdata_targetObject:/.*[Ww][Ii][Nn][Ll][Oo][Gg][Oo][Nn]\\[Uu][Ss][Ee][Rr][Ii][Nn][Ii][Tt].*/ OR data_win_eventdata_targetObject:/.*[Cc][Uu][Rr][Rr][Ee][Nn][Tt][Vv][Ee][Rr][Ss][Ii][Oo][Nn]\\[Ee][Xx][Pp][Ll][Oo][Rr][Ee][Rr]\\[Rr][Uu][Nn].*/ OR data_win_eventdata_targetObject:/.*[Pp][Oo][Ll][Ii][Cc][Ii][Ee][Ss]\\[Ee][Xx][Pp][Ll][Oo][Rr][Ee][Rr]\\[Rr][Uu][Nn].*/ OR data_win_eventdata_targetObject:/.*[Cc][Uu][Rr][Rr][Ee][Nn][Tt][Vv][Ee][Rr][Ss][Ii][Oo][Nn]\\[Ww][Ii][Nn][Dd][Oo][Ww][Ss]\\[Ll][Oo][Aa][Dd].*/)'
-      pivot_on: [host]
-      window: 4h
-    - name: "Remote-execution / lateral-movement tooling on this host"
-      query: '(data_win_system_eventID:"1" AND data_win_eventdata_image:/.*(\\[Pp][Ss][Ee][Xx][Ee][Cc]\.[Ee][Xx][Ee]|\\[Pp][Ss][Ee][Xx][Ee][Ss][Vv][Cc]\.[Ee][Xx][Ee]|\\[Pp][Aa][Ee][Xx][Ee][Cc]\.[Ee][Xx][Ee]|\\[Ww][Ii][Nn][Rr][Ss]\.[Ee][Xx][Ee]|\\[Mm][Ss][Tt][Ss][Cc]\.[Ee][Xx][Ee]|\\[Ww][Mm][Ii][Cc]\.[Ee][Xx][Ee])/) OR (data_win_system_eventID:"1" AND data_win_eventdata_image:/.*(\\[Pp][Oo][Ww][Ee][Rr][Ss][Hh][Ee][Ll][Ll]\.[Ee][Xx][Ee]|\\[Pp][Ww][Ss][Hh]\.[Ee][Xx][Ee])/ AND (data_win_eventdata_commandLine:/.*[Ii][Nn][Vv][Oo][Kk][Ee]-[Cc][Oo][Mm][Mm][Aa][Nn][Dd].*/ OR data_win_eventdata_commandLine:/.*[Nn][Ee][Ww]-[Pp][Ss][Ss][Ee][Ss][Ss][Ii][Oo][Nn].*/ OR data_win_eventdata_commandLine:/.*[Ee][Nn][Tt][Ee][Rr]-[Pp][Ss][Ss][Ee][Ss][Ss][Ii][Oo][Nn].*/ OR data_win_eventdata_commandLine:/.*-[Cc][Oo][Mm][Pp][Uu][Tt][Ee][Rr][Nn][Aa][Mm][Ee].*/))'
-      pivot_on: [host]
-      window: 2h
-    - name: "Process injection / LSASS access on this host"
-      query: '((data_win_system_eventID:"8") OR (data_win_system_eventID:"10" AND data_win_eventdata_targetImage:/.*(\\[Ll][Ss][Aa][Ss][Ss]\.[Ee][Xx][Ee])/) OR (data_win_system_eventID:"1" AND (data_win_eventdata_commandLine:/.*[Cc][Rr][Ee][Aa][Tt][Ee][Rr][Ee][Mm][Oo][Tt][Ee][Tt][Hh][Rr][Ee][Aa][Dd].*/ OR data_win_eventdata_commandLine:/.*[Vv][Ii][Rr][Tt][Uu][Aa][Ll][Aa][Ll][Ll][Oo][Cc][Ee][Xx].*/ OR data_win_eventdata_commandLine:/.*[Ww][Rr][Ii][Tt][Ee][Pp][Rr][Oo][Cc][Ee][Ss][Ss][Mm][Ee][Mm][Oo][Rr][Yy].*/)))'
-      pivot_on: [host]
-      window: 1h
-    - name: "Follow-on LOLBin / signed-binary-proxy execution on this host"
-      query: 'data_win_system_eventID:"1" AND data_win_eventdata_image:/.*(\\[Rr][Uu][Nn][Dd][Ll][Ll]32\.[Ee][Xx][Ee]|\\[Rr][Ee][Gg][Ss][Vv][Rr]32\.[Ee][Xx][Ee]|\\[Mm][Ss][Hh][Tt][Aa]\.[Ee][Xx][Ee]|\\[Ii][Nn][Ss][Tt][Aa][Ll][Ll][Uu][Tt][Ii][Ll]\.[Ee][Xx][Ee]|\\[Rr][Ee][Gg][Aa][Ss][Mm]\.[Ee][Xx][Ee]|\\[Rr][Ee][Gg][Ss][Vv][Cc][Ss]\.[Ee][Xx][Ee]|\\[Mm][Ss][Bb][Uu][Ii][Ll][Dd]\.[Ee][Xx][Ee]|\\[Cc][Ee][Rr][Tt][Uu][Tt][Ii][Ll]\.[Ee][Xx][Ee]|\\[Bb][Ii][Tt][Ss][Aa][Dd][Mm][Ii][Nn]\.[Ee][Xx][Ee]|\\[Ww][Mm][Ii][Cc]\.[Ee][Xx][Ee]|\\[Cc][Mm][Ss][Tt][Pp]\.[Ee][Xx][Ee]|\\[Oo][Dd][Bb][Cc][Cc][Oo][Nn][Ff]\.[Ee][Xx][Ee]|\\[Ff][Oo][Rr][Ff][Ii][Ll][Ee][Ss]\.[Ee][Xx][Ee]|\\[Pp][Cc][Aa][Ll][Uu][Aa]\.[Ee][Xx][Ee]|\\[Mm][Aa][Vv][Ii][Nn][Jj][Ee][Cc][Tt]\.[Ee][Xx][Ee]|\\[Ss][Cc][Rr][Ii][Pp][Tt][Rr][Uu][Nn][Nn][Ee][Rr]\.[Ee][Xx][Ee])/'
-      pivot_on: [host]
-      window: 1h
+  # Behaviour-targeted hunts the engine runs around the alert (not a sweep).
+  - name: Suspicious named-pipe servers from implant-typical paths on this host
+    query: (data_win_system_eventID:"17" OR data_win_system_eventID:"18") AND (data_win_eventdata_image:/[Cc]:\\[Ww][Ii][Nn][Dd][Oo][Ww][Ss]\\[Ww][Ii][Nn][Ss][Xx][Ss]\\.*/ OR data_win_eventdata_image:/.*\\[Pp][Rr][Oo][Gg][Rr][Aa][Mm][Dd][Aa][Tt][Aa]\\.*/ OR data_win_eventdata_image:/.*\\[Tt][Ee][Mm][Pp]\\.*/ OR data_win_eventdata_image:/.*\\[Aa][Pp][Pp][Dd][Aa][Tt][Aa]\\.*/ OR data_win_eventdata_image:/[Cc]:\\[Ww][Ii][Nn][Dd][Oo][Ww][Ss]\\[Ss][Yy][Ss][Tt][Ee][Mm]32\\[Cc][Oo][Mm]\\.*/)
+    pivot_on:
+    - host
+    window: 4h
+  - name: Rundll32/regsvr32 proxy-loading an implant DLL from a non-standard path
+    query: (data_win_system_eventID:"1" AND (data_win_eventdata_image:/.*\\[Rr][Uu][Nn][Dd][Ll][Ll]32\.[Ee][Xx][Ee]/ OR data_win_eventdata_image:/.*\\[Rr][Ee][Gg][Ss][Vv][Rr]32\.[Ee][Xx][Ee]/) AND (data_win_eventdata_commandLine:/.*\\[Pp][Rr][Oo][Gg][Rr][Aa][Mm][Dd][Aa][Tt][Aa]\\.*\.[Dd][Ll][Ll].*/ OR data_win_eventdata_commandLine:/.*\\[Tt][Ee][Mm][Pp]\\.*\.[Dd][Ll][Ll].*/ OR data_win_eventdata_commandLine:/.*\\[Aa][Pp][Pp][Dd][Aa][Tt][Aa]\\.*\.[Dd][Ll][Ll].*/ OR data_win_eventdata_commandLine:/.*\\[Ww][Ii][Nn][Ss][Xx][Ss]\\.*\.[Dd][Ll][Ll].*/))
+    pivot_on:
+    - host
+    window: 4h
+  - name: Credential theft on this host (LSASS access, SECURITY/SAM hive save, comsvcs MiniDump)
+    query: (data_win_system_eventID:"10" AND data_win_eventdata_targetImage:/.*\\[Ll][Ss][Aa][Ss][Ss]\.[Ee][Xx][Ee]/) OR (data_win_system_eventID:"1" AND (data_win_eventdata_commandLine:/.*[Rr][Ee][Gg].*[Ss][Aa][Vv][Ee].*[Hh][Kk][Ll][Mm].*\\[Ss][Ee][Cc][Uu][Rr][Ii][Tt][Yy].*/ OR data_win_eventdata_commandLine:/.*[Rr][Ee][Gg].*[Ss][Aa][Vv][Ee].*[Hh][Kk][Ll][Mm].*\\[Ss][Aa][Mm].*/ OR data_win_eventdata_commandLine:/.*[Cc][Oo][Mm][Ss][Vv][Cc][Ss]\.[Dd][Ll][Ll].*[Mm][Ii][Nn][Ii][Dd][Uu][Mm][Pp].*/))
+    pivot_on:
+    - host
+    window: 2h
+  - name: Active Directory / domain reconnaissance from this host
+    query: data_win_system_eventID:"1" AND (data_win_eventdata_commandLine:/.*[Nn][Ll][Tt][Ee][Ss][Tt].*\/[Dd][Cc][Ll][Ii][Ss][Tt].*/ OR data_win_eventdata_commandLine:/.*[Nn][Ee][Tt][ ]+[Gg][Rr][Oo][Uu][Pp].*[Dd][Oo][Mm][Aa][Ii][Nn][ ]+[Aa][Dd][Mm][Ii][Nn][Ss].*/ OR data_win_eventdata_commandLine:/.*[Dd][Ss][Qq][Uu][Ee][Rr][Yy][ ]+.*/ OR data_win_eventdata_commandLine:/.*[Aa][Dd][Ff][Ii][Nn][Dd]\.[Ee][Xx][Ee].*/ OR data_win_eventdata_commandLine:/.*[Ww][Hh][Oo][Aa][Mm][Ii].*\/[Aa][Ll][Ll].*/)
+    pivot_on:
+    - host
+    window: 6h
+  - name: Exfiltration / archive staging to legitimate cloud from this host
+    query: data_win_system_eventID:"1" AND (data_win_eventdata_commandLine:/.*[Dd][Oo][Cc][Ss]\.[Ll][Ii][Vv][Ee]\.[Nn][Ee][Tt].*/ OR data_win_eventdata_commandLine:/.*[Nn][Ee][Tt][ ]+[Uu][Ss][Ee][ ]+.*[Hh][Tt][Tt][Pp][Ss]:\/\/.*/ OR (data_win_eventdata_image:/.*\\([Rr][Aa][Rr]|7[Zz]|7[Zz][Aa]|[Ww][Ii][Nn][Rr][Aa][Rr])\.[Ee][Xx][Ee]/ AND data_win_eventdata_commandLine:/.*\.([Dd][Oo][Cc]|[Xx][Ll][Ss]|[Pp][Dd][Ff]).*/))
+    pivot_on:
+    - host
+    window: 6h

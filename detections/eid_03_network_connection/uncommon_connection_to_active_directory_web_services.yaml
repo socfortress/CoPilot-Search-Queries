@@ -172,48 +172,58 @@ graylog:
   query: data_win_system_eventID:"3" AND data_win_eventdata_initiated:true AND data_win_eventdata_destinationPort:"9389" AND _exists_:data_win_eventdata_image AND NOT (data_win_eventdata_image:/[Cc]:\\[Ww][Ii][Nn][Dd][Oo][Ww][Ss]\\[Ss][Yy][Ss][Tt][Ee][Mm]32\\[Dd][Ss][Aa][Cc]\.[Ee][Xx][Ee]/ OR data_win_eventdata_image:/[Cc]:\\[Pp][Rr][Oo][Gg][Rr][Aa][Mm] [Ff][Ii][Ll][Ee][Ss]\\[Mm][Ii][Cc][Rr][Oo][Ss][Oo][Ff][Tt] [Mm][Oo][Nn][Ii][Tt][Oo][Rr][Ii][Nn][Gg] [Aa][Gg][Ee][Nn][Tt][\\]/ OR data_win_eventdata_image:/[Cc]:\\[Pp][Rr][Oo][Gg][Rr][Aa][Mm] [Ff][Ii][Ll][Ee][Ss]\\[Pp][Oo][Ww][Ee][Rr][Ss][Hh][Ee][Ll][Ll]\\7\\[Pp][Ww][Ss][Hh]\.[Ee][Xx][Ee].*/ OR data_win_eventdata_image:/[Cc]:\\[Pp][Rr][Oo][Gg][Rr][Aa][Mm] [Ff][Ii][Ll][Ee][Ss]\\[Pp][Oo][Ww][Ee][Rr][Ss][Hh][Ee][Ll][Ll]\\7-[Pp][Rr][Ee][Vv][Ii][Ee][Ww]\\[Pp][Ww][Ss][Hh]\.[Ee][Xx].*/ OR data_win_eventdata_image:/[Cc]:\\[Ww][Ii][Nn][Dd][Oo][Ww][Ss]\\[Ss][Yy][Ss][Tt][Ee][Mm]32\\[Ww][Ii][Nn][Dd][Oo][Ww][Ss][Pp][Oo][Ww][Ee][Rr][Ss][Hh][Ee][Ll][Ll]\\.*/ OR data_win_eventdata_image:/[Cc]:\\[Ww][Ii][Nn][Dd][Oo][Ww][Ss]\\[Ss][Yy][Ss][Ww][Oo][Ww]64\\[Ww][Ii][Nn][Dd][Oo][Ww][Ss][Pp][Oo][Ww][Ee][Rr][Ss][Hh][Ee][Ll][Ll]\\.*/)
 
 correlation:
-  # Authored by the correlation engine for review. Related CoPilot Searches to run
-  # around an alert from this rule, scoped to the same host/user/IP within the window.
+  # Authored per-rule (behaviour-researched) for the correlation engine. Related CoPilot
+  # Searches + telemetry pivots to run around an alert, scoped to its host/user/ip/domain.
   related_rules:
-    - id: ec570e53-4c76-45a9-804d-dc3f355ff7a7
-      name: "7Zip Compressing Dump Files"
-      reason: "next kill-chain tactic: Collection"
-    - id: 0a1255c5-d732-4b62-ac02-b5152d34fb83
-      name: "ADExplorer Writing Complete AD Snapshot Into .dat File"
-      reason: "next kill-chain tactic: Discovery"
-    - id: 1ea13e8c-03ea-409b-877d-ce5c3d2c1cb3
-      name: "ADFS Database Named Pipe Connection By Uncommon Tool"
-      reason: "next kill-chain tactic: Collection"
-    - id: 75bf09fa-1dd7-4d18-9af9-dd9e492562eb
-      name: "ADSI-Cache File Creation By Uncommon Tool"
-      reason: "next kill-chain tactic: Command and Control"
-    - id: 03e2746e-2b31-42f1-ab7a-eb39365b2422
-      name: "APT31 Judgement Panda Activity"
-      reason: "next kill-chain tactic: Collection"
-    - id: 9212f354-7775-4e28-9c9f-8f0a4544e664
-      name: "Active Directory Database Snapshot Via ADExplorer"
-      reason: "next kill-chain tactic: Discovery"
-  window: 1h
+  - id: e92a4287-e072-4a40-9739-370c106bb750
+    name: HackTool - SOAPHound Execution
+    reason: SOAPHound is the FalconForce .NET tool that collects AD data over ADWS (port 9389) and this alert's own reference; the uncommon process hitting 9389 is most likely SOAPHound itself, so this is the process-creation half of the same collection on the same host/user.
+  - id: f376c8a7-a2d0-4ddc-aa0c-16c17236d962
+    name: HackTool - Bloodhound/Sharphound Execution
+    reason: BloodHound/SharpHound performs the same bulk AD collection and modern collectors can harvest over ADWS; its execution on this host corroborates the 9389 connection as attacker enumeration rather than admin tooling.
+  - id: 02773bed-83bf-469f-b7ff-e676e7d78bab
+    name: BloodHound Collection Files
+    reason: The ADWS enumeration's output landing on disk (*_users.json, *_groups.json, BloodHound.zip) is the direct downstream artifact proving directory data was actually collected on this host.
+  - id: 70bc5215-526f-4477-963c-a47a5c9ebd12
+    name: Potential Active Directory Enumeration Using AD Module - ProcCreation
+    reason: Loading Microsoft.ActiveDirectory.Management.dll enumerates AD through the DC's ADWS endpoint; a parallel/alternative ADWS query path by the same actor on this host (and this rule already excludes the benign pwsh/WindowsPowerShell callers).
+  - id: 455b9d50-15a1-4b99-853f-8d37655a4c1b
+    name: PUA - Suspicious ActiveDirectory Enumeration Via AdFind.EXE
+    reason: AdFind runs the same domain enumeration over LDAP - the actor's parallel AD reconnaissance by a different channel, commonly seen alongside ADWS collection on the same host/user.
+  - id: 9212f354-7775-4e28-9c9f-8f0a4544e664
+    name: Active Directory Database Snapshot Via ADExplorer
+    reason: ADExplorer -snapshot dumps the whole AD database to feed BloodHound - an alternative bulk collection of the same target that co-occurs when an actor is harvesting the directory.
+  - id: 1eeed653-dbc8-4187-ad0c-eeebb20e6599
+    name: Potential SPN Enumeration Via Setspn.EXE
+    reason: Once the domain graph reveals kerberoastable service accounts, SPN enumeration via setspn is the classic next step toward Kerberoasting - a follow-on credential-access move on the same host/user.
+  - id: 35ba1d85-724d-42a3-889f-2e2362bcaf23
+    name: AD Privileged Users or Groups Reconnaissance
+    reason: DC-side reads (4661) of privileged users/groups are exactly what ADWS collection drives toward (Domain Admins, etc.) - a follow-on/confirming enumeration of the high-value principals the actor just mapped.
+  window: 2h
   enrichment_searches:
-  # Rule-specific telemetry pivots the engine runs around an alert from this rule,
-  # scoped to the alert's host/user/IP within the window (behaviour-targeted, not a sweep).
-    - name: "Host / domain account-reconnaissance commands on this host"
-      query: 'data_win_system_eventID:"1" AND data_win_eventdata_image:/.*(\\[Ww][Hh][Oo][Aa][Mm][Ii]\.[Ee][Xx][Ee]|\\[Nn][Ee][Tt]\.[Ee][Xx][Ee]|\\[Nn][Ee][Tt]1\.[Ee][Xx][Ee]|\\[Nn][Ll][Tt][Ee][Ss][Tt]\.[Ee][Xx][Ee]|\\[Ss][Yy][Ss][Tt][Ee][Mm][Ii][Nn][Ff][Oo]\.[Ee][Xx][Ee]|\\[Ii][Pp][Cc][Oo][Nn][Ff][Ii][Gg]\.[Ee][Xx][Ee]|\\[Aa][Rr][Pp]\.[Ee][Xx][Ee]|\\[Rr][Oo][Uu][Tt][Ee]\.[Ee][Xx][Ee]|\\[Tt][Aa][Ss][Kk][Ll][Ii][Ss][Tt]\.[Ee][Xx][Ee]|\\[Qq][Uu][Ss][Ee][Rr]\.[Ee][Xx][Ee]|\\[Qq][Ww][Ii][Nn][Ss][Tt][Aa]\.[Ee][Xx][Ee]|\\[Dd][Ss][Qq][Uu][Ee][Rr][Yy]\.[Ee][Xx][Ee]|\\[Nn][Bb][Tt][Ss][Tt][Aa][Tt]\.[Ee][Xx][Ee]|\\[Hh][Oo][Ss][Tt][Nn][Aa][Mm][Ee]\.[Ee][Xx][Ee]|\\[Nn][Ee][Tt][Ss][Tt][Aa][Tt]\.[Ee][Xx][Ee]|\\[Rr][Ee][Gg]\.[Ee][Xx][Ee])/'
-      pivot_on: [host]
-      window: 1h
-    - name: "Other executions of this tool-set on this host (any arguments)"
-      query: 'data_win_system_eventID:"1" AND data_win_eventdata_image:/.*(\\[Dd][Ss][Aa][Cc]\.[Ee][Xx][Ee])/'
-      pivot_on: [host]
-      window: 2h
-    - name: "Remote-execution / lateral-movement tooling on this host"
-      query: '(data_win_system_eventID:"1" AND data_win_eventdata_image:/.*(\\[Pp][Ss][Ee][Xx][Ee][Cc]\.[Ee][Xx][Ee]|\\[Pp][Ss][Ee][Xx][Ee][Ss][Vv][Cc]\.[Ee][Xx][Ee]|\\[Pp][Aa][Ee][Xx][Ee][Cc]\.[Ee][Xx][Ee]|\\[Ww][Ii][Nn][Rr][Ss]\.[Ee][Xx][Ee]|\\[Mm][Ss][Tt][Ss][Cc]\.[Ee][Xx][Ee]|\\[Ww][Mm][Ii][Cc]\.[Ee][Xx][Ee])/) OR (data_win_system_eventID:"1" AND data_win_eventdata_image:/.*(\\[Pp][Oo][Ww][Ee][Rr][Ss][Hh][Ee][Ll][Ll]\.[Ee][Xx][Ee]|\\[Pp][Ww][Ss][Hh]\.[Ee][Xx][Ee])/ AND (data_win_eventdata_commandLine:/.*[Ii][Nn][Vv][Oo][Kk][Ee]-[Cc][Oo][Mm][Mm][Aa][Nn][Dd].*/ OR data_win_eventdata_commandLine:/.*[Nn][Ee][Ww]-[Pp][Ss][Ss][Ee][Ss][Ss][Ii][Oo][Nn].*/ OR data_win_eventdata_commandLine:/.*[Ee][Nn][Tt][Ee][Rr]-[Pp][Ss][Ss][Ee][Ss][Ss][Ii][Oo][Nn].*/ OR data_win_eventdata_commandLine:/.*-[Cc][Oo][Mm][Pp][Uu][Tt][Ee][Rr][Nn][Aa][Mm][Ee].*/))'
-      pivot_on: [host]
-      window: 2h
-    - name: "Other hosts connecting to the same destination address (campaign)"
-      query: '(data_win_system_eventID:"22" OR data_win_system_eventID:"3")'
-      pivot_on: [ip]
-      window: 24h
-    - name: "Downloader / C2 tooling executed on this host"
-      query: '(data_win_system_eventID:"1" AND data_win_eventdata_image:/.*(\\[Cc][Ee][Rr][Tt][Uu][Tt][Ii][Ll]\.[Ee][Xx][Ee]|\\[Bb][Ii][Tt][Ss][Aa][Dd][Mm][Ii][Nn]\.[Ee][Xx][Ee]|\\[Cc][Uu][Rr][Ll]\.[Ee][Xx][Ee]|\\[Ww][Gg][Ee][Tt]\.[Ee][Xx][Ee])/) OR (data_win_eventdata_commandLine:/.*[Dd][Oo][Ww][Nn][Ll][Oo][Aa][Dd][Ss][Tt][Rr][Ii][Nn][Gg].*/ OR data_win_eventdata_commandLine:/.*[Dd][Oo][Ww][Nn][Ll][Oo][Aa][Dd][Ff][Ii][Ll][Ee].*/ OR data_win_eventdata_commandLine:/.*[Ii][Nn][Vv][Oo][Kk][Ee]-[Ww][Ee][Bb][Rr][Ee][Qq][Uu][Ee][Ss][Tt].*/ OR data_win_eventdata_commandLine:/.*[Nn][Ee][Tt]\.[Ww][Ee][Bb][Cc][Ll][Ii][Ee][Nn][Tt].*/ OR data_win_eventdata_commandLine:/.*[Ss][Tt][Aa][Rr][Tt]-[Bb][Ii][Tt][Ss][Tt][Rr][Aa][Nn][Ss][Ff][Ee][Rr].*/ OR data_win_eventdata_commandLine:/.*[Ii][Ww][Rr] .*/ OR data_win_eventdata_commandLine:/.*[Cc][Uu][Rr][Ll] .*/ OR data_win_eventdata_commandLine:/.*[Ww][Gg][Ee][Tt] .*/)'
-      pivot_on: [host]
-      window: 1h
+  # Behaviour-targeted hunts the engine runs around the alert (not a sweep).
+  - name: BloodHound / SOAPHound collection output written on this host
+    query: data_win_system_eventID:"11" AND (data_win_eventdata_targetFilename:/.*[Bb][Ll][Oo][Oo][Dd][Hh][Oo][Uu][Nn][Dd]\.[Zz][Ii][Pp]/ OR data_win_eventdata_targetFilename:/.*_[Uu][Ss][Ee][Rr][Ss]\.[Jj][Ss][Oo][Nn]/ OR data_win_eventdata_targetFilename:/.*_[Gg][Rr][Oo][Uu][Pp][Ss]\.[Jj][Ss][Oo][Nn]/ OR data_win_eventdata_targetFilename:/.*_[Cc][Oo][Mm][Pp][Uu][Tt][Ee][Rr][Ss]\.[Jj][Ss][Oo][Nn]/ OR data_win_eventdata_targetFilename:/.*_[Gg][Pp][Oo][Ss]\.[Jj][Ss][Oo][Nn]/ OR data_win_eventdata_targetFilename:/.*_[Oo][Uu][Ss]\.[Jj][Ss][Oo][Nn]/ OR data_win_eventdata_targetFilename:/.*_[Cc][Oo][Nn][Tt][Aa][Ii][Nn][Ee][Rr][Ss]\.[Jj][Ss][Oo][Nn]/)
+    pivot_on:
+    - host
+    window: 2h
+  - name: AD-enumeration tooling / cmdlets executed on this host
+    query: data_win_system_eventID:"1" AND (data_win_eventdata_image:/.*(\\[Ss][Hh][Aa][Rr][Pp][Hh][Oo][Uu][Nn][Dd]\.[Ee][Xx][Ee]|\\[Bb][Ll][Oo][Oo][Dd][Hh][Oo][Uu][Nn][Dd]\.[Ee][Xx][Ee]|\\[Aa][Dd][Ff][Ii][Nn][Dd]\.[Ee][Xx][Ee]|\\[Cc][Ss][Vv][Dd][Ee]\.[Ee][Xx][Ee]|\\[Ll][Dd][Ii][Ff][Dd][Ee]\.[Ee][Xx][Ee]|\\[Dd][Ss][Qq][Uu][Ee][Rr][Yy]\.[Ee][Xx][Ee]|\\[Aa][Dd][Ee][Xx][Pp][Ll][Oo][Rr][Ee][Rr]\.[Ee][Xx][Ee]|\\[Aa][Dd][Ee][Xx][Pp][Ll][Oo][Rr][Ee][Rr]64\.[Ee][Xx][Ee]|\\[Nn][Ll][Tt][Ee][Ss][Tt]\.[Ee][Xx][Ee])/ OR data_win_eventdata_commandLine:/.*[Mm][Ii][Cc][Rr][Oo][Ss][Oo][Ff][Tt]\.[Aa][Cc][Tt][Ii][Vv][Ee][Dd][Ii][Rr][Ee][Cc][Tt][Oo][Rr][Yy]\.[Mm][Aa][Nn][Aa][Gg][Ee][Mm][Ee][Nn][Tt].*/ OR data_win_eventdata_commandLine:/.*[Gg][Ee][Tt]-[Aa][Dd][Uu][Ss][Ee][Rr].*/ OR data_win_eventdata_commandLine:/.*[Gg][Ee][Tt]-[Aa][Dd][Cc][Oo][Mm][Pp][Uu][Tt][Ee][Rr].*/ OR data_win_eventdata_commandLine:/.*[Gg][Ee][Tt]-[Aa][Dd][Gg][Rr][Oo][Uu][Pp].*/ OR data_win_eventdata_commandLine:/.*[Gg][Ee][Tt]-[Aa][Dd][Dd][Oo][Mm][Aa][Ii][Nn].*/)
+    pivot_on:
+    - host
+    window: 2h
+  - name: SPN enumeration / Kerberoasting on this host
+    query: (data_win_system_eventID:"1" AND data_win_eventdata_image:/.*\\[Ss][Ee][Tt][Ss][Pp][Nn]\.[Ee][Xx][Ee]/) OR data_win_eventdata_commandLine:/.*[Gg][Ee][Tt][Uu][Ss][Ee][Rr][Ss][Pp][Nn][Ss].*/ OR data_win_eventdata_commandLine:/.*[Kk][Ee][Rr][Bb][Ee][Rr][Oo][Aa][Ss][Tt].*/ OR data_win_eventdata_commandLine:/.*[Gg][Ee][Tt]-[Dd][Oo][Mm][Aa][Ii][Nn][Ss][Pp][Nn][Tt][Ii][Cc][Kk][Ee][Tt].*/ OR data_win_eventdata_commandLine:/.*[Rr][Ee][Qq][Uu][Ee][Ss][Tt]-[Ss][Pp][Nn][Tt][Ii][Cc][Kk][Ee][Tt].*/ OR data_win_eventdata_commandLine:/.*\\[Rr][Uu][Bb][Ee][Uu][Ss].*/
+    pivot_on:
+    - host
+    window: 4h
+  - name: LSASS access / DCSync / credential dumping on this host
+    query: (data_win_system_eventID:"10" AND data_win_eventdata_targetImage:/.*\\[Ll][Ss][Aa][Ss][Ss]\.[Ee][Xx][Ee]/) OR data_win_eventdata_commandLine:/.*[Ss][Ee][Kk][Uu][Rr][Ll][Ss][Aa].*/ OR data_win_eventdata_commandLine:/.*[Ll][Ss][Aa][Dd][Uu][Mm][Pp].*/ OR data_win_eventdata_commandLine:/.*[Dd][Cc][Ss][Yy][Nn][Cc].*/ OR data_win_eventdata_commandLine:/.*[Mm][Ii][Mm][Ii][Kk][Aa][Tt][Zz].*/ OR data_win_eventdata_commandLine:/.*[Cc][Oo][Mm][Ss][Vv][Cc][Ss]\.[Dd][Ll][Ll].*[Mm][Ii][Nn][Ii][Dd][Uu][Mm][Pp].*/
+    pivot_on:
+    - host
+    window: 6h
+  - name: Other hosts reaching the same DC's ADWS endpoint (port 9389)
+    query: data_win_system_eventID:"3" AND data_win_eventdata_initiated:true AND data_win_eventdata_destinationPort:"9389"
+    pivot_on:
+    - ip
+    window: 24h

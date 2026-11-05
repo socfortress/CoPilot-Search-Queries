@@ -191,44 +191,58 @@ graylog:
   query: (data_win_system_eventID:"17" OR data_win_system_eventID:"18") AND ((data_win_eventdata_pipeName:/.*\\[Mm][Ss][Ss][Ee]-.*/ AND data_win_eventdata_pipeName:/.*-[Ss][Ee][Rr][Vv][Ee][Rr].*/) OR data_win_eventdata_pipeName:/\\[Pp][Oo][Ss][Tt][Ee][Xx]_.*/ OR data_win_eventdata_pipeName:/\\[Ss][Tt][Aa][Tt][Uu][Ss]_.*/ OR data_win_eventdata_pipeName:/\\[Mm][Ss][Aa][Gg][Ee][Nn][Tt]_.*/ OR data_win_eventdata_pipeName:/\\[Mm][Oo][Jj][Oo]_.*/ OR data_win_eventdata_pipeName:/\\[Ii][Nn][Tt][Ee][Rr][Pp][Rr][Oo][Cc][Ee][Ss][Ss]_.*/ OR data_win_eventdata_pipeName:/\\[Ss][Aa][Mm][Rr]_.*/ OR data_win_eventdata_pipeName:/\\[Nn][Ee][Tt][Ll][Oo][Gg][Oo][Nn]_.*/ OR data_win_eventdata_pipeName:/\\[Ss][Rr][Vv][Ss][Vv][Cc]_.*/ OR data_win_eventdata_pipeName:/\\[Ll][Ss][Aa][Rr][Pp][Cc]_.*/ OR data_win_eventdata_pipeName:/\\[Ww][Kk][Ss][Ss][Vv][Cc]_.*/)
 
 correlation:
-  # Authored by the correlation engine for review. Related CoPilot Searches to run
-  # around an alert from this rule, scoped to the same host/user/IP within the window.
+  # Authored per-rule (behaviour-researched) for the correlation engine. Related CoPilot
+  # Searches + telemetry pivots to run around an alert, scoped to its host/user/ip/domain.
   related_rules:
-    - id: ec570e53-4c76-45a9-804d-dc3f355ff7a7
-      name: "7Zip Compressing Dump Files"
-      reason: "next kill-chain tactic: Collection"
-    - id: 0a1255c5-d732-4b62-ac02-b5152d34fb83
-      name: "ADExplorer Writing Complete AD Snapshot Into .dat File"
-      reason: "next kill-chain tactic: Discovery"
-    - id: 1ea13e8c-03ea-409b-877d-ce5c3d2c1cb3
-      name: "ADFS Database Named Pipe Connection By Uncommon Tool"
-      reason: "next kill-chain tactic: Collection"
-    - id: 75bf09fa-1dd7-4d18-9af9-dd9e492562eb
-      name: "ADSI-Cache File Creation By Uncommon Tool"
-      reason: "next kill-chain tactic: Command and Control"
-    - id: 33a2d1dd-f3b0-40bd-8baf-7974468927cc
-      name: "APT PRIVATELOG Image Load Pattern"
-      reason: "next kill-chain tactic: Privilege Escalation"
-    - id: 03e2746e-2b31-42f1-ab7a-eb39365b2422
-      name: "APT31 Judgement Panda Activity"
-      reason: "next kill-chain tactic: Credential Access"
+  - id: 6309645e-122d-4c5b-bb2b-22e4f9c2fa42
+    name: HackTool - Potential CobaltStrike Process Injection
+    reason: 'The injection this pipe serves: a Beacon''s postex_* pipe is the IPC channel to a sacrificial process it just injected into via CreateRemoteThread (EID8). Same beacon, same host, same minute.'
+  - id: f35c5d71-b489-4e22-a115-f003df287317
+    name: Potential CobaltStrike Process Patterns
+    reason: The spawnto/sacrificial process (rundll32, dllhost, gpupdate) a Beacon forks for fork&run jobs is exactly the process that opens these postex_* named pipes - the parent side of this event.
+  - id: ae9c6a7c-9521-42a6-915e-5aaa8689d529
+    name: CobaltStrike Load by Rundll32
+    reason: 'Precursor: how the Beacon DLL was loaded/launched before it began opening its default pipes. Finding it on the same host dates the initial execution.'
+  - id: 961d0ba2-3eea-4303-a930-2cf78bbfcc5e
+    name: HackTool - Credential Dumping Tools Named Pipe Created
+    reason: The most common postex job run over a postex_* pipe is LSASS/credential dumping; a dumping tool leaving its own named pipe on this host confirms the beacon moved to credential access.
+  - id: 9bd04a79-dabe-4f1f-a5ff-92430265c96b
+    name: Privilege Escalation via Named Pipe Impersonation
+    reason: getsystem via a 'cmd /c echo > \\.\pipe\<name>' named-pipe impersonation - a beacon's likely next privesc and itself a named-pipe technique, so it pairs directly with this pipe event on the same host.
+  - id: d7a95147-145f-4678-b85d-d1ff4a3bb3f6
+    name: CobaltStrike Service Installations - Security
+    reason: A Beacon doing jump psexec / SYSTEM elevation installs a service (EID4697) running an encoded payload; it co-occurs with the SMB-beacon pipes (msagent_*, status_*) this rule matches.
+  - id: 586a8d6b-6bfe-4ad9-9d78-888cd2fe50c3
+    name: Remote Service Activity via SVCCTL Named Pipe
+    reason: psexec-style remote service creation over SMB IPC$/svcctl (EID5145) is the lateral movement a linked SMB Beacon performs; the srvsvc_*/samr_* RPC-mimic pipes here are the same lateral-movement surface.
+  - id: 85adeb13-4fc9-4e68-8a4a-c7cb2c336eb7
+    name: CobaltStrike Named Pipe Patterns
+    reason: Sibling detection that catches operator-customized (malleable C2 profile) pipe names this default-pattern rule would miss; a hit expands the same beacon's pipe footprint and raises confidence.
   window: 1h
   enrichment_searches:
-  # Rule-specific telemetry pivots the engine runs around an alert from this rule,
-  # scoped to the alert's host/user/IP within the window (behaviour-targeted, not a sweep).
-    - name: "Process injection / remote-thread & LSASS access on this host"
-      query: '((data_win_system_eventID:"8") OR (data_win_system_eventID:"10" AND data_win_eventdata_targetImage:/.*(\\[Ll][Ss][Aa][Ss][Ss]\.[Ee][Xx][Ee])/) OR (data_win_system_eventID:"1" AND (data_win_eventdata_commandLine:/.*[Cc][Rr][Ee][Aa][Tt][Ee][Rr][Ee][Mm][Oo][Tt][Ee][Tt][Hh][Rr][Ee][Aa][Dd].*/ OR data_win_eventdata_commandLine:/.*[Vv][Ii][Rr][Tt][Uu][Aa][Ll][Aa][Ll][Ll][Oo][Cc][Ee][Xx].*/ OR data_win_eventdata_commandLine:/.*[Ww][Rr][Ii][Tt][Ee][Pp][Rr][Oo][Cc][Ee][Ss][Ss][Mm][Ee][Mm][Oo][Rr][Yy].*/)))'
-      pivot_on: [host]
-      window: 1h
-    - name: "Memory/credential-dump creation & LSASS access on this host"
-      query: '((data_win_system_eventID:"1" AND data_win_eventdata_image:/.*(\\[Pp][Rr][Oo][Cc][Dd][Uu][Mm][Pp]\.[Ee][Xx][Ee]|\\[Pp][Rr][Oo][Cc][Dd][Uu][Mm][Pp]64\.[Ee][Xx][Ee]|\\[Ss][Qq][Ll][Dd][Uu][Mm][Pp][Ee][Rr]\.[Ee][Xx][Ee]|\\[Cc][Rr][Ee][Aa][Tt][Ee][Dd][Uu][Mm][Pp]\.[Ee][Xx][Ee]|\\[Rr][Dd][Rr][Ll][Ee][Aa][Kk][Dd][Ii][Aa][Gg]\.[Ee][Xx][Ee]|\\[Dd][Uu][Mm][Pp][Ee][Rr][Tt]\.[Ee][Xx][Ee]|\\[Nn][Aa][Nn][Oo][Dd][Uu][Mm][Pp]\.[Ee][Xx][Ee]|\\[Aa][Vv][Dd][Uu][Mm][Pp]\.[Ee][Xx][Ee])/) OR (data_win_system_eventID:"1" AND (data_win_eventdata_commandLine:/.*[Cc][Oo][Mm][Ss][Vv][Cc][Ss]\.[Dd][Ll][Ll].*/ OR data_win_eventdata_commandLine:/.*[Mm][Ii][Nn][Ii][Dd][Uu][Mm][Pp].*/ OR data_win_eventdata_commandLine:/.*[Dd][Uu][Mm][Pp][Ee][Rr][Tt].*/ OR data_win_eventdata_commandLine:/.*[Nn][Aa][Nn][Oo][Dd][Uu][Mm][Pp].*/ OR data_win_eventdata_commandLine:/.*[Ll][Ss][Aa][Ss][Ss].*/ OR data_win_eventdata_commandLine:/.*[Ss][Ee][Kk][Uu][Rr][Ll][Ss][Aa].*/ OR data_win_eventdata_commandLine:/.*[Nn][Tt][Dd][Ss]\.[Dd][Ii][Tt].*/ OR data_win_eventdata_commandLine:/.*[Nn][Tt][Dd][Ss][Uu][Tt][Ii][Ll].*/)) OR (data_win_system_eventID:"10" AND data_win_eventdata_targetImage:/.*(\\[Ll][Ss][Aa][Ss][Ss]\.[Ee][Xx][Ee])/))'
-      pivot_on: [host]
-      window: 1h
-    - name: "Remote-execution / lateral-movement tooling on this host"
-      query: '(data_win_system_eventID:"1" AND data_win_eventdata_image:/.*(\\[Pp][Ss][Ee][Xx][Ee][Cc]\.[Ee][Xx][Ee]|\\[Pp][Ss][Ee][Xx][Ee][Ss][Vv][Cc]\.[Ee][Xx][Ee]|\\[Pp][Aa][Ee][Xx][Ee][Cc]\.[Ee][Xx][Ee]|\\[Ww][Ii][Nn][Rr][Ss]\.[Ee][Xx][Ee]|\\[Mm][Ss][Tt][Ss][Cc]\.[Ee][Xx][Ee]|\\[Ww][Mm][Ii][Cc]\.[Ee][Xx][Ee])/) OR (data_win_system_eventID:"1" AND data_win_eventdata_image:/.*(\\[Pp][Oo][Ww][Ee][Rr][Ss][Hh][Ee][Ll][Ll]\.[Ee][Xx][Ee]|\\[Pp][Ww][Ss][Hh]\.[Ee][Xx][Ee])/ AND (data_win_eventdata_commandLine:/.*[Ii][Nn][Vv][Oo][Kk][Ee]-[Cc][Oo][Mm][Mm][Aa][Nn][Dd].*/ OR data_win_eventdata_commandLine:/.*[Nn][Ee][Ww]-[Pp][Ss][Ss][Ee][Ss][Ss][Ii][Oo][Nn].*/ OR data_win_eventdata_commandLine:/.*[Ee][Nn][Tt][Ee][Rr]-[Pp][Ss][Ss][Ee][Ss][Ss][Ii][Oo][Nn].*/ OR data_win_eventdata_commandLine:/.*-[Cc][Oo][Mm][Pp][Uu][Tt][Ee][Rr][Nn][Aa][Mm][Ee].*/))'
-      pivot_on: [host]
-      window: 2h
-    - name: "Process injection / LSASS access on this host"
-      query: '((data_win_system_eventID:"8") OR (data_win_system_eventID:"10" AND data_win_eventdata_targetImage:/.*(\\[Ll][Ss][Aa][Ss][Ss]\.[Ee][Xx][Ee])/) OR (data_win_system_eventID:"1" AND (data_win_eventdata_commandLine:/.*[Cc][Rr][Ee][Aa][Tt][Ee][Rr][Ee][Mm][Oo][Tt][Ee][Tt][Hh][Rr][Ee][Aa][Dd].*/ OR data_win_eventdata_commandLine:/.*[Vv][Ii][Rr][Tt][Uu][Aa][Ll][Aa][Ll][Ll][Oo][Cc][Ee][Xx].*/ OR data_win_eventdata_commandLine:/.*[Ww][Rr][Ii][Tt][Ee][Pp][Rr][Oo][Cc][Ee][Ss][Ss][Mm][Ee][Mm][Oo][Rr][Yy].*/)))'
-      pivot_on: [host]
-      window: 1h
+  # Behaviour-targeted hunts the engine runs around the alert (not a sweep).
+  - name: Process injection & CS-typical LSASS/handle access on this host
+    query: (data_win_system_eventID:"8") OR (data_win_system_eventID:"10" AND (data_win_eventdata_grantedAccess:/0[Xx]1[Ff][Ff][Ff][Ff][Ff]/ OR data_win_eventdata_grantedAccess:/0[Xx]1[Ff]3[Ff][Ff][Ff]/ OR data_win_eventdata_callTrace:/.*[Uu][Nn][Kk][Nn][Oo][Ww][Nn].*/))
+    pivot_on:
+    - host
+    window: 1h
+  - name: LSASS credential dumping (postex job) on this host
+    query: (data_win_system_eventID:"10" AND data_win_eventdata_targetImage:/.*\\[Ll][Ss][Aa][Ss][Ss]\.[Ee][Xx][Ee]/) OR (data_win_system_eventID:"1" AND (data_win_eventdata_commandLine:/.*[Cc][Oo][Mm][Ss][Vv][Cc][Ss]\.[Dd][Ll][Ll].*/ OR data_win_eventdata_commandLine:/.*[Mm][Ii][Nn][Ii][Dd][Uu][Mm][Pp].*/ OR data_win_eventdata_commandLine:/.*[Ss][Ee][Kk][Uu][Rr][Ll][Ss][Aa].*/ OR data_win_eventdata_commandLine:/.*[Ll][Oo][Gg][Oo][Nn][Pp][Aa][Ss][Ss][Ww][Oo][Rr][Dd][Ss].*/))
+    pivot_on:
+    - host
+    window: 1h
+  - name: C2 egress from a sacrificial/LOLBin spawnto process on this host
+    query: data_win_system_eventID:"3" AND (data_win_eventdata_image:/.*\\[Rr][Uu][Nn][Dd][Ll][Ll]32\.[Ee][Xx][Ee]/ OR data_win_eventdata_image:/.*\\[Dd][Ll][Ll][Hh][Oo][Ss][Tt]\.[Ee][Xx][Ee]/ OR data_win_eventdata_image:/.*\\[Gg][Pp][Uu][Pp][Dd][Aa][Tt][Ee]\.[Ee][Xx][Ee]/ OR data_win_eventdata_image:/.*\\[Rr][Ee][Gg][Ss][Vv][Rr]32\.[Ee][Xx][Ee]/ OR data_win_eventdata_image:/.*\\[Ww][Ee][Rr][Ff][Aa][Uu][Ll][Tt]\.[Ee][Xx][Ee]/)
+    pivot_on:
+    - host
+    window: 2h
+  - name: SMB lateral movement / psexec service child on this host
+    query: (data_win_system_eventID:"3" AND data_win_eventdata_destinationPort:"445") OR (data_win_system_eventID:"1" AND data_win_eventdata_parentImage:/.*\\[Ss][Ee][Rr][Vv][Ii][Cc][Ee][Ss]\.[Ee][Xx][Ee]/ AND (data_win_eventdata_image:/.*\\[Cc][Mm][Dd]\.[Ee][Xx][Ee]/ OR data_win_eventdata_image:/.*\\[Pp][Oo][Ww][Ee][Rr][Ss][Hh][Ee][Ll][Ll]\.[Ee][Xx][Ee]/ OR data_win_eventdata_image:/.*\\[Rr][Uu][Nn][Dd][Ll][Ll]32\.[Ee][Xx][Ee]/))
+    pivot_on:
+    - host
+    window: 2h
+  - name: AD / domain discovery (samr/netlogon/lsarpc pipe recon) on this host
+    query: data_win_system_eventID:"1" AND (data_win_eventdata_image:/.*\\[Nn][Ee][Tt]1?\.[Ee][Xx][Ee]/ OR data_win_eventdata_image:/.*\\[Nn][Ll][Tt][Ee][Ss][Tt]\.[Ee][Xx][Ee]/ OR data_win_eventdata_image:/.*\\[Dd][Ss][Qq][Uu][Ee][Rr][Yy]\.[Ee][Xx][Ee]/ OR data_win_eventdata_image:/.*\\[Ww][Hh][Oo][Aa][Mm][Ii]\.[Ee][Xx][Ee]/ OR data_win_eventdata_commandLine:/.*[Nn][Ee][Tt] [Gg][Rr][Oo][Uu][Pp].*/ OR data_win_eventdata_commandLine:/.*[Dd][Oo][Mm][Aa][Ii][Nn] [Aa][Dd][Mm][Ii][Nn][Ss].*/ OR data_win_eventdata_commandLine:/.*-[Cc][Oo][Ll][Ll][Ee][Cc][Tt][Ii][Oo][Nn][Mm][Ee][Tt][Hh][Oo][Dd].*/)
+    pivot_on:
+    - host
+    window: 4h

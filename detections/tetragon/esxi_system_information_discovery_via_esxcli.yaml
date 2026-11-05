@@ -160,23 +160,58 @@ graylog:
   query: data_process_exec_process_binary:/.*\/[Ee][Ss][Xx][Cc][Ll][Ii]/ AND data_process_exec_process_arguments:/.*[Ss][Yy][Ss][Tt][Ee][Mm].*/ AND (data_process_exec_process_arguments:/.* [Gg][Ee][Tt].*/ OR data_process_exec_process_arguments:/.* [Ll][Ii][Ss][Tt].*/)
 
 correlation:
-  # Authored by the correlation engine for review.
+  # Authored per-rule (behaviour-researched) for the correlation engine. Related CoPilot
+  # Searches + telemetry pivots to run around an alert, scoped to its host/user/ip/domain.
+  related_rules:
+  - id: 2992ac4d-31e9-4325-99f2-b18a73221bb2
+    name: ESXi VM Kill Via ESXCLI
+    reason: 'The impact precursor and highest-value escalation after this recon: once the operator has profiled the host they run `esxcli vm process kill` to power off running VMs, releasing the file locks on the .vmdk/.vmx files so the datastore can be encrypted. Recon on this host followed by VM-kill is the ESXi ransomware chain in progress.'
+  - id: 5f1573a7-363b-4114-9208-ad7a61de46eb
+    name: ESXi VM List Discovery Via ESXCLI
+    reason: 'Co-occurring reconnaissance in the same burst: `esxcli vm` enumerates the installed/running VMs, which is the list of targets the attacker will power off and encrypt. System-info and VM-list discovery are routinely chained back-to-back when profiling a hypervisor.'
+  - id: f41dada5-3f56-4232-8503-3fb7f9cf2d60
+    name: ESXi Storage Information Discovery Via ESXCLI
+    reason: Co-occurring reconnaissance that locates the datastores (the /vmfs/volumes holding the VMDKs to encrypt); this detection's own rule notes it is seen used by DarkSide and LockBit. Finding the storage is the step that turns host recon into an encryption target list.
+  - id: 33e814e0-1f00-4e43-9c34-31fb7ae2b174
+    name: ESXi Network Configuration Discovery Via ESXCLI
+    reason: 'Co-occurring reconnaissance in the same profiling sweep: `esxcli network` maps the management network and interfaces, used to understand the host and plan lateral movement to vCenter/other ESXi hosts. Fires on the same host/session as system-info discovery.'
+  - id: b28e4eb3-8bbc-4f0c-819f-edfe8e2f25db
+    name: ESXi Account Creation Via ESXCLI
+    reason: 'Persistence follow-on using the same `esxcli system` namespace: after enumerating existing accounts with system discovery, the attacker runs `esxcli system account add` to plant a backdoor local account on the host. Recon of accounts then creation of one is a direct causal sequence.'
+  - id: 9691f58d-92c1-4416-8bf3-2edd753ec9cf
+    name: ESXi Admin Permission Assigned To Account Via ESXCLI
+    reason: 'Privilege-escalation follow-on paired with account creation: `esxcli system permission set` grants Admin to the account the attacker just planted, giving full control of the hypervisor. Same `system` namespace as this discovery and the next step in establishing durable admin access.'
+  - id: 38eb1dbb-011f-40b1-a126-cf03a0210563
+    name: ESXi Syslog Configuration Change Via ESXCLI
+    reason: 'Defense-evasion / anti-forensics follow-on in the same `esxcli system` namespace: `esxcli system syslog config set` redirects or disables log forwarding so the imminent VM-kill and encryption are not shipped off-host. Operators tamper with logging after recon and before impact.'
+  - id: 8737b7f6-8df3-4bb7-b1da-06019b99b687
+    name: Shell Invocation Via Ssh - Linux
+    reason: 'Likely precursor that delivers the interactive session issuing these esxcli commands: ssh used to spawn/break out to an unrestricted shell (ProxyCommand/LocalCommand/localhost tricks) is how an operator escapes the restricted ESXi/DCUI shell. Seeing this on the host just before the esxcli recon explains how the attacker got hands-on access.'
+  window: 2h
   enrichment_searches:
-  # Rule-specific telemetry pivots the engine runs around an alert from this rule,
-  # scoped to the alert's host/user/IP within the window (behaviour-targeted, not a sweep).
-    - name: "Shell / interpreter execution on this host"
-      query: '((data_process_exec_process_binary:/.*(\/[Bb][Aa][Ss][Hh]|\/[Ss][Hh]|\/[Dd][Aa][Ss][Hh]|\/[Zz][Ss][Hh]|\/[Kk][Ss][Hh]|\/[Aa][Ss][Hh]|\/[Bb][Uu][Ss][Yy][Bb][Oo][Xx])/) OR (data_process_exec_process_binary:/.*(\/[Pp][Yy][Tt][Hh][Oo][Nn]|\/[Pp][Yy][Tt][Hh][Oo][Nn]3|\/[Pp][Ee][Rr][Ll]|\/[Rr][Uu][Bb][Yy]|\/[Pp][Hh][Pp]|\/[Nn][Oo][Dd][Ee]|\/[Ll][Uu][Aa]|\/[Aa][Ww][Kk])/))'
-      pivot_on: [host]
-      window: 1h
-    - name: "User / owner reconnaissance commands on this host"
-      query: 'data_process_exec_process_binary:/.*(\/[Ww][Hh][Oo][Aa][Mm][Ii]|\/[Ii][Dd]|\/[Uu][Nn][Aa][Mm][Ee]|\/[Hh][Oo][Ss][Tt][Nn][Aa][Mm][Ee]|\/[Hh][Oo][Ss][Tt][Nn][Aa][Mm][Ee][Cc][Tt][Ll]|\/[Ss][Ss]|\/[Nn][Ee][Tt][Ss][Tt][Aa][Tt]|\/[Ii][Ff][Cc][Oo][Nn][Ff][Ii][Gg]|\/[Aa][Rr][Pp]|\/[Ww]|\/[Ww][Hh][Oo]|\/[Ll][Aa][Ss][Tt]|\/[Ll][Ss][Oo][Ff]|\/[Nn][Mm][Aa][Pp]|\/[Dd][Ii][Gg]|\/[Ff][Ii][Nn][Dd])/'
-      pivot_on: [host]
-      window: 1h
-    - name: "Other executions of this tool-set on this host (any arguments)"
-      query: 'data_process_exec_process_binary:/.*(\/[Ee][Ss][Xx][Cc][Ll][Ii])/'
-      pivot_on: [host]
-      window: 2h
-    - name: "Persistence via cron / systemd / shell profiles on this host"
-      query: '((data_process_exec_process_binary:/.*(\/[Cc][Rr][Oo][Nn][Tt][Aa][Bb]|\/[Ss][Yy][Ss][Tt][Ee][Mm][Cc][Tt][Ll]|\/[Aa][Tt]|\/[Uu][Pp][Dd][Aa][Tt][Ee]-[Rr][Cc]\.[Dd])/) OR (data_process_exec_process_arguments:/.*\/[Ee][Tt][Cc]\/[Cc][Rr][Oo][Nn].*/) OR (data_process_exec_process_arguments:/.*\/[Ee][Tt][Cc]\/[Ss][Yy][Ss][Tt][Ee][Mm][Dd].*/) OR (data_process_exec_process_arguments:/.*[Rr][Cc]\.[Ll][Oo][Cc][Aa][Ll].*/) OR (data_process_exec_process_arguments:/.*\.[Bb][Aa][Ss][Hh][Rr][Cc].*/) OR (data_process_exec_process_arguments:/.*\.[Bb][Aa][Ss][Hh]_[Pp][Rr][Oo][Ff][Ii][Ll][Ee].*/) OR (data_process_exec_process_arguments:/.*\/[Ee][Tt][Cc]\/[Pp][Rr][Oo][Ff][Ii][Ll][Ee].*/) OR (data_process_exec_process_arguments:/.*[Aa][Uu][Tt][Hh][Oo][Rr][Ii][Zz][Ee][Dd]_[Kk][Ee][Yy][Ss].*/) OR (data_process_exec_process_arguments:/.*\/[Ee][Tt][Cc]\/[Ii][Nn][Ii][Tt]\.[Dd].*/))'
-      pivot_on: [host]
-      window: 4h
+  # Behaviour-targeted hunts the engine runs around the alert (not a sweep).
+  - name: Broader ESXi esxcli reconnaissance burst on this host
+    query: data_process_exec_process_binary:/.*\/[Ee][Ss][Xx][Cc][Ll][Ii]/ AND (data_process_exec_process_arguments:/.*[Vv][Mm] .*/ OR data_process_exec_process_arguments:/.*[Ss][Tt][Oo][Rr][Aa][Gg][Ee].*/ OR data_process_exec_process_arguments:/.*[Nn][Ee][Tt][Ww][Oo][Rr][Kk].*/ OR data_process_exec_process_arguments:/.*[Vv][Ss][Aa][Nn].*/ OR data_process_exec_process_arguments:/.*[Hh][Aa][Rr][Dd][Ww][Aa][Rr][Ee].*/ OR data_process_exec_process_arguments:/.*[Ss][Oo][Ff][Tt][Ww][Aa][Rr][Ee].*/)
+    pivot_on:
+    - host
+    window: 2h
+  - name: ESXi VM power-off / kill (impact precursor) on this host
+    query: (data_process_exec_process_binary:/.*\/[Ee][Ss][Xx][Cc][Ll][Ii]/ AND data_process_exec_process_arguments:/.*[Vv][Mm] [Pp][Rr][Oo][Cc][Ee][Ss][Ss].*/ AND data_process_exec_process_arguments:/.*[Kk][Ii][Ll][Ll].*/) OR (data_process_exec_process_binary:/.*\/[Vv][Ii][Mm]-[Cc][Mm][Dd]/ AND data_process_exec_process_arguments:/.*[Pp][Oo][Ww][Ee][Rr]\.[Oo][Ff][Ff].*/) OR (data_process_exec_process_binary:/.*\/[Vv][Ii][Mm]-[Cc][Mm][Dd]/ AND data_process_exec_process_arguments:/.*[Pp][Oo][Ww][Ee][Rr]\.[Ss][Hh][Uu][Tt][Dd][Oo][Ww][Nn].*/)
+    pivot_on:
+    - host
+    window: 4h
+  - name: ESXi persistence / privilege / logging / firewall tampering via esxcli on this host
+    query: data_process_exec_process_binary:/.*\/[Ee][Ss][Xx][Cc][Ll][Ii]/ AND (data_process_exec_process_arguments:/.*[Aa][Cc][Cc][Oo][Uu][Nn][Tt] [Aa][Dd][Dd].*/ OR data_process_exec_process_arguments:/.*[Pp][Ee][Rr][Mm][Ii][Ss][Ss][Ii][Oo][Nn].*/ OR data_process_exec_process_arguments:/.*[Ss][Yy][Ss][Ll][Oo][Gg].*/ OR data_process_exec_process_arguments:/.*[Ff][Ii][Rr][Ee][Ww][Aa][Ll][Ll].*/)
+    pivot_on:
+    - host
+    window: 6h
+  - name: Interactive shell / SSH session context on this host
+    query: data_process_exec_process_binary:/.*(\/[Ss][Ss][Hh][Dd]|\/[Ss][Ss][Hh]|\/[Dd][Rr][Oo][Pp][Bb][Ee][Aa][Rr]|\/[Bb][Uu][Ss][Yy][Bb][Oo][Xx]|\/[Aa][Ss][Hh]|\/[Bb][Aa][Ss][Hh]|\/[Ss][Hh])/
+    pivot_on:
+    - host
+    window: 1h
+  - name: ESXi datastore access / encryptor staging on this host
+    query: (data_process_exec_process_arguments:/.*\/[Vv][Mm][Ff][Ss]\/[Vv][Oo][Ll][Uu][Mm][Ee][Ss]\/.*/) OR (data_process_exec_process_binary:/.*\/[Tt][Mm][Pp]\/.*/) OR (data_process_exec_process_binary:/.*\/[Oo][Pp][Ee][Nn][Ss][Ss][Ll]/ AND data_process_exec_process_arguments:/.*[Ee][Nn][Cc].*/)
+    pivot_on:
+    - host
+    window: 6h

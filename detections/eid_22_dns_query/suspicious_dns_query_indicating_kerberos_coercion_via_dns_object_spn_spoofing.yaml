@@ -148,48 +148,58 @@ graylog:
   query: data_win_system_eventID:"22" AND data_win_eventdata_queryName:/.*[Uu][Ww][Hh][Rr][Cc][Aa].*/ AND data_win_eventdata_queryName:/.*[Bb][Aa][Aa][Aa][Aa].*/
 
 correlation:
-  # Authored by the correlation engine for review. Related CoPilot Searches to run
-  # around an alert from this rule, scoped to the same host/user/IP within the window.
+  # Authored per-rule (behaviour-researched) for the correlation engine. Related CoPilot
+  # Searches + telemetry pivots to run around an alert, scoped to its host/user/ip/domain.
   related_rules:
-    - id: ec570e53-4c76-45a9-804d-dc3f355ff7a7
-      name: "7Zip Compressing Dump Files"
-      reason: "next kill-chain tactic: Collection"
-    - id: 0a1255c5-d732-4b62-ac02-b5152d34fb83
-      name: "ADExplorer Writing Complete AD Snapshot Into .dat File"
-      reason: "next kill-chain tactic: Discovery"
-    - id: 1ea13e8c-03ea-409b-877d-ce5c3d2c1cb3
-      name: "ADFS Database Named Pipe Connection By Uncommon Tool"
-      reason: "next kill-chain tactic: Collection"
-    - id: 75bf09fa-1dd7-4d18-9af9-dd9e492562eb
-      name: "ADSI-Cache File Creation By Uncommon Tool"
-      reason: "next kill-chain tactic: Command and Control"
-    - id: 03e2746e-2b31-42f1-ab7a-eb39365b2422
-      name: "APT31 Judgement Panda Activity"
-      reason: "next kill-chain tactic: Credential Access"
-    - id: fc028194-969d-4122-8abe-0470d5b8f12f
-      name: "Access to Browser Login Data"
-      reason: "next kill-chain tactic: Credential Access"
-  window: 1h
+  - id: b07e58cf-cacc-4135-8473-ccb2eba63dd2
+    name: Potential Kerberos Coercion by Spoofing SPNs via DNS Manipulation
+    reason: 'Upstream root cause: the attacker plants this same marshaled CREDENTIAL_TARGET_INFORMATION blob as a dnsNode record in AD (Security 5136/5137); this DNS-query rule fires when the coerced victim later resolves that spoofed SPN name.'
+  - id: 0ed99dda-6a35-11ef-8c99-0242ac120002
+    name: Attempts of Kerberos Coercion Via DNS SPN Spoofing
+    reason: 'Process-creation twin of this detection: the identical UWhRC..BAAAA signature in a command line (tool adding the spoofed SPN, or nslookup checking it) - if both fire on the host the coercion tooling ran locally.'
+  - id: 1ce8c8a3-2723-48ed-8246-906ac91061a6
+    name: Possible PetitPotam Coerce Authentication Attempt
+    reason: 'Coercion precursor: PetitPotam EFSRPC/lsarpc over IPC$ is how the victim is forced to authenticate to the spoofed SPN that this query resolves, completing the CVE-2025-33073 reflection.'
+  - id: bb76d96b-821c-47cf-944b-7ce377864492
+    name: Suspicious NTLM Authentication on the Printer Spooler Service
+    reason: Alternate coercion vector (WebDAV/PrinterBug via davclnt DavSetCookie) that forces the victim's authentication which CVE-2025-33073 reflects off the spoofed DNS SPN resolved here.
+  - id: a7664b14-75fb-4a50-a223-cb9bc0afbacf
+    name: HackTool - RemoteKrbRelay Execution
+    reason: RemoteKrbRelay implements the DNS-SPN-spoofing Kerberos relay (CVE-2025-33073 family) that generates this crafted query name and relays the reflected authentication to the victim.
+  - id: 12827a56-61a4-476a-a9cb-f3068f191073
+    name: HackTool - KrbRelayUp Execution
+    reason: Sibling local-privesc tool built on the same Kerberos-relay primitive; its execution on the host means the coercion-and-reflection chain is being driven to local SYSTEM.
+  - id: 749c9f5e-b353-4b90-a9c1-05243357ca4b
+    name: Potential Privilege Escalation via Local Kerberos Relay over LDAP
+    reason: 'Reflection payoff on the same host: a localhost (127.0.0.1) Kerberos logon as the built-in local administrator - the elevated session the spoofed-SPN coercion is designed to yield.'
+  - id: e97d9903-53b2-41fc-8cb9-889ed4093e80
+    name: KrbRelayUp Service Installation
+    reason: 'Cash-out/persistence follow-on: the KrbSCM service (System 7045) installed to run as SYSTEM once the Kerberos relay escalation that this DNS query is part of succeeds.'
+  window: 2h
   enrichment_searches:
-  # Rule-specific telemetry pivots the engine runs around an alert from this rule,
-  # scoped to the alert's host/user/IP within the window (behaviour-targeted, not a sweep).
-    - name: "Remote-execution / lateral-movement tooling on this host"
-      query: '(data_win_system_eventID:"1" AND data_win_eventdata_image:/.*(\\[Pp][Ss][Ee][Xx][Ee][Cc]\.[Ee][Xx][Ee]|\\[Pp][Ss][Ee][Xx][Ee][Ss][Vv][Cc]\.[Ee][Xx][Ee]|\\[Pp][Aa][Ee][Xx][Ee][Cc]\.[Ee][Xx][Ee]|\\[Ww][Ii][Nn][Rr][Ss]\.[Ee][Xx][Ee]|\\[Mm][Ss][Tt][Ss][Cc]\.[Ee][Xx][Ee]|\\[Ww][Mm][Ii][Cc]\.[Ee][Xx][Ee])/) OR (data_win_system_eventID:"1" AND data_win_eventdata_image:/.*(\\[Pp][Oo][Ww][Ee][Rr][Ss][Hh][Ee][Ll][Ll]\.[Ee][Xx][Ee]|\\[Pp][Ww][Ss][Hh]\.[Ee][Xx][Ee])/ AND (data_win_eventdata_commandLine:/.*[Ii][Nn][Vv][Oo][Kk][Ee]-[Cc][Oo][Mm][Mm][Aa][Nn][Dd].*/ OR data_win_eventdata_commandLine:/.*[Nn][Ee][Ww]-[Pp][Ss][Ss][Ee][Ss][Ss][Ii][Oo][Nn].*/ OR data_win_eventdata_commandLine:/.*[Ee][Nn][Tt][Ee][Rr]-[Pp][Ss][Ss][Ee][Ss][Ss][Ii][Oo][Nn].*/ OR data_win_eventdata_commandLine:/.*-[Cc][Oo][Mm][Pp][Uu][Tt][Ee][Rr][Nn][Aa][Mm][Ee].*/))'
-      pivot_on: [host]
-      window: 2h
-    - name: "Other hosts resolving or connecting to the same domain (campaign)"
-      query: '(data_win_system_eventID:"22" OR data_win_system_eventID:"3")'
-      pivot_on: [domain]
-      window: 24h
-    - name: "DNS queries by script interpreters / LOLBins on this host"
-      query: 'data_win_system_eventID:"22" AND (data_win_eventdata_image:/.*(\\[Pp][Oo][Ww][Ee][Rr][Ss][Hh][Ee][Ll][Ll]\.[Ee][Xx][Ee]|\\[Pp][Ww][Ss][Hh]\.[Ee][Xx][Ee]|\\[Pp][Oo][Ww][Ee][Rr][Ss][Hh][Ee][Ll][Ll]_[Ii][Ss][Ee]\.[Ee][Xx][Ee]|\\[Cc][Mm][Dd]\.[Ee][Xx][Ee]|\\[Ww][Ss][Cc][Rr][Ii][Pp][Tt]\.[Ee][Xx][Ee]|\\[Cc][Ss][Cc][Rr][Ii][Pp][Tt]\.[Ee][Xx][Ee]|\\[Mm][Ss][Hh][Tt][Aa]\.[Ee][Xx][Ee]|\\[Rr][Uu][Nn][Dd][Ll][Ll]32\.[Ee][Xx][Ee]|\\[Rr][Ee][Gg][Ss][Vv][Rr]32\.[Ee][Xx][Ee]|\\[Mm][Ss][Hh][Tt][Aa]\.[Ee][Xx][Ee]|\\[Ii][Nn][Ss][Tt][Aa][Ll][Ll][Uu][Tt][Ii][Ll]\.[Ee][Xx][Ee]|\\[Rr][Ee][Gg][Aa][Ss][Mm]\.[Ee][Xx][Ee]|\\[Rr][Ee][Gg][Ss][Vv][Cc][Ss]\.[Ee][Xx][Ee]|\\[Mm][Ss][Bb][Uu][Ii][Ll][Dd]\.[Ee][Xx][Ee]|\\[Cc][Ee][Rr][Tt][Uu][Tt][Ii][Ll]\.[Ee][Xx][Ee]|\\[Bb][Ii][Tt][Ss][Aa][Dd][Mm][Ii][Nn]\.[Ee][Xx][Ee]|\\[Ww][Mm][Ii][Cc]\.[Ee][Xx][Ee]|\\[Cc][Mm][Ss][Tt][Pp]\.[Ee][Xx][Ee])/ OR data_win_eventdata_image:/.*(\\[Oo][Dd][Bb][Cc][Cc][Oo][Nn][Ff]\.[Ee][Xx][Ee]|\\[Ff][Oo][Rr][Ff][Ii][Ll][Ee][Ss]\.[Ee][Xx][Ee]|\\[Pp][Cc][Aa][Ll][Uu][Aa]\.[Ee][Xx][Ee]|\\[Mm][Aa][Vv][Ii][Nn][Jj][Ee][Cc][Tt]\.[Ee][Xx][Ee]|\\[Ss][Cc][Rr][Ii][Pp][Tt][Rr][Uu][Nn][Nn][Ee][Rr]\.[Ee][Xx][Ee])/)'
-      pivot_on: [host]
-      window: 1h
-    - name: "Downloader / C2 tooling executed on this host"
-      query: '(data_win_system_eventID:"1" AND data_win_eventdata_image:/.*(\\[Cc][Ee][Rr][Tt][Uu][Tt][Ii][Ll]\.[Ee][Xx][Ee]|\\[Bb][Ii][Tt][Ss][Aa][Dd][Mm][Ii][Nn]\.[Ee][Xx][Ee]|\\[Cc][Uu][Rr][Ll]\.[Ee][Xx][Ee]|\\[Ww][Gg][Ee][Tt]\.[Ee][Xx][Ee])/) OR (data_win_eventdata_commandLine:/.*[Dd][Oo][Ww][Nn][Ll][Oo][Aa][Dd][Ss][Tt][Rr][Ii][Nn][Gg].*/ OR data_win_eventdata_commandLine:/.*[Dd][Oo][Ww][Nn][Ll][Oo][Aa][Dd][Ff][Ii][Ll][Ee].*/ OR data_win_eventdata_commandLine:/.*[Ii][Nn][Vv][Oo][Kk][Ee]-[Ww][Ee][Bb][Rr][Ee][Qq][Uu][Ee][Ss][Tt].*/ OR data_win_eventdata_commandLine:/.*[Nn][Ee][Tt]\.[Ww][Ee][Bb][Cc][Ll][Ii][Ee][Nn][Tt].*/ OR data_win_eventdata_commandLine:/.*[Ss][Tt][Aa][Rr][Tt]-[Bb][Ii][Tt][Ss][Tt][Rr][Aa][Nn][Ss][Ff][Ee][Rr].*/ OR data_win_eventdata_commandLine:/.*[Ii][Ww][Rr] .*/ OR data_win_eventdata_commandLine:/.*[Cc][Uu][Rr][Ll] .*/ OR data_win_eventdata_commandLine:/.*[Ww][Gg][Ee][Tt] .*/)'
-      pivot_on: [host]
-      window: 1h
-    - name: "Memory/credential-dump creation & LSASS access on this host"
-      query: '((data_win_system_eventID:"1" AND data_win_eventdata_image:/.*(\\[Pp][Rr][Oo][Cc][Dd][Uu][Mm][Pp]\.[Ee][Xx][Ee]|\\[Pp][Rr][Oo][Cc][Dd][Uu][Mm][Pp]64\.[Ee][Xx][Ee]|\\[Ss][Qq][Ll][Dd][Uu][Mm][Pp][Ee][Rr]\.[Ee][Xx][Ee]|\\[Cc][Rr][Ee][Aa][Tt][Ee][Dd][Uu][Mm][Pp]\.[Ee][Xx][Ee]|\\[Rr][Dd][Rr][Ll][Ee][Aa][Kk][Dd][Ii][Aa][Gg]\.[Ee][Xx][Ee]|\\[Dd][Uu][Mm][Pp][Ee][Rr][Tt]\.[Ee][Xx][Ee]|\\[Nn][Aa][Nn][Oo][Dd][Uu][Mm][Pp]\.[Ee][Xx][Ee]|\\[Aa][Vv][Dd][Uu][Mm][Pp]\.[Ee][Xx][Ee])/) OR (data_win_system_eventID:"1" AND (data_win_eventdata_commandLine:/.*[Cc][Oo][Mm][Ss][Vv][Cc][Ss]\.[Dd][Ll][Ll].*/ OR data_win_eventdata_commandLine:/.*[Mm][Ii][Nn][Ii][Dd][Uu][Mm][Pp].*/ OR data_win_eventdata_commandLine:/.*[Dd][Uu][Mm][Pp][Ee][Rr][Tt].*/ OR data_win_eventdata_commandLine:/.*[Nn][Aa][Nn][Oo][Dd][Uu][Mm][Pp].*/ OR data_win_eventdata_commandLine:/.*[Ll][Ss][Aa][Ss][Ss].*/ OR data_win_eventdata_commandLine:/.*[Ss][Ee][Kk][Uu][Rr][Ll][Ss][Aa].*/ OR data_win_eventdata_commandLine:/.*[Nn][Tt][Dd][Ss]\.[Dd][Ii][Tt].*/ OR data_win_eventdata_commandLine:/.*[Nn][Tt][Dd][Ss][Uu][Tt][Ii][Ll].*/)) OR (data_win_system_eventID:"10" AND data_win_eventdata_targetImage:/.*(\\[Ll][Ss][Aa][Ss][Ss]\.[Ee][Xx][Ee])/))'
-      pivot_on: [host]
-      window: 1h
+  # Behaviour-targeted hunts the engine runs around the alert (not a sweep).
+  - name: Inbound IPC$ coercion named-pipe authentication to this host
+    query: data_win_system_eventID:"5145" AND data_win_eventdata_shareName:/.*[Ii][Pp][Cc]\$/ AND (data_win_eventdata_relativeTargetName:/.*[Ll][Ss][Aa][Rr][Pp][Cc].*/ OR data_win_eventdata_relativeTargetName:/.*[Ee][Ff][Ss][Rr][Pp][Cc].*/ OR data_win_eventdata_relativeTargetName:/.*[Ee][Ff][Ss][Rr].*/ OR data_win_eventdata_relativeTargetName:/.*[Ss][Pp][Oo][Oo][Ll][Ss][Ss].*/ OR data_win_eventdata_relativeTargetName:/.*[Nn][Ee][Tt][Dd][Ff][Ss].*/ OR data_win_eventdata_relativeTargetName:/.*[Ss][Rr][Vv][Ss][Vv][Cc].*/)
+    pivot_on:
+    - host
+    window: 2h
+  - name: Marshaled SPN signature or Kerberos-relay / ADIDNS tooling on this host
+    query: (data_win_system_eventID:"1" AND data_win_eventdata_commandLine:/.*[Uu][Ww][Hh][Rr][Cc][Aa].*/ AND data_win_eventdata_commandLine:/.*[Bb][Aa][Aa][Aa][Aa].*/) OR (data_win_system_eventID:"1" AND (data_win_eventdata_image:/.*\\[Kk][Rr][Bb][Rr][Ee][Ll][Aa][Yy]\.[Ee][Xx][Ee]/ OR data_win_eventdata_image:/.*\\[Kk][Rr][Bb][Rr][Ee][Ll][Aa][Yy][Uu][Pp]\.[Ee][Xx][Ee]/ OR data_win_eventdata_image:/.*\\[Rr][Ee][Mm][Oo][Tt][Ee][Kk][Rr][Bb][Rr][Ee][Ll][Aa][Yy]\.[Ee][Xx][Ee]/ OR data_win_eventdata_commandLine:/.*[Ii][Nn][Vv][Oo][Kk][Ee]-[Dd][Nn][Ss][Uu][Pp][Dd][Aa][Tt][Ee].*/ OR data_win_eventdata_commandLine:/.*[Nn][Ee][Ww]-[Aa][Dd][Ii][Dd][Nn][Ss][Nn][Oo][Dd][Ee].*/ OR data_win_eventdata_commandLine:/.*[Dd][Nn][Ss][Tt][Oo][Oo][Ll].*/ OR data_win_eventdata_commandLine:/.*[Dd][Nn][Ss][Cc][Mm][Dd].*/))
+    pivot_on:
+    - host
+    window: 1h
+  - name: Localhost-reflected Kerberos network logon on this host
+    query: data_win_system_eventID:"4624" AND data_win_eventdata_authenticationPackageName:/[Kk][Ee][Rr][Bb][Ee][Rr][Oo][Ss]/ AND data_win_eventdata_ipAddress:"127.0.0.1" AND data_win_eventdata_logonType:"3"
+    pivot_on:
+    - host
+    window: 1h
+  - name: Privileged service installed on this host (relay cash-out)
+    query: data_win_system_eventID:"7045" AND (data_win_eventdata_serviceName:/.*[Kk][Rr][Bb][Ss][Cc][Mm].*/ OR data_win_eventdata_imagePath:/.*[Cc][Mm][Dd]\.[Ee][Xx][Ee].*/ OR data_win_eventdata_imagePath:/.*[Pp][Oo][Ww][Ee][Rr][Ss][Hh][Ee][Ll][Ll].*/ OR data_win_eventdata_imagePath:/.*[Cc][Oo][Mm][Ss][Pp][Ee][Cc].*/ OR data_win_eventdata_imagePath:/.*\\[Tt][Ee][Mm][Pp]\\.*/ OR data_win_eventdata_imagePath:/.*\\[Pp][Rr][Oo][Gg][Rr][Aa][Mm][Dd][Aa][Tt][Aa]\\.*/ OR data_win_eventdata_imagePath:/.*\\[Uu][Ss][Ee][Rr][Ss]\\[Pp][Uu][Bb][Ll][Ii][Cc]\\.*/)
+    pivot_on:
+    - host
+    window: 1h
+  - name: Same spoofed SPN name resolved by other hosts (campaign spread)
+    query: data_win_system_eventID:"22" AND data_win_eventdata_queryName:/.*[Uu][Ww][Hh][Rr][Cc][Aa].*/ AND data_win_eventdata_queryName:/.*[Bb][Aa][Aa][Aa][Aa].*/
+    pivot_on:
+    - domain
+    window: 24h

@@ -170,23 +170,58 @@ graylog:
   query: (data_process_exec_process_binary:/.*\/[Bb][Aa][Ss][Hh]/ OR data_process_exec_process_binary:/.*\/[Cc][Ss][Hh]/ OR data_process_exec_process_binary:/.*\/[Dd][Aa][Ss][Hh]/ OR data_process_exec_process_binary:/.*\/[Ff][Ii][Ss][Hh]/ OR data_process_exec_process_binary:/.*\/[Kk][Ss][Hh]/ OR data_process_exec_process_binary:/.*\/[Ss][Hh]/ OR data_process_exec_process_binary:/.*\/[Zz][Ss][Hh]/) AND data_process_exec_process_arguments:/.* -[Cc] .*/ AND data_process_exec_process_arguments:/.*\/[Tt][Mm][Pp]\/.*/
 
 correlation:
-  # Authored by the correlation engine for review.
+  # Authored per-rule (behaviour-researched) for the correlation engine. Related CoPilot
+  # Searches + telemetry pivots to run around an alert, scoped to its host/user/ip/domain.
+  related_rules:
+  - id: a2d9e2f3-0f43-4c7a-bcd9-9acfc0d723aa
+    name: Suspicious Download and Execute Pattern via Curl/Wget
+    reason: 'Precursor/superset of this exact event: curl or wget writing into /tmp or /dev/shm immediately followed by ''sh -c''. If it co-fired on this host, the script this rule just ran via sh -c IS the ''execute'' half of a confirmed download-and-run stager, not a benign admin one-liner.'
+  - id: cf610c15-ed71-46e1-bdf8-2bd1a99de6c4
+    name: Download File To Potentially Suspicious Directory Via Wget
+    reason: 'The drop that preceded this execution: wget -O /tmp/<file> is the most common way the script now being run by ''sh -c ... /tmp/...'' arrived on the host. Pair it with this alert to establish ingress-then-execute ordering on the same host.'
+  - id: 818f7b24-0fba-4c49-a073-8b755573b9c7
+    name: Linux Webshell Indicators
+    reason: 'Likely parent/foothold: a web-server process (nginx/apache/php-fpm) spawning a shell is the classic parent that then runs ''sh -c'' against a /tmp script. Check this alert''s data_process_exec_parent_binary against it - a webshell parent makes the /tmp execution attacker-driven initial access.'
+  - id: 6419afd1-3742-47a5-a7e6-b50386cd15f8
+    name: Chmod Targeting Sensitive Directories
+    reason: 'Immediate precursor: chmod +x /tmp/<script> to set the execute bit on the just-dropped payload runs moments before this bash -c executes it. chmod on a /tmp target co-firing just before this alert confirms a deliberate stage-and-run sequence.'
+  - id: 312b42b1-bded-4441-8b58-163a3af58775
+    name: Potentially Suspicious Execution From Tmp Folder
+    reason: 'Sibling payoff for the binary case: a process whose own path is under /tmp/ is executed (an ELF dropper) rather than a shell script referencing /tmp. Co-firing means both the script stage and a native binary stage ran out of /tmp on this host.'
+  - id: 5cd16c8f-44a6-4654-81e7-a84d6db507d4
+    name: Process Execution From Shared Memory Directory
+    reason: 'Fileless-evasion sibling: the same staged-execution TTP moved to /dev/shm (RAM-backed tmpfs) so the payload never touches disk. A frequent evasion pivot on a host where a /tmp script was just executed - widen the hunt to /dev/shm when this fires.'
+  - id: 6b14bac8-3e3a-4324-8109-42f0546a347f
+    name: Scheduled Cron Task/Job - Linux
+    reason: 'Follow-on persistence tied to the exact same directory: this rule detects crontab loading a job from /tmp (crontab */tmp/*). A /tmp loader''s first act is usually to install a cron entry from /tmp so the payload survives reboot, so this is the expected next step after the script runs.'
+  - id: e34cfa0c-0a50-4210-9cb3-5632d08eb041
+    name: Potential GobRAT File Discovery Via Grep
+    reason: 'Named-malware continuation: this detection''s own references ARE the GobRAT research, and the GobRAT loader runs precisely this ''sh -c'' script from /tmp, then greps for its deployed components (apached and friends). Grep file-discovery for GobRAT artifacts on the same host strongly indicates a live GobRAT infection.'
+  window: 2h
   enrichment_searches:
-  # Rule-specific telemetry pivots the engine runs around an alert from this rule,
-  # scoped to the alert's host/user/IP within the window (behaviour-targeted, not a sweep).
-    - name: "Other executions of this tool-set on this host (any arguments)"
-      query: 'data_process_exec_process_binary:/.*(\/[Cc][Ss][Hh]|\/[Ff][Ii][Ss][Hh]|\/[Kk][Ss][Hh]|\/[Zz][Ss][Hh])/'
-      pivot_on: [host]
-      window: 2h
-    - name: "Persistence via cron / systemd / shell profiles on this host"
-      query: '((data_process_exec_process_binary:/.*(\/[Cc][Rr][Oo][Nn][Tt][Aa][Bb]|\/[Ss][Yy][Ss][Tt][Ee][Mm][Cc][Tt][Ll]|\/[Aa][Tt]|\/[Uu][Pp][Dd][Aa][Tt][Ee]-[Rr][Cc]\.[Dd])/) OR (data_process_exec_process_arguments:/.*\/[Ee][Tt][Cc]\/[Cc][Rr][Oo][Nn].*/) OR (data_process_exec_process_arguments:/.*\/[Ee][Tt][Cc]\/[Ss][Yy][Ss][Tt][Ee][Mm][Dd].*/) OR (data_process_exec_process_arguments:/.*[Rr][Cc]\.[Ll][Oo][Cc][Aa][Ll].*/) OR (data_process_exec_process_arguments:/.*\.[Bb][Aa][Ss][Hh][Rr][Cc].*/) OR (data_process_exec_process_arguments:/.*\.[Bb][Aa][Ss][Hh]_[Pp][Rr][Oo][Ff][Ii][Ll][Ee].*/) OR (data_process_exec_process_arguments:/.*\/[Ee][Tt][Cc]\/[Pp][Rr][Oo][Ff][Ii][Ll][Ee].*/) OR (data_process_exec_process_arguments:/.*[Aa][Uu][Tt][Hh][Oo][Rr][Ii][Zz][Ee][Dd]_[Kk][Ee][Yy][Ss].*/) OR (data_process_exec_process_arguments:/.*\/[Ee][Tt][Cc]\/[Ii][Nn][Ii][Tt]\.[Dd].*/))'
-      pivot_on: [host]
-      window: 4h
-    - name: "Shell / interpreter execution on this host"
-      query: '((data_process_exec_process_binary:/.*(\/[Bb][Aa][Ss][Hh]|\/[Ss][Hh]|\/[Dd][Aa][Ss][Hh]|\/[Zz][Ss][Hh]|\/[Kk][Ss][Hh]|\/[Aa][Ss][Hh]|\/[Bb][Uu][Ss][Yy][Bb][Oo][Xx])/) OR (data_process_exec_process_binary:/.*(\/[Pp][Yy][Tt][Hh][Oo][Nn]|\/[Pp][Yy][Tt][Hh][Oo][Nn]3|\/[Pp][Ee][Rr][Ll]|\/[Rr][Uu][Bb][Yy]|\/[Pp][Hh][Pp]|\/[Nn][Oo][Dd][Ee]|\/[Ll][Uu][Aa]|\/[Aa][Ww][Kk])/))'
-      pivot_on: [host]
-      window: 1h
-    - name: "Reconnaissance commands on this host"
-      query: 'data_process_exec_process_binary:/.*(\/[Ww][Hh][Oo][Aa][Mm][Ii]|\/[Ii][Dd]|\/[Uu][Nn][Aa][Mm][Ee]|\/[Hh][Oo][Ss][Tt][Nn][Aa][Mm][Ee]|\/[Hh][Oo][Ss][Tt][Nn][Aa][Mm][Ee][Cc][Tt][Ll]|\/[Ss][Ss]|\/[Nn][Ee][Tt][Ss][Tt][Aa][Tt]|\/[Ii][Ff][Cc][Oo][Nn][Ff][Ii][Gg]|\/[Aa][Rr][Pp]|\/[Ww]|\/[Ww][Hh][Oo]|\/[Ll][Aa][Ss][Tt]|\/[Ll][Ss][Oo][Ff]|\/[Nn][Mm][Aa][Pp]|\/[Dd][Ii][Gg]|\/[Ff][Ii][Nn][Dd])/'
-      pivot_on: [host]
-      window: 1h
+  # Behaviour-targeted hunts the engine runs around the alert (not a sweep).
+  - name: Reverse-shell / C2 egress on this host (nc/ncat/netcat/socat, /dev/tcp, pty.spawn)
+    query: (data_process_exec_process_binary:/.*\/[Nn][Cc]/ OR data_process_exec_process_binary:/.*\/[Nn][Cc][Aa][Tt]/ OR data_process_exec_process_binary:/.*\/[Nn][Ee][Tt][Cc][Aa][Tt]/ OR data_process_exec_process_binary:/.*\/[Ss][Oo][Cc][Aa][Tt]/) OR data_process_exec_process_arguments:/.*\/[Dd][Ee][Vv]\/[Tt][Cc][Pp]\/.*/ OR data_process_exec_process_arguments:/.*[Pp][Tt][Yy]\.[Ss][Pp][Aa][Ww][Nn].*/
+    pivot_on:
+    - host
+    window: 2h
+  - name: Host reconnaissance burst after the staged script ran
+    query: data_process_exec_process_binary:/.*(\/[Ww][Hh][Oo][Aa][Mm][Ii]|\/[Ii][Dd]|\/[Uu][Nn][Aa][Mm][Ee]|\/[Hh][Oo][Ss][Tt][Nn][Aa][Mm][Ee]|\/[Ii][Pp]|\/[Ss][Ss]|\/[Nn][Ee][Tt][Ss][Tt][Aa][Tt]|\/[Ii][Ff][Cc][Oo][Nn][Ff][Ii][Gg]|\/[Aa][Rr][Pp]|\/[Ll][Ss][Oo][Ff]|\/[Ll][Aa][Ss][Tt]|\/[Ff][Ii][Nn][Dd])/
+    pivot_on:
+    - host
+    window: 1h
+  - name: Persistence written on this host (cron / systemd / rc.local / init.d / bashrc / authorized_keys)
+    query: (data_process_exec_process_binary:/.*(\/[Cc][Rr][Oo][Nn][Tt][Aa][Bb]|\/[Ss][Yy][Ss][Tt][Ee][Mm][Cc][Tt][Ll]|\/[Aa][Tt])/) OR data_process_exec_process_arguments:/.*\/[Ee][Tt][Cc]\/[Cc][Rr][Oo][Nn].*/ OR data_process_exec_process_arguments:/.*\/[Ee][Tt][Cc]\/[Ss][Yy][Ss][Tt][Ee][Mm][Dd]\/.*/ OR data_process_exec_process_arguments:/.*\/[Ee][Tt][Cc]\/[Ii][Nn][Ii][Tt]\.[Dd]\/.*/ OR data_process_exec_process_arguments:/.*[Rr][Cc]\.[Ll][Oo][Cc][Aa][Ll].*/ OR data_process_exec_process_arguments:/.*\.[Bb][Aa][Ss][Hh][Rr][Cc].*/ OR data_process_exec_process_arguments:/.*[Aa][Uu][Tt][Hh][Oo][Rr][Ii][Zz][Ee][Dd]_[Kk][Ee][Yy][Ss].*/
+    pivot_on:
+    - host
+    window: 4h
+  - name: Ingress tool transfer into /tmp or /dev/shm (how the script was staged)
+    query: (data_process_exec_process_binary:/.*\/[Ww][Gg][Ee][Tt]/ OR data_process_exec_process_binary:/.*\/[Cc][Uu][Rr][Ll]/ OR data_process_exec_process_binary:/.*\/[Tt][Ff][Tt][Pp]/ OR data_process_exec_process_binary:/.*\/[Ff][Tt][Pp]/) AND (data_process_exec_process_arguments:/.*\/[Tt][Mm][Pp]\/.*/ OR data_process_exec_process_arguments:/.*\/[Dd][Ee][Vv]\/[Ss][Hh][Mm]\/.*/)
+    pivot_on:
+    - host
+    window: 2h
+  - name: Download or base64 blob piped straight into a shell (what the sh -c is doing)
+    query: data_process_exec_process_arguments:/.*([Cc][Uu][Rr][Ll]|[Ww][Gg][Ee][Tt]).*\|.*([Bb][Aa][Ss][Hh]|[Ss][Hh]).*/ OR data_process_exec_process_arguments:/.*[Bb][Aa][Ss][Ee]64.*\|.*([Bb][Aa][Ss][Hh]|[Ss][Hh]).*/
+    pivot_on:
+    - host
+    window: 2h

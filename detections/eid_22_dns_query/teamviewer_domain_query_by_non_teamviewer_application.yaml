@@ -151,48 +151,58 @@ graylog:
   query: data_win_system_eventID:"22" AND (data_win_eventdata_queryName:/[Tt][Aa][Ff]\.[Tt][Ee][Aa][Mm][Vv][Ii][Ee][Ww][Ee][Rr]\.[Cc][Oo][Mm]/ OR data_win_eventdata_queryName:/[Uu][Dd][Pp]\.[Pp][Ii][Nn][Gg]\.[Tt][Ee][Aa][Mm][Vv][Ii][Ee][Ww][Ee][Rr]\.[Cc][Oo][Mm]/) AND _exists_:data_win_eventdata_image AND NOT (data_win_eventdata_image:/.*[Tt][Ee][Aa][Mm][Vv][Ii][Ee][Ww][Ee][Rr].*/)
 
 correlation:
-  # Authored by the correlation engine for review. Related CoPilot Searches to run
-  # around an alert from this rule, scoped to the same host/user/IP within the window.
+  # Authored per-rule (behaviour-researched) for the correlation engine. Related CoPilot
+  # Searches + telemetry pivots to run around an alert, scoped to its host/user/ip/domain.
   related_rules:
-    - id: 75bf09fa-1dd7-4d18-9af9-dd9e492562eb
-      name: "ADSI-Cache File Creation By Uncommon Tool"
-      reason: "next kill-chain tactic: Command and Control"
-    - id: 639c9081-f482-47d3-a0bd-ddee3d4ecd76
-      name: "All Backups Deleted Via Wbadmin.EXE"
-      reason: "next kill-chain tactic: Impact"
-    - id: 0b9ad457-2554-44c1-82c2-d56a99c42377
-      name: "Anydesk Temporary Artefact"
-      reason: "next kill-chain tactic: Command and Control"
-    - id: 7cff77e1-9663-46a3-8260-17f2e1aa9d0a
-      name: "AppX Package Installation Attempts Via AppInstaller.EXE"
-      reason: "next kill-chain tactic: Command and Control"
-    - id: 1f0f6176-6482-4027-b151-00071af39d7e
-      name: "Arbitrary File Download Via ConfigSecurityPolicy.EXE"
-      reason: "next kill-chain tactic: Exfiltration"
-    - id: eee00933-a761-4cd0-be70-c42fe91731e7
-      name: "Arbitrary File Download Via GfxDownloadWrapper.EXE"
-      reason: "next kill-chain tactic: Command and Control"
+  - id: 4d07b1f4-cb00-4470-b9f8-b0191d48ff52
+    name: DNS Query To Remote Access Software Domain From Non-Browser App
+    reason: 'Generalised twin of this detection: the same disguised binary that resolved TeamViewer''s backend (taf/udp.ping.teamviewer.com) under a non-TeamViewer name will also resolve other RMM infrastructure (AnyDesk, ScreenConnect, LogMeIn, Splashtop) by an unexpected process. Fires on the identical T1219.002 behaviour with a wider domain net on the same host.'
+  - id: ccad96d7-a48c-4f13-8b9c-9f6a31cba454
+    name: Detect Remote Access Software Usage FileInfo
+    reason: 'Process-creation confirmation of what made the DNS query: matches a binary''s PE Product metadata against 194 remote-access/RMM signatures (TeamViewer included), so it identifies the renamed/disguised TeamViewer EXE by its embedded version info even though its filename is faked. This names the actual image, path, parent and command line behind the alert.'
+  - id: 162ab1e4-6874-4564-853c-53ec3ab8be01
+    name: TeamViewer Remote Session
+    reason: 'Follow-on proof the remote-access channel actually went live: detects TeamViewer session log/print-DB artefacts (TVPrint.db) written on the host. DNS alone shows a handshake attempt; this confirms an interactive TeamViewer session was established on the same endpoint.'
+  - id: 9711de76-5d4f-4c50-a94f-21e4e8f8384d
+    name: Installation of TeamViewer Desktop
+    reason: 'Decision-relevant context on the same host: TeamViewer_Desktop.exe creation shows a full TeamViewer client being installed around the same time, which either explains the query as a legitimate TeamViewer presence (FP triage) or shows the attacker deploying the real client alongside the disguised component.'
+  - id: 9ef27c24-4903-4192-881a-3adde7ff92a5
+    name: Renamed Remote Utilities RAT (RURAT) Execution
+    reason: Same disguise-by-rename TTP (detects RURAT by PE Product header despite a renamed EXE). A host already running one remote-access tool under a false filename frequently runs more; this catches a renamed RuRAT sibling of the same RMM-abuse intrusion.
+  - id: b471f462-eb0d-4832-be35-28d94bdb4780
+    name: Remote Access Tool - Renamed MeshAgent Execution - Windows
+    reason: Renamed-RMM sibling with the exact obfuscation behaviour this alert describes (MeshAgent run under an altered name to bypass name-based blocking). Co-occurs in intrusions that stage remote-access tooling under disguised binaries on the same host.
+  - id: b52e84a3-029e-4529-b09b-71d19dd27e94
+    name: Remote Access Tool - AnyDesk Execution
+    reason: AnyDesk is the remote-access tool most frequently stacked with TeamViewer by the same actor for redundant hands-on-keyboard access. Its execution on the same host within the window points to an RMM-abuse foothold rather than a one-off TeamViewer query.
+  - id: 57bff678-25d1-4d6c-8211-8ca106d12053
+    name: Remote Access Tool - ScreenConnect Execution
+    reason: Another RMM commonly co-deployed in the same intrusions as abused TeamViewer; ScreenConnect execution on the same host within the window corroborates deliberate remote-access tooling being planted rather than benign support activity.
   window: 1h
   enrichment_searches:
-  # Rule-specific telemetry pivots the engine runs around an alert from this rule,
-  # scoped to the alert's host/user/IP within the window (behaviour-targeted, not a sweep).
-    - name: "Remote-access / RMM tooling on this host"
-      query: '((data_win_system_eventID:"1" AND data_win_eventdata_image:/.*(\\[Nn][Gg][Rr][Oo][Kk]\.[Ee][Xx][Ee]|\\[Pp][Ll][Ii][Nn][Kk]\.[Ee][Xx][Ee]|\\[Ss][Ss][Hh]\.[Ee][Xx][Ee]|\\[Ff][Rr][Pp][Cc]\.[Ee][Xx][Ee]|\\[Cc][Hh][Ii][Ss][Ee][Ll]\.[Ee][Xx][Ee]|\\[Cc][Ll][Oo][Uu][Dd][Ff][Ll][Aa][Rr][Ee][Dd]\.[Ee][Xx][Ee])/) OR (data_win_system_eventID:"3" AND data_win_eventdata_image:/.*(\\[Nn][Gg][Rr][Oo][Kk]\.[Ee][Xx][Ee]|\\[Pp][Ll][Ii][Nn][Kk]\.[Ee][Xx][Ee]|\\[Ss][Ss][Hh]\.[Ee][Xx][Ee]|\\[Ff][Rr][Pp][Cc]\.[Ee][Xx][Ee]|\\[Cc][Hh][Ii][Ss][Ee][Ll]\.[Ee][Xx][Ee]|\\[Cc][Ll][Oo][Uu][Dd][Ff][Ll][Aa][Rr][Ee][Dd]\.[Ee][Xx][Ee])/) OR ((data_win_eventdata_commandLine:/.*-[Rr] 127\.0\.0\.1.*/ OR data_win_eventdata_commandLine:/.*[Ss][Ss][Hh] -[Rr].*/ OR data_win_eventdata_commandLine:/.*[Pp][Oo][Rr][Tt][Ff][Ww][Dd].*/ OR data_win_eventdata_commandLine:/.*[Ss][Oo][Cc][Kk][Ss].*/)))'
-      pivot_on: [host]
-      window: 1h
-    - name: "Archive / staging & outbound-transfer tooling on this host"
-      query: '(((data_win_system_eventID:"1" AND data_win_eventdata_image:/.*(\\7[Zz]\.[Ee][Xx][Ee]|\\7[Zz][Aa]\.[Ee][Xx][Ee]|\\7[Zz][Rr]\.[Ee][Xx][Ee]|\\[Rr][Aa][Rr]\.[Ee][Xx][Ee]|\\[Ww][Ii][Nn][Rr][Aa][Rr]\.[Ee][Xx][Ee]|\\[Ww][Zz][Zz][Ii][Pp]\.[Ee][Xx][Ee]|\\[Mm][Aa][Kk][Ee][Cc][Aa][Bb]\.[Ee][Xx][Ee])/) OR (data_win_eventdata_commandLine:/.*[Cc][Oo][Mm][Pp][Rr][Ee][Ss][Ss]-[Aa][Rr][Cc][Hh][Ii][Vv][Ee].*/ OR data_win_eventdata_commandLine:/.*\.7[Zz].*/ OR data_win_eventdata_commandLine:/.*\.[Rr][Aa][Rr].*/ OR data_win_eventdata_commandLine:/.* -[Hh][Pp].*/)) OR (((data_win_system_eventID:"1" AND data_win_eventdata_image:/.*(\\[Rr][Cc][Ll][Oo][Nn][Ee]\.[Ee][Xx][Ee]|\\[Cc][Uu][Rr][Ll]\.[Ee][Xx][Ee]|\\[Ww][Gg][Ee][Tt]\.[Ee][Xx][Ee]|\\[Ww][Ii][Nn][Ss][Cc][Pp]\.[Ee][Xx][Ee]|\\[Pp][Ss][Cc][Pp]\.[Ee][Xx][Ee]|\\[Mm][Ee][Gg][Aa][Cc][Mm][Dd]\.[Ee][Xx][Ee]|\\[Mm][Ee][Gg][Aa][Ss][Yy][Nn][Cc]\.[Ee][Xx][Ee])/) OR ((data_win_eventdata_commandLine:/.*[Ii][Nn][Vv][Oo][Kk][Ee]-[Rr][Ee][Ss][Tt][Mm][Ee][Tt][Hh][Oo][Dd].*/ OR data_win_eventdata_commandLine:/.*[Ss][Tt][Aa][Rr][Tt]-[Bb][Ii][Tt][Ss][Tt][Rr][Aa][Nn][Ss][Ff][Ee][Rr].*/ OR data_win_eventdata_commandLine:/.*[Rr][Cc][Ll][Oo][Nn][Ee].*/ OR data_win_eventdata_commandLine:/.*[Tt][Rr][Aa][Nn][Ss][Ff][Ee][Rr]\.[Ss][Hh].*/ OR data_win_eventdata_commandLine:/.*[Aa][Nn][Oo][Nn][Ff][Ii][Ll][Ee][Ss].*/ OR data_win_eventdata_commandLine:/.*[Pp][Aa][Ss][Tt][Ee][Bb][Ii][Nn].*/ OR data_win_eventdata_commandLine:/.*[Mm][Ee][Gg][Aa]\.[Nn][Zz].*/ OR data_win_eventdata_commandLine:/.*-[Oo][Uu][Tt][Ff][Ii][Ll][Ee].*/ OR data_win_eventdata_commandLine:/.*[Uu][Pp][Ll][Oo][Aa][Dd][Ff][Ii][Ll][Ee].*/)))))'
-      pivot_on: [host]
-      window: 2h
-    - name: "Other hosts resolving or connecting to the same domain (campaign)"
-      query: '(data_win_system_eventID:"22" OR data_win_system_eventID:"3")'
-      pivot_on: [domain]
-      window: 24h
-    - name: "DNS queries by script interpreters / LOLBins on this host"
-      query: 'data_win_system_eventID:"22" AND (data_win_eventdata_image:/.*(\\[Pp][Oo][Ww][Ee][Rr][Ss][Hh][Ee][Ll][Ll]\.[Ee][Xx][Ee]|\\[Pp][Ww][Ss][Hh]\.[Ee][Xx][Ee]|\\[Pp][Oo][Ww][Ee][Rr][Ss][Hh][Ee][Ll][Ll]_[Ii][Ss][Ee]\.[Ee][Xx][Ee]|\\[Cc][Mm][Dd]\.[Ee][Xx][Ee]|\\[Ww][Ss][Cc][Rr][Ii][Pp][Tt]\.[Ee][Xx][Ee]|\\[Cc][Ss][Cc][Rr][Ii][Pp][Tt]\.[Ee][Xx][Ee]|\\[Mm][Ss][Hh][Tt][Aa]\.[Ee][Xx][Ee]|\\[Rr][Uu][Nn][Dd][Ll][Ll]32\.[Ee][Xx][Ee]|\\[Rr][Ee][Gg][Ss][Vv][Rr]32\.[Ee][Xx][Ee]|\\[Mm][Ss][Hh][Tt][Aa]\.[Ee][Xx][Ee]|\\[Ii][Nn][Ss][Tt][Aa][Ll][Ll][Uu][Tt][Ii][Ll]\.[Ee][Xx][Ee]|\\[Rr][Ee][Gg][Aa][Ss][Mm]\.[Ee][Xx][Ee]|\\[Rr][Ee][Gg][Ss][Vv][Cc][Ss]\.[Ee][Xx][Ee]|\\[Mm][Ss][Bb][Uu][Ii][Ll][Dd]\.[Ee][Xx][Ee]|\\[Cc][Ee][Rr][Tt][Uu][Tt][Ii][Ll]\.[Ee][Xx][Ee]|\\[Bb][Ii][Tt][Ss][Aa][Dd][Mm][Ii][Nn]\.[Ee][Xx][Ee]|\\[Ww][Mm][Ii][Cc]\.[Ee][Xx][Ee]|\\[Cc][Mm][Ss][Tt][Pp]\.[Ee][Xx][Ee])/ OR data_win_eventdata_image:/.*(\\[Oo][Dd][Bb][Cc][Cc][Oo][Nn][Ff]\.[Ee][Xx][Ee]|\\[Ff][Oo][Rr][Ff][Ii][Ll][Ee][Ss]\.[Ee][Xx][Ee]|\\[Pp][Cc][Aa][Ll][Uu][Aa]\.[Ee][Xx][Ee]|\\[Mm][Aa][Vv][Ii][Nn][Jj][Ee][Cc][Tt]\.[Ee][Xx][Ee]|\\[Ss][Cc][Rr][Ii][Pp][Tt][Rr][Uu][Nn][Nn][Ee][Rr]\.[Ee][Xx][Ee])/)'
-      pivot_on: [host]
-      window: 1h
-    - name: "Downloader / C2 tooling executed on this host"
-      query: '(data_win_system_eventID:"1" AND data_win_eventdata_image:/.*(\\[Cc][Ee][Rr][Tt][Uu][Tt][Ii][Ll]\.[Ee][Xx][Ee]|\\[Bb][Ii][Tt][Ss][Aa][Dd][Mm][Ii][Nn]\.[Ee][Xx][Ee]|\\[Cc][Uu][Rr][Ll]\.[Ee][Xx][Ee]|\\[Ww][Gg][Ee][Tt]\.[Ee][Xx][Ee])/) OR (data_win_eventdata_commandLine:/.*[Dd][Oo][Ww][Nn][Ll][Oo][Aa][Dd][Ss][Tt][Rr][Ii][Nn][Gg].*/ OR data_win_eventdata_commandLine:/.*[Dd][Oo][Ww][Nn][Ll][Oo][Aa][Dd][Ff][Ii][Ll][Ee].*/ OR data_win_eventdata_commandLine:/.*[Ii][Nn][Vv][Oo][Kk][Ee]-[Ww][Ee][Bb][Rr][Ee][Qq][Uu][Ee][Ss][Tt].*/ OR data_win_eventdata_commandLine:/.*[Nn][Ee][Tt]\.[Ww][Ee][Bb][Cc][Ll][Ii][Ee][Nn][Tt].*/ OR data_win_eventdata_commandLine:/.*[Ss][Tt][Aa][Rr][Tt]-[Bb][Ii][Tt][Ss][Tt][Rr][Aa][Nn][Ss][Ff][Ee][Rr].*/ OR data_win_eventdata_commandLine:/.*[Ii][Ww][Rr] .*/ OR data_win_eventdata_commandLine:/.*[Cc][Uu][Rr][Ll] .*/ OR data_win_eventdata_commandLine:/.*[Ww][Gg][Ee][Tt] .*/)'
-      pivot_on: [host]
-      window: 1h
+  # Behaviour-targeted hunts the engine runs around the alert (not a sweep).
+  - name: Remote-access / RMM software executed on this host (incl. renamed)
+    query: data_win_system_eventID:"1" AND (data_win_eventdata_product:/.*([Tt][Ee][Aa][Mm][Vv][Ii][Ee][Ww][Ee][Rr]|[Aa][Nn][Yy][Dd][Ee][Ss][Kk]|[Ss][Cc][Rr][Ee][Ee][Nn][Cc][Oo][Nn][Nn][Ee][Cc][Tt]|[Cc][Oo][Nn][Nn][Ee][Cc][Tt][Ww][Ii][Ss][Ee]|[Ss][Pp][Ll][Aa][Ss][Hh][Tt][Oo][Pp]|[Ll][Oo][Gg][Mm][Ee][Ii][Nn]|[Gg][Oo][Tt][Oo][Aa][Ss][Ss][Ii][Ss][Tt]|[Mm][Ee][Ss][Hh][Aa][Gg][Ee][Nn][Tt]|[Rr][Ee][Mm][Oo][Tt][Ee] [Uu][Tt][Ii][Ll][Ii][Tt][Ii][Ee][Ss]|[Rr][Uu][Ss][Tt][Dd][Ee][Ss][Kk]|[Uu][Ll][Tt][Rr][Aa][Vv][Ii][Ee][Ww][Ee][Rr]|[Nn][Ee][Tt][Ss][Uu][Pp][Pp][Oo][Rr][Tt]|[Rr][Aa][Dd][Mm][Ii][Nn]|[Aa][Mm][Mm][Yy][Yy])/ OR data_win_eventdata_description:/.*([Tt][Ee][Aa][Mm][Vv][Ii][Ee][Ww][Ee][Rr]|[Aa][Nn][Yy][Dd][Ee][Ss][Kk]|[Ss][Cc][Rr][Ee][Ee][Nn][Cc][Oo][Nn][Nn][Ee][Cc][Tt]|[Ss][Pp][Ll][Aa][Ss][Hh][Tt][Oo][Pp])/ OR data_win_eventdata_image:/.*\\([Aa][Nn][Yy][Dd][Ee][Ss][Kk]|[Tt][Ee][Aa][Mm][Vv][Ii][Ee][Ww][Ee][Rr]|[Rr][Uu][Tt][Ss][Ee][Rr][Vv]|[Ss][Cc][Rr][Ee][Ee][Nn][Cc][Oo][Nn][Nn][Ee][Cc][Tt]|[Uu][Ll][Tt][Rr][Aa][Vv][Ii][Ee][Ww][Ee][Rr])\.[Ee][Xx][Ee]/)
+    pivot_on:
+    - host
+    window: 2h
+  - name: Network session to remote-access infrastructure from this host
+    query: data_win_system_eventID:"3" AND (data_win_eventdata_destinationPort:"5938" OR data_win_eventdata_destinationHostname:/.*([Tt][Ee][Aa][Mm][Vv][Ii][Ee][Ww][Ee][Rr]|[Aa][Nn][Yy][Dd][Ee][Ss][Kk]|[Ss][Cc][Rr][Ee][Ee][Nn][Cc][Oo][Nn][Nn][Ee][Cc][Tt]|[Ss][Pp][Ll][Aa][Ss][Hh][Tt][Oo][Pp]|[Ll][Oo][Gg][Mm][Ee][Ii][Nn])/ OR data_win_eventdata_image:/.*\\([Tt][Ee][Aa][Mm][Vv][Ii][Ee][Ww][Ee][Rr]|[Aa][Nn][Yy][Dd][Ee][Ss][Kk]|[Ss][Cc][Rr][Ee][Ee][Nn][Cc][Oo][Nn][Nn][Ee][Cc][Tt]|[Rr][Uu][Tt][Ss][Ee][Rr][Vv])\.[Ee][Xx][Ee]/)
+    pivot_on:
+    - host
+    window: 2h
+  - name: 'Delivery of the disguised binary: downloader LOLBin or archive extraction on this host'
+    query: data_win_system_eventID:"1" AND ((data_win_eventdata_image:/.*\\([Cc][Ee][Rr][Tt][Uu][Tt][Ii][Ll]|[Bb][Ii][Tt][Ss][Aa][Dd][Mm][Ii][Nn]|[Cc][Uu][Rr][Ll]|[Ww][Gg][Ee][Tt])\.[Ee][Xx][Ee]/ AND data_win_eventdata_commandLine:/.*([Hh][Tt][Tt][Pp]|[Uu][Rr][Ll][Cc][Aa][Cc][Hh][Ee])/) OR data_win_eventdata_commandLine:/.*([Ii][Nn][Vv][Oo][Kk][Ee]-[Ww][Ee][Bb][Rr][Ee][Qq][Uu][Ee][Ss][Tt]|[Dd][Oo][Ww][Nn][Ll][Oo][Aa][Dd][Ff][Ii][Ll][Ee]|[Dd][Oo][Ww][Nn][Ll][Oo][Aa][Dd][Ss][Tt][Rr][Ii][Nn][Gg]|[Nn][Ee][Tt]\.[Ww][Ee][Bb][Cc][Ll][Ii][Ee][Nn][Tt]|[Ss][Tt][Aa][Rr][Tt]-[Bb][Ii][Tt][Ss][Tt][Rr][Aa][Nn][Ss][Ff][Ee][Rr])/ OR data_win_eventdata_image:/.*\\(7[Zz]|[Ww][Ii][Nn][Rr][Aa][Rr]|[Rr][Aa][Rr]|[Pp][Ee][Aa][Zz][Ii][Pp]|7[Zz][Rr]|7[Zz][Gg])\.[Ee][Xx][Ee]/)
+    pivot_on:
+    - host
+    window: 4h
+  - name: 'Persistence: remote-access tool wired to auto-start on this host'
+    query: (data_win_system_eventID:"1" AND (data_win_eventdata_commandLine:/.*([Ss][Cc][Hh][Tt][Aa][Ss][Kk][Ss]|[Nn][Ee][Ww]-[Ss][Ee][Rr][Vv][Ii][Cc][Ee]|[Rr][Ee][Gg][Ii][Ss][Tt][Ee][Rr]-[Ss][Cc][Hh][Ee][Dd][Uu][Ll][Ee][Dd][Tt][Aa][Ss][Kk]|[Cc][Uu][Rr][Rr][Ee][Nn][Tt][Vv][Ee][Rr][Ss][Ii][Oo][Nn].[Rr][Uu][Nn])/ AND data_win_eventdata_commandLine:/.*([Tt][Ee][Aa][Mm][Vv][Ii][Ee][Ww][Ee][Rr]|[Aa][Nn][Yy][Dd][Ee][Ss][Kk]|[Ss][Cc][Rr][Ee][Ee][Nn][Cc][Oo][Nn][Nn][Ee][Cc][Tt]|[Mm][Ee][Ss][Hh][Aa][Gg][Ee][Nn][Tt]|[Rr][Uu][Tt][Ss][Ee][Rr][Vv]|[Ss][Pp][Ll][Aa][Ss][Hh][Tt][Oo][Pp])/)) OR (data_win_system_eventID:"13" AND data_win_eventdata_targetObject:/.*[Cc][Uu][Rr][Rr][Ee][Nn][Tt][Vv][Ee][Rr][Ss][Ii][Oo][Nn].*[Rr][Uu][Nn].*/ AND data_win_eventdata_details:/.*([Tt][Ee][Aa][Mm][Vv][Ii][Ee][Ww][Ee][Rr]|[Aa][Nn][Yy][Dd][Ee][Ss][Kk]|[Ss][Cc][Rr][Ee][Ee][Nn][Cc][Oo][Nn][Nn][Ee][Cc][Tt]|[Mm][Ee][Ss][Hh][Aa][Gg][Ee][Nn][Tt])/)
+    pivot_on:
+    - host
+    window: 6h
+  - name: 'Campaign: other hosts resolving this TeamViewer backend domain from a non-TeamViewer process'
+    query: data_win_system_eventID:"22" AND _exists_:data_win_eventdata_image AND NOT data_win_eventdata_image:/.*[Tt][Ee][Aa][Mm][Vv][Ii][Ee][Ww][Ee][Rr].*/
+    pivot_on:
+    - domain
+    window: 24h

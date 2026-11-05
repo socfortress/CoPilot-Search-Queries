@@ -194,23 +194,58 @@ graylog:
   query: (((data_process_exec_parent_binary:/.*\/[Nn][Oo][Dd][Ee]/ OR data_process_exec_parent_binary:/.*\/[Bb][Uu][Nn]/) AND data_process_exec_process_arguments:/.*[Cc][Uu][Rr][Ll] .*/ AND data_process_exec_process_arguments:/.*\/[Tt][Mm][Pp]\/[Ll][Dd]\.[Pp][Yy].*/ AND data_process_exec_process_arguments:/.*[Pp][Yy][Tt][Hh][Oo][Nn]3 .*/ AND data_process_exec_process_arguments:/.*[Nn][Oo][Hh][Uu][Pp] .*/ AND data_process_exec_process_arguments:/.*6202033.*/) OR (data_process_exec_process_binary:/.*\/[Cc][Uu][Rr][Ll]/ AND data_process_exec_process_arguments:/.*[Hh][Tt][Tt][Pp]:\/\/[Ss][Ff][Rr][Cc][Ll][Aa][Kk]\.[Cc][Oo][Mm].*/))
 
 correlation:
-  # Authored by the correlation engine for review.
+  # Authored per-rule (behaviour-researched) for the correlation engine. Related CoPilot
+  # Searches + telemetry pivots to run around an alert, scoped to its host/user/ip/domain.
+  related_rules:
+  - id: eb827bbd-670a-4d58-8446-c464d8ac2323
+    name: Shai-Hulud Malicious Bun Execution - Linux
+    reason: 'Direct sibling: both are npm supply-chain RAT droppers whose postinstall script runs under a node/bun parent (this rule''s branch 1 keys on the same ''*/node''/''*/bun'' parent). A host running one compromised package often pulls others in the same install, so Shai-Hulud bun execution and the axios dropper co-occur in the same npm install tree.'
+  - id: efd2eb09-b72e-4a61-8dc7-b1382a1e8983
+    name: Shai-Hulud NPM Package Malicious Exfiltration via Curl
+    reason: 'Same C2/exfil mechanism as this dropper''s second branch: curl reaching out to an attacker-controlled host. Confirms whether the post-compromise curl beacon to sfrclak.com is accompanied by, or is part of, the broader npm-worm exfiltration wave on this dev/CI host.'
+  - id: 36603778-030c-43c4-8cbb-cd3c1d1a80c7
+    name: LiteLLM / TeamPCP Supply Chain Attack Indicators
+    reason: Co-occurring March-2026 supply-chain RAT with the identical goal (harvest every credential, exfiltrate, install a persistent C2 backdoor). A build/dev host hit by the axios compromise should be checked for other active supply-chain backdoors from the same wave hitting package ecosystems.
+  - id: a2d9e2f3-0f43-4c7a-bcd9-9acfc0d723aa
+    name: Suspicious Download and Execute Pattern via Curl/Wget
+    reason: 'The core TTP of this dropper: curl pulls the payload (/tmp/ld.py) into a temp directory and it is executed. This rule fires on the generic curl->/tmp->exec stager pattern, confirming the ingress-tool-transfer-then-run step of the axios RAT chain (T1105).'
+  - id: e4ffe466-6ff8-48d4-94bd-e32d1a6061e2
+    name: Nohup Execution
+    reason: The dropper launches its Python RAT detached via 'nohup python3 /tmp/ld.py' - 'nohup' is literally one of the strings this rule's branch 1 matches. Nohup execution on the same host within the window is the detached-RAT-launch step of this exact chain.
+  - id: 312b42b1-bded-4441-8b58-163a3af58775
+    name: Potentially Suspicious Execution From Tmp Folder
+    reason: 'Direct follow-on: the staged payload /tmp/ld.py is a process executing from /tmp. This rule fires on that execution, so it is the next-stage confirmation that the downloaded dropper payload actually ran on the host.'
+  - id: f0025a69-e1b7-4dda-a53c-db21fa2d4071
+    name: Script Interpreter Spawning Credential Scanner - Linux
+    reason: 'The objective of npm supply-chain RATs on dev/CI hosts: a node/bun interpreter spawning trufflehog/gitleaks to find and steal secrets (same vector as Shai-Hulud). Its appearance on this host is the likely-next credential-theft stage after the axios dropper gains execution.'
+  - id: c70834fa-fb9d-4aa0-9e7d-45ceed36f3f7
+    name: Linux Suspicious Child Process from Node.js - React2Shell
+    reason: 'Same parent-process abuse: a Node.js process spawning suspicious children (curl/python/shell/nc). Whether from a package postinstall or a server RCE, node spawning a downloader or interpreter on this host is the mechanism that carried the axios dropper and is worth correlating as co-occurring node-child abuse.'
+  window: 2h
   enrichment_searches:
-  # Rule-specific telemetry pivots the engine runs around an alert from this rule,
-  # scoped to the alert's host/user/IP within the window (behaviour-targeted, not a sweep).
-    - name: "Shell / interpreter execution on this host"
-      query: '((data_process_exec_process_binary:/.*(\/[Bb][Aa][Ss][Hh]|\/[Ss][Hh]|\/[Dd][Aa][Ss][Hh]|\/[Zz][Ss][Hh]|\/[Kk][Ss][Hh]|\/[Aa][Ss][Hh]|\/[Bb][Uu][Ss][Yy][Bb][Oo][Xx])/) OR (data_process_exec_process_binary:/.*(\/[Pp][Yy][Tt][Hh][Oo][Nn]|\/[Pp][Yy][Tt][Hh][Oo][Nn]3|\/[Pp][Ee][Rr][Ll]|\/[Rr][Uu][Bb][Yy]|\/[Pp][Hh][Pp]|\/[Nn][Oo][Dd][Ee]|\/[Ll][Uu][Aa]|\/[Aa][Ww][Kk])/))'
-      pivot_on: [host]
-      window: 1h
-    - name: "Downloader / ingress-tool-transfer on this host"
-      query: 'data_process_exec_process_binary:/.*(\/[Cc][Uu][Rr][Ll]|\/[Ww][Gg][Ee][Tt]|\/[Tt][Ff][Tt][Pp])/'
-      pivot_on: [host]
-      window: 1h
-    - name: "Persistence via cron / systemd / shell profiles on this host"
-      query: '((data_process_exec_process_binary:/.*(\/[Cc][Rr][Oo][Nn][Tt][Aa][Bb]|\/[Ss][Yy][Ss][Tt][Ee][Mm][Cc][Tt][Ll]|\/[Aa][Tt]|\/[Uu][Pp][Dd][Aa][Tt][Ee]-[Rr][Cc]\.[Dd])/) OR (data_process_exec_process_arguments:/.*\/[Ee][Tt][Cc]\/[Cc][Rr][Oo][Nn].*/) OR (data_process_exec_process_arguments:/.*\/[Ee][Tt][Cc]\/[Ss][Yy][Ss][Tt][Ee][Mm][Dd].*/) OR (data_process_exec_process_arguments:/.*[Rr][Cc]\.[Ll][Oo][Cc][Aa][Ll].*/) OR (data_process_exec_process_arguments:/.*\.[Bb][Aa][Ss][Hh][Rr][Cc].*/) OR (data_process_exec_process_arguments:/.*\.[Bb][Aa][Ss][Hh]_[Pp][Rr][Oo][Ff][Ii][Ll][Ee].*/) OR (data_process_exec_process_arguments:/.*\/[Ee][Tt][Cc]\/[Pp][Rr][Oo][Ff][Ii][Ll][Ee].*/) OR (data_process_exec_process_arguments:/.*[Aa][Uu][Tt][Hh][Oo][Rr][Ii][Zz][Ee][Dd]_[Kk][Ee][Yy][Ss].*/) OR (data_process_exec_process_arguments:/.*\/[Ee][Tt][Cc]\/[Ii][Nn][Ii][Tt]\.[Dd].*/))'
-      pivot_on: [host]
-      window: 4h
-    - name: "Reconnaissance commands on this host"
-      query: 'data_process_exec_process_binary:/.*(\/[Ww][Hh][Oo][Aa][Mm][Ii]|\/[Ii][Dd]|\/[Uu][Nn][Aa][Mm][Ee]|\/[Hh][Oo][Ss][Tt][Nn][Aa][Mm][Ee]|\/[Hh][Oo][Ss][Tt][Nn][Aa][Mm][Ee][Cc][Tt][Ll]|\/[Ss][Ss]|\/[Nn][Ee][Tt][Ss][Tt][Aa][Tt]|\/[Ii][Ff][Cc][Oo][Nn][Ff][Ii][Gg]|\/[Aa][Rr][Pp]|\/[Ww]|\/[Ww][Hh][Oo]|\/[Ll][Aa][Ss][Tt]|\/[Ll][Ss][Oo][Ff]|\/[Nn][Mm][Aa][Pp]|\/[Dd][Ii][Gg]|\/[Ff][Ii][Nn][Dd])/'
-      pivot_on: [host]
-      window: 1h
+  # Behaviour-targeted hunts the engine runs around the alert (not a sweep).
+  - name: Axios RAT campaign IOCs (C2 domain, /tmp/ld.py loader, 6202033 callback) on this host
+    query: (data_process_exec_process_arguments:/.*[Ss][Ff][Rr][Cc][Ll][Aa][Kk]\.[Cc][Oo][Mm].*/ OR data_process_exec_process_arguments:/.*\/[Tt][Mm][Pp]\/[Ll][Dd]\.[Pp][Yy].*/ OR data_process_exec_process_arguments:/.*6202033.*/)
+    pivot_on:
+    - host
+    window: 24h
+  - name: Detached Python payload execution (nohup/setsid python3, or python3 running from /tmp or /dev/shm) on this host
+    query: ((data_process_exec_process_binary:/.*\/[Nn][Oo][Hh][Uu][Pp]/ OR data_process_exec_process_binary:/.*\/[Ss][Ee][Tt][Ss][Ii][Dd]/ OR data_process_exec_process_arguments:/.*[Dd][Ii][Ss][Oo][Ww][Nn].*/) AND data_process_exec_process_arguments:/.*[Pp][Yy][Tt][Hh][Oo][Nn].*/) OR (data_process_exec_process_binary:/.*\/[Pp][Yy][Tt][Hh][Oo][Nn]3?/ AND (data_process_exec_process_arguments:/.*\/[Tt][Mm][Pp]\/.*/ OR data_process_exec_process_arguments:/.*\/[Dd][Ee][Vv]\/[Ss][Hh][Mm]\/.*/))
+    pivot_on:
+    - host
+    window: 2h
+  - name: Developer/CI secret and credential access (npmrc, git/aws creds, SSH keys, /proc environ, trufflehog) on this host
+    query: (data_process_exec_process_arguments:/.*\.[Nn][Pp][Mm][Rr][Cc].*/ OR data_process_exec_process_arguments:/.*\.[Gg][Ii][Tt]-[Cc][Rr][Ee][Dd][Ee][Nn][Tt][Ii][Aa][Ll][Ss].*/ OR data_process_exec_process_arguments:/.*\/\.[Ss][Ss][Hh]\/.*/ OR data_process_exec_process_arguments:/.*\/\.[Aa][Ww][Ss]\/[Cc][Rr][Ee][Dd][Ee][Nn][Tt][Ii][Aa][Ll][Ss].*/ OR data_process_exec_process_arguments:/.*\/[Pp][Rr][Oo][Cc]\/.*\/[Ee][Nn][Vv][Ii][Rr][Oo][Nn].*/ OR data_process_exec_process_binary:/.*\/[Tt][Rr][Uu][Ff][Ff][Ll][Ee][Hh][Oo][Gg]/ OR data_process_exec_process_binary:/.*\/[Gg][Ii][Tt][Ll][Ee][Aa][Kk][Ss]/)
+    pivot_on:
+    - host
+    window: 6h
+  - name: Dropper self-deletion / anti-forensics (rm/shred of /tmp payload, ld.py, package.json, bash_history) on this host
+    query: ((data_process_exec_process_binary:/.*\/[Rr][Mm]/ OR data_process_exec_process_binary:/.*\/[Ss][Hh][Rr][Ee][Dd]/ OR data_process_exec_process_binary:/.*\/[Uu][Nn][Ll][Ii][Nn][Kk]/ OR data_process_exec_process_binary:/.*\/[Tt][Rr][Uu][Nn][Cc][Aa][Tt][Ee]/) AND (data_process_exec_process_arguments:/.*\/[Tt][Mm][Pp]\/.*/ OR data_process_exec_process_arguments:/.*[Ll][Dd]\.[Pp][Yy].*/ OR data_process_exec_process_arguments:/.*[Pp][Aa][Cc][Kk][Aa][Gg][Ee]\.[Jj][Ss][Oo][Nn].*/ OR data_process_exec_process_arguments:/.*\.[Bb][Aa][Ss][Hh]_[Hh][Ii][Ss][Tt][Oo][Rr][Yy].*/))
+    pivot_on:
+    - host
+    window: 2h
+  - name: Package-manager / Node runtime spawning a downloader or interpreter (malicious postinstall precursor) on this host
+    query: (data_process_exec_parent_binary:/.*\/[Nn][Oo][Dd][Ee]/ OR data_process_exec_parent_binary:/.*\/[Bb][Uu][Nn]/ OR data_process_exec_parent_binary:/.*\/[Nn][Pp][Mm]/ OR data_process_exec_parent_binary:/.*\/[Nn][Pp][Xx]/ OR data_process_exec_parent_binary:/.*\/[Yy][Aa][Rr][Nn]/ OR data_process_exec_parent_binary:/.*\/[Pp][Nn][Pp][Mm]/) AND (data_process_exec_process_binary:/.*\/[Cc][Uu][Rr][Ll]/ OR data_process_exec_process_binary:/.*\/[Ww][Gg][Ee][Tt]/ OR data_process_exec_process_binary:/.*\/[Bb][Aa][Ss][Hh]/ OR data_process_exec_process_binary:/.*\/[Ss][Hh]/ OR data_process_exec_process_binary:/.*\/[Dd][Aa][Ss][Hh]/ OR data_process_exec_process_binary:/.*\/[Pp][Yy][Tt][Hh][Oo][Nn]3?/)
+    pivot_on:
+    - host
+    window: 2h
