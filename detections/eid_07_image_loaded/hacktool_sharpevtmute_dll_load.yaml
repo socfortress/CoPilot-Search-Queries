@@ -135,19 +135,58 @@ graylog:
   query: data_win_system_eventID:"7" AND data_win_eventdata_hashes:/.*[Ii][Mm][Pp][Hh][Aa][Ss][Hh]=330768[Aa]4[Ff]172[Ee]10[Aa][Cc][Bb]6287[Bb]87289[Dd]83[Bb].*/
 
 correlation:
-  # Authored by the correlation engine for review.
+  # Authored per-rule (behaviour-researched) for the correlation engine. Related CoPilot
+  # Searches + telemetry pivots to run around an alert, scoped to its host/user/ip/domain.
+  related_rules:
+  - id: cc36992a-4671-4f21-a91d-6c2b72a2edf5
+    name: Suspicious Eventlog Clearing or Configuration Change Activity
+    reason: 'Same target, cruder method on the same host: EvtMuteHook silently drops selected records in-memory, while this catches an operator clearing or reconfiguring those very Windows event logs via wevtutil cl/sl, Clear-EventLog or wmic ClearEventLog. Actors routinely pair the stealthy hook with an outright clear, so both firing is one anti-forensics operation.'
+  - id: 236e7c8e-c9d9-11eb-a824-acde48001122
+    name: Disable Logs Using WevtUtil
+    reason: 'Command-line sibling of the in-memory hook: ''wevtutil sl <channel> /e:false'' hard-disables a Windows log channel so events are never written, the same objective EvtMuteHook achieves by hooking the Event Log service. Both suppress event logging on this host; one present raises the likelihood of the other in the same intrusion.'
+  - id: 2f78da12-f7c7-430b-8b19-a28f269b77a3
+    name: Disable Windows Event Logging Via Registry
+    reason: 'Same goal via the persistent registry path: setting a WINEVT Channels ...\Enabled value to 0 disables a log channel for good, whereas EvtMute''s hook is in-memory and lost on reboot. If the hook fired, check whether the actor also disabled channels in the registry to persist the blinding.'
+  - id: d99b79d2-0a6f-4f46-ad8b-260b6e17f982
+    name: Security Eventlog Cleared
+    reason: 'Ground-truth artifact from a different channel: if the operator also wiped logs (or the hook missed records), the native 1102/517 ''audit log cleared'' event in the Security log records it directly, independently confirming that event logs were tampered with around the DLL load.'
+  - id: 0a13e132-651d-11eb-ae93-0242ac130002
+    name: Audit Policy Tampering Via Auditpol
+    reason: 'Adjacent logging-suppression technique: ''auditpol /clear'' or ''/set ...:disable'' stops events from ever being generated, complementing EvtMute''s suppression of events already generated. Operators blinding the Event Log service frequently also strip the audit policy that feeds it.'
+  - id: 4d7cda18-1b12-4e52-b45c-d28653210df8
+    name: Sysmon Driver Unloaded Via Fltmc.EXE
+    reason: 'Companion sensor-blinding on the same host: EvtMute kills the native Windows Event Log while ''fltmc unload'' rips out the Sysmon filter driver, together removing both of the host''s primary telemetry sources. An operator going dark on logs commonly unloads Sysmon in the same session.'
+  - id: a238b5d0-ce2d-4414-a676-7a531b3d13d6
+    name: ETW Trace Evasion Activity
+    reason: 'One layer down: Event Tracing for Windows underlies both the event logs EvtMute hooks and much EDR telemetry, so clearing/disabling ETW trace sessions (logman update, Set/Remove-EtwTraceProvider) is the adjacent evasion an actor runs alongside hooking the Event Log consumer.'
+  - id: 98054878-5eab-434c-85d4-72d4e5a3361b
+    name: HackTool - EDRSilencer Execution - Filter Added
+    reason: 'Same operator playbook, different sensor: EvtMute silences the Windows Event Log; EDRSilencer adds WFP filters to silence the EDR agent. Both are named defense-impairment hacktools deployed to blind the SOC before noisy actions, so one materially raises the prior for the other on this host.'
+  window: 2h
   enrichment_searches:
-  # Rule-specific telemetry pivots the engine runs around an alert from this rule,
-  # scoped to the alert's host/user/IP within the window (behaviour-targeted, not a sweep).
-    - name: "DLL sideloading / execution from user-writable paths on this host"
-      query: '((data_win_system_eventID:"7" AND (data_win_eventdata_imageLoaded:/.*\\[Uu][Ss][Ee][Rr][Ss]\\.*/ OR data_win_eventdata_imageLoaded:/.*\\[Pp][Rr][Oo][Gg][Rr][Aa][Mm][Dd][Aa][Tt][Aa]\\.*/ OR data_win_eventdata_imageLoaded:/.*\\[Ww][Ii][Nn][Dd][Oo][Ww][Ss]\\[Tt][Ee][Mm][Pp]\\.*/ OR data_win_eventdata_imageLoaded:/.*\\[Aa][Pp][Pp][Dd][Aa][Tt][Aa]\\.*/ OR data_win_eventdata_imageLoaded:/.*\\[Pp][Uu][Bb][Ll][Ii][Cc]\\.*/ OR data_win_eventdata_imageLoaded:/.*\\\$[Rr][Ee][Cc][Yy][Cc][Ll][Ee].*/)) OR (data_win_system_eventID:"1" AND (data_win_eventdata_image:/.*\\[Uu][Ss][Ee][Rr][Ss]\\.*/ OR data_win_eventdata_image:/.*\\[Pp][Rr][Oo][Gg][Rr][Aa][Mm][Dd][Aa][Tt][Aa]\\.*/ OR data_win_eventdata_image:/.*\\[Ww][Ii][Nn][Dd][Oo][Ww][Ss]\\[Tt][Ee][Mm][Pp]\\.*/ OR data_win_eventdata_image:/.*\\[Aa][Pp][Pp][Dd][Aa][Tt][Aa]\\.*/ OR data_win_eventdata_image:/.*\\[Pp][Uu][Bb][Ll][Ii][Cc]\\.*/ OR data_win_eventdata_image:/.*\\\$[Rr][Ee][Cc][Yy][Cc][Ll][Ee].*/)))'
-      pivot_on: [host]
-      window: 2h
-    - name: "Follow-on LOLBin / signed-binary-proxy execution on this host"
-      query: 'data_win_system_eventID:"1" AND data_win_eventdata_image:/.*(\\[Rr][Uu][Nn][Dd][Ll][Ll]32\.[Ee][Xx][Ee]|\\[Rr][Ee][Gg][Ss][Vv][Rr]32\.[Ee][Xx][Ee]|\\[Mm][Ss][Hh][Tt][Aa]\.[Ee][Xx][Ee]|\\[Ii][Nn][Ss][Tt][Aa][Ll][Ll][Uu][Tt][Ii][Ll]\.[Ee][Xx][Ee]|\\[Rr][Ee][Gg][Aa][Ss][Mm]\.[Ee][Xx][Ee]|\\[Rr][Ee][Gg][Ss][Vv][Cc][Ss]\.[Ee][Xx][Ee]|\\[Mm][Ss][Bb][Uu][Ii][Ll][Dd]\.[Ee][Xx][Ee]|\\[Cc][Ee][Rr][Tt][Uu][Tt][Ii][Ll]\.[Ee][Xx][Ee]|\\[Bb][Ii][Tt][Ss][Aa][Dd][Mm][Ii][Nn]\.[Ee][Xx][Ee]|\\[Ww][Mm][Ii][Cc]\.[Ee][Xx][Ee]|\\[Cc][Mm][Ss][Tt][Pp]\.[Ee][Xx][Ee]|\\[Oo][Dd][Bb][Cc][Cc][Oo][Nn][Ff]\.[Ee][Xx][Ee]|\\[Ff][Oo][Rr][Ff][Ii][Ll][Ee][Ss]\.[Ee][Xx][Ee]|\\[Pp][Cc][Aa][Ll][Uu][Aa]\.[Ee][Xx][Ee]|\\[Mm][Aa][Vv][Ii][Nn][Jj][Ee][Cc][Tt]\.[Ee][Xx][Ee]|\\[Ss][Cc][Rr][Ii][Pp][Tt][Rr][Uu][Nn][Nn][Ee][Rr]\.[Ee][Xx][Ee])/'
-      pivot_on: [host]
-      window: 1h
-    - name: "Memory/credential-dump creation & LSASS access on this host"
-      query: '((data_win_system_eventID:"1" AND data_win_eventdata_image:/.*(\\[Pp][Rr][Oo][Cc][Dd][Uu][Mm][Pp]\.[Ee][Xx][Ee]|\\[Pp][Rr][Oo][Cc][Dd][Uu][Mm][Pp]64\.[Ee][Xx][Ee]|\\[Ss][Qq][Ll][Dd][Uu][Mm][Pp][Ee][Rr]\.[Ee][Xx][Ee]|\\[Cc][Rr][Ee][Aa][Tt][Ee][Dd][Uu][Mm][Pp]\.[Ee][Xx][Ee]|\\[Rr][Dd][Rr][Ll][Ee][Aa][Kk][Dd][Ii][Aa][Gg]\.[Ee][Xx][Ee]|\\[Dd][Uu][Mm][Pp][Ee][Rr][Tt]\.[Ee][Xx][Ee]|\\[Nn][Aa][Nn][Oo][Dd][Uu][Mm][Pp]\.[Ee][Xx][Ee]|\\[Aa][Vv][Dd][Uu][Mm][Pp]\.[Ee][Xx][Ee])/) OR (data_win_system_eventID:"1" AND (data_win_eventdata_commandLine:/.*[Cc][Oo][Mm][Ss][Vv][Cc][Ss]\.[Dd][Ll][Ll].*/ OR data_win_eventdata_commandLine:/.*[Mm][Ii][Nn][Ii][Dd][Uu][Mm][Pp].*/ OR data_win_eventdata_commandLine:/.*[Dd][Uu][Mm][Pp][Ee][Rr][Tt].*/ OR data_win_eventdata_commandLine:/.*[Nn][Aa][Nn][Oo][Dd][Uu][Mm][Pp].*/ OR data_win_eventdata_commandLine:/.*[Ll][Ss][Aa][Ss][Ss].*/ OR data_win_eventdata_commandLine:/.*[Ss][Ee][Kk][Uu][Rr][Ll][Ss][Aa].*/ OR data_win_eventdata_commandLine:/.*[Nn][Tt][Dd][Ss]\.[Dd][Ii][Tt].*/ OR data_win_eventdata_commandLine:/.*[Nn][Tt][Dd][Ss][Uu][Tt][Ii][Ll].*/)) OR (data_win_system_eventID:"10" AND data_win_eventdata_targetImage:/.*(\\[Ll][Ss][Aa][Ss][Ss]\.[Ee][Xx][Ee])/))'
-      pivot_on: [host]
-      window: 1h
+  # Behaviour-targeted hunts the engine runs around the alert (not a sweep).
+  - name: Injection into the Event Log service host (svchost) on this host
+    query: (data_win_system_eventID:"10" AND data_win_eventdata_targetImage:/.*\\[Ss][Vv][Cc][Hh][Oo][Ss][Tt]\.[Ee][Xx][Ee]/ AND (data_win_eventdata_grantedAccess:/0[Xx]1[Ff].*/ OR data_win_eventdata_grantedAccess:/0[Xx]143[0-9A-Fa-f].*/)) OR (data_win_system_eventID:"8" AND data_win_eventdata_targetImage:/.*\\[Ss][Vv][Cc][Hh][Oo][Ss][Tt]\.[Ee][Xx][Ee]/) OR (data_win_system_eventID:"7" AND data_win_eventdata_image:/.*\\[Ss][Vv][Cc][Hh][Oo][Ss][Tt]\.[Ee][Xx][Ee]/ AND data_win_eventdata_signed:/[Ff][Aa][Ll][Ss][Ee]/)
+    pivot_on:
+    - host
+    window: 1h
+  - name: Event Log service control and native log-clear artifacts on this host
+    query: (data_win_system_eventID:"1" AND (data_win_eventdata_commandLine:/.*[Ww][Ee][Vv][Tt][Uu][Tt][Ii][Ll] [Cc][Ll].*/ OR data_win_eventdata_commandLine:/.*[Ww][Ee][Vv][Tt][Uu][Tt][Ii][Ll] [Ss][Ll].*/ OR data_win_eventdata_commandLine:/.*[Cc][Ll][Ee][Aa][Rr]-[Ee][Vv][Ee][Nn][Tt][Ll][Oo][Gg].*/ OR data_win_eventdata_commandLine:/.*[Rr][Ee][Mm][Oo][Vv][Ee]-[Ee][Vv][Ee][Nn][Tt][Ll][Oo][Gg].*/ OR data_win_eventdata_commandLine:/.*[Ll][Ii][Mm][Ii][Tt]-[Ee][Vv][Ee][Nn][Tt][Ll][Oo][Gg].*/ OR data_win_eventdata_commandLine:/.*[Cc][Ll][Ee][Aa][Rr]-[Ww][Ii][Nn][Ee][Vv][Ee][Nn][Tt].*/ OR data_win_eventdata_commandLine:/.*[Ss][Tt][Oo][Pp]-[Ss][Ee][Rr][Vv][Ii][Cc][Ee].*[Ee][Vv][Ee][Nn][Tt][Ll][Oo][Gg].*/ OR data_win_eventdata_commandLine:/.* [Ss][Cc] [Ss][Tt][Oo][Pp] .*[Ee][Vv][Ee][Nn][Tt][Ll][Oo][Gg].*/ OR data_win_eventdata_commandLine:/.* [Nn][Ee][Tt] [Ss][Tt][Oo][Pp] .*[Ee][Vv][Ee][Nn][Tt][Ll][Oo][Gg].*/)) OR data_win_system_eventID:"1102" OR data_win_system_eventID:"104" OR data_win_system_eventID:"1100"
+    pivot_on:
+    - host
+    window: 6h
+  - name: Companion sensor-blinding (Defender / Sysmon / ETW) on this host
+    query: data_win_system_eventID:"1" AND (data_win_eventdata_commandLine:/.*[Ss][Ee][Tt]-[Mm][Pp][Pp][Rr][Ee][Ff][Ee][Rr][Ee][Nn][Cc][Ee].*/ OR data_win_eventdata_commandLine:/.*[Dd][Ii][Ss][Aa][Bb][Ll][Ee][Rr][Ee][Aa][Ll][Tt][Ii][Mm][Ee][Mm][Oo][Nn][Ii][Tt][Oo][Rr][Ii][Nn][Gg].*/ OR data_win_eventdata_commandLine:/.*[Dd][Ii][Ss][Aa][Bb][Ll][Ee][Aa][Nn][Tt][Ii][Ss][Pp][Yy][Ww][Aa][Rr][Ee].*/ OR data_win_eventdata_commandLine:/.*[Aa][Dd][Dd]-[Mm][Pp][Pp][Rr][Ee][Ff][Ee][Rr][Ee][Nn][Cc][Ee].*/ OR data_win_eventdata_commandLine:/.*[Ff][Ll][Tt][Mm][Cc].*[Uu][Nn][Ll][Oo][Aa][Dd].*/ OR data_win_eventdata_commandLine:/.*[Ss][Yy][Ss][Mm][Oo][Nn].*-[Uu].*/ OR data_win_eventdata_commandLine:/.*[Ll][Oo][Gg][Mm][Aa][Nn].*[Tt][Rr][Aa][Cc][Ee].*/ OR data_win_eventdata_commandLine:/.*[Ee][Tt][Ww][Tt][Rr][Aa][Cc][Ee][Pp][Rr][Oo][Vv][Ii][Dd][Ee][Rr].*/ OR data_win_eventdata_commandLine:/.*[Ss][Cc] [Ss][Tt][Oo][Pp] [Ww][Ii][Nn][Dd][Ee][Ff][Ee][Nn][Dd].*/ OR data_win_eventdata_commandLine:/.*[Ss][Cc] [Ss][Tt][Oo][Pp] [Ss][Yy][Ss][Mm][Oo][Nn].*/)
+    pivot_on:
+    - host
+    window: 6h
+  - name: 'Credential access: LSASS dumping and secret extraction on this host'
+    query: (data_win_system_eventID:"1" AND data_win_eventdata_image:/.*(\\[Pp][Rr][Oo][Cc][Dd][Uu][Mm][Pp]\.[Ee][Xx][Ee]|\\[Pp][Rr][Oo][Cc][Dd][Uu][Mm][Pp]64\.[Ee][Xx][Ee]|\\[Nn][Aa][Nn][Oo][Dd][Uu][Mm][Pp]\.[Ee][Xx][Ee]|\\[Mm][Ii][Mm][Ii][Kk][Aa][Tt][Zz].*|\\[Cc][Rr][Ee][Aa][Tt][Ee][Dd][Uu][Mm][Pp]\.[Ee][Xx][Ee])/) OR (data_win_system_eventID:"1" AND (data_win_eventdata_commandLine:/.*[Cc][Oo][Mm][Ss][Vv][Cc][Ss]\.[Dd][Ll][Ll].*[Mm][Ii][Nn][Ii][Dd][Uu][Mm][Pp].*/ OR data_win_eventdata_commandLine:/.*[Ss][Ee][Kk][Uu][Rr][Ll][Ss][Aa].*/ OR data_win_eventdata_commandLine:/.*[Nn][Tt][Dd][Ss]\.[Dd][Ii][Tt].*/ OR data_win_eventdata_commandLine:/.*[Nn][Tt][Dd][Ss][Uu][Tt][Ii][Ll].*/ OR data_win_eventdata_commandLine:/.*[Ll][Ss][Aa][Ss][Ss].*[Dd][Uu][Mm][Pp].*/)) OR (data_win_system_eventID:"10" AND data_win_eventdata_targetImage:/.*\\[Ll][Ss][Aa][Ss][Ss]\.[Ee][Xx][Ee]/) OR (data_win_system_eventID:"11" AND data_win_eventdata_targetFilename:/.*[Ll][Ss][Aa][Ss][Ss].*\.[Dd][Mm][Pp].*/)
+    pivot_on:
+    - host
+    window: 2h
+  - name: Hook-tool / EvtMute DLL staging and suspicious DLL writes on this host
+    query: data_win_system_eventID:"11" AND data_win_eventdata_targetFilename:/.*\.[Dd][Ll][Ll]/ AND (data_win_eventdata_targetFilename:/.*[Ee][Vv][Tt][Mm][Uu][Tt][Ee].*/ OR data_win_eventdata_targetFilename:/.*[Ss][Hh][Aa][Rr][Pp][Ee][Vv][Tt].*/ OR data_win_eventdata_targetFilename:/.*\\[Uu][Ss][Ee][Rr][Ss]\\.*/ OR data_win_eventdata_targetFilename:/.*\\[Pp][Rr][Oo][Gg][Rr][Aa][Mm][Dd][Aa][Tt][Aa]\\.*/ OR data_win_eventdata_targetFilename:/.*\\[Aa][Pp][Pp][Dd][Aa][Tt][Aa]\\.*/ OR data_win_eventdata_targetFilename:/.*\\[Tt][Ee][Mm][Pp]\\.*/ OR data_win_eventdata_targetFilename:/.*\\[Pp][Uu][Bb][Ll][Ii][Cc]\\.*/)
+    pivot_on:
+    - host
+    window: 2h

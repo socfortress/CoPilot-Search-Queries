@@ -142,40 +142,55 @@ graylog:
   query: data_win_system_eventID:"7" AND (data_win_eventdata_imageLoaded:/.*\\[Kk][Aa][Tt][Zz]_[Oo][Nn][Tt][Oo][Pp]\.[Dd][Ll][Ll]/ OR data_win_eventdata_imageLoaded:/.*\\[Aa][Pp][Pp][Dd][Aa][Tt][Aa]\\[Ll][Oo][Cc][Aa][Ll]\\[Tt][Ee][Mm][Pp]\\[Rr][Ee][Cc][Ee][Ii][Vv][Ee][Dd]_[Dd][Ll][Ll]\.[Dd][Ll][Ll]/)
 
 correlation:
-  # Authored by the correlation engine for review. Related CoPilot Searches to run
-  # around an alert from this rule, scoped to the same host/user/IP within the window.
+  # Authored per-rule (behaviour-researched) for the correlation engine. Related CoPilot
+  # Searches + telemetry pivots to run around an alert, scoped to its host/user/ip/domain.
   related_rules:
-    - id: ec570e53-4c76-45a9-804d-dc3f355ff7a7
-      name: "7Zip Compressing Dump Files"
-      reason: "next kill-chain tactic: Collection"
-    - id: 0a1255c5-d732-4b62-ac02-b5152d34fb83
-      name: "ADExplorer Writing Complete AD Snapshot Into .dat File"
-      reason: "next kill-chain tactic: Discovery"
-    - id: 1ea13e8c-03ea-409b-877d-ce5c3d2c1cb3
-      name: "ADFS Database Named Pipe Connection By Uncommon Tool"
-      reason: "next kill-chain tactic: Collection"
-    - id: 75bf09fa-1dd7-4d18-9af9-dd9e492562eb
-      name: "ADSI-Cache File Creation By Uncommon Tool"
-      reason: "next kill-chain tactic: Command and Control"
-    - id: 33a2d1dd-f3b0-40bd-8baf-7974468927cc
-      name: "APT PRIVATELOG Image Load Pattern"
-      reason: "next kill-chain tactic: Privilege Escalation"
-    - id: 9aa01d62-7667-4d3b-acb8-8cb5103e2014
-      name: "APT27 - Emissary Panda Activity"
-      reason: "next kill-chain tactic: Execution"
-  window: 1h
+  - id: 9c3d6e32-f4c8-4d73-8b8f-95c3b383a13c
+    name: DNS Query To Katz Stealer Domains
+    reason: Same malware family — the direct C2 confirmation. This image-load catches the Katz payload DLL resident; a DNS query to katz-panel.com / katzstealer.com / twist2katz.com on the same host in the window is the same implant beaconing to its panel. Both firing together is a near-certain Katz infection (the file and the network halves of one event), promoting the alert to a confirmed incident.
+  - id: 62b7ccc9-23b4-471e-aa15-6da3663c4d59
+    name: PowerShell Base64 Encoded Reflective Assembly Load
+    reason: Precursor loader stage. Katz arrives as a gzip/JS → obfuscated-PowerShell chain that reflectively loads the .NET stealer into memory (T1620); that loader is what writes and maps %TEMP%\received_dll.dll / katz_ontop.dll. Firing just before this image-load reconstructs how the payload became resident and names the parent process to contain.
+  - id: b3d34dc5-2efd-4ae3-845f-8ec14921f449
+    name: Browser Started with Remote Debugging
+    reason: Katz's App-Bound-Encryption bypass in action. To read Chrome/Edge cookies protected by ABE, the stealer relaunches the browser with --remote-debugging-* (or Firefox -start-debugger-server) and pulls live session cookies over the DevTools protocol. On the same host right after the DLL loads, this is the cookie/session theft the stealer exists to perform (T1185).
+  - id: fc028194-969d-4122-8abe-0470d5b8f12f
+    name: Access to Browser Login Data
+    reason: Direct credential-harvest follow-on. Reading the Chromium 'Login Data' SQLite store lifts saved usernames and passwords (T1555.003). If this fires on the host near the DLL load it is Katz collecting the very passwords it will ship to the panel.
+  - id: 47147b5b-9e17-4d76-b8d2-7bac24c5ce1b
+    name: Potential Browser Data Stealing
+    reason: Katz's core objective — bulk copy of the Chromium/Gecko profile stores (\User Data, Login Data, Cookies) via copy/esentutl/robocopy before exfil. Co-occurring with the DLL load it is the staged loot being gathered for the panel.
+  - id: 4833155a-4053-4c9c-a997-777fcea0baa7
+    name: SQLite Firefox Profile Data DB Access
+    reason: Broadens the theft to the Gecko surface. Katz also harvests Firefox-family profiles; a sqlite/sqlite3 process querying a Firefox profile DB on the host (T1539, T1005) is cookie/credential theft from the non-Chromium browsers alongside the loaded stealer.
+  - id: c3dbbc9f-ef1d-470a-a90a-d343448d5875
+    name: Suspicious Non-Browser Network Communication With Telegram API
+    reason: Parallel exfil channel. Katz-class stealers ship harvested credentials, cookies, wallets and tokens to a Telegram bot; a non-browser process talking to the Telegram API on the same host is the loot leaving, complementing the panel-domain C2 beacon (T1567).
+  window: 2h
   enrichment_searches:
-  # Rule-specific telemetry pivots the engine runs around an alert from this rule,
-  # scoped to the alert's host/user/IP within the window (behaviour-targeted, not a sweep).
-    - name: "Autostart persistence written on this host (Run keys, services, IFEO)"
-      query: '(data_win_system_eventID:"12" OR data_win_system_eventID:"13") AND (data_win_eventdata_targetObject:/.*[Cc][Uu][Rr][Rr][Ee][Nn][Tt][Vv][Ee][Rr][Ss][Ii][Oo][Nn]\\[Rr][Uu][Nn].*/ OR data_win_eventdata_targetObject:/.*[Cc][Uu][Rr][Rr][Ee][Nn][Tt][Vv][Ee][Rr][Ss][Ii][Oo][Nn]\\[Rr][Uu][Nn][Oo][Nn][Cc][Ee].*/ OR data_win_eventdata_targetObject:/.*[Cc][Uu][Rr][Rr][Ee][Nn][Tt][Cc][Oo][Nn][Tt][Rr][Oo][Ll][Ss][Ee][Tt]\\[Ss][Ee][Rr][Vv][Ii][Cc][Ee][Ss]\\.*/ OR data_win_eventdata_targetObject:/.*[Ii][Mm][Aa][Gg][Ee] [Ff][Ii][Ll][Ee] [Ee][Xx][Ee][Cc][Uu][Tt][Ii][Oo][Nn] [Oo][Pp][Tt][Ii][Oo][Nn][Ss]\\.*/ OR data_win_eventdata_targetObject:/.*[Ww][Ii][Nn][Ll][Oo][Gg][Oo][Nn]\\[Ss][Hh][Ee][Ll][Ll].*/ OR data_win_eventdata_targetObject:/.*[Ww][Ii][Nn][Ll][Oo][Gg][Oo][Nn]\\[Uu][Ss][Ee][Rr][Ii][Nn][Ii][Tt].*/ OR data_win_eventdata_targetObject:/.*[Cc][Uu][Rr][Rr][Ee][Nn][Tt][Vv][Ee][Rr][Ss][Ii][Oo][Nn]\\[Ee][Xx][Pp][Ll][Oo][Rr][Ee][Rr]\\[Rr][Uu][Nn].*/ OR data_win_eventdata_targetObject:/.*[Pp][Oo][Ll][Ii][Cc][Ii][Ee][Ss]\\[Ee][Xx][Pp][Ll][Oo][Rr][Ee][Rr]\\[Rr][Uu][Nn].*/ OR data_win_eventdata_targetObject:/.*[Cc][Uu][Rr][Rr][Ee][Nn][Tt][Vv][Ee][Rr][Ss][Ii][Oo][Nn]\\[Ww][Ii][Nn][Dd][Oo][Ww][Ss]\\[Ll][Oo][Aa][Dd].*/)'
-      pivot_on: [host]
-      window: 4h
-    - name: "DLL sideloading / execution from user-writable paths on this host"
-      query: '((data_win_system_eventID:"7" AND (data_win_eventdata_imageLoaded:/.*\\[Uu][Ss][Ee][Rr][Ss]\\.*/ OR data_win_eventdata_imageLoaded:/.*\\[Pp][Rr][Oo][Gg][Rr][Aa][Mm][Dd][Aa][Tt][Aa]\\.*/ OR data_win_eventdata_imageLoaded:/.*\\[Ww][Ii][Nn][Dd][Oo][Ww][Ss]\\[Tt][Ee][Mm][Pp]\\.*/ OR data_win_eventdata_imageLoaded:/.*\\[Aa][Pp][Pp][Dd][Aa][Tt][Aa]\\.*/ OR data_win_eventdata_imageLoaded:/.*\\[Pp][Uu][Bb][Ll][Ii][Cc]\\.*/ OR data_win_eventdata_imageLoaded:/.*\\\$[Rr][Ee][Cc][Yy][Cc][Ll][Ee].*/)) OR (data_win_system_eventID:"1" AND (data_win_eventdata_image:/.*\\[Uu][Ss][Ee][Rr][Ss]\\.*/ OR data_win_eventdata_image:/.*\\[Pp][Rr][Oo][Gg][Rr][Aa][Mm][Dd][Aa][Tt][Aa]\\.*/ OR data_win_eventdata_image:/.*\\[Ww][Ii][Nn][Dd][Oo][Ww][Ss]\\[Tt][Ee][Mm][Pp]\\.*/ OR data_win_eventdata_image:/.*\\[Aa][Pp][Pp][Dd][Aa][Tt][Aa]\\.*/ OR data_win_eventdata_image:/.*\\[Pp][Uu][Bb][Ll][Ii][Cc]\\.*/ OR data_win_eventdata_image:/.*\\\$[Rr][Ee][Cc][Yy][Cc][Ll][Ee].*/)))'
-      pivot_on: [host]
-      window: 2h
-    - name: "Follow-on LOLBin / signed-binary-proxy execution on this host"
-      query: 'data_win_system_eventID:"1" AND data_win_eventdata_image:/.*(\\[Rr][Uu][Nn][Dd][Ll][Ll]32\.[Ee][Xx][Ee]|\\[Rr][Ee][Gg][Ss][Vv][Rr]32\.[Ee][Xx][Ee]|\\[Mm][Ss][Hh][Tt][Aa]\.[Ee][Xx][Ee]|\\[Ii][Nn][Ss][Tt][Aa][Ll][Ll][Uu][Tt][Ii][Ll]\.[Ee][Xx][Ee]|\\[Rr][Ee][Gg][Aa][Ss][Mm]\.[Ee][Xx][Ee]|\\[Rr][Ee][Gg][Ss][Vv][Cc][Ss]\.[Ee][Xx][Ee]|\\[Mm][Ss][Bb][Uu][Ii][Ll][Dd]\.[Ee][Xx][Ee]|\\[Cc][Ee][Rr][Tt][Uu][Tt][Ii][Ll]\.[Ee][Xx][Ee]|\\[Bb][Ii][Tt][Ss][Aa][Dd][Mm][Ii][Nn]\.[Ee][Xx][Ee]|\\[Ww][Mm][Ii][Cc]\.[Ee][Xx][Ee]|\\[Cc][Mm][Ss][Tt][Pp]\.[Ee][Xx][Ee]|\\[Oo][Dd][Bb][Cc][Cc][Oo][Nn][Ff]\.[Ee][Xx][Ee]|\\[Ff][Oo][Rr][Ff][Ii][Ll][Ee][Ss]\.[Ee][Xx][Ee]|\\[Pp][Cc][Aa][Ll][Uu][Aa]\.[Ee][Xx][Ee]|\\[Mm][Aa][Vv][Ii][Nn][Jj][Ee][Cc][Tt]\.[Ee][Xx][Ee]|\\[Ss][Cc][Rr][Ii][Pp][Tt][Rr][Uu][Nn][Nn][Ee][Rr]\.[Ee][Xx][Ee])/'
-      pivot_on: [host]
-      window: 1h
+  # Behaviour-targeted hunts the engine runs around the alert (not a sweep).
+  - name: 'Infostealer collection: browser, crypto-wallet and messaging stores touched on this host'
+    query: (data_win_system_eventID:"1" AND (data_win_eventdata_commandLine:/.*[Ll][Oo][Gg][Ii][Nn] [Dd][Aa][Tt][Aa].*/ OR data_win_eventdata_commandLine:/.*\\[Cc][Oo][Oo][Kk][Ii][Ee][Ss].*/ OR data_win_eventdata_commandLine:/.*[Ww][Ee][Bb] [Dd][Aa][Tt][Aa].*/ OR data_win_eventdata_commandLine:/.*[Ll][Oo][Cc][Aa][Ll] [Ss][Tt][Aa][Tt][Ee].*/ OR data_win_eventdata_commandLine:/.*[Ww][Aa][Ll][Ll][Ee][Tt]\.[Dd][Aa][Tt].*/ OR data_win_eventdata_commandLine:/.*\\[Ee][Xx][Oo][Dd][Uu][Ss].*/ OR data_win_eventdata_commandLine:/.*\\[Tt][Dd][Aa][Tt][Aa].*/ OR data_win_eventdata_commandLine:/.*[Ll][Ee][Vv][Ee][Ll][Dd][Bb].*/)) OR (data_win_system_eventID:"11" AND (data_win_eventdata_targetFilename:/.*[Ll][Oo][Gg][Ii][Nn] [Dd][Aa][Tt][Aa].*/ OR data_win_eventdata_targetFilename:/.*\\[Cc][Oo][Oo][Kk][Ii][Ee][Ss].*/ OR data_win_eventdata_targetFilename:/.*[Ww][Ee][Bb] [Dd][Aa][Tt][Aa].*/ OR data_win_eventdata_targetFilename:/.*[Ww][Aa][Ll][Ll][Ee][Tt]\.[Dd][Aa][Tt].*/ OR data_win_eventdata_targetFilename:/.*\\[Ee][Xx][Oo][Dd][Uu][Ss].*/ OR data_win_eventdata_targetFilename:/.*\\[Tt][Dd][Aa][Tt][Aa].*/ OR data_win_eventdata_targetFilename:/.*[Ll][Ee][Vv][Ee][Ll][Dd][Bb].*/))
+    pivot_on:
+    - host
+    window: 2h
+  - name: Browser process injection / remote-debugging on this host (App-Bound-Encryption cookie theft)
+    query: (data_win_system_eventID:"10" AND data_win_eventdata_targetImage:/.*\\([Cc][Hh][Rr][Oo][Mm][Ee]|[Mm][Ss][Ee][Dd][Gg][Ee]|[Bb][Rr][Aa][Vv][Ee]|[Oo][Pp][Ee][Rr][Aa]|[Ff][Ii][Rr][Ee][Ff][Oo][Xx])\.[Ee][Xx][Ee]/) OR (data_win_system_eventID:"8" AND data_win_eventdata_targetImage:/.*\\([Cc][Hh][Rr][Oo][Mm][Ee]|[Mm][Ss][Ee][Dd][Gg][Ee]|[Bb][Rr][Aa][Vv][Ee]|[Oo][Pp][Ee][Rr][Aa]|[Ff][Ii][Rr][Ee][Ff][Oo][Xx])\.[Ee][Xx][Ee]/) OR (data_win_system_eventID:"1" AND data_win_eventdata_commandLine:/.* --[Rr][Ee][Mm][Oo][Tt][Ee]-[Dd][Ee][Bb][Uu][Gg][Gg][Ii][Nn][Gg].*/)
+    pivot_on:
+    - host
+    window: 2h
+  - name: Outbound C2 / exfil connections by processes running from user-writable paths on this host
+    query: data_win_system_eventID:"3" AND (data_win_eventdata_image:/.*\\[Aa][Pp][Pp][Dd][Aa][Tt][Aa]\\.*/ OR data_win_eventdata_image:/.*\\[Tt][Ee][Mm][Pp]\\.*/ OR data_win_eventdata_image:/.*\\[Pp][Rr][Oo][Gg][Rr][Aa][Mm][Dd][Aa][Tt][Aa]\\.*/ OR data_win_eventdata_image:/.*\\[Pp][Uu][Bb][Ll][Ii][Cc]\\.*/ OR data_win_eventdata_image:/.*\\[Dd][Oo][Ww][Nn][Ll][Oo][Aa][Dd][Ss]\\.*/)
+    pivot_on:
+    - host
+    window: 1h
+  - name: 'Loader chain: script-interpreter-spawned stage or encoded/reflective/hidden-window PowerShell on this host'
+    query: data_win_system_eventID:"1" AND ((data_win_eventdata_commandLine:/.* -[Ee][Nn][Cc].*/ OR data_win_eventdata_commandLine:/.* -[Ee][Nn][Cc][Oo][Dd][Ee][Dd][Cc][Oo][Mm][Mm][Aa][Nn][Dd].*/ OR data_win_eventdata_commandLine:/.*[Ff][Rr][Oo][Mm][Bb][Aa][Ss][Ee]64[Ss][Tt][Rr][Ii][Nn][Gg].*/ OR data_win_eventdata_commandLine:/.*[Rr][Ee][Ff][Ll][Ee][Cc][Tt][Ii][Oo][Nn]\.[Aa][Ss][Ss][Ee][Mm][Bb][Ll][Yy].*/ OR data_win_eventdata_commandLine:/.*[Dd][Oo][Ww][Nn][Ll][Oo][Aa][Dd][Ss][Tt][Rr][Ii][Nn][Gg].*/ OR data_win_eventdata_commandLine:/.* -[Ww] [Hh][Ii][Dd][Dd][Ee][Nn].*/) OR (data_win_eventdata_parentImage:/.*\\([Ww][Ss][Cc][Rr][Ii][Pp][Tt]|[Cc][Ss][Cc][Rr][Ii][Pp][Tt]|[Mm][Ss][Hh][Tt][Aa])\.[Ee][Xx][Ee]/ AND data_win_eventdata_image:/.*\\([Pp][Oo][Ww][Ee][Rr][Ss][Hh][Ee][Ll][Ll]|[Pp][Ww][Ss][Hh]|[Cc][Mm][Dd]|[Rr][Ee][Gg][Ss][Vv][Rr]32|[Rr][Uu][Nn][Dd][Ll][Ll]32|[Mm][Ss][Bb][Uu][Ii][Ll][Dd]|[Ii][Nn][Ss][Tt][Aa][Ll][Ll][Uu][Tt][Ii][Ll]|[Rr][Ee][Gg][Aa][Ss][Mm])\.[Ee][Xx][Ee]/))
+    pivot_on:
+    - host
+    window: 4h
+  - name: Autostart persistence written on this host (Run keys, scheduled task, Startup folder)
+    query: ((data_win_system_eventID:"13" OR data_win_system_eventID:"12") AND (data_win_eventdata_targetObject:/.*[Cc][Uu][Rr][Rr][Ee][Nn][Tt][Vv][Ee][Rr][Ss][Ii][Oo][Nn]\\[Rr][Uu][Nn].*/ OR data_win_eventdata_targetObject:/.*[Cc][Uu][Rr][Rr][Ee][Nn][Tt][Vv][Ee][Rr][Ss][Ii][Oo][Nn]\\[Rr][Uu][Nn][Oo][Nn][Cc][Ee].*/ OR data_win_eventdata_targetObject:/.*[Ww][Ii][Nn][Ll][Oo][Gg][Oo][Nn]\\[Ss][Hh][Ee][Ll][Ll].*/ OR data_win_eventdata_targetObject:/.*[Ww][Ii][Nn][Ll][Oo][Gg][Oo][Nn]\\[Uu][Ss][Ee][Rr][Ii][Nn][Ii][Tt].*/ OR data_win_eventdata_targetObject:/.*[Ee][Xx][Pp][Ll][Oo][Rr][Ee][Rr]\\[Rr][Uu][Nn].*/)) OR (data_win_system_eventID:"1" AND (data_win_eventdata_image:/.*\\[Ss][Cc][Hh][Tt][Aa][Ss][Kk][Ss]\.[Ee][Xx][Ee]/ OR data_win_eventdata_commandLine:/.*[Rr][Ee][Gg].* [Aa][Dd][Dd].*[Rr][Uu][Nn].*/)) OR (data_win_system_eventID:"11" AND data_win_eventdata_targetFilename:/.*\\[Ss][Tt][Aa][Rr][Tt][Uu][Pp]\\.*/)
+    pivot_on:
+    - host
+    window: 6h

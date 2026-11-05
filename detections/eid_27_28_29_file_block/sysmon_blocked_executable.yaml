@@ -118,19 +118,58 @@ graylog:
   query: data_win_system_eventID:"27"
 
 correlation:
-  # Authored by the correlation engine for review.
+  # Authored per-rule (behaviour-researched) for the correlation engine. Related CoPilot
+  # Searches + telemetry pivots to run around an alert, scoped to its host/user/ip/domain.
+  related_rules:
+  - id: 693a44e9-7f26-4cb6-b787-214867672d3a
+    name: Sysmon File Executable Creation Detected
+    reason: 'Direct Sysmon sibling (EID 29) from the same policy: it logs PE writes it does not block, so it captures the payloads this dropper landed on paths the EID 27 block did not cover.'
+  - id: c3e5c1b1-45e9-4632-b242-27939c170239
+    name: Sysmon Blocked File Shredding
+    reason: Sibling anti-tamper block (EID 28) shipped in the same Sysmon config; a ransomware actor that drops a payload here also shreds originals/backups, so the two block events co-occur in one intrusion.
+  - id: Windows-Office-Product-Spawned-Child-Process-For-Download
+    name: Windows Office Product Spawned Child Process For Download
+    reason: 'Likely delivery root cause: a phishing Office document spawning a URL-bearing downloader is how the executable that was just blocked got fetched onto this host.'
+  - id: cea72823-df4d-4567-950c-0b579eaf0846
+    name: Potential Dropper Script Execution Via WScript/CScript/MSHTA
+    reason: A wscript/cscript/mshta dropper running from a user temp directory is a common writer of the PE that the block policy just intercepted.
+  - id: 5b80a791-ad9b-4b75-bcc1-ad4e1e89c200
+    name: File With Suspicious Extension Downloaded Via Bitsadmin
+    reason: 'LOLBin ingress transfer: bitsadmin pulling an exe/dll to disk is exactly the payload-staging write the EID 27 block stops.'
+  - id: 85b0b087-eddf-4a2b-b033-d771fa2b9775
+    name: PowerShell Download and Execution Cradles
+    reason: A PowerShell download cradle fetches and runs a payload, writing the PE to disk that the block policy prevents from landing.
+  - id: 327ff235-94eb-4f06-b9de-aaee571324be
+    name: Regsvr32 Execution From Highly Suspicious Location
+    reason: 'Follow-on proxy execution: after a blocked drop, actors load a DLL they did manage to land from a suspicious path via regsvr32.'
+  - id: 9c5037d1-c568-49b3-88c7-9846a5bdc2be
+    name: Suspicious Run Key from Download
+    reason: 'Follow-on persistence: a Run key pointing at a file in Downloads/Temp/Outlook attachments is the dropper setting autostart for the payload it staged around the block.'
+  window: 2h
   enrichment_searches:
-  # Rule-specific telemetry pivots the engine runs around an alert from this rule,
-  # scoped to the alert's host/user/IP within the window (behaviour-targeted, not a sweep).
-    - name: "Execution of programs from user-writable paths on this host"
-      query: 'data_win_system_eventID:"1" AND (data_win_eventdata_image:/.*\\[Uu][Ss][Ee][Rr][Ss]\\.*/ OR data_win_eventdata_image:/.*\\[Pp][Rr][Oo][Gg][Rr][Aa][Mm][Dd][Aa][Tt][Aa]\\.*/ OR data_win_eventdata_image:/.*\\[Ww][Ii][Nn][Dd][Oo][Ww][Ss]\\[Tt][Ee][Mm][Pp]\\.*/ OR data_win_eventdata_image:/.*\\[Aa][Pp][Pp][Dd][Aa][Tt][Aa]\\.*/ OR data_win_eventdata_image:/.*\\[Pp][Uu][Bb][Ll][Ii][Cc]\\.*/ OR data_win_eventdata_image:/.*\\\$[Rr][Ee][Cc][Yy][Cc][Ll][Ee].*/)'
-      pivot_on: [host]
-      window: 1h
-    - name: "Autostart persistence written on this host"
-      query: '(data_win_system_eventID:"12" OR data_win_system_eventID:"13") AND (data_win_eventdata_targetObject:/.*[Cc][Uu][Rr][Rr][Ee][Nn][Tt][Vv][Ee][Rr][Ss][Ii][Oo][Nn]\\[Rr][Uu][Nn].*/ OR data_win_eventdata_targetObject:/.*[Cc][Uu][Rr][Rr][Ee][Nn][Tt][Vv][Ee][Rr][Ss][Ii][Oo][Nn]\\[Rr][Uu][Nn][Oo][Nn][Cc][Ee].*/ OR data_win_eventdata_targetObject:/.*[Cc][Uu][Rr][Rr][Ee][Nn][Tt][Cc][Oo][Nn][Tt][Rr][Oo][Ll][Ss][Ee][Tt]\\[Ss][Ee][Rr][Vv][Ii][Cc][Ee][Ss]\\.*/ OR data_win_eventdata_targetObject:/.*[Ii][Mm][Aa][Gg][Ee] [Ff][Ii][Ll][Ee] [Ee][Xx][Ee][Cc][Uu][Tt][Ii][Oo][Nn] [Oo][Pp][Tt][Ii][Oo][Nn][Ss]\\.*/ OR data_win_eventdata_targetObject:/.*[Ww][Ii][Nn][Ll][Oo][Gg][Oo][Nn]\\[Ss][Hh][Ee][Ll][Ll].*/ OR data_win_eventdata_targetObject:/.*[Ww][Ii][Nn][Ll][Oo][Gg][Oo][Nn]\\[Uu][Ss][Ee][Rr][Ii][Nn][Ii][Tt].*/ OR data_win_eventdata_targetObject:/.*[Cc][Uu][Rr][Rr][Ee][Nn][Tt][Vv][Ee][Rr][Ss][Ii][Oo][Nn]\\[Ee][Xx][Pp][Ll][Oo][Rr][Ee][Rr]\\[Rr][Uu][Nn].*/ OR data_win_eventdata_targetObject:/.*[Pp][Oo][Ll][Ii][Cc][Ii][Ee][Ss]\\[Ee][Xx][Pp][Ll][Oo][Rr][Ee][Rr]\\[Rr][Uu][Nn].*/ OR data_win_eventdata_targetObject:/.*[Cc][Uu][Rr][Rr][Ee][Nn][Tt][Vv][Ee][Rr][Ss][Ii][Oo][Nn]\\[Ww][Ii][Nn][Dd][Oo][Ww][Ss]\\[Ll][Oo][Aa][Dd].*/)'
-      pivot_on: [host]
-      window: 2h
-    - name: "Memory/credential-dump creation & LSASS access on this host"
-      query: '((data_win_system_eventID:"1" AND data_win_eventdata_image:/.*(\\[Pp][Rr][Oo][Cc][Dd][Uu][Mm][Pp]\.[Ee][Xx][Ee]|\\[Pp][Rr][Oo][Cc][Dd][Uu][Mm][Pp]64\.[Ee][Xx][Ee]|\\[Ss][Qq][Ll][Dd][Uu][Mm][Pp][Ee][Rr]\.[Ee][Xx][Ee]|\\[Cc][Rr][Ee][Aa][Tt][Ee][Dd][Uu][Mm][Pp]\.[Ee][Xx][Ee]|\\[Rr][Dd][Rr][Ll][Ee][Aa][Kk][Dd][Ii][Aa][Gg]\.[Ee][Xx][Ee]|\\[Dd][Uu][Mm][Pp][Ee][Rr][Tt]\.[Ee][Xx][Ee]|\\[Nn][Aa][Nn][Oo][Dd][Uu][Mm][Pp]\.[Ee][Xx][Ee]|\\[Aa][Vv][Dd][Uu][Mm][Pp]\.[Ee][Xx][Ee])/) OR (data_win_system_eventID:"1" AND (data_win_eventdata_commandLine:/.*[Cc][Oo][Mm][Ss][Vv][Cc][Ss]\.[Dd][Ll][Ll].*/ OR data_win_eventdata_commandLine:/.*[Mm][Ii][Nn][Ii][Dd][Uu][Mm][Pp].*/ OR data_win_eventdata_commandLine:/.*[Dd][Uu][Mm][Pp][Ee][Rr][Tt].*/ OR data_win_eventdata_commandLine:/.*[Nn][Aa][Nn][Oo][Dd][Uu][Mm][Pp].*/ OR data_win_eventdata_commandLine:/.*[Ll][Ss][Aa][Ss][Ss].*/ OR data_win_eventdata_commandLine:/.*[Ss][Ee][Kk][Uu][Rr][Ll][Ss][Aa].*/ OR data_win_eventdata_commandLine:/.*[Nn][Tt][Dd][Ss]\.[Dd][Ii][Tt].*/ OR data_win_eventdata_commandLine:/.*[Nn][Tt][Dd][Ss][Uu][Tt][Ii][Ll].*/)) OR (data_win_system_eventID:"10" AND data_win_eventdata_targetImage:/.*(\\[Ll][Ss][Aa][Ss][Ss]\.[Ee][Xx][Ee])/))'
-      pivot_on: [host]
-      window: 1h
+  # Behaviour-targeted hunts the engine runs around the alert (not a sweep).
+  - name: Executable payloads written or Sysmon-detected on this host (drops the block missed)
+    query: (data_win_system_eventID:"29") OR (data_win_system_eventID:"11" AND (data_win_eventdata_targetFilename:/.*\.[Ee][Xx][Ee]/ OR data_win_eventdata_targetFilename:/.*\.[Dd][Ll][Ll]/ OR data_win_eventdata_targetFilename:/.*\.[Ss][Yy][Ss]/ OR data_win_eventdata_targetFilename:/.*\.[Ss][Cc][Rr]/) AND (data_win_eventdata_targetFilename:/.*\\[Uu][Ss][Ee][Rr][Ss]\\.*/ OR data_win_eventdata_targetFilename:/.*\\[Pp][Rr][Oo][Gg][Rr][Aa][Mm][Dd][Aa][Tt][Aa]\\.*/ OR data_win_eventdata_targetFilename:/.*\\[Aa][Pp][Pp][Dd][Aa][Tt][Aa]\\.*/ OR data_win_eventdata_targetFilename:/.*\\[Tt][Ee][Mm][Pp]\\.*/ OR data_win_eventdata_targetFilename:/.*\\[Pp][Uu][Bb][Ll][Ii][Cc]\\.*/))
+    pivot_on:
+    - host
+    window: 1h
+  - name: Ingress tool transfer / download of a payload to disk on this host
+    query: (data_win_system_eventID:"1" AND data_win_eventdata_image:/.*(\\[Cc][Ee][Rr][Tt][Uu][Tt][Ii][Ll]\.[Ee][Xx][Ee]|\\[Bb][Ii][Tt][Ss][Aa][Dd][Mm][Ii][Nn]\.[Ee][Xx][Ee]|\\[Cc][Uu][Rr][Ll]\.[Ee][Xx][Ee]|\\[Ww][Gg][Ee][Tt]\.[Ee][Xx][Ee])/) OR (data_win_eventdata_commandLine:/.*[Dd][Oo][Ww][Nn][Ll][Oo][Aa][Dd][Ss][Tt][Rr][Ii][Nn][Gg].*/ OR data_win_eventdata_commandLine:/.*[Dd][Oo][Ww][Nn][Ll][Oo][Aa][Dd][Ff][Ii][Ll][Ee].*/ OR data_win_eventdata_commandLine:/.*[Ii][Nn][Vv][Oo][Kk][Ee]-[Ww][Ee][Bb][Rr][Ee][Qq][Uu][Ee][Ss][Tt].*/ OR data_win_eventdata_commandLine:/.*[Nn][Ee][Tt]\.[Ww][Ee][Bb][Cc][Ll][Ii][Ee][Nn][Tt].*/ OR data_win_eventdata_commandLine:/.*[Ss][Tt][Aa][Rr][Tt]-[Bb][Ii][Tt][Ss][Tt][Rr][Aa][Nn][Ss][Ff][Ee][Rr].*/)
+    pivot_on:
+    - host
+    window: 2h
+  - name: Office / script-host spawning child processes on this host (delivery root cause)
+    query: data_win_system_eventID:"1" AND (data_win_eventdata_parentImage:/.*\\[Ww][Ii][Nn][Ww][Oo][Rr][Dd]\.[Ee][Xx][Ee]/ OR data_win_eventdata_parentImage:/.*\\[Ee][Xx][Cc][Ee][Ll]\.[Ee][Xx][Ee]/ OR data_win_eventdata_parentImage:/.*\\[Pp][Oo][Ww][Ee][Rr][Pp][Nn][Tt]\.[Ee][Xx][Ee]/ OR data_win_eventdata_parentImage:/.*\\[Oo][Uu][Tt][Ll][Oo][Oo][Kk]\.[Ee][Xx][Ee]/ OR data_win_eventdata_parentImage:/.*\\[Oo][Nn][Ee][Nn][Oo][Tt][Ee]\.[Ee][Xx][Ee]/ OR data_win_eventdata_parentImage:/.*\\[Mm][Ss][Hh][Tt][Aa]\.[Ee][Xx][Ee]/ OR data_win_eventdata_parentImage:/.*\\[Ww][Ss][Cc][Rr][Ii][Pp][Tt]\.[Ee][Xx][Ee]/ OR data_win_eventdata_parentImage:/.*\\[Cc][Ss][Cc][Rr][Ii][Pp][Tt]\.[Ee][Xx][Ee]/)
+    pivot_on:
+    - host
+    window: 2h
+  - name: Execution from user-writable / masquerading paths on this host (drop retried and run)
+    query: data_win_system_eventID:"1" AND (data_win_eventdata_image:/.*\\[Uu][Ss][Ee][Rr][Ss]\\.*/ OR data_win_eventdata_image:/.*\\[Pp][Rr][Oo][Gg][Rr][Aa][Mm][Dd][Aa][Tt][Aa]\\.*/ OR data_win_eventdata_image:/.*\\[Ww][Ii][Nn][Dd][Oo][Ww][Ss]\\[Tt][Ee][Mm][Pp]\\.*/ OR data_win_eventdata_image:/.*\\[Aa][Pp][Pp][Dd][Aa][Tt][Aa]\\.*/ OR data_win_eventdata_image:/.*\\[Pp][Uu][Bb][Ll][Ii][Cc]\\.*/ OR data_win_eventdata_image:/.*\\\$[Rr][Ee][Cc][Yy][Cc][Ll][Ee].*/)
+    pivot_on:
+    - host
+    window: 2h
+  - name: Security-tool tampering & backup/shadow-copy destruction on this host
+    query: data_win_system_eventID:"1" AND (data_win_eventdata_commandLine:/.*[Ss][Ee][Tt]-[Mm][Pp][Pp][Rr][Ee][Ff][Ee][Rr][Ee][Nn][Cc][Ee].*/ OR data_win_eventdata_commandLine:/.*[Dd][Ii][Ss][Aa][Bb][Ll][Ee][Rr][Ee][Aa][Ll][Tt][Ii][Mm][Ee][Mm][Oo][Nn][Ii][Tt][Oo][Rr][Ii][Nn][Gg].*/ OR data_win_eventdata_commandLine:/.*[Aa][Dd][Dd]-[Mm][Pp][Pp][Rr][Ee][Ff][Ee][Rr][Ee][Nn][Cc][Ee] -[Ee][Xx][Cc][Ll][Uu][Ss][Ii][Oo][Nn][Pp][Aa][Tt][Hh].*/ OR data_win_eventdata_commandLine:/.*[Vv][Ss][Ss][Aa][Dd][Mm][Ii][Nn].*/ OR data_win_eventdata_commandLine:/.*[Ww][Mm][Ii][Cc] [Ss][Hh][Aa][Dd][Oo][Ww][Cc][Oo][Pp][Yy].*/ OR data_win_eventdata_commandLine:/.*[Bb][Cc][Dd][Ee][Dd][Ii][Tt].*/ OR data_win_eventdata_commandLine:/.*[Ww][Bb][Aa][Dd][Mm][Ii][Nn].*/ OR data_win_eventdata_commandLine:/.*[Ss][Cc] [Ss][Tt][Oo][Pp].*/ OR data_win_eventdata_commandLine:/.*[Ss][Tt][Oo][Pp]-[Ss][Ee][Rr][Vv][Ii][Cc][Ee].*/)
+    pivot_on:
+    - host
+    window: 2h

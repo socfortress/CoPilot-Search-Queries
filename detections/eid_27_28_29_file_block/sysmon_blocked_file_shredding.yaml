@@ -118,19 +118,58 @@ graylog:
   query: data_win_system_eventID:"28"
 
 correlation:
-  # Authored by the correlation engine for review.
+  # Authored per-rule (behaviour-researched) for the correlation engine. Related CoPilot
+  # Searches + telemetry pivots to run around an alert, scoped to its host/user/ip/domain.
+  related_rules:
+  - id: a4824fca-976f-4964-b334-0621379e84c4
+    name: Potential File Overwrite Via Sysinternals SDelete
+    reason: SDelete erasing a file (not free space) overwrites the file's raw contents in exactly the secure-delete pattern Sysmon's FileBlockShredding policy intercepts; when this process-creation rule fires alongside the block it names the exact image, parent and command line behind the shred that was stopped.
+  - id: c1d867fe-8d95-4487-aab4-e53f2d339f90
+    name: Renamed Sysinternals Sdelete Execution
+    reason: FileBlockShredding keys on the overwrite behaviour, not the binary name, so it still blocks a shred when the operator renames sdelete.exe to evade name-based detection; this rule identifies that disguised binary (via PE OriginalFileName) as the tool whose wipe was blocked.
+  - id: 4b046706-5789-4673-b111-66f25fe99534
+    name: Deleted Data Overwritten Via Cipher.EXE
+    reason: '''cipher /w'' overwrites free space so deleted data cannot be carved back - the same make-it-unrecoverable objective via a built-in LOLBin, and a common fallback when a direct file shred is blocked. FileBlockShredding does not gate free-space wiping, so this is where the blocked operator''s destruction often succeeds.'
+  - id: 4e5e024e-fabb-11eb-8b8f-acde48001122
+    name: Fsutil Zeroing File
+    reason: '''fsutil setzerodata'' zeroes a file''s contents - the identical destroy-the-file-data intent as the blocked shred, by a built-in utility (notably LockBit zeroing its own binary post-encryption). If it fires on the host the operator is wiping artifacts through whatever mechanism the shred policy fails to cover.'
+  - id: c947b146-0abc-4c87-9c64-b17e9d7274a2
+    name: Shadow Copies Deletion Using Operating Systems Utilities
+    reason: FileBlockShredding does not block VSS destruction. Ransomware deletes volume shadow copies (vssadmin/wmic/wbadmin) in the same pre/post-encryption burst that attempts the file shred, so this is the recovery-denial half of one impact sequence and where damage lands despite the block.
+  - id: 06125661-3814-4e03-bfa2-1e4411c60ac3
+    name: Backup Files Deleted
+    reason: 'The file-level counterpart to the shred: deletion of .bak/.bkf/.vhd backups runs beside the shredding attempt to close the restore path. It is a FileDelete (EID 23/26) event not gated by the shred-block, confirming the destruction proceeded even though the overwrite was stopped.'
+  - id: c9fbe8e9-119d-40a6-9b59-dd58a5d84429
+    name: Potential Ransomware or Unauthorized MBR Tampering Via Bcdedit.EXE
+    reason: '''bcdedit /set recoveryenabled no'' / bootstatuspolicy ignoreallfailures is the boot-recovery inhibition ransomware runs alongside data destruction; its presence on the same host in the window elevates a lone blocked shred into a confirmed ransomware impact chain (T1490).'
+  - id: fdb829a8-db84-4832-b64b-3e964cd44f01
+    name: Windows Eventlog Cleared Via Wevtutil
+    reason: Clearing the Windows event logs is the anti-forensic twin of file shredding - both are indicator removal (T1070). An operator who tried to shred a file typically also wipes the logs that recorded the intrusion, so the two fire in the same cleanup pass.
+  window: 2h
   enrichment_searches:
-  # Rule-specific telemetry pivots the engine runs around an alert from this rule,
-  # scoped to the alert's host/user/IP within the window (behaviour-targeted, not a sweep).
-    - name: "Execution of programs from user-writable paths on this host"
-      query: 'data_win_system_eventID:"1" AND (data_win_eventdata_image:/.*\\[Uu][Ss][Ee][Rr][Ss]\\.*/ OR data_win_eventdata_image:/.*\\[Pp][Rr][Oo][Gg][Rr][Aa][Mm][Dd][Aa][Tt][Aa]\\.*/ OR data_win_eventdata_image:/.*\\[Ww][Ii][Nn][Dd][Oo][Ww][Ss]\\[Tt][Ee][Mm][Pp]\\.*/ OR data_win_eventdata_image:/.*\\[Aa][Pp][Pp][Dd][Aa][Tt][Aa]\\.*/ OR data_win_eventdata_image:/.*\\[Pp][Uu][Bb][Ll][Ii][Cc]\\.*/ OR data_win_eventdata_image:/.*\\\$[Rr][Ee][Cc][Yy][Cc][Ll][Ee].*/)'
-      pivot_on: [host]
-      window: 1h
-    - name: "Autostart persistence written on this host"
-      query: '(data_win_system_eventID:"12" OR data_win_system_eventID:"13") AND (data_win_eventdata_targetObject:/.*[Cc][Uu][Rr][Rr][Ee][Nn][Tt][Vv][Ee][Rr][Ss][Ii][Oo][Nn]\\[Rr][Uu][Nn].*/ OR data_win_eventdata_targetObject:/.*[Cc][Uu][Rr][Rr][Ee][Nn][Tt][Vv][Ee][Rr][Ss][Ii][Oo][Nn]\\[Rr][Uu][Nn][Oo][Nn][Cc][Ee].*/ OR data_win_eventdata_targetObject:/.*[Cc][Uu][Rr][Rr][Ee][Nn][Tt][Cc][Oo][Nn][Tt][Rr][Oo][Ll][Ss][Ee][Tt]\\[Ss][Ee][Rr][Vv][Ii][Cc][Ee][Ss]\\.*/ OR data_win_eventdata_targetObject:/.*[Ii][Mm][Aa][Gg][Ee] [Ff][Ii][Ll][Ee] [Ee][Xx][Ee][Cc][Uu][Tt][Ii][Oo][Nn] [Oo][Pp][Tt][Ii][Oo][Nn][Ss]\\.*/ OR data_win_eventdata_targetObject:/.*[Ww][Ii][Nn][Ll][Oo][Gg][Oo][Nn]\\[Ss][Hh][Ee][Ll][Ll].*/ OR data_win_eventdata_targetObject:/.*[Ww][Ii][Nn][Ll][Oo][Gg][Oo][Nn]\\[Uu][Ss][Ee][Rr][Ii][Nn][Ii][Tt].*/ OR data_win_eventdata_targetObject:/.*[Cc][Uu][Rr][Rr][Ee][Nn][Tt][Vv][Ee][Rr][Ss][Ii][Oo][Nn]\\[Ee][Xx][Pp][Ll][Oo][Rr][Ee][Rr]\\[Rr][Uu][Nn].*/ OR data_win_eventdata_targetObject:/.*[Pp][Oo][Ll][Ii][Cc][Ii][Ee][Ss]\\[Ee][Xx][Pp][Ll][Oo][Rr][Ee][Rr]\\[Rr][Uu][Nn].*/ OR data_win_eventdata_targetObject:/.*[Cc][Uu][Rr][Rr][Ee][Nn][Tt][Vv][Ee][Rr][Ss][Ii][Oo][Nn]\\[Ww][Ii][Nn][Dd][Oo][Ww][Ss]\\[Ll][Oo][Aa][Dd].*/)'
-      pivot_on: [host]
-      window: 2h
-    - name: "Memory/credential-dump creation & LSASS access on this host"
-      query: '((data_win_system_eventID:"1" AND data_win_eventdata_image:/.*(\\[Pp][Rr][Oo][Cc][Dd][Uu][Mm][Pp]\.[Ee][Xx][Ee]|\\[Pp][Rr][Oo][Cc][Dd][Uu][Mm][Pp]64\.[Ee][Xx][Ee]|\\[Ss][Qq][Ll][Dd][Uu][Mm][Pp][Ee][Rr]\.[Ee][Xx][Ee]|\\[Cc][Rr][Ee][Aa][Tt][Ee][Dd][Uu][Mm][Pp]\.[Ee][Xx][Ee]|\\[Rr][Dd][Rr][Ll][Ee][Aa][Kk][Dd][Ii][Aa][Gg]\.[Ee][Xx][Ee]|\\[Dd][Uu][Mm][Pp][Ee][Rr][Tt]\.[Ee][Xx][Ee]|\\[Nn][Aa][Nn][Oo][Dd][Uu][Mm][Pp]\.[Ee][Xx][Ee]|\\[Aa][Vv][Dd][Uu][Mm][Pp]\.[Ee][Xx][Ee])/) OR (data_win_system_eventID:"1" AND (data_win_eventdata_commandLine:/.*[Cc][Oo][Mm][Ss][Vv][Cc][Ss]\.[Dd][Ll][Ll].*/ OR data_win_eventdata_commandLine:/.*[Mm][Ii][Nn][Ii][Dd][Uu][Mm][Pp].*/ OR data_win_eventdata_commandLine:/.*[Dd][Uu][Mm][Pp][Ee][Rr][Tt].*/ OR data_win_eventdata_commandLine:/.*[Nn][Aa][Nn][Oo][Dd][Uu][Mm][Pp].*/ OR data_win_eventdata_commandLine:/.*[Ll][Ss][Aa][Ss][Ss].*/ OR data_win_eventdata_commandLine:/.*[Ss][Ee][Kk][Uu][Rr][Ll][Ss][Aa].*/ OR data_win_eventdata_commandLine:/.*[Nn][Tt][Dd][Ss]\.[Dd][Ii][Tt].*/ OR data_win_eventdata_commandLine:/.*[Nn][Tt][Dd][Ss][Uu][Tt][Ii][Ll].*/)) OR (data_win_system_eventID:"10" AND data_win_eventdata_targetImage:/.*(\\[Ll][Ss][Aa][Ss][Ss]\.[Ee][Xx][Ee])/))'
-      pivot_on: [host]
-      window: 1h
+  # Behaviour-targeted hunts the engine runs around the alert (not a sweep).
+  - name: Secure-delete / file-wiping tooling executed on this host
+    query: data_win_system_eventID:"1" AND (data_win_eventdata_originalFileName:/[Ss][Dd][Ee][Ll][Ee][Tt][Ee]\.[Ee][Xx][Ee]/ OR data_win_eventdata_image:/.*\\[Ss][Dd][Ee][Ll][Ee][Tt][Ee][0-9]*\.[Ee][Xx][Ee]/ OR data_win_eventdata_commandLine:/.*[Cc][Ii][Pp][Hh][Ee][Rr].*\/[Ww].*/ OR (data_win_eventdata_image:/.*\\[Ff][Ss][Uu][Tt][Ii][Ll]\.[Ee][Xx][Ee]/ AND data_win_eventdata_commandLine:/.*[Ss][Ee][Tt][Zz][Ee][Rr][Oo][Dd][Aa][Tt][Aa].*/))
+    pivot_on:
+    - host
+    window: 2h
+  - name: Recovery inhibition on this host (shadow copies, backups, boot recovery) - not gated by the shred block
+    query: data_win_system_eventID:"1" AND (data_win_eventdata_commandLine:/.*[Vv][Ss][Ss][Aa][Dd][Mm][Ii][Nn].*[Dd][Ee][Ll][Ee][Tt][Ee].*[Ss][Hh][Aa][Dd][Oo][Ww].*/ OR data_win_eventdata_commandLine:/.*[Ss][Hh][Aa][Dd][Oo][Ww][Cc][Oo][Pp][Yy].*[Dd][Ee][Ll][Ee][Tt][Ee].*/ OR data_win_eventdata_commandLine:/.*[Ww][Bb][Aa][Dd][Mm][Ii][Nn].*[Dd][Ee][Ll][Ee][Tt][Ee].*/ OR data_win_eventdata_commandLine:/.*[Bb][Cc][Dd][Ee][Dd][Ii][Tt].*[Rr][Ee][Cc][Oo][Vv][Ee][Rr][Yy][Ee][Nn][Aa][Bb][Ll][Ee][Dd].*/ OR data_win_eventdata_commandLine:/.*[Bb][Cc][Dd][Ee][Dd][Ii][Tt].*[Bb][Oo][Oo][Tt][Ss][Tt][Aa][Tt][Uu][Ss][Pp][Oo][Ll][Ii][Cc][Yy].*/ OR data_win_eventdata_commandLine:/.*[Rr][Ee][Aa][Gg][Ee][Nn][Tt][Cc].*[Dd][Ii][Ss][Aa][Bb][Ll][Ee].*/)
+    pivot_on:
+    - host
+    window: 2h
+  - name: Further Sysmon file-block events on this host (shred retry / executable drop blocks)
+    query: (data_win_system_eventID:"27" OR data_win_system_eventID:"28" OR data_win_system_eventID:"29")
+    pivot_on:
+    - host
+    window: 2h
+  - name: Anti-forensic log and USN-journal clearing on this host
+    query: (data_win_system_eventID:"1" AND (data_win_eventdata_commandLine:/.*[Ww][Ee][Vv][Tt][Uu][Tt][Ii][Ll] [Cc][Ll].*/ OR data_win_eventdata_commandLine:/.*[Cc][Ll][Ee][Aa][Rr]-[Ee][Vv][Ee][Nn][Tt][Ll][Oo][Gg].*/ OR data_win_eventdata_commandLine:/.*[Ff][Ss][Uu][Tt][Ii][Ll] [Uu][Ss][Nn] [Dd][Ee][Ll][Ee][Tt][Ee][Jj][Oo][Uu][Rr][Nn][Aa][Ll].*/)) OR data_win_system_eventID:"1102" OR data_win_system_eventID:"104"
+    pivot_on:
+    - host
+    window: 2h
+  - name: Same account running secure-deletion / destruction tooling across hosts
+    query: data_win_system_eventID:"1" AND (data_win_eventdata_originalFileName:/[Ss][Dd][Ee][Ll][Ee][Tt][Ee]\.[Ee][Xx][Ee]/ OR data_win_eventdata_commandLine:/.*[Cc][Ii][Pp][Hh][Ee][Rr].*\/[Ww].*/ OR data_win_eventdata_commandLine:/.*[Ss][Ee][Tt][Zz][Ee][Rr][Oo][Dd][Aa][Tt][Aa].*/ OR data_win_eventdata_commandLine:/.*[Vv][Ss][Ss][Aa][Dd][Mm][Ii][Nn].*[Dd][Ee][Ll][Ee][Tt][Ee].*/ OR data_win_eventdata_commandLine:/.*[Ww][Bb][Aa][Dd][Mm][Ii][Nn].*[Dd][Ee][Ll][Ee][Tt][Ee].*/)
+    pivot_on:
+    - user
+    window: 6h

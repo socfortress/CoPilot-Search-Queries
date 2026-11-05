@@ -140,44 +140,52 @@ graylog:
   query: data_win_system_eventID:"7" AND data_win_eventdata_image:/.*\\[Ss][Vv][Cc][Hh][Oo][Ss][Tt]\.[Ee][Xx][Ee]/ AND data_win_eventdata_imageLoaded:/.*\\[Cc][Ll][Ff][Ss][Ww]32\.[Dd][Ll][Ll]/
 
 correlation:
-  # Authored by the correlation engine for review. Related CoPilot Searches to run
-  # around an alert from this rule, scoped to the same host/user/IP within the window.
+  # Authored per-rule (behaviour-researched) for the correlation engine. Related CoPilot
+  # Searches + telemetry pivots to run around an alert, scoped to its host/user/ip/domain.
   related_rules:
-    - id: ec570e53-4c76-45a9-804d-dc3f355ff7a7
-      name: "7Zip Compressing Dump Files"
-      reason: "next kill-chain tactic: Collection"
-    - id: 0a1255c5-d732-4b62-ac02-b5152d34fb83
-      name: "ADExplorer Writing Complete AD Snapshot Into .dat File"
-      reason: "next kill-chain tactic: Discovery"
-    - id: 1ea13e8c-03ea-409b-877d-ce5c3d2c1cb3
-      name: "ADFS Database Named Pipe Connection By Uncommon Tool"
-      reason: "next kill-chain tactic: Collection"
-    - id: 75bf09fa-1dd7-4d18-9af9-dd9e492562eb
-      name: "ADSI-Cache File Creation By Uncommon Tool"
-      reason: "next kill-chain tactic: Command and Control"
-    - id: 03e2746e-2b31-42f1-ab7a-eb39365b2422
-      name: "APT31 Judgement Panda Activity"
-      reason: "next kill-chain tactic: Credential Access"
-    - id: d522eca2-2973-4391-a3e0-ef0374321dae
-      name: "Abused Debug Privilege by Arbitrary Parent Processes"
-      reason: "next kill-chain tactic: Privilege Escalation"
-  window: 1h
+  - id: fb4e2211-6d08-426b-8e6f-0d4a161e3b1d
+    name: Clfs.SYS Loaded By Process Located In a Potential Suspicious Location
+    reason: Both abuse the Common Log File System. This rule catches the clfs.sys kernel driver loaded by a process running from a user-writable path (CLFS LPE-exploit staging / payload interaction); PRIVATELOG hides its AES-encrypted second stage inside a CLFS .blf log and reads it via clfsw32.dll. A clfs.sys hit on the same host is the broader CLFS tradecraft sitting beside this svchost loader.
+  - id: 79c7d1fc-64c7-91be-a616-ccda752efe81
+    name: Windows DLL Search Order Hijacking Hunt with Sysmon
+    reason: PRIVATELOG is an unregistered DLL delivered via DLL search-order hijacking into a trusted process. The malicious DLL that plants the loader into the svchost context surfaces here as an EID 7 load from a non-standard directory - the delivery step that precedes this svchost-loads-clfsw32.dll pattern.
+  - id: 174afcfa-6e40-4ae9-af64-496546389294
+    name: Credential Dumping Attempt Via Svchost
+    reason: EID 10 handle opened against svchost.exe with injection-grade rights (0x143a) from a non-services.exe source. PRIVATELOG executes inside svchost; a tool opening svchost memory with VM_WRITE/CREATE_THREAD bits is the same service-host abuse - either the injection that seeds the loader or the actor's follow-on credential theft from the service host.
+  - id: 166e9c50-8cd9-44af-815d-d1f0c0e90dde
+    name: Suspicious Svchost Process Access
+    reason: Full-access (0x1F3FFF) handle to svchost from an UNKNOWN (unbacked / manually-mapped) call stack. PRIVATELOG runs from injected, reflectively-loaded memory inside the service host; a sibling unbacked-memory handle to svchost corroborates in-memory code operating within svchost alongside this image-load pattern.
+  - id: 16c37b52-b141-42a5-a3ea-bbe098444397
+    name: Suspect Svchost Activity
+    reason: svchost.exe spawned with no command-line arguments - the textbook sign that a malicious process created a sacrificial svchost purely to inject code into it (the rule itself cites T1055). If the actor stood up such a svchost to host the PRIVATELOG loader, it fires just before this clfsw32.dll load on the same host.
+  - id: 01d2e2a1-5f09-44f7-9fc1-24faa7479b6d
+    name: Uncommon Svchost Parent Process
+    reason: svchost.exe whose parent is not services.exe - a provenance anomaly indicating an injected or masqueraded service host rather than a legitimately service-launched one. The abnormal svchost instance that hosts PRIVATELOG would trip this at process creation, pinpointing exactly which svchost to pull apart.
+  window: 2h
   enrichment_searches:
-  # Rule-specific telemetry pivots the engine runs around an alert from this rule,
-  # scoped to the alert's host/user/IP within the window (behaviour-targeted, not a sweep).
-    - name: "Process injection / remote-thread & LSASS access on this host"
-      query: '((data_win_system_eventID:"8") OR (data_win_system_eventID:"10" AND data_win_eventdata_targetImage:/.*(\\[Ll][Ss][Aa][Ss][Ss]\.[Ee][Xx][Ee])/) OR (data_win_system_eventID:"1" AND (data_win_eventdata_commandLine:/.*[Cc][Rr][Ee][Aa][Tt][Ee][Rr][Ee][Mm][Oo][Tt][Ee][Tt][Hh][Rr][Ee][Aa][Dd].*/ OR data_win_eventdata_commandLine:/.*[Vv][Ii][Rr][Tt][Uu][Aa][Ll][Aa][Ll][Ll][Oo][Cc][Ee][Xx].*/ OR data_win_eventdata_commandLine:/.*[Ww][Rr][Ii][Tt][Ee][Pp][Rr][Oo][Cc][Ee][Ss][Ss][Mm][Ee][Mm][Oo][Rr][Yy].*/)))'
-      pivot_on: [host]
-      window: 1h
-    - name: "Memory/credential-dump creation & LSASS access on this host"
-      query: '((data_win_system_eventID:"1" AND data_win_eventdata_image:/.*(\\[Pp][Rr][Oo][Cc][Dd][Uu][Mm][Pp]\.[Ee][Xx][Ee]|\\[Pp][Rr][Oo][Cc][Dd][Uu][Mm][Pp]64\.[Ee][Xx][Ee]|\\[Ss][Qq][Ll][Dd][Uu][Mm][Pp][Ee][Rr]\.[Ee][Xx][Ee]|\\[Cc][Rr][Ee][Aa][Tt][Ee][Dd][Uu][Mm][Pp]\.[Ee][Xx][Ee]|\\[Rr][Dd][Rr][Ll][Ee][Aa][Kk][Dd][Ii][Aa][Gg]\.[Ee][Xx][Ee]|\\[Dd][Uu][Mm][Pp][Ee][Rr][Tt]\.[Ee][Xx][Ee]|\\[Nn][Aa][Nn][Oo][Dd][Uu][Mm][Pp]\.[Ee][Xx][Ee]|\\[Aa][Vv][Dd][Uu][Mm][Pp]\.[Ee][Xx][Ee])/) OR (data_win_system_eventID:"1" AND (data_win_eventdata_commandLine:/.*[Cc][Oo][Mm][Ss][Vv][Cc][Ss]\.[Dd][Ll][Ll].*/ OR data_win_eventdata_commandLine:/.*[Mm][Ii][Nn][Ii][Dd][Uu][Mm][Pp].*/ OR data_win_eventdata_commandLine:/.*[Dd][Uu][Mm][Pp][Ee][Rr][Tt].*/ OR data_win_eventdata_commandLine:/.*[Nn][Aa][Nn][Oo][Dd][Uu][Mm][Pp].*/ OR data_win_eventdata_commandLine:/.*[Ll][Ss][Aa][Ss][Ss].*/ OR data_win_eventdata_commandLine:/.*[Ss][Ee][Kk][Uu][Rr][Ll][Ss][Aa].*/ OR data_win_eventdata_commandLine:/.*[Nn][Tt][Dd][Ss]\.[Dd][Ii][Tt].*/ OR data_win_eventdata_commandLine:/.*[Nn][Tt][Dd][Ss][Uu][Tt][Ii][Ll].*/)) OR (data_win_system_eventID:"10" AND data_win_eventdata_targetImage:/.*(\\[Ll][Ss][Aa][Ss][Ss]\.[Ee][Xx][Ee])/))'
-      pivot_on: [host]
-      window: 1h
-    - name: "DLL sideloading / execution from user-writable paths on this host"
-      query: '((data_win_system_eventID:"7" AND (data_win_eventdata_imageLoaded:/.*\\[Uu][Ss][Ee][Rr][Ss]\\.*/ OR data_win_eventdata_imageLoaded:/.*\\[Pp][Rr][Oo][Gg][Rr][Aa][Mm][Dd][Aa][Tt][Aa]\\.*/ OR data_win_eventdata_imageLoaded:/.*\\[Ww][Ii][Nn][Dd][Oo][Ww][Ss]\\[Tt][Ee][Mm][Pp]\\.*/ OR data_win_eventdata_imageLoaded:/.*\\[Aa][Pp][Pp][Dd][Aa][Tt][Aa]\\.*/ OR data_win_eventdata_imageLoaded:/.*\\[Pp][Uu][Bb][Ll][Ii][Cc]\\.*/ OR data_win_eventdata_imageLoaded:/.*\\\$[Rr][Ee][Cc][Yy][Cc][Ll][Ee].*/)) OR (data_win_system_eventID:"1" AND (data_win_eventdata_image:/.*\\[Uu][Ss][Ee][Rr][Ss]\\.*/ OR data_win_eventdata_image:/.*\\[Pp][Rr][Oo][Gg][Rr][Aa][Mm][Dd][Aa][Tt][Aa]\\.*/ OR data_win_eventdata_image:/.*\\[Ww][Ii][Nn][Dd][Oo][Ww][Ss]\\[Tt][Ee][Mm][Pp]\\.*/ OR data_win_eventdata_image:/.*\\[Aa][Pp][Pp][Dd][Aa][Tt][Aa]\\.*/ OR data_win_eventdata_image:/.*\\[Pp][Uu][Bb][Ll][Ii][Cc]\\.*/ OR data_win_eventdata_image:/.*\\\$[Rr][Ee][Cc][Yy][Cc][Ll][Ee].*/)))'
-      pivot_on: [host]
-      window: 2h
-    - name: "Follow-on LOLBin / signed-binary-proxy execution on this host"
-      query: 'data_win_system_eventID:"1" AND data_win_eventdata_image:/.*(\\[Rr][Uu][Nn][Dd][Ll][Ll]32\.[Ee][Xx][Ee]|\\[Rr][Ee][Gg][Ss][Vv][Rr]32\.[Ee][Xx][Ee]|\\[Mm][Ss][Hh][Tt][Aa]\.[Ee][Xx][Ee]|\\[Ii][Nn][Ss][Tt][Aa][Ll][Ll][Uu][Tt][Ii][Ll]\.[Ee][Xx][Ee]|\\[Rr][Ee][Gg][Aa][Ss][Mm]\.[Ee][Xx][Ee]|\\[Rr][Ee][Gg][Ss][Vv][Cc][Ss]\.[Ee][Xx][Ee]|\\[Mm][Ss][Bb][Uu][Ii][Ll][Dd]\.[Ee][Xx][Ee]|\\[Cc][Ee][Rr][Tt][Uu][Tt][Ii][Ll]\.[Ee][Xx][Ee]|\\[Bb][Ii][Tt][Ss][Aa][Dd][Mm][Ii][Nn]\.[Ee][Xx][Ee]|\\[Ww][Mm][Ii][Cc]\.[Ee][Xx][Ee]|\\[Cc][Mm][Ss][Tt][Pp]\.[Ee][Xx][Ee]|\\[Oo][Dd][Bb][Cc][Cc][Oo][Nn][Ff]\.[Ee][Xx][Ee]|\\[Ff][Oo][Rr][Ff][Ii][Ll][Ee][Ss]\.[Ee][Xx][Ee]|\\[Pp][Cc][Aa][Ll][Uu][Aa]\.[Ee][Xx][Ee]|\\[Mm][Aa][Vv][Ii][Nn][Jj][Ee][Cc][Tt]\.[Ee][Xx][Ee]|\\[Ss][Cc][Rr][Ii][Pp][Tt][Rr][Uu][Nn][Nn][Ee][Rr]\.[Ee][Xx][Ee])/'
-      pivot_on: [host]
-      window: 1h
+  # Behaviour-targeted hunts the engine runs around the alert (not a sweep).
+  - name: svchost loading the CLFS API or DLLs from user-writable paths on this host
+    query: data_win_system_eventID:"7" AND data_win_eventdata_image:/.*\\[Ss][Vv][Cc][Hh][Oo][Ss][Tt]\.[Ee][Xx][Ee]/ AND (data_win_eventdata_imageLoaded:/.*\\[Cc][Ll][Ff][Ss][Ww]32\.[Dd][Ll][Ll]/ OR data_win_eventdata_imageLoaded:/.*\\[Cc][Ll][Ff][Ss]\.[Ss][Yy][Ss]/ OR data_win_eventdata_imageLoaded:/.*\\[Uu][Ss][Ee][Rr][Ss]\\.*/ OR data_win_eventdata_imageLoaded:/.*\\[Pp][Rr][Oo][Gg][Rr][Aa][Mm][Dd][Aa][Tt][Aa]\\.*/ OR data_win_eventdata_imageLoaded:/.*\\[Ww][Ii][Nn][Dd][Oo][Ww][Ss]\\[Tt][Ee][Mm][Pp]\\.*/ OR data_win_eventdata_imageLoaded:/.*\\[Aa][Pp][Pp][Dd][Aa][Tt][Aa]\\.*/ OR data_win_eventdata_imageLoaded:/.*\\[Pp][Uu][Bb][Ll][Ii][Cc]\\.*/)
+    pivot_on:
+    - host
+    window: 1h
+  - name: svchost loading an unsigned image on this host
+    query: data_win_system_eventID:"7" AND data_win_eventdata_image:/.*\\[Ss][Vv][Cc][Hh][Oo][Ss][Tt]\.[Ee][Xx][Ee]/ AND data_win_eventdata_signed:/.*[Ff][Aa][Ll][Ss][Ee].*/
+    pivot_on:
+    - host
+    window: 2h
+  - name: Code injection into svchost on this host (remote thread or injection-grade handle)
+    query: (data_win_system_eventID:"8" AND data_win_eventdata_targetImage:/.*\\[Ss][Vv][Cc][Hh][Oo][Ss][Tt]\.[Ee][Xx][Ee]/) OR (data_win_system_eventID:"10" AND data_win_eventdata_targetImage:/.*\\[Ss][Vv][Cc][Hh][Oo][Ss][Tt]\.[Ee][Xx][Ee]/ AND (data_win_eventdata_grantedAccess:/0[Xx]143[Aa]/ OR data_win_eventdata_grantedAccess:/0[Xx]143[Bb]/ OR data_win_eventdata_grantedAccess:/0[Xx]1438/ OR data_win_eventdata_grantedAccess:/0[Xx]0[Cc]38/ OR data_win_eventdata_grantedAccess:/0[Xx]1[Ff]3[Ff][Ff][Ff]/))
+    pivot_on:
+    - host
+    window: 1h
+  - name: CLFS .blf payload container created in an unusual location on this host
+    query: data_win_system_eventID:"11" AND data_win_eventdata_targetFilename:/.*\.[Bb][Ll][Ff]/ AND (data_win_eventdata_targetFilename:/.*\\[Uu][Ss][Ee][Rr][Ss]\\[Pp][Uu][Bb][Ll][Ii][Cc]\\.*/ OR data_win_eventdata_targetFilename:/.*\\[Pp][Rr][Oo][Gg][Rr][Aa][Mm][Dd][Aa][Tt][Aa]\\.*/ OR data_win_eventdata_targetFilename:/.*\\[Ww][Ii][Nn][Dd][Oo][Ww][Ss]\\[Tt][Ee][Mm][Pp]\\.*/ OR data_win_eventdata_targetFilename:/.*\\[Aa][Pp][Pp][Dd][Aa][Tt][Aa]\\.*/ OR data_win_eventdata_targetFilename:/.*\\[Pp][Ee][Rr][Ff][Ll][Oo][Gg][Ss]\\.*/)
+    pivot_on:
+    - host
+    window: 24h
+  - name: Credential access against LSASS on this host (PRIVATELOG second-stage goal)
+    query: (data_win_system_eventID:"10" AND data_win_eventdata_targetImage:/.*\\[Ll][Ss][Aa][Ss][Ss]\.[Ee][Xx][Ee]/ AND (data_win_eventdata_grantedAccess:/0[Xx]1[Ff][0-9A-Fa-f][Ff][Ff][Ff]/ OR data_win_eventdata_grantedAccess:/0[Xx]143[Aa]/ OR data_win_eventdata_grantedAccess:/0[Xx]1438/ OR data_win_eventdata_grantedAccess:/0[Xx]1410/ OR data_win_eventdata_grantedAccess:/0[Xx]1010/)) OR (data_win_system_eventID:"8" AND data_win_eventdata_targetImage:/.*\\[Ll][Ss][Aa][Ss][Ss]\.[Ee][Xx][Ee]/) OR (data_win_system_eventID:"1" AND (data_win_eventdata_commandLine:/.*[Ss][Ee][Kk][Uu][Rr][Ll][Ss][Aa].*/ OR data_win_eventdata_commandLine:/.*[Mm][Ii][Nn][Ii][Dd][Uu][Mm][Pp].*/ OR data_win_eventdata_commandLine:/.*[Cc][Oo][Mm][Ss][Vv][Cc][Ss]\.[Dd][Ll][Ll].*/ OR data_win_eventdata_commandLine:/.*[Ll][Ss][Aa][Ss][Ss].*/))
+    pivot_on:
+    - host
+    window: 2h

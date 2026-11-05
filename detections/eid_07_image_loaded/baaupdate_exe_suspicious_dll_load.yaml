@@ -212,44 +212,58 @@ graylog:
   query: data_win_system_eventID:"7" AND data_win_eventdata_image:/.*\\[Bb][Aa][Aa][Uu][Pp][Dd][Aa][Tt][Ee]\.[Ee][Xx][Ee]/ AND data_win_eventdata_imageLoaded:/.*\.[Dd][Ll][Ll]/ AND (data_win_eventdata_imageLoaded:/.*:\\[Pp][Ee][Rr][Ff][Ll][Oo][Gg][Ss]\\.*/ OR data_win_eventdata_imageLoaded:/.*:\\[Uu][Ss][Ee][Rr][Ss]\\[Dd][Ee][Ff][Aa][Uu][Ll][Tt]\\.*/ OR data_win_eventdata_imageLoaded:/.*:\\[Uu][Ss][Ee][Rr][Ss]\\[Pp][Uu][Bb][Ll][Ii][Cc]\\.*/ OR data_win_eventdata_imageLoaded:/.*:\\[Ww][Ii][Nn][Dd][Oo][Ww][Ss]\\[Tt][Ee][Mm][Pp]\\.*/ OR data_win_eventdata_imageLoaded:/.*\\[Aa][Pp][Pp][Dd][Aa][Tt][Aa]\\[Ll][Oo][Cc][Aa][Ll]\\[Tt][Ee][Mm][Pp]\\.*/ OR data_win_eventdata_imageLoaded:/.*\\[Aa][Pp][Pp][Dd][Aa][Tt][Aa]\\[Rr][Oo][Aa][Mm][Ii][Nn][Gg]\\.*/ OR data_win_eventdata_imageLoaded:/.*\\[Cc][Oo][Nn][Tt][Aa][Cc][Tt][Ss]\\.*/ OR data_win_eventdata_imageLoaded:/.*\\[Ff][Aa][Vv][Oo][Rr][Ii][Tt][Ee][Ss]\\.*/ OR data_win_eventdata_imageLoaded:/.*\\[Ff][Aa][Vv][Oo][Uu][Rr][Ii][Tt][Ee][Ss]\\.*/ OR data_win_eventdata_imageLoaded:/.*\\[Ll][Ii][Nn][Kk][Ss]\\.*/ OR data_win_eventdata_imageLoaded:/.*\\[Mm][Uu][Ss][Ii][Cc]\\.*/ OR data_win_eventdata_imageLoaded:/.*\\[Pp][Ii][Cc][Tt][Uu][Rr][Ee][Ss]\\.*/ OR data_win_eventdata_imageLoaded:/.*\\[Pp][Rr][Oo][Gg][Rr][Aa][Mm][Dd][Aa][Tt][Aa]\\.*/ OR data_win_eventdata_imageLoaded:/.*\\[Tt][Ee][Mm][Pp][Oo][Rr][Aa][Rr][Yy] [Ii][Nn][Tt][Ee][Rr][Nn][Ee][Tt].*/ OR data_win_eventdata_imageLoaded:/.*\\[Vv][Ii][Dd][Ee][Oo][Ss]\\.*/)
 
 correlation:
-  # Authored by the correlation engine for review. Related CoPilot Searches to run
-  # around an alert from this rule, scoped to the same host/user/IP within the window.
+  # Authored per-rule (behaviour-researched) for the correlation engine. Related CoPilot
+  # Searches + telemetry pivots to run around an alert, scoped to its host/user/ip/domain.
   related_rules:
-    - id: ec570e53-4c76-45a9-804d-dc3f355ff7a7
-      name: "7Zip Compressing Dump Files"
-      reason: "next kill-chain tactic: Collection"
-    - id: 1ea13e8c-03ea-409b-877d-ce5c3d2c1cb3
-      name: "ADFS Database Named Pipe Connection By Uncommon Tool"
-      reason: "next kill-chain tactic: Collection"
-    - id: 75bf09fa-1dd7-4d18-9af9-dd9e492562eb
-      name: "ADSI-Cache File Creation By Uncommon Tool"
-      reason: "next kill-chain tactic: Command and Control"
-    - id: 03e2746e-2b31-42f1-ab7a-eb39365b2422
-      name: "APT31 Judgement Panda Activity"
-      reason: "next kill-chain tactic: Collection"
-    - id: 639c9081-f482-47d3-a0bd-ddee3d4ecd76
-      name: "All Backups Deleted Via Wbadmin.EXE"
-      reason: "next kill-chain tactic: Impact"
-    - id: a5d85486-b89c-11eb-8267-acde48001122
-      name: "Allow Inbound Traffic In Firewall Rule"
-      reason: "next kill-chain tactic: Lateral Movement"
-  window: 1h
+  - id: 9f38c1db-e2ae-40bf-81d0-5b68f73fb512
+    name: Suspicious BitLocker Access Agent Update Utility Execution
+    reason: 'Same binary, process-creation half of this exact BitlockMove event: fires when BaaUpdate.exe spawns child processes. Confirms the hijacked DLL actually executed code (not merely loaded) and exposes the payload launched in the interactive user''s session on this host.'
+  - id: fa1c3040-4680-11ec-a618-3e22fbd008af
+    name: Remote Process Instantiation via DCOM and PowerShell Script Block
+    reason: 'Delivery precursor: remote DCOM process instantiation is exactly how BaaUpdate.exe is launched on this target during BitlockMove (BDEUILauncher class as INTERACTIVE USER). Catching the remote DCOM spawn identifies the source host that triggered this landing.'
+  - id: windows-com-hijacking-inprocserver32-001
+    name: Windows COM Hijacking InprocServer32 Modification
+    reason: 'Hijack-mechanism precursor: BaaUpdate is COM-hijacked by repointing a CLSID''s InprocServer32 at an attacker DLL. This catches that registry repoint on the host - the change that makes BaaUpdate resolve and load the planted DLL this alert observed.'
+  - id: 2f7979ae-f82b-45af-ac1d-2b10e93b0baa
+    name: Potential DCOM InternetExplorer.Application DLL Hijack
+    reason: 'Precursor of the same family: the over-the-network writable-path .dll plant a DCOM-triggered DLL hijack requires. BitlockMove stages its hijack DLL into a user-writable folder the same way before BaaUpdate loads it.'
+  - id: f354eba5-623b-450f-b073-0b5b2773b6aa
+    name: Potential DCOM InternetExplorer.Application DLL Hijack - Image Load
+    reason: 'Closest sibling - identical detection shape: a DCOM-reachable COM host binary DLL-hijacked and caught at Sysmon EID7 image load. Co-occurrence points to the same DCOM-lateral-movement-via-DLL-hijack operator tradecraft / campaign.'
+  - id: f1f3bf22-deb2-418d-8cce-e1a45e46a5bd
+    name: MMC20 Lateral Movement
+    reason: Sibling DCOM lateral movement (T1021.003) sharing the svchost '-Embedding' COM-surrogate spawn signature BaaUpdate shows when invoked via DCOM; an operator wielding BitlockMove commonly carries other DCOM lateral-movement tools against the same hosts.
+  - id: 551d9c1f-816c-445b-a7a6-7a3864720d60
+    name: Potential Excel.EXE DCOM Lateral Movement Via ActivateMicrosoftApp
+    reason: Sibling DCOM lateral movement via a COM object's anomalous child process - another branch of the same T1021.003 technique the same actor may use to reach this or neighbouring hosts in the window.
+  - id: 8943b567-f14d-4ee8-a0bb-2121d4ce3184
+    name: Dump LSASS via comsvcs DLL
+    reason: 'Likely follow-on: having landed as the interactive user, the operator dumps LSASS (comsvcs MiniDump) to harvest credentials and move onward. Expands this stealthy lateral-movement landing into a credential-access incident.'
+  window: 2h
   enrichment_searches:
-  # Rule-specific telemetry pivots the engine runs around an alert from this rule,
-  # scoped to the alert's host/user/IP within the window (behaviour-targeted, not a sweep).
-    - name: "Follow-on LOLBin / signed-binary-proxy execution on this host"
-      query: 'data_win_system_eventID:"1" AND data_win_eventdata_image:/.*(\\[Rr][Uu][Nn][Dd][Ll][Ll]32\.[Ee][Xx][Ee]|\\[Rr][Ee][Gg][Ss][Vv][Rr]32\.[Ee][Xx][Ee]|\\[Mm][Ss][Hh][Tt][Aa]\.[Ee][Xx][Ee]|\\[Ii][Nn][Ss][Tt][Aa][Ll][Ll][Uu][Tt][Ii][Ll]\.[Ee][Xx][Ee]|\\[Rr][Ee][Gg][Aa][Ss][Mm]\.[Ee][Xx][Ee]|\\[Rr][Ee][Gg][Ss][Vv][Cc][Ss]\.[Ee][Xx][Ee]|\\[Mm][Ss][Bb][Uu][Ii][Ll][Dd]\.[Ee][Xx][Ee]|\\[Cc][Ee][Rr][Tt][Uu][Tt][Ii][Ll]\.[Ee][Xx][Ee]|\\[Bb][Ii][Tt][Ss][Aa][Dd][Mm][Ii][Nn]\.[Ee][Xx][Ee]|\\[Ww][Mm][Ii][Cc]\.[Ee][Xx][Ee]|\\[Cc][Mm][Ss][Tt][Pp]\.[Ee][Xx][Ee]|\\[Oo][Dd][Bb][Cc][Cc][Oo][Nn][Ff]\.[Ee][Xx][Ee]|\\[Ff][Oo][Rr][Ff][Ii][Ll][Ee][Ss]\.[Ee][Xx][Ee]|\\[Pp][Cc][Aa][Ll][Uu][Aa]\.[Ee][Xx][Ee]|\\[Mm][Aa][Vv][Ii][Nn][Jj][Ee][Cc][Tt]\.[Ee][Xx][Ee]|\\[Ss][Cc][Rr][Ii][Pp][Tt][Rr][Uu][Nn][Nn][Ee][Rr]\.[Ee][Xx][Ee])/'
-      pivot_on: [host]
-      window: 1h
-    - name: "Remote-execution / lateral-movement tooling on this host"
-      query: '(data_win_system_eventID:"1" AND data_win_eventdata_image:/.*(\\[Pp][Ss][Ee][Xx][Ee][Cc]\.[Ee][Xx][Ee]|\\[Pp][Ss][Ee][Xx][Ee][Ss][Vv][Cc]\.[Ee][Xx][Ee]|\\[Pp][Aa][Ee][Xx][Ee][Cc]\.[Ee][Xx][Ee]|\\[Ww][Ii][Nn][Rr][Ss]\.[Ee][Xx][Ee]|\\[Mm][Ss][Tt][Ss][Cc]\.[Ee][Xx][Ee]|\\[Ww][Mm][Ii][Cc]\.[Ee][Xx][Ee])/) OR (data_win_system_eventID:"1" AND data_win_eventdata_image:/.*(\\[Pp][Oo][Ww][Ee][Rr][Ss][Hh][Ee][Ll][Ll]\.[Ee][Xx][Ee]|\\[Pp][Ww][Ss][Hh]\.[Ee][Xx][Ee])/ AND (data_win_eventdata_commandLine:/.*[Ii][Nn][Vv][Oo][Kk][Ee]-[Cc][Oo][Mm][Mm][Aa][Nn][Dd].*/ OR data_win_eventdata_commandLine:/.*[Nn][Ee][Ww]-[Pp][Ss][Ss][Ee][Ss][Ss][Ii][Oo][Nn].*/ OR data_win_eventdata_commandLine:/.*[Ee][Nn][Tt][Ee][Rr]-[Pp][Ss][Ss][Ee][Ss][Ss][Ii][Oo][Nn].*/ OR data_win_eventdata_commandLine:/.*-[Cc][Oo][Mm][Pp][Uu][Tt][Ee][Rr][Nn][Aa][Mm][Ee].*/))'
-      pivot_on: [host]
-      window: 2h
-    - name: "Other executions of this tool-set on this host (any arguments)"
-      query: 'data_win_system_eventID:"1" AND data_win_eventdata_image:/.*(\\[Bb][Aa][Aa][Uu][Pp][Dd][Aa][Tt][Ee]\.[Ee][Xx][Ee])/'
-      pivot_on: [host]
-      window: 2h
-    - name: "Memory/credential-dump creation & LSASS access on this host"
-      query: '((data_win_system_eventID:"1" AND data_win_eventdata_image:/.*(\\[Pp][Rr][Oo][Cc][Dd][Uu][Mm][Pp]\.[Ee][Xx][Ee]|\\[Pp][Rr][Oo][Cc][Dd][Uu][Mm][Pp]64\.[Ee][Xx][Ee]|\\[Ss][Qq][Ll][Dd][Uu][Mm][Pp][Ee][Rr]\.[Ee][Xx][Ee]|\\[Cc][Rr][Ee][Aa][Tt][Ee][Dd][Uu][Mm][Pp]\.[Ee][Xx][Ee]|\\[Rr][Dd][Rr][Ll][Ee][Aa][Kk][Dd][Ii][Aa][Gg]\.[Ee][Xx][Ee]|\\[Dd][Uu][Mm][Pp][Ee][Rr][Tt]\.[Ee][Xx][Ee]|\\[Nn][Aa][Nn][Oo][Dd][Uu][Mm][Pp]\.[Ee][Xx][Ee]|\\[Aa][Vv][Dd][Uu][Mm][Pp]\.[Ee][Xx][Ee])/) OR (data_win_system_eventID:"1" AND (data_win_eventdata_commandLine:/.*[Cc][Oo][Mm][Ss][Vv][Cc][Ss]\.[Dd][Ll][Ll].*/ OR data_win_eventdata_commandLine:/.*[Mm][Ii][Nn][Ii][Dd][Uu][Mm][Pp].*/ OR data_win_eventdata_commandLine:/.*[Dd][Uu][Mm][Pp][Ee][Rr][Tt].*/ OR data_win_eventdata_commandLine:/.*[Nn][Aa][Nn][Oo][Dd][Uu][Mm][Pp].*/ OR data_win_eventdata_commandLine:/.*[Ll][Ss][Aa][Ss][Ss].*/ OR data_win_eventdata_commandLine:/.*[Ss][Ee][Kk][Uu][Rr][Ll][Ss][Aa].*/ OR data_win_eventdata_commandLine:/.*[Nn][Tt][Dd][Ss]\.[Dd][Ii][Tt].*/ OR data_win_eventdata_commandLine:/.*[Nn][Tt][Dd][Ss][Uu][Tt][Ii][Ll].*/)) OR (data_win_system_eventID:"10" AND data_win_eventdata_targetImage:/.*(\\[Ll][Ss][Aa][Ss][Ss]\.[Ee][Xx][Ee])/))'
-      pivot_on: [host]
-      window: 1h
+  # Behaviour-targeted hunts the engine runs around the alert (not a sweep).
+  - name: BaaUpdate.exe process tree on this host (COM-surrogate parent + spawned children)
+    query: (data_win_system_eventID:"1" AND data_win_eventdata_image:/.*\\[Bb][Aa][Aa][Uu][Pp][Dd][Aa][Tt][Ee]\.[Ee][Xx][Ee]/) OR (data_win_system_eventID:"1" AND data_win_eventdata_parentImage:/.*\\[Bb][Aa][Aa][Uu][Pp][Dd][Aa][Tt][Ee]\.[Ee][Xx][Ee]/)
+    pivot_on:
+    - host
+    window: 1h
+  - name: Inbound network/remote-interactive logon (the DCOM lateral-movement source)
+    query: data_win_system_eventID:"4624" AND (data_win_eventdata_logonType:"3" OR data_win_eventdata_logonType:"10")
+    pivot_on:
+    - host
+    window: 1h
+  - name: Hijack DLL planted in a user/public-writable path on this host
+    query: data_win_system_eventID:"11" AND data_win_eventdata_targetFilename:/.*\.[Dd][Ll][Ll]/ AND (data_win_eventdata_targetFilename:/.*:\\[Pp][Ee][Rr][Ff][Ll][Oo][Gg][Ss]\\.*/ OR data_win_eventdata_targetFilename:/.*:\\[Uu][Ss][Ee][Rr][Ss]\\[Pp][Uu][Bb][Ll][Ii][Cc]\\.*/ OR data_win_eventdata_targetFilename:/.*:\\[Uu][Ss][Ee][Rr][Ss]\\[Dd][Ee][Ff][Aa][Uu][Ll][Tt]\\.*/ OR data_win_eventdata_targetFilename:/.*:\\[Ww][Ii][Nn][Dd][Oo][Ww][Ss]\\[Tt][Ee][Mm][Pp]\\.*/ OR data_win_eventdata_targetFilename:/.*\\[Aa][Pp][Pp][Dd][Aa][Tt][Aa]\\[Ll][Oo][Cc][Aa][Ll]\\[Tt][Ee][Mm][Pp]\\.*/ OR data_win_eventdata_targetFilename:/.*\\[Aa][Pp][Pp][Dd][Aa][Tt][Aa]\\[Rr][Oo][Aa][Mm][Ii][Nn][Gg]\\.*/ OR data_win_eventdata_targetFilename:/.*\\[Pp][Rr][Oo][Gg][Rr][Aa][Mm][Dd][Aa][Tt][Aa]\\.*/)
+    pivot_on:
+    - host
+    window: 2h
+  - name: COM CLSID hijack registry modification on this host (incl. BDEUILauncher CLSID)
+    query: data_win_system_eventID:"13" AND (data_win_eventdata_targetObject:/.*[Cc][Ll][Ss][Ii][Dd].*\\[Ii][Nn][Pp][Rr][Oo][Cc][Ss][Ee][Rr][Vv][Ee][Rr]32.*/ OR data_win_eventdata_targetObject:/.*[Cc][Ll][Ss][Ii][Dd].*\\[Ll][Oo][Cc][Aa][Ll][Ss][Ee][Rr][Vv][Ee][Rr]32.*/ OR data_win_eventdata_targetObject:/.*\\[Tt][Rr][Ee][Aa][Tt][Aa][Ss].*/ OR data_win_eventdata_targetObject:/.*[Aa][Bb]93[Bb]6[Ff]1-[Bb][Ee]76-4185-[Aa]488-[Aa]9001[Bb]105[Bb]94.*/)
+    pivot_on:
+    - host
+    window: 2h
+  - name: Anomalous C2 network/DNS from BaaUpdate.exe (a BitLocker utility that should never touch the network)
+    query: (data_win_system_eventID:"3" AND data_win_eventdata_image:/.*\\[Bb][Aa][Aa][Uu][Pp][Dd][Aa][Tt][Ee]\.[Ee][Xx][Ee]/) OR (data_win_system_eventID:"22" AND data_win_eventdata_image:/.*\\[Bb][Aa][Aa][Uu][Pp][Dd][Aa][Tt][Ee]\.[Ee][Xx][Ee]/)
+    pivot_on:
+    - host
+    window: 1h

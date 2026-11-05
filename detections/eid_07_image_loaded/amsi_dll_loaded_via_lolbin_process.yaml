@@ -145,19 +145,58 @@ graylog:
   query: data_win_system_eventID:"7" AND data_win_eventdata_imageLoaded:/.*\\[Aa][Mm][Ss][Ii]\.[Dd][Ll][Ll]/ AND (data_win_eventdata_image:/.*\\[Ee][Xx][Tt][Ee][Xx][Pp][Oo][Rr][Tt]\.[Ee][Xx][Ee]/ OR data_win_eventdata_image:/.*\\[Oo][Dd][Bb][Cc][Cc][Oo][Nn][Ff]\.[Ee][Xx][Ee]/ OR data_win_eventdata_image:/.*\\[Rr][Uu][Nn][Dd][Ll][Ll]32\.[Ee][Xx][Ee]/)
 
 correlation:
-  # Authored by the correlation engine for review.
+  # Authored per-rule (behaviour-researched) for the correlation engine. Related CoPilot
+  # Searches + telemetry pivots to run around an alert, scoped to its host/user/ip/domain.
+  related_rules:
+  - id: 3f5491e2-8db8-496b-9e95-1029fce852d4
+    name: Driver/DLL Installation Via Odbcconf.EXE
+    reason: 'Precursor / same-process launch (odbcconf arm): odbcconf INSTALLDRIVER loads an attacker DLL into odbcconf, and when that DLL hosts the .NET/PowerShell runtime it is the very odbcconf this rule then catches loading amsi.dll. The EID 1 record supplies the command line, parent and DLL path that the image-load event omits.'
+  - id: 5f03babb-12db-4eec-8c82-7b4cb5580868
+    name: Response File Execution Via Odbcconf.EXE
+    reason: 'Precursor (the other odbcconf LOLBAS method): ''odbcconf -f <file>.rsp'' runs a response file whose REGSVR action loads a DLL into odbcconf — the launch of the same amsi.dll-hosting process. It names the .rsp/DLL payload to pull and shows how the host was invoked.'
+  - id: 5bb68627-3198-40ca-b458-49f973db8752
+    name: Rundll32 Execution Without Parameters
+    reason: 'Precursor / co-occurring (rundll32 arm): a rundll32 started with no DLL/export arguments is a hollowed or injected process (Metasploit psexec, PowerShdll-style hosts) — the exact rundll32 shape that goes on to load amsi.dll to run PowerShell in memory. On the same host in the window it ties the injected rundll32 to the amsi load.'
+  - id: 30edb182-aa75-42c0-b0a9-e998bb29067c
+    name: Potential AMSI Bypass Via .NET Reflection
+    reason: Follow-on defense impairment — the payoff. Loading amsi.dll into a managed host is usually a prelude to neutering it; the amsiInitFailed / [Ref].Assembly.GetType…SetValue($null,$true) reflection is the canonical in-memory AMSI patch a .NET-hosted PowerShell runs next. Its presence confirms AMSI was actively subverted, not merely loaded.
+  - id: e0d6c087-2d1c-47fd-8799-3904103c5a98
+    name: AMSI Bypass Pattern Assembly GetType
+    reason: 'Corroboration from a second telemetry source: the same [Ref].Assembly.GetType…NonPublic,Static bypass, but seen in script-block logging (EID 4104) instead of a command line — decisive here because a LOLBIN-hosted runspace usually has no powershell.exe command line, so the bypass only surfaces in 4104. It reveals the content the custom host executed.'
+  - id: 41421f44-58f9-455d-838a-c398859841d4
+    name: ETW Logging Tamper In .NET Processes Via CommandLine
+    reason: 'Co-occurring defense impairment specific to .NET hosts: a process that loads the CLR to host PowerShell frequently sets COMPlus_ETWEnabled/ETWFlags=0 to blind the CLR''s ETW providers (and the EDR behind them) alongside the AMSI evasion. On the host it corroborates a deliberate, telemetry-aware managed-code attack rather than a benign amsi.dll load.'
+  - id: 88a22f69-62f9-4b8a-aa00-6b0212f2f05a
+    name: Invoke-Obfuscation Via Use Rundll32 - PowerShell Module
+    reason: 'Co-occurring execution evidence (rundll32 arm): module logging (EID 4103) of obfuscated PowerShell that shells out through rundll32 / shellexec_rundll — the same rundll32-as-PowerShell-launcher tradecraft this image-load rule detects, captured from the PowerShell engine''s side.'
+  - id: ea9bf0fa-edec-4fb8-8b78-b119f2528186
+    name: Windows Defender AMSI Trigger Detected
+    reason: 'Co-occurring ground truth: if the amsi.dll loaded in the LOLBIN actually scanned the malicious script before any bypass completed, Defender raises an AMSI event (1116) on the same host. Pairing it with this detection tells the analyst whether AMSI caught the payload or the attacker beat it — directly shaping severity.'
+  window: 2h
   enrichment_searches:
-  # Rule-specific telemetry pivots the engine runs around an alert from this rule,
-  # scoped to the alert's host/user/IP within the window (behaviour-targeted, not a sweep).
-    - name: "Other executions of this tool-set on this host (any arguments)"
-      query: 'data_win_system_eventID:"1" AND data_win_eventdata_image:/.*(\\[Ee][Xx][Tt][Ee][Xx][Pp][Oo][Rr][Tt]\.[Ee][Xx][Ee]|\\[Oo][Dd][Bb][Cc][Cc][Oo][Nn][Ff]\.[Ee][Xx][Ee])/'
-      pivot_on: [host]
-      window: 2h
-    - name: "DLL sideloading / execution from user-writable paths on this host"
-      query: '((data_win_system_eventID:"7" AND (data_win_eventdata_imageLoaded:/.*\\[Uu][Ss][Ee][Rr][Ss]\\.*/ OR data_win_eventdata_imageLoaded:/.*\\[Pp][Rr][Oo][Gg][Rr][Aa][Mm][Dd][Aa][Tt][Aa]\\.*/ OR data_win_eventdata_imageLoaded:/.*\\[Ww][Ii][Nn][Dd][Oo][Ww][Ss]\\[Tt][Ee][Mm][Pp]\\.*/ OR data_win_eventdata_imageLoaded:/.*\\[Aa][Pp][Pp][Dd][Aa][Tt][Aa]\\.*/ OR data_win_eventdata_imageLoaded:/.*\\[Pp][Uu][Bb][Ll][Ii][Cc]\\.*/ OR data_win_eventdata_imageLoaded:/.*\\\$[Rr][Ee][Cc][Yy][Cc][Ll][Ee].*/)) OR (data_win_system_eventID:"1" AND (data_win_eventdata_image:/.*\\[Uu][Ss][Ee][Rr][Ss]\\.*/ OR data_win_eventdata_image:/.*\\[Pp][Rr][Oo][Gg][Rr][Aa][Mm][Dd][Aa][Tt][Aa]\\.*/ OR data_win_eventdata_image:/.*\\[Ww][Ii][Nn][Dd][Oo][Ww][Ss]\\[Tt][Ee][Mm][Pp]\\.*/ OR data_win_eventdata_image:/.*\\[Aa][Pp][Pp][Dd][Aa][Tt][Aa]\\.*/ OR data_win_eventdata_image:/.*\\[Pp][Uu][Bb][Ll][Ii][Cc]\\.*/ OR data_win_eventdata_image:/.*\\\$[Rr][Ee][Cc][Yy][Cc][Ll][Ee].*/)))'
-      pivot_on: [host]
-      window: 2h
-    - name: "Follow-on LOLBin / signed-binary-proxy execution on this host"
-      query: 'data_win_system_eventID:"1" AND data_win_eventdata_image:/.*(\\[Rr][Uu][Nn][Dd][Ll][Ll]32\.[Ee][Xx][Ee]|\\[Rr][Ee][Gg][Ss][Vv][Rr]32\.[Ee][Xx][Ee]|\\[Mm][Ss][Hh][Tt][Aa]\.[Ee][Xx][Ee]|\\[Ii][Nn][Ss][Tt][Aa][Ll][Ll][Uu][Tt][Ii][Ll]\.[Ee][Xx][Ee]|\\[Rr][Ee][Gg][Aa][Ss][Mm]\.[Ee][Xx][Ee]|\\[Rr][Ee][Gg][Ss][Vv][Cc][Ss]\.[Ee][Xx][Ee]|\\[Mm][Ss][Bb][Uu][Ii][Ll][Dd]\.[Ee][Xx][Ee]|\\[Cc][Ee][Rr][Tt][Uu][Tt][Ii][Ll]\.[Ee][Xx][Ee]|\\[Bb][Ii][Tt][Ss][Aa][Dd][Mm][Ii][Nn]\.[Ee][Xx][Ee]|\\[Ww][Mm][Ii][Cc]\.[Ee][Xx][Ee]|\\[Cc][Mm][Ss][Tt][Pp]\.[Ee][Xx][Ee]|\\[Oo][Dd][Bb][Cc][Cc][Oo][Nn][Ff]\.[Ee][Xx][Ee]|\\[Ff][Oo][Rr][Ff][Ii][Ll][Ee][Ss]\.[Ee][Xx][Ee]|\\[Pp][Cc][Aa][Ll][Uu][Aa]\.[Ee][Xx][Ee]|\\[Mm][Aa][Vv][Ii][Nn][Jj][Ee][Cc][Tt]\.[Ee][Xx][Ee]|\\[Ss][Cc][Rr][Ii][Pp][Tt][Rr][Uu][Nn][Nn][Ee][Rr]\.[Ee][Xx][Ee])/'
-      pivot_on: [host]
-      window: 1h
+  # Behaviour-targeted hunts the engine runs around the alert (not a sweep).
+  - name: Managed runtime (CLR/.NET) and PowerShell automation loaded by a LOLBIN on this host
+    query: data_win_system_eventID:"7" AND data_win_eventdata_image:/.*(\\[Rr][Uu][Nn][Dd][Ll][Ll]32\.[Ee][Xx][Ee]|\\[Oo][Dd][Bb][Cc][Cc][Oo][Nn][Ff]\.[Ee][Xx][Ee]|\\[Ee][Xx][Tt][Ee][Xx][Pp][Oo][Rr][Tt]\.[Ee][Xx][Ee]|\\[Rr][Ee][Gg][Ss][Vv][Rr]32\.[Ee][Xx][Ee]|\\[Ii][Nn][Ss][Tt][Aa][Ll][Ll][Uu][Tt][Ii][Ll]\.[Ee][Xx][Ee]|\\[Rr][Ee][Gg][Aa][Ss][Mm]\.[Ee][Xx][Ee]|\\[Rr][Ee][Gg][Ss][Vv][Cc][Ss]\.[Ee][Xx][Ee]|\\[Mm][Ss][Bb][Uu][Ii][Ll][Dd]\.[Ee][Xx][Ee])/ AND (data_win_eventdata_imageLoaded:/.*\\[Cc][Ll][Rr]\.[Dd][Ll][Ll]/ OR data_win_eventdata_imageLoaded:/.*\\[Cc][Ll][Rr][Jj][Ii][Tt]\.[Dd][Ll][Ll]/ OR data_win_eventdata_imageLoaded:/.*\\[Mm][Ss][Cc][Oo][Rr][Ee][Ee]\.[Dd][Ll][Ll]/ OR data_win_eventdata_imageLoaded:/.*\\[Mm][Ss][Cc][Oo][Rr][Ee][Ee][Ii]\.[Dd][Ll][Ll]/ OR data_win_eventdata_imageLoaded:/.*\\[Cc][Oo][Rr][Ee][Cc][Ll][Rr]\.[Dd][Ll][Ll]/ OR data_win_eventdata_imageLoaded:/.*[Ss][Yy][Ss][Tt][Ee][Mm]\.[Mm][Aa][Nn][Aa][Gg][Ee][Mm][Ee][Nn][Tt]\.[Aa][Uu][Tt][Oo][Mm][Aa][Tt][Ii][Oo][Nn].*/)
+    pivot_on:
+    - host
+    window: 1h
+  - name: LOLBIN host spawned by an Office / script / shell parent on this host
+    query: data_win_system_eventID:"1" AND data_win_eventdata_image:/.*(\\[Rr][Uu][Nn][Dd][Ll][Ll]32\.[Ee][Xx][Ee]|\\[Oo][Dd][Bb][Cc][Cc][Oo][Nn][Ff]\.[Ee][Xx][Ee]|\\[Ee][Xx][Tt][Ee][Xx][Pp][Oo][Rr][Tt]\.[Ee][Xx][Ee])/ AND data_win_eventdata_parentImage:/.*(\\[Ww][Ii][Nn][Ww][Oo][Rr][Dd]\.[Ee][Xx][Ee]|\\[Ee][Xx][Cc][Ee][Ll]\.[Ee][Xx][Ee]|\\[Pp][Oo][Ww][Ee][Rr][Pp][Nn][Tt]\.[Ee][Xx][Ee]|\\[Oo][Uu][Tt][Ll][Oo][Oo][Kk]\.[Ee][Xx][Ee]|\\[Mm][Ss][Hh][Tt][Aa]\.[Ee][Xx][Ee]|\\[Ww][Ss][Cc][Rr][Ii][Pp][Tt]\.[Ee][Xx][Ee]|\\[Cc][Ss][Cc][Rr][Ii][Pp][Tt]\.[Ee][Xx][Ee]|\\[Cc][Mm][Dd]\.[Ee][Xx][Ee]|\\[Pp][Oo][Ww][Ee][Rr][Ss][Hh][Ee][Ll][Ll]\.[Ee][Xx][Ee]|\\[Pp][Ww][Ss][Hh]\.[Ee][Xx][Ee])/
+    pivot_on:
+    - host
+    window: 2h
+  - name: AMSI bypass or teardown markers in command lines and script content on this host
+    query: (data_win_system_eventID:"1" AND (data_win_eventdata_commandLine:/.*[Aa][Mm][Ss][Ii][Ii][Nn][Ii][Tt][Ff][Aa][Ii][Ll][Ee][Dd].*/ OR data_win_eventdata_commandLine:/.*[Aa][Mm][Ss][Ii][Uu][Tt][Ii][Ll][Ss].*/ OR data_win_eventdata_commandLine:/.*[Aa][Mm][Ss][Ii][Ss][Cc][Aa][Nn][Bb][Uu][Ff][Ff][Ee][Rr].*/ OR data_win_eventdata_commandLine:/.*[Aa][Mm][Ss][Ii][Ee][Nn][Aa][Bb][Ll][Ee].*/)) OR (data_win_system_eventID:"4104" AND (data_win_eventdata_scriptBlockText:/.*[Aa][Mm][Ss][Ii][Ii][Nn][Ii][Tt][Ff][Aa][Ii][Ll][Ee][Dd].*/ OR data_win_eventdata_scriptBlockText:/.*[Aa][Mm][Ss][Ii][Uu][Tt][Ii][Ll][Ss].*/ OR data_win_eventdata_scriptBlockText:/.*[Aa][Mm][Ss][Ii][Ss][Cc][Aa][Nn][Bb][Uu][Ff][Ff][Ee][Rr].*/ OR data_win_eventdata_scriptBlockText:/.*[Aa][Mm][Ss][Ii][Cc][Oo][Nn][Tt][Ee][Xx][Tt].*/ OR data_win_eventdata_scriptBlockText:/.*[Ss][Yy][Ss][Tt][Ee][Mm]\.[Mm][Aa][Nn][Aa][Gg][Ee][Mm][Ee][Nn][Tt]\.[Aa][Uu][Tt][Oo][Mm][Aa][Tt][Ii][Oo][Nn]\.[Aa][Mm][Ss][Ii].*/ OR data_win_eventdata_scriptBlockText:/.*[Aa][Mm][Ss][Ii]\.[Dd][Ll][Ll].*/))
+    pivot_on:
+    - host
+    window: 2h
+  - name: Outbound network connections from LOLBIN / script-host processes on this host
+    query: data_win_system_eventID:"3" AND data_win_eventdata_image:/.*(\\[Rr][Uu][Nn][Dd][Ll][Ll]32\.[Ee][Xx][Ee]|\\[Oo][Dd][Bb][Cc][Cc][Oo][Nn][Ff]\.[Ee][Xx][Ee]|\\[Ee][Xx][Tt][Ee][Xx][Pp][Oo][Rr][Tt]\.[Ee][Xx][Ee]|\\[Rr][Ee][Gg][Ss][Vv][Rr]32\.[Ee][Xx][Ee]|\\[Ii][Nn][Ss][Tt][Aa][Ll][Ll][Uu][Tt][Ii][Ll]\.[Ee][Xx][Ee]|\\[Rr][Ee][Gg][Aa][Ss][Mm]\.[Ee][Xx][Ee]|\\[Rr][Ee][Gg][Ss][Vv][Cc][Ss]\.[Ee][Xx][Ee]|\\[Mm][Ss][Bb][Uu][Ii][Ll][Dd]\.[Ee][Xx][Ee]|\\[Mm][Ss][Hh][Tt][Aa]\.[Ee][Xx][Ee])/
+    pivot_on:
+    - host
+    window: 1h
+  - name: ETW provider disable in .NET and Defender real-time / script scanning disable on this host
+    query: (data_win_system_eventID:"1" AND (data_win_eventdata_commandLine:/.*[Cc][Oo][Mm][Pp][Ll][Uu][Ss]_[Ee][Tt][Ww][Ee][Nn][Aa][Bb][Ll][Ee][Dd].*/ OR data_win_eventdata_commandLine:/.*[Cc][Oo][Mm][Pp][Ll][Uu][Ss]_[Ee][Tt][Ww][Ff][Ll][Aa][Gg][Ss].*/ OR data_win_eventdata_commandLine:/.*[Dd][Ii][Ss][Aa][Bb][Ll][Ee][Rr][Ee][Aa][Ll][Tt][Ii][Mm][Ee][Mm][Oo][Nn][Ii][Tt][Oo][Rr][Ii][Nn][Gg].*/ OR data_win_eventdata_commandLine:/.*[Dd][Ii][Ss][Aa][Bb][Ll][Ee][Ss][Cc][Rr][Ii][Pp][Tt][Ss][Cc][Aa][Nn][Nn][Ii][Nn][Gg].*/)) OR (data_win_system_eventID:"13" AND (data_win_eventdata_targetObject:/.*[Ww][Ii][Nn][Dd][Oo][Ww][Ss] [Ss][Cc][Rr][Ii][Pp][Tt]\\[Ss][Ee][Tt][Tt][Ii][Nn][Gg][Ss]\\[Aa][Mm][Ss][Ii][Ee][Nn][Aa][Bb][Ll][Ee].*/ OR data_win_eventdata_targetObject:/.*[Dd][Ii][Ss][Aa][Bb][Ll][Ee][Aa][Nn][Tt][Ii][Ss][Pp][Yy][Ww][Aa][Rr][Ee].*/ OR data_win_eventdata_targetObject:/.*[Dd][Ii][Ss][Aa][Bb][Ll][Ee][Rr][Ee][Aa][Ll][Tt][Ii][Mm][Ee][Mm][Oo][Nn][Ii][Tt][Oo][Rr][Ii][Nn][Gg].*/))
+    pivot_on:
+    - host
+    window: 4h

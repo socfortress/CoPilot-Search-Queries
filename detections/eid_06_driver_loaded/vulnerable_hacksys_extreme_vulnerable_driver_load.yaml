@@ -149,44 +149,58 @@ graylog:
   query: data_win_system_eventID:"6" AND (data_win_eventdata_imageLoaded:/.*\\[Hh][Ee][Vv][Dd]\.[Ss][Yy][Ss]/ OR data_win_eventdata_hashes:/.*[Ii][Mm][Pp][Hh][Aa][Ss][Hh]=[Ff]26[Dd]0[Bb]110873[Aa]1[Cc]7[Dd]8[Cc]4[Ff]08[Ff][Bb][Ee][Aa][Bb]89[Cc]5.*/ OR data_win_eventdata_hashes:/.*[Ii][Mm][Pp][Hh][Aa][Ss][Hh]=[Cc]46[Ee][Aa]2[Ee]651[Ff][Dd]5[Ff]7[Ff]716[Cc]8867[Cc]6[Dd]13594.*/)
 
 correlation:
-  # Authored by the correlation engine for review. Related CoPilot Searches to run
-  # around an alert from this rule, scoped to the same host/user/IP within the window.
+  # Authored per-rule (behaviour-researched) for the correlation engine. Related CoPilot
+  # Searches + telemetry pivots to run around an alert, scoped to its host/user/ip/domain.
   related_rules:
-    - id: ec570e53-4c76-45a9-804d-dc3f355ff7a7
-      name: "7Zip Compressing Dump Files"
-      reason: "next kill-chain tactic: Collection"
-    - id: 0a1255c5-d732-4b62-ac02-b5152d34fb83
-      name: "ADExplorer Writing Complete AD Snapshot Into .dat File"
-      reason: "next kill-chain tactic: Discovery"
-    - id: 1ea13e8c-03ea-409b-877d-ce5c3d2c1cb3
-      name: "ADFS Database Named Pipe Connection By Uncommon Tool"
-      reason: "next kill-chain tactic: Collection"
-    - id: 75bf09fa-1dd7-4d18-9af9-dd9e492562eb
-      name: "ADSI-Cache File Creation By Uncommon Tool"
-      reason: "next kill-chain tactic: Command and Control"
-    - id: 33a2d1dd-f3b0-40bd-8baf-7974468927cc
-      name: "APT PRIVATELOG Image Load Pattern"
-      reason: "next kill-chain tactic: Privilege Escalation"
-    - id: 03e2746e-2b31-42f1-ab7a-eb39365b2422
-      name: "APT31 Judgement Panda Activity"
-      reason: "next kill-chain tactic: Credential Access"
-  window: 1h
+  - id: 431a1fdb-4799-4f3b-91c3-a683b003fc49
+    name: New Kernel Driver Via SC.EXE
+    reason: 'Precursor/install: a driver only loads (EID 6) after it is registered as a kernel-type service; ''sc create <svc> type= kernel binPath= ...HEVD.sys'' is the step that creates the service this load came from.'
+  - id: e76ca062-4de0-4d79-8d90-160a0d335eca
+    name: PUA - Kernel Driver Utility (KDU) Execution
+    reason: 'Precursor/loader: KDU is purpose-built to map vulnerable drivers such as HEVD into the kernel and bypass Driver Signature Enforcement, so its execution on the host is the most likely cause of this exact HEVD load.'
+  - id: f63508a0-c809-4435-b3be-ed819394d612
+    name: Potential Privileged System Service Operation - SeLoadDriverPrivilege
+    reason: 'Precursor/enabler: SeLoadDriverPrivilege is the exact right a non-SYSTEM process exercises to load a device driver; its use just before this event is the HEVD load being authorised at the OS level.'
+  - id: d526c60a-e236-4011-b165-831ffa52ab70
+    name: Windows Vulnerable Driver Blocklist Disabled
+    reason: 'Precursor/enabler: HEVD is on Microsoft''s vulnerable-driver blocklist, so attackers disable the blocklist first; this toggle on the same host clears the control that would otherwise have blocked this load.'
+  - id: 6225c53a-a96e-4235-b28f-8d7997cd96eb
+    name: Hypervisor-protected Code Integrity (HVCI) Related Registry Tampering Via CommandLine
+    reason: 'Precursor/enabler: HVCI / Memory Integrity blocks unsigned and blocklisted kernel drivers, so tampering with its registry values on the host is a direct way to make the HEVD load succeed.'
+  - id: 2c4523d5-d481-4ed0-8ec3-7fbf0cb41a75
+    name: Driver Load From A Temporary Directory
+    reason: 'Co-occurring: HEVD is typically dropped to and loaded from a temp/working directory, so this rule frequently fires on the very same EID 6 event and corroborates the staging location.'
+  - id: 39b64854-5497-4b57-a448-40977b8c9679
+    name: Malicious Driver Load By Name
+    reason: 'Co-occurring BYOVD: an intrusion that brings HEVD often stages a known kill/rootkit driver (poortry, mimidrv, gmer64, ...) in the same toolkit, so a sibling malicious .sys loading on this host in the window is the same operation.'
+  - id: 4931188c-178e-4ee7-a348-39e8a7a56821
+    name: Filter Driver Unloaded Via Fltmc.EXE
+    reason: 'Follow-on payoff: the reason to load a vulnerable driver like HEVD is to disable defenses, so unloading an EDR/AV minifilter on the same host is the kernel foothold being used to blind the sensor.'
+  window: 2h
   enrichment_searches:
-  # Rule-specific telemetry pivots the engine runs around an alert from this rule,
-  # scoped to the alert's host/user/IP within the window (behaviour-targeted, not a sweep).
-    - name: "Service installation / creation on this host"
-      query: '((data_win_system_eventID:"7045") OR (data_win_system_eventID:"1" AND data_win_eventdata_image:/.*(\\[Ss][Cc]\.[Ee][Xx][Ee])/ AND (data_win_eventdata_commandLine:/.*[Cc][Rr][Ee][Aa][Tt][Ee].*/ OR data_win_eventdata_commandLine:/.*[Cc][Oo][Nn][Ff][Ii][Gg].*/ OR data_win_eventdata_commandLine:/.*[Bb][Ii][Nn][Pp][Aa][Tt][Hh].*/ OR data_win_eventdata_commandLine:/.*[Bb][Ii][Nn][Pp][Aa][Tt][Hh].*/)))'
-      pivot_on: [host]
-      window: 4h
-    - name: "Memory/credential-dump creation & LSASS access on this host"
-      query: '((data_win_system_eventID:"1" AND data_win_eventdata_image:/.*(\\[Pp][Rr][Oo][Cc][Dd][Uu][Mm][Pp]\.[Ee][Xx][Ee]|\\[Pp][Rr][Oo][Cc][Dd][Uu][Mm][Pp]64\.[Ee][Xx][Ee]|\\[Ss][Qq][Ll][Dd][Uu][Mm][Pp][Ee][Rr]\.[Ee][Xx][Ee]|\\[Cc][Rr][Ee][Aa][Tt][Ee][Dd][Uu][Mm][Pp]\.[Ee][Xx][Ee]|\\[Rr][Dd][Rr][Ll][Ee][Aa][Kk][Dd][Ii][Aa][Gg]\.[Ee][Xx][Ee]|\\[Dd][Uu][Mm][Pp][Ee][Rr][Tt]\.[Ee][Xx][Ee]|\\[Nn][Aa][Nn][Oo][Dd][Uu][Mm][Pp]\.[Ee][Xx][Ee]|\\[Aa][Vv][Dd][Uu][Mm][Pp]\.[Ee][Xx][Ee])/) OR (data_win_system_eventID:"1" AND (data_win_eventdata_commandLine:/.*[Cc][Oo][Mm][Ss][Vv][Cc][Ss]\.[Dd][Ll][Ll].*/ OR data_win_eventdata_commandLine:/.*[Mm][Ii][Nn][Ii][Dd][Uu][Mm][Pp].*/ OR data_win_eventdata_commandLine:/.*[Dd][Uu][Mm][Pp][Ee][Rr][Tt].*/ OR data_win_eventdata_commandLine:/.*[Nn][Aa][Nn][Oo][Dd][Uu][Mm][Pp].*/ OR data_win_eventdata_commandLine:/.*[Ll][Ss][Aa][Ss][Ss].*/ OR data_win_eventdata_commandLine:/.*[Ss][Ee][Kk][Uu][Rr][Ll][Ss][Aa].*/ OR data_win_eventdata_commandLine:/.*[Nn][Tt][Dd][Ss]\.[Dd][Ii][Tt].*/ OR data_win_eventdata_commandLine:/.*[Nn][Tt][Dd][Ss][Uu][Tt][Ii][Ll].*/)) OR (data_win_system_eventID:"10" AND data_win_eventdata_targetImage:/.*(\\[Ll][Ss][Aa][Ss][Ss]\.[Ee][Xx][Ee])/))'
-      pivot_on: [host]
-      window: 1h
-    - name: "DLL sideloading / execution from user-writable paths on this host"
-      query: '((data_win_system_eventID:"7" AND (data_win_eventdata_imageLoaded:/.*\\[Uu][Ss][Ee][Rr][Ss]\\.*/ OR data_win_eventdata_imageLoaded:/.*\\[Pp][Rr][Oo][Gg][Rr][Aa][Mm][Dd][Aa][Tt][Aa]\\.*/ OR data_win_eventdata_imageLoaded:/.*\\[Ww][Ii][Nn][Dd][Oo][Ww][Ss]\\[Tt][Ee][Mm][Pp]\\.*/ OR data_win_eventdata_imageLoaded:/.*\\[Aa][Pp][Pp][Dd][Aa][Tt][Aa]\\.*/ OR data_win_eventdata_imageLoaded:/.*\\[Pp][Uu][Bb][Ll][Ii][Cc]\\.*/ OR data_win_eventdata_imageLoaded:/.*\\\$[Rr][Ee][Cc][Yy][Cc][Ll][Ee].*/)) OR (data_win_system_eventID:"1" AND (data_win_eventdata_image:/.*\\[Uu][Ss][Ee][Rr][Ss]\\.*/ OR data_win_eventdata_image:/.*\\[Pp][Rr][Oo][Gg][Rr][Aa][Mm][Dd][Aa][Tt][Aa]\\.*/ OR data_win_eventdata_image:/.*\\[Ww][Ii][Nn][Dd][Oo][Ww][Ss]\\[Tt][Ee][Mm][Pp]\\.*/ OR data_win_eventdata_image:/.*\\[Aa][Pp][Pp][Dd][Aa][Tt][Aa]\\.*/ OR data_win_eventdata_image:/.*\\[Pp][Uu][Bb][Ll][Ii][Cc]\\.*/ OR data_win_eventdata_image:/.*\\\$[Rr][Ee][Cc][Yy][Cc][Ll][Ee].*/)))'
-      pivot_on: [host]
-      window: 2h
-    - name: "Follow-on LOLBin / signed-binary-proxy execution on this host"
-      query: 'data_win_system_eventID:"1" AND data_win_eventdata_image:/.*(\\[Rr][Uu][Nn][Dd][Ll][Ll]32\.[Ee][Xx][Ee]|\\[Rr][Ee][Gg][Ss][Vv][Rr]32\.[Ee][Xx][Ee]|\\[Mm][Ss][Hh][Tt][Aa]\.[Ee][Xx][Ee]|\\[Ii][Nn][Ss][Tt][Aa][Ll][Ll][Uu][Tt][Ii][Ll]\.[Ee][Xx][Ee]|\\[Rr][Ee][Gg][Aa][Ss][Mm]\.[Ee][Xx][Ee]|\\[Rr][Ee][Gg][Ss][Vv][Cc][Ss]\.[Ee][Xx][Ee]|\\[Mm][Ss][Bb][Uu][Ii][Ll][Dd]\.[Ee][Xx][Ee]|\\[Cc][Ee][Rr][Tt][Uu][Tt][Ii][Ll]\.[Ee][Xx][Ee]|\\[Bb][Ii][Tt][Ss][Aa][Dd][Mm][Ii][Nn]\.[Ee][Xx][Ee]|\\[Ww][Mm][Ii][Cc]\.[Ee][Xx][Ee]|\\[Cc][Mm][Ss][Tt][Pp]\.[Ee][Xx][Ee]|\\[Oo][Dd][Bb][Cc][Cc][Oo][Nn][Ff]\.[Ee][Xx][Ee]|\\[Ff][Oo][Rr][Ff][Ii][Ll][Ee][Ss]\.[Ee][Xx][Ee]|\\[Pp][Cc][Aa][Ll][Uu][Aa]\.[Ee][Xx][Ee]|\\[Mm][Aa][Vv][Ii][Nn][Jj][Ee][Cc][Tt]\.[Ee][Xx][Ee]|\\[Ss][Cc][Rr][Ii][Pp][Tt][Rr][Uu][Nn][Nn][Ee][Rr]\.[Ee][Xx][Ee])/'
-      pivot_on: [host]
-      window: 1h
+  # Behaviour-targeted hunts the engine runs around the alert (not a sweep).
+  - name: Kernel-mode driver service registered on this host
+    query: ((data_win_system_eventID:"7045" AND data_win_eventdata_imagePath:/.*\.[Ss][Yy][Ss].*/) OR (data_win_system_eventID:"1" AND (data_win_eventdata_image:/.*\\[Ss][Cc]\.[Ee][Xx][Ee]/ OR data_win_eventdata_originalFileName:/[Ss][Cc]\.[Ee][Xx][Ee]/) AND data_win_eventdata_commandLine:/.*[Cc][Rr][Ee][Aa][Tt][Ee].*/ AND data_win_eventdata_commandLine:/.*[Kk][Ee][Rr][Nn][Ee][Ll].*/))
+    pivot_on:
+    - host
+    window: 4h
+  - name: Driver-signing / vulnerable-driver-blocklist / HVCI protections disabled on this host
+    query: ((data_win_system_eventID:"1" AND (data_win_eventdata_image:/.*\\[Bb][Cc][Dd][Ee][Dd][Ii][Tt]\.[Ee][Xx][Ee]/ OR data_win_eventdata_image:/.*\\[Rr][Ee][Gg]\.[Ee][Xx][Ee]/) AND (data_win_eventdata_commandLine:/.*[Tt][Ee][Ss][Tt][Ss][Ii][Gg][Nn][Ii][Nn][Gg].*/ OR data_win_eventdata_commandLine:/.*[Nn][Oo][Ii][Nn][Tt][Ee][Gg][Rr][Ii][Tt][Yy][Cc][Hh][Ee][Cc][Kk][Ss].*/ OR data_win_eventdata_commandLine:/.*[Vv][Uu][Ll][Nn][Ee][Rr][Aa][Bb][Ll][Ee][Dd][Rr][Ii][Vv][Ee][Rr][Bb][Ll][Oo][Cc][Kk][Ll][Ii][Ss][Tt].*/ OR data_win_eventdata_commandLine:/.*[Hh][Yy][Pp][Ee][Rr][Vv][Ii][Ss][Oo][Rr][Ee][Nn][Ff][Oo][Rr][Cc][Ee][Dd][Cc][Oo][Dd][Ee][Ii][Nn][Tt][Ee][Gg][Rr][Ii][Tt][Yy].*/ OR data_win_eventdata_commandLine:/.*[Dd][Ee][Vv][Ii][Cc][Ee][Gg][Uu][Aa][Rr][Dd].*/)) OR (data_win_system_eventID:"13" AND (data_win_eventdata_targetObject:/.*[Vv][Uu][Ll][Nn][Ee][Rr][Aa][Bb][Ll][Ee][Dd][Rr][Ii][Vv][Ee][Rr][Bb][Ll][Oo][Cc][Kk][Ll][Ii][Ss][Tt][Ee][Nn][Aa][Bb][Ll][Ee]/ OR data_win_eventdata_targetObject:/.*\\[Dd][Ee][Vv][Ii][Cc][Ee][Gg][Uu][Aa][Rr][Dd]\\.*/)))
+    pivot_on:
+    - host
+    window: 6h
+  - name: Suspicious .sys driver file written to disk on this host
+    query: data_win_system_eventID:"11" AND data_win_eventdata_targetFilename:/.*\.[Ss][Yy][Ss]/ AND (data_win_eventdata_targetFilename:/.*\\[Tt][Ee][Mm][Pp]\\.*/ OR data_win_eventdata_targetFilename:/.*\\[Uu][Ss][Ee][Rr][Ss]\\.*/ OR data_win_eventdata_targetFilename:/.*\\[Pp][Rr][Oo][Gg][Rr][Aa][Mm][Dd][Aa][Tt][Aa]\\.*/ OR data_win_eventdata_targetFilename:/.*\\[Pp][Uu][Bb][Ll][Ii][Cc]\\.*/ OR data_win_eventdata_targetFilename:/.*\\[Aa][Pp][Pp][Dd][Aa][Tt][Aa]\\.*/)
+    pivot_on:
+    - host
+    window: 4h
+  - name: Security tooling tampered or terminated on this host
+    query: ((data_win_system_eventID:"1" AND (data_win_eventdata_image:/.*\\[Ff][Ll][Tt][Mm][Cc]\.[Ee][Xx][Ee]/ OR data_win_eventdata_originalFileName:/[Ff][Ll][Tt][Mm][Cc]\.[Ee][Xx][Ee]/) AND data_win_eventdata_commandLine:/.*[Uu][Nn][Ll][Oo][Aa][Dd].*/) OR (data_win_system_eventID:"1" AND (data_win_eventdata_image:/.*\\[Nn][Ee][Tt]\.[Ee][Xx][Ee]/ OR data_win_eventdata_image:/.*\\[Nn][Ee][Tt]1\.[Ee][Xx][Ee]/ OR data_win_eventdata_image:/.*\\[Ss][Cc]\.[Ee][Xx][Ee]/ OR data_win_eventdata_image:/.*\\[Tt][Aa][Ss][Kk][Kk][Ii][Ll][Ll]\.[Ee][Xx][Ee]/) AND (data_win_eventdata_commandLine:/.*[Ss][Tt][Oo][Pp].*/ OR data_win_eventdata_commandLine:/.*[Dd][Ee][Ll][Ee][Tt][Ee].*/) AND (data_win_eventdata_commandLine:/.*[Dd][Ee][Ff][Ee][Nn][Dd][Ee][Rr].*/ OR data_win_eventdata_commandLine:/.*[Ss][Ee][Nn][Tt][Ii][Nn][Ee][Ll].*/ OR data_win_eventdata_commandLine:/.*[Cc][Rr][Oo][Ww][Dd][Ss][Tt][Rr][Ii][Kk][Ee].*/ OR data_win_eventdata_commandLine:/.*[Cc][Aa][Rr][Bb][Oo][Nn][Bb][Ll][Aa][Cc][Kk].*/ OR data_win_eventdata_commandLine:/.*[Mm][Ss][Mm][Pp][Ee][Nn][Gg].*/ OR data_win_eventdata_commandLine:/.*[Ss][Oo][Pp][Hh][Oo][Ss].*/ OR data_win_eventdata_commandLine:/.*[Ww][Aa][Zz][Uu][Hh].*/ OR data_win_eventdata_commandLine:/.*[Ww][Ii][Nn][Dd][Ee][Ff][Ee][Nn][Dd].*/)))
+    pivot_on:
+    - host
+    window: 2h
+  - name: LSASS access / credential dumping on this host
+    query: ((data_win_system_eventID:"10" AND data_win_eventdata_targetImage:/.*\\[Ll][Ss][Aa][Ss][Ss]\.[Ee][Xx][Ee]/) OR (data_win_system_eventID:"1" AND (data_win_eventdata_commandLine:/.*[Cc][Oo][Mm][Ss][Vv][Cc][Ss]\.[Dd][Ll][Ll].*/ OR data_win_eventdata_commandLine:/.*[Mm][Ii][Nn][Ii][Dd][Uu][Mm][Pp].*/ OR data_win_eventdata_commandLine:/.*[Ll][Ss][Aa][Ss][Ss].*/ OR data_win_eventdata_commandLine:/.*[Ss][Ee][Kk][Uu][Rr][Ll][Ss][Aa].*/ OR data_win_eventdata_commandLine:/.*[Mm][Ii][Mm][Ii][Kk][Aa][Tt][Zz].*/)) OR (data_win_system_eventID:"1" AND (data_win_eventdata_image:/.*\\[Pp][Rr][Oo][Cc][Dd][Uu][Mm][Pp]\.[Ee][Xx][Ee]/ OR data_win_eventdata_image:/.*\\[Pp][Rr][Oo][Cc][Dd][Uu][Mm][Pp]64\.[Ee][Xx][Ee]/)))
+    pivot_on:
+    - host
+    window: 2h

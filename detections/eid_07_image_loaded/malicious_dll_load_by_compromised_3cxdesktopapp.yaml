@@ -182,19 +182,50 @@ graylog:
   query: data_win_system_eventID:"7" AND (data_win_eventdata_hashes:/.*[Ss][Hh][Aa]256=7986[Bb][Bb][Aa][Ee][Ee]8940[Dd][Aa]11[Cc][Ee]089383521[Aa][Bb]420[Cc]443[Aa][Bb]7[Bb]15[Ee][Dd]42[Aa][Ee][Dd]91[Ff][Dd]31[Cc][Ee]833896.*/ OR data_win_eventdata_hashes:/.*[Ss][Hh][Aa]1=[Bb][Ff]939[Cc]9[Cc]261[Dd]27[Ee][Ee]7[Bb][Bb]92325[Cc][Cc]588624[Ff][Cc][Aa]75429.*/ OR data_win_eventdata_hashes:/.*[Mm][Dd]5=74[Bb][Cc]2[Dd]0[Bb]6680[Ff][Aa][Aa]1[Aa]5[Aa]76[Bb]27[Ee]5479[Cc][Bb][Cc].*/ OR data_win_eventdata_hashes:/.*[Ss][Hh][Aa]256=11[Bb][Ee]1803[Ee]2[Ee]307[Bb]647[Aa]8[Aa]7[Ee]02[Dd]128335[Cc]448[Ff][Ff]741[Bb][Ff]06[Bb][Ff]52[Bb]332[Ee]0[Bb][Bb][Ff]423[Bb]03.*/ OR data_win_eventdata_hashes:/.*[Ss][Hh][Aa]1=20[Dd]554[Aa]80[Dd]759[Cc]50[Dd]6537[Dd][Dd]7097[Ff][Ee][Dd]84[Dd][Dd]258[Bb]3[Ee].*/ OR data_win_eventdata_hashes:/.*[Mm][Dd]5=82187[Aa][Dd]3[Ff]0[Cc]6[Cc]225[Ee]2[Ff][Bb][Aa]0[Cc]867280[Cc][Cc]9.*/ OR data_win_eventdata_hashes:/.*[Ss][Hh][Aa]256=[Ff]79[Cc]3[Bb]0[Aa][Dd][Bb]6[Ee][Cc]7[Bb][Cc][Cc]8[Bb][Cc]9[Aa][Ee]955[Aa]1571[Aa][Aa][Ee][Dd]6755[Aa]28[Cc]8[Bb]17[Bb]1[Dd]7595[Ee][Ee]86840952.*/ OR data_win_eventdata_hashes:/.*[Ss][Hh][Aa]1=894[Ee]7[Dd]4[Ff][Ff][Dd]764[Bb][Bb]458809[Cc]7[Ff]0643694[Bb]036[Ee][Aa][Dd]30.*/ OR data_win_eventdata_hashes:/.*[Mm][Dd]5=11[Bb][Cc]82[Aa]9[Bb][Dd]8297[Bb][Dd]0823[Bb][Cc][Ee]5[Dd]6202082.*/ OR data_win_eventdata_hashes:/.*[Ss][Hh][Aa]256=8[Aa][Bb]3[Aa]5[Ee][Aa][Aa][Ff]8[Cc]296080[Ff][Aa][Dd][Ff]56[Bb]265194681[Dd]7[Dd][Aa]5[Dd][Aa]7[Cc]02562953[Aa]4[Cc][Bb]60[Ee]147423.*/ OR data_win_eventdata_hashes:/.*[Ss][Hh][Aa]1=3[Bb]3[Ee]778[Bb]647371262120[Aa]523[Ee][Bb]873[Cc]20[Bb][Bb]82[Bb][Ee][Aa][Ff].*/ OR data_win_eventdata_hashes:/.*[Mm][Dd]5=7[Ff][Aa][Ee][Aa]2[Bb]01796[Bb]80[Dd]180399040[Bb][Bb]69835.*/)
 
 correlation:
-  # Authored by the correlation engine for review.
+  # Authored per-rule (behaviour-researched) for the correlation engine. Related CoPilot
+  # Searches + telemetry pivots to run around an alert, scoped to its host/user/ip/domain.
+  related_rules:
+  - id: 93bbde78-dc86-4e73-9ffc-ff8a384ca89c
+    name: Potential Compromised 3CXDesktopApp Execution
+    reason: The process that loads this malicious DLL IS the trojanized 3CXDesktopApp.exe (build 18.12.x); this rule convicts that exact binary by hash/version on the same host, so a co-hit confirms the EID 7 image-load alert's parent is the compromised client rather than a benign hash collision.
+  - id: 51eecf75-d069-43c7-9ea2-63f75499edd4
+    name: Potential Compromised 3CXDesktopApp Beaconing Activity - Netcon
+    reason: 'Direct follow-on: once the sideloaded DLL runs its embedded shellcode the client calls home. This rule catches 3CXDesktopApp.exe connecting to the campaign C2 domains (akamaicontainer.com, msstorageazure.com, pbxsources.com...) on the same host, escalating the DLL load into confirmed active command-and-control.'
+  - id: bd03a0dc-5d93-49eb-b2e8-2dfd268600f8
+    name: Potential Compromised 3CXDesktopApp Beaconing Activity - DNS
+    reason: 'The DNS half of that same beaconing step: the host resolving the 3CX campaign C2 domains. It co-occurs with the netcon rule and is frequently the earliest network evidence that the loaded DLL has begun calling out, even before a TCP session is established.'
+  - id: 63f3605b-979f-48c2-b7cc-7f90523fed88
+    name: Potential Suspicious Child Process Of 3CXDesktopApp
+    reason: 'Next stage after C2: the compromised 3CXDesktopApp.exe spawning cmd/powershell/rundll32/mshta on the same host. This is the hands-on-keyboard / second-stage execution that typically follows a successful malicious DLL load and beacon.'
+  - id: e7581747-1e44-4d4b-85a6-0db0b4a00f2a
+    name: Potential Compromised 3CXDesktopApp Update Activity
+    reason: 'Precursor / delivery: the trojanized Update.exe pulling the compromised 18.12.x build that plants this very DLL. Seen on the same host (usually earlier in the window), it explains how the malicious DLL arrived and pins the compromise to the official update channel.'
+  - id: 640dc51c-7713-4faa-8a0e-e7c0d9d4654c
+    name: FoggyWeb Backdoor DLL Loading
+    reason: 'Same detection class and this rule''s own cited reference (NOBELIUM FoggyWeb): a known-malicious DLL sideloaded into a trusted signed process via Sysmon EID 7. If the host was actually hit by FoggyWeb (AD FS version.dll) rather than 3CX, this companion rule fires - checking whether both or only one fired disambiguates which campaign is in play.'
+  - id: 553d0429-1a1c-44bf-b3f5-a8513deb9ee5
+    name: Hunting 3CXDesktopApp Software
+    reason: 'Scoping context: confirms the 3CX client is installed/running on the alert host and lets the analyst enumerate every other endpoint running 3CXDesktopApp - the supply-chain blast radius that may load the same DLL and needs the same triage.'
+  window: 24h
   enrichment_searches:
-  # Rule-specific telemetry pivots the engine runs around an alert from this rule,
-  # scoped to the alert's host/user/IP within the window (behaviour-targeted, not a sweep).
-    - name: "DLL sideloading / execution from user-writable paths on this host"
-      query: '((data_win_system_eventID:"7" AND (data_win_eventdata_imageLoaded:/.*\\[Uu][Ss][Ee][Rr][Ss]\\.*/ OR data_win_eventdata_imageLoaded:/.*\\[Pp][Rr][Oo][Gg][Rr][Aa][Mm][Dd][Aa][Tt][Aa]\\.*/ OR data_win_eventdata_imageLoaded:/.*\\[Ww][Ii][Nn][Dd][Oo][Ww][Ss]\\[Tt][Ee][Mm][Pp]\\.*/ OR data_win_eventdata_imageLoaded:/.*\\[Aa][Pp][Pp][Dd][Aa][Tt][Aa]\\.*/ OR data_win_eventdata_imageLoaded:/.*\\[Pp][Uu][Bb][Ll][Ii][Cc]\\.*/ OR data_win_eventdata_imageLoaded:/.*\\\$[Rr][Ee][Cc][Yy][Cc][Ll][Ee].*/)) OR (data_win_system_eventID:"1" AND (data_win_eventdata_image:/.*\\[Uu][Ss][Ee][Rr][Ss]\\.*/ OR data_win_eventdata_image:/.*\\[Pp][Rr][Oo][Gg][Rr][Aa][Mm][Dd][Aa][Tt][Aa]\\.*/ OR data_win_eventdata_image:/.*\\[Ww][Ii][Nn][Dd][Oo][Ww][Ss]\\[Tt][Ee][Mm][Pp]\\.*/ OR data_win_eventdata_image:/.*\\[Aa][Pp][Pp][Dd][Aa][Tt][Aa]\\.*/ OR data_win_eventdata_image:/.*\\[Pp][Uu][Bb][Ll][Ii][Cc]\\.*/ OR data_win_eventdata_image:/.*\\\$[Rr][Ee][Cc][Yy][Cc][Ll][Ee].*/)))'
-      pivot_on: [host]
-      window: 2h
-    - name: "Follow-on LOLBin / signed-binary-proxy execution on this host"
-      query: 'data_win_system_eventID:"1" AND data_win_eventdata_image:/.*(\\[Rr][Uu][Nn][Dd][Ll][Ll]32\.[Ee][Xx][Ee]|\\[Rr][Ee][Gg][Ss][Vv][Rr]32\.[Ee][Xx][Ee]|\\[Mm][Ss][Hh][Tt][Aa]\.[Ee][Xx][Ee]|\\[Ii][Nn][Ss][Tt][Aa][Ll][Ll][Uu][Tt][Ii][Ll]\.[Ee][Xx][Ee]|\\[Rr][Ee][Gg][Aa][Ss][Mm]\.[Ee][Xx][Ee]|\\[Rr][Ee][Gg][Ss][Vv][Cc][Ss]\.[Ee][Xx][Ee]|\\[Mm][Ss][Bb][Uu][Ii][Ll][Dd]\.[Ee][Xx][Ee]|\\[Cc][Ee][Rr][Tt][Uu][Tt][Ii][Ll]\.[Ee][Xx][Ee]|\\[Bb][Ii][Tt][Ss][Aa][Dd][Mm][Ii][Nn]\.[Ee][Xx][Ee]|\\[Ww][Mm][Ii][Cc]\.[Ee][Xx][Ee]|\\[Cc][Mm][Ss][Tt][Pp]\.[Ee][Xx][Ee]|\\[Oo][Dd][Bb][Cc][Cc][Oo][Nn][Ff]\.[Ee][Xx][Ee]|\\[Ff][Oo][Rr][Ff][Ii][Ll][Ee][Ss]\.[Ee][Xx][Ee]|\\[Pp][Cc][Aa][Ll][Uu][Aa]\.[Ee][Xx][Ee]|\\[Mm][Aa][Vv][Ii][Nn][Jj][Ee][Cc][Tt]\.[Ee][Xx][Ee]|\\[Ss][Cc][Rr][Ii][Pp][Tt][Rr][Uu][Nn][Nn][Ee][Rr]\.[Ee][Xx][Ee])/'
-      pivot_on: [host]
-      window: 1h
-    - name: "Memory/credential-dump creation & LSASS access on this host"
-      query: '((data_win_system_eventID:"1" AND data_win_eventdata_image:/.*(\\[Pp][Rr][Oo][Cc][Dd][Uu][Mm][Pp]\.[Ee][Xx][Ee]|\\[Pp][Rr][Oo][Cc][Dd][Uu][Mm][Pp]64\.[Ee][Xx][Ee]|\\[Ss][Qq][Ll][Dd][Uu][Mm][Pp][Ee][Rr]\.[Ee][Xx][Ee]|\\[Cc][Rr][Ee][Aa][Tt][Ee][Dd][Uu][Mm][Pp]\.[Ee][Xx][Ee]|\\[Rr][Dd][Rr][Ll][Ee][Aa][Kk][Dd][Ii][Aa][Gg]\.[Ee][Xx][Ee]|\\[Dd][Uu][Mm][Pp][Ee][Rr][Tt]\.[Ee][Xx][Ee]|\\[Nn][Aa][Nn][Oo][Dd][Uu][Mm][Pp]\.[Ee][Xx][Ee]|\\[Aa][Vv][Dd][Uu][Mm][Pp]\.[Ee][Xx][Ee])/) OR (data_win_system_eventID:"1" AND (data_win_eventdata_commandLine:/.*[Cc][Oo][Mm][Ss][Vv][Cc][Ss]\.[Dd][Ll][Ll].*/ OR data_win_eventdata_commandLine:/.*[Mm][Ii][Nn][Ii][Dd][Uu][Mm][Pp].*/ OR data_win_eventdata_commandLine:/.*[Dd][Uu][Mm][Pp][Ee][Rr][Tt].*/ OR data_win_eventdata_commandLine:/.*[Nn][Aa][Nn][Oo][Dd][Uu][Mm][Pp].*/ OR data_win_eventdata_commandLine:/.*[Ll][Ss][Aa][Ss][Ss].*/ OR data_win_eventdata_commandLine:/.*[Ss][Ee][Kk][Uu][Rr][Ll][Ss][Aa].*/ OR data_win_eventdata_commandLine:/.*[Nn][Tt][Dd][Ss]\.[Dd][Ii][Tt].*/ OR data_win_eventdata_commandLine:/.*[Nn][Tt][Dd][Ss][Uu][Tt][Ii][Ll].*/)) OR (data_win_system_eventID:"10" AND data_win_eventdata_targetImage:/.*(\\[Ll][Ss][Aa][Ss][Ss]\.[Ee][Xx][Ee])/))'
-      pivot_on: [host]
-      window: 1h
+  # Behaviour-targeted hunts the engine runs around the alert (not a sweep).
+  - name: Malicious payload DLL dropped into the 3CXDesktopApp directory (delivery)
+    query: data_win_system_eventID:"11" AND (data_win_eventdata_targetFilename:/.*\\3[Cc][Xx][Dd][Ee][Ss][Kk][Tt][Oo][Pp][Aa][Pp][Pp]\\.*\.[Dd][Ll][Ll]/ OR data_win_eventdata_targetFilename:/.*\\[Ff][Ff][Mm][Pp][Ee][Gg]\.[Dd][Ll][Ll]/ OR data_win_eventdata_targetFilename:/.*\\[Dd]3[Dd][Cc][Oo][Mm][Pp][Ii][Ll][Ee][Rr]_47\.[Dd][Ll][Ll]/)
+    pivot_on:
+    - host
+    window: 24h
+  - name: Child processes spawned by 3CXDesktopApp.exe (second-stage execution)
+    query: data_win_system_eventID:"1" AND data_win_eventdata_parentImage:/.*\\3[Cc][Xx][Dd][Ee][Ss][Kk][Tt][Oo][Pp][Aa][Pp][Pp]\.[Ee][Xx][Ee]/
+    pivot_on:
+    - host
+    window: 6h
+  - name: Network connections and DNS queries made by the 3CXDesktopApp process (C2 beacon, incl. unknown infra)
+    query: (data_win_system_eventID:"3" AND data_win_eventdata_image:/.*\\3[Cc][Xx][Dd][Ee][Ss][Kk][Tt][Oo][Pp][Aa][Pp][Pp]\.[Ee][Xx][Ee]/) OR (data_win_system_eventID:"22" AND data_win_eventdata_image:/.*\\3[Cc][Xx][Dd][Ee][Ss][Kk][Tt][Oo][Pp][Aa][Pp][Pp]\.[Ee][Xx][Ee]/)
+    pivot_on:
+    - host
+    window: 24h
+  - name: Browser credential and history store access (3CX info-stealer second-stage objective)
+    query: (data_win_system_eventID:"1" AND (data_win_eventdata_commandLine:/.*[Ll][Oo][Gg][Ii][Nn] [Dd][Aa][Tt][Aa].*/ OR data_win_eventdata_commandLine:/.*\\[Uu][Ss][Ee][Rr] [Dd][Aa][Tt][Aa]\\.*/ OR data_win_eventdata_commandLine:/.*[Pp][Ll][Aa][Cc][Ee][Ss]\.[Ss][Qq][Ll][Ii][Tt][Ee].*/)) OR (data_win_system_eventID:"11" AND (data_win_eventdata_targetFilename:/.*[Ll][Oo][Gg][Ii][Nn] [Dd][Aa][Tt][Aa].*/ OR data_win_eventdata_targetFilename:/.*[Pp][Ll][Aa][Cc][Ee][Ss]\.[Ss][Qq][Ll][Ii][Tt][Ee]/ OR data_win_eventdata_targetFilename:/.*[Cc][Oo][Oo][Kk][Ii][Ee][Ss]\.[Ss][Qq][Ll][Ii][Tt][Ee]/))
+    pivot_on:
+    - host
+    window: 6h

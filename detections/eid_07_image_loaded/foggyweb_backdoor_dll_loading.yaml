@@ -135,40 +135,58 @@ graylog:
   query: data_win_system_eventID:"7" AND data_win_eventdata_imageLoaded:/[Cc]:\\[Ww][Ii][Nn][Dd][Oo][Ww][Ss]\\[Aa][Dd][Ff][Ss]\\[Vv][Ee][Rr][Ss][Ii][Oo][Nn]\.[Dd][Ll][Ll]/
 
 correlation:
-  # Authored by the correlation engine for review. Related CoPilot Searches to run
-  # around an alert from this rule, scoped to the same host/user/IP within the window.
+  # Authored per-rule (behaviour-researched) for the correlation engine. Related CoPilot
+  # Searches + telemetry pivots to run around an alert, scoped to its host/user/ip/domain.
   related_rules:
-    - id: ec570e53-4c76-45a9-804d-dc3f355ff7a7
-      name: "7Zip Compressing Dump Files"
-      reason: "next kill-chain tactic: Collection"
-    - id: 0a1255c5-d732-4b62-ac02-b5152d34fb83
-      name: "ADExplorer Writing Complete AD Snapshot Into .dat File"
-      reason: "next kill-chain tactic: Discovery"
-    - id: 1ea13e8c-03ea-409b-877d-ce5c3d2c1cb3
-      name: "ADFS Database Named Pipe Connection By Uncommon Tool"
-      reason: "next kill-chain tactic: Collection"
-    - id: 75bf09fa-1dd7-4d18-9af9-dd9e492562eb
-      name: "ADSI-Cache File Creation By Uncommon Tool"
-      reason: "next kill-chain tactic: Command and Control"
-    - id: 33a2d1dd-f3b0-40bd-8baf-7974468927cc
-      name: "APT PRIVATELOG Image Load Pattern"
-      reason: "next kill-chain tactic: Privilege Escalation"
-    - id: 9aa01d62-7667-4d3b-acb8-8cb5103e2014
-      name: "APT27 - Emissary Panda Activity"
-      reason: "next kill-chain tactic: Execution"
-  window: 1h
+  - id: 1ea13e8c-03ea-409b-877d-ce5c3d2c1cb3
+    name: ADFS Database Named Pipe Connection By Uncommon Tool
+    reason: 'Co-occurring objective: FoggyWeb exists to steal the AD FS token-signing certificate, which lives in the AD FS configuration database (WID). This rule fires when AADInternals/ADFSDump reads that DB over the \MICROSOFT##WID\tsql\query pipe, and it deliberately excludes the Microsoft.IdentityServer.ServiceHost.exe process FoggyWeb runs inside, so a hit is the operators'' manual cert-theft tooling on the same ADFS host, confirming the breach''s purpose.'
+  - id: 75bf09fa-1dd7-4d18-9af9-dd9e492562eb
+    name: ADSI-Cache File Creation By Uncommon Tool
+    reason: 'Follow-on AD lookup: the stolen token-signing certificate is encrypted with the AD FS DKM master key held in Active Directory, so the operators query AD over LDAP/ADSI for it (CN=ADFS ... thumbnailPhoto), leaving an ADSI schema-cache (.sch) file written by the same uncommon process; this is the step that makes the cert usable for Golden SAML.'
+  - id: 9be34ad0-b6a7-4fbd-91cf-fc7ec1047f5f
+    name: UNC2452 Process Creation Patterns
+    reason: 'Same intrusion set: UNC2452 (NOBELIUM) authored and deployed FoggyWeb in the SolarWinds campaign. Its documented hands-on process patterns (7z -mx9 -p staging, rundll32 ...,Tk_ exports) appearing on this host/network place the same operator at the keyboard around the backdoor load.'
+  - id: b7155193-8a81-4d8f-805d-88de864ca50c
+    name: UNC2452 PowerShell Pattern
+    reason: 'Same actor''s lateral-movement tradecraft (Invoke-WMIMethod / wmic /node: launching rundll32 from C:\Windows), the remote-execution technique NOBELIUM used to reach and gain SYSTEM on the AD FS server before planting version.dll; a hit corroborates how the implant arrived.'
+  - id: e64c8ef3-9f98-40c8-b71e-96110991cb4c
+    name: DLL Names Used By SVR For GraphicalProton Backdoor
+    reason: 'Same actor, second implant: SVR (= APT29/NOBELIUM) and the identical technique class, a malicious DLL image-loaded (EID 7). GraphicalProton module names surfacing in the same environment reinforce a NOBELIUM intrusion rather than a one-off DLL anomaly.'
+  - id: 79c7d1fc-64c7-91be-a616-ccda752efe81
+    name: Windows DLL Search Order Hijacking Hunt with Sysmon
+    reason: 'The loading mechanism itself: FoggyWeb is DLL search-order hijacking of version.dll (T1574.001). This broader EID-7 hunt catches legitimate system-DLL names loaded from non-standard directories, so it re-surfaces the C:\Windows\ADFS\version.dll load and reveals any sibling sideloads the operators planted on the host.'
+  - id: 9e716b33-63b2-46da-86a4-bd3c3b9b5dfb
+    name: Certificate Exported Via PowerShell
+    reason: 'The end objective on disk: exporting the AD FS token-signing/decryption private keys for Golden SAML. AADInternals'' Export-AADIntADFSSigningCertificate and Export-PfxCertificate run as PowerShell on the same ADFS host; a hit is the signing key leaving the box.'
+  - id: 3ffd6f51-e6c1-47b7-94b4-c1e61d4117c5
+    name: Certificate Exported Via Certutil.EXE
+    reason: 'Same cert-theft objective via a different LOLBin: certutil -exportPFX dumping the AD FS certificate private key. Pairs with the PowerShell variant so the engine surfaces the signing-key export whichever tool the operator used.'
+  window: 2h
   enrichment_searches:
-  # Rule-specific telemetry pivots the engine runs around an alert from this rule,
-  # scoped to the alert's host/user/IP within the window (behaviour-targeted, not a sweep).
-    - name: "DLL sideloading / execution from user-writable paths on this host"
-      query: '((data_win_system_eventID:"7" AND (data_win_eventdata_imageLoaded:/.*\\[Uu][Ss][Ee][Rr][Ss]\\.*/ OR data_win_eventdata_imageLoaded:/.*\\[Pp][Rr][Oo][Gg][Rr][Aa][Mm][Dd][Aa][Tt][Aa]\\.*/ OR data_win_eventdata_imageLoaded:/.*\\[Ww][Ii][Nn][Dd][Oo][Ww][Ss]\\[Tt][Ee][Mm][Pp]\\.*/ OR data_win_eventdata_imageLoaded:/.*\\[Aa][Pp][Pp][Dd][Aa][Tt][Aa]\\.*/ OR data_win_eventdata_imageLoaded:/.*\\[Pp][Uu][Bb][Ll][Ii][Cc]\\.*/ OR data_win_eventdata_imageLoaded:/.*\\\$[Rr][Ee][Cc][Yy][Cc][Ll][Ee].*/)) OR (data_win_system_eventID:"1" AND (data_win_eventdata_image:/.*\\[Uu][Ss][Ee][Rr][Ss]\\.*/ OR data_win_eventdata_image:/.*\\[Pp][Rr][Oo][Gg][Rr][Aa][Mm][Dd][Aa][Tt][Aa]\\.*/ OR data_win_eventdata_image:/.*\\[Ww][Ii][Nn][Dd][Oo][Ww][Ss]\\[Tt][Ee][Mm][Pp]\\.*/ OR data_win_eventdata_image:/.*\\[Aa][Pp][Pp][Dd][Aa][Tt][Aa]\\.*/ OR data_win_eventdata_image:/.*\\[Pp][Uu][Bb][Ll][Ii][Cc]\\.*/ OR data_win_eventdata_image:/.*\\\$[Rr][Ee][Cc][Yy][Cc][Ll][Ee].*/)))'
-      pivot_on: [host]
-      window: 2h
-    - name: "Follow-on LOLBin / signed-binary-proxy execution on this host"
-      query: 'data_win_system_eventID:"1" AND data_win_eventdata_image:/.*(\\[Rr][Uu][Nn][Dd][Ll][Ll]32\.[Ee][Xx][Ee]|\\[Rr][Ee][Gg][Ss][Vv][Rr]32\.[Ee][Xx][Ee]|\\[Mm][Ss][Hh][Tt][Aa]\.[Ee][Xx][Ee]|\\[Ii][Nn][Ss][Tt][Aa][Ll][Ll][Uu][Tt][Ii][Ll]\.[Ee][Xx][Ee]|\\[Rr][Ee][Gg][Aa][Ss][Mm]\.[Ee][Xx][Ee]|\\[Rr][Ee][Gg][Ss][Vv][Cc][Ss]\.[Ee][Xx][Ee]|\\[Mm][Ss][Bb][Uu][Ii][Ll][Dd]\.[Ee][Xx][Ee]|\\[Cc][Ee][Rr][Tt][Uu][Tt][Ii][Ll]\.[Ee][Xx][Ee]|\\[Bb][Ii][Tt][Ss][Aa][Dd][Mm][Ii][Nn]\.[Ee][Xx][Ee]|\\[Ww][Mm][Ii][Cc]\.[Ee][Xx][Ee]|\\[Cc][Mm][Ss][Tt][Pp]\.[Ee][Xx][Ee]|\\[Oo][Dd][Bb][Cc][Cc][Oo][Nn][Ff]\.[Ee][Xx][Ee]|\\[Ff][Oo][Rr][Ff][Ii][Ll][Ee][Ss]\.[Ee][Xx][Ee]|\\[Pp][Cc][Aa][Ll][Uu][Aa]\.[Ee][Xx][Ee]|\\[Mm][Aa][Vv][Ii][Nn][Jj][Ee][Cc][Tt]\.[Ee][Xx][Ee]|\\[Ss][Cc][Rr][Ii][Pp][Tt][Rr][Uu][Nn][Nn][Ee][Rr]\.[Ee][Xx][Ee])/'
-      pivot_on: [host]
-      window: 1h
-    - name: "Memory/credential-dump creation & LSASS access on this host"
-      query: '((data_win_system_eventID:"1" AND data_win_eventdata_image:/.*(\\[Pp][Rr][Oo][Cc][Dd][Uu][Mm][Pp]\.[Ee][Xx][Ee]|\\[Pp][Rr][Oo][Cc][Dd][Uu][Mm][Pp]64\.[Ee][Xx][Ee]|\\[Ss][Qq][Ll][Dd][Uu][Mm][Pp][Ee][Rr]\.[Ee][Xx][Ee]|\\[Cc][Rr][Ee][Aa][Tt][Ee][Dd][Uu][Mm][Pp]\.[Ee][Xx][Ee]|\\[Rr][Dd][Rr][Ll][Ee][Aa][Kk][Dd][Ii][Aa][Gg]\.[Ee][Xx][Ee]|\\[Dd][Uu][Mm][Pp][Ee][Rr][Tt]\.[Ee][Xx][Ee]|\\[Nn][Aa][Nn][Oo][Dd][Uu][Mm][Pp]\.[Ee][Xx][Ee]|\\[Aa][Vv][Dd][Uu][Mm][Pp]\.[Ee][Xx][Ee])/) OR (data_win_system_eventID:"1" AND (data_win_eventdata_commandLine:/.*[Cc][Oo][Mm][Ss][Vv][Cc][Ss]\.[Dd][Ll][Ll].*/ OR data_win_eventdata_commandLine:/.*[Mm][Ii][Nn][Ii][Dd][Uu][Mm][Pp].*/ OR data_win_eventdata_commandLine:/.*[Dd][Uu][Mm][Pp][Ee][Rr][Tt].*/ OR data_win_eventdata_commandLine:/.*[Nn][Aa][Nn][Oo][Dd][Uu][Mm][Pp].*/ OR data_win_eventdata_commandLine:/.*[Ll][Ss][Aa][Ss][Ss].*/ OR data_win_eventdata_commandLine:/.*[Ss][Ee][Kk][Uu][Rr][Ll][Ss][Aa].*/ OR data_win_eventdata_commandLine:/.*[Nn][Tt][Dd][Ss]\.[Dd][Ii][Tt].*/ OR data_win_eventdata_commandLine:/.*[Nn][Tt][Dd][Ss][Uu][Tt][Ii][Ll].*/)) OR (data_win_system_eventID:"10" AND data_win_eventdata_targetImage:/.*(\\[Ll][Ss][Aa][Ss][Ss]\.[Ee][Xx][Ee])/))'
-      pivot_on: [host]
-      window: 1h
+  # Behaviour-targeted hunts the engine runs around the alert (not a sweep).
+  - name: AADInternals / ADFSDump token-signing-certificate theft tooling on this host
+    query: ((data_win_system_eventID:"1" OR data_win_system_eventID:"4104") AND (data_win_eventdata_commandLine:/.*[Aa][Aa][Dd][Ii][Nn][Tt][Ee][Rr][Nn][Aa][Ll][Ss].*/ OR data_win_eventdata_commandLine:/.*[Ee][Xx][Pp][Oo][Rr][Tt]-[Aa][Aa][Dd][Ii][Nn][Tt][Aa][Dd][Ff][Ss].*/ OR data_win_eventdata_commandLine:/.*[Gg][Ee][Tt]-[Aa][Aa][Dd][Ii][Nn][Tt][Aa][Dd][Ff][Ss].*/ OR data_win_eventdata_scriptBlockText:/.*[Aa][Aa][Dd][Ii][Nn][Tt][Ee][Rr][Nn][Aa][Ll][Ss].*/ OR data_win_eventdata_scriptBlockText:/.*[Ee][Xx][Pp][Oo][Rr][Tt]-[Aa][Aa][Dd][Ii][Nn][Tt][Aa][Dd][Ff][Ss].*/ OR data_win_eventdata_scriptBlockText:/.*[Gg][Ee][Tt]-[Aa][Aa][Dd][Ii][Nn][Tt][Aa][Dd][Ff][Ss].*/)) OR (data_win_system_eventID:"1" AND (data_win_eventdata_image:/.*\\[Aa][Dd][Ff][Ss][Dd][Uu][Mm][Pp]\.[Ee][Xx][Ee]/ OR data_win_eventdata_image:/.*\\[Aa][Dd][Ff][Ss][Pp][Oo][Oo][Ff].*/ OR data_win_eventdata_originalFileName:/.*[Aa][Dd][Ff][Ss][Dd][Uu][Mm][Pp].*/))
+    pivot_on:
+    - host
+    window: 2h
+  - name: version.dll hijack DLL dropped or loaded from a non-System32 path on this host
+    query: (data_win_system_eventID:"11" AND data_win_eventdata_targetFilename:/.*\\[Vv][Ee][Rr][Ss][Ii][Oo][Nn]\.[Dd][Ll][Ll]/) OR (data_win_system_eventID:"7" AND data_win_eventdata_imageLoaded:/.*\\[Vv][Ee][Rr][Ss][Ii][Oo][Nn]\.[Dd][Ll][Ll]/ AND NOT (data_win_eventdata_imageLoaded:/.*\\[Ss][Yy][Ss][Tt][Ee][Mm]32\\.*/ OR data_win_eventdata_imageLoaded:/.*\\[Ss][Yy][Ss][Ww][Oo][Ww]64\\.*/))
+    pivot_on:
+    - host
+    window: 24h
+  - name: Anomalous child processes or network activity from the AD FS service host (FoggyWeb process)
+    query: (data_win_system_eventID:"1" AND data_win_eventdata_parentImage:/.*\\[Mm][Ii][Cc][Rr][Oo][Ss][Oo][Ff][Tt]\.[Ii][Dd][Ee][Nn][Tt][Ii][Tt][Yy][Ss][Ee][Rr][Vv][Ee][Rr]\.[Ss][Ee][Rr][Vv][Ii][Cc][Ee][Hh][Oo][Ss][Tt]\.[Ee][Xx][Ee]/) OR ((data_win_system_eventID:"3" OR data_win_system_eventID:"22") AND data_win_eventdata_image:/.*\\[Mm][Ii][Cc][Rr][Oo][Ss][Oo][Ff][Tt]\.[Ii][Dd][Ee][Nn][Tt][Ii][Tt][Yy][Ss][Ee][Rr][Vv][Ee][Rr]\.[Ss][Ee][Rr][Vv][Ii][Cc][Ee][Hh][Oo][Ss][Tt]\.[Ee][Xx][Ee]/)
+    pivot_on:
+    - host
+    window: 2h
+  - name: AD FS DKM master-key AD lookup and token-signing certificate/key export on this host
+    query: (data_win_system_eventID:"4104" AND (data_win_eventdata_scriptBlockText:/.*[Cc][Nn]=[Aa][Dd][Ff][Ss].*/ OR data_win_eventdata_scriptBlockText:/.*[Cc][Rr][Yy][Pp][Tt][Oo][Pp][Oo][Ll][Ii][Cc][Yy].*/ OR data_win_eventdata_scriptBlockText:/.*[Tt][Hh][Uu][Mm][Bb][Nn][Aa][Ii][Ll][Pp][Hh][Oo][Tt][Oo].*/ OR data_win_eventdata_scriptBlockText:/.*[Dd][Ii][Rr][Ee][Cc][Tt][Oo][Rr][Yy][Ss][Ee][Aa][Rr][Cc][Hh][Ee][Rr].*/)) OR (data_win_system_eventID:"1" AND data_win_eventdata_commandLine:/.*-[Ee][Xx][Pp][Oo][Rr][Tt][Pp][Ff][Xx].*/) OR (data_win_system_eventID:"11" AND (data_win_eventdata_targetFilename:/.*\.[Pp][Ff][Xx]/ OR data_win_eventdata_targetFilename:/.*\.[Pp]12/ OR data_win_eventdata_targetFilename:/.*\.[Pp][Ee][Mm]/))
+    pivot_on:
+    - host
+    window: 4h
+  - name: LSASS credential access / SYSTEM escalation on the AD FS host (precursor privilege)
+    query: (data_win_system_eventID:"10" AND data_win_eventdata_targetImage:/.*\\[Ll][Ss][Aa][Ss][Ss]\.[Ee][Xx][Ee]/ AND (data_win_eventdata_grantedAccess:/0[Xx]1010/ OR data_win_eventdata_grantedAccess:/0[Xx]1410/ OR data_win_eventdata_grantedAccess:/0[Xx]143[Aa]/ OR data_win_eventdata_grantedAccess:/0[Xx]1438/ OR data_win_eventdata_grantedAccess:/0[Xx]1[Ff][Ff][Ff][Ff][Ff]/)) OR (data_win_system_eventID:"1" AND (data_win_eventdata_commandLine:/.*[Cc][Oo][Mm][Ss][Vv][Cc][Ss]\.[Dd][Ll][Ll].*[Mm][Ii][Nn][Ii][Dd][Uu][Mm][Pp].*/ OR data_win_eventdata_commandLine:/.*[Ss][Ee][Kk][Uu][Rr][Ll][Ss][Aa].*/ OR data_win_eventdata_commandLine:/.*[Pp][Rr][Oo][Cc][Dd][Uu][Mm][Pp].*[Ll][Ss][Aa][Ss][Ss].*/)) OR (data_win_system_eventID:"11" AND data_win_eventdata_targetFilename:/.*[Ll][Ss][Aa][Ss][Ss].*\.[Dd][Mm][Pp]/)
+    pivot_on:
+    - host
+    window: 4h

@@ -146,19 +146,53 @@ graylog:
   query: data_win_system_eventID:"7" AND data_win_eventdata_image:/[Cc]:\\[Ww][Ii][Nn][Dd][Oo][Ww][Ss]\\.*/ AND (data_win_eventdata_imageLoaded:/[Cc]:\\[Uu][Ss][Ee][Rr][Ss]\\[Pp][Uu][Bb][Ll][Ii][Cc]\\.*/ OR data_win_eventdata_imageLoaded:/[Cc]:\\[Pp][Ee][Rr][Ff][Ll][Oo][Gg][Ss]\\.*/)
 
 correlation:
-  # Authored by the correlation engine for review.
+  # Authored per-rule (behaviour-researched) for the correlation engine. Related CoPilot
+  # Searches + telemetry pivots to run around an alert, scoped to its host/user/ip/domain.
+  related_rules:
+  - id: 9ed5959a-c43c-4c59-84e3-d28628429456
+    name: UAC Bypass Using Iscsicpl - ImageLoad
+    reason: 'The exact behaviour this rule''s reference (iscsicpl_bypassUAC) describes: the auto-elevating system binary iscsicpl.exe loading a planted iscsiexe.dll from a user-controlled path to elevate. This generic rule catches it when the DLL sits in Public/PerfLogs; firing together confirms an iscsicpl UAC bypass.'
+  - id: f39ee679-3b1e-4f47-841c-5c3c580acda2
+    name: Windows DLL Search Order Hijacking with iscsicpl
+    reason: 'The process-creation payoff of the same iscsicpl hijack: iscsicpl.exe spawning cmd/powershell after loading the planted DLL. If this fires on the host, the sideloaded DLL executed a shell payload - the ''what ran'' that follows this image-load.'
+  - id: 799a5f48-0ac1-4e0f-9152-71d137d48c2a
+    name: Abusable DLL Potential Sideloading From Suspicious Location
+    reason: Direct sibling detecting known-abused DLLs (coreclr, libcef, zipdll...) sideloaded from the same suspicious locations, including C:\PerfLogs and C:\Users\Public. A named-DLL hit alongside this location-based hit strongly corroborates deliberate sideloading over a benign coincidence.
+  - id: a5ea83a7-05a5-44c1-be2e-addccbbd8c03
+    name: UAC Bypass With Fake DLL
+    reason: 'Same drop-then-autoelevate primitive: dism.exe loading a dropped dismcore.dll from a non-System32 path for a UAC bypass. Behaviourally identical to this rule (trusted binary tricked into loading an attacker DLL), so it points at the same actor goal of elevated execution.'
+  - id: b5de0c9a-6f19-43e0-af4e-55ad01f550af
+    name: Unsigned DLL Loaded by Windows Utility
+    reason: 'The signature-based angle on the same behaviour: a trusted Windows utility (rundll32/regsvr32/installutil...) loading an unsigned/untrusted DLL for proxy execution. Where this rule keys on an abnormal load location, that one keys on the DLL being unsigned - the same sideload seen two ways.'
+  - id: dbbd9f66-2ed3-4ca2-98a4-6ea985dd1a1c
+    name: Potential Initial Access via DLL Search Order Hijacking
+    reason: 'The precursor file-write: a .dll being planted into a hijackable location by an unusual process. A planted DLL must exist before a system binary can load it, so a recent hit from this rule on the same host is the drop that set up this load.'
+  - id: 79c7d1fc-64c7-91be-a616-ccda752efe81
+    name: Windows DLL Search Order Hijacking Hunt with Sysmon
+    reason: Broad hunt for DLLs loaded from non-standard directories (outside system32/syswow64/winsxs/wbem). It generalises this rule's narrow Public/PerfLogs focus, so correlating it surfaces the rest of a search-order-hijack campaign on the host.
+  - id: 4f6c43e2-f989-4ea5-bcd8-843b49a0317c
+    name: UAC Bypass Using WOW64 Logger DLL Hijack
+    reason: 'An alternative DLL-hijack UAC bypass (UACMe #30) from a syswow64 source with full process access. Same family (DLL hijack to elevate) that the same intruder may try on the host, so its presence reinforces an active privilege-escalation attempt rather than noise.'
+  window: 2h
   enrichment_searches:
-  # Rule-specific telemetry pivots the engine runs around an alert from this rule,
-  # scoped to the alert's host/user/IP within the window (behaviour-targeted, not a sweep).
-    - name: "Log-clearing / anti-forensic activity on this host"
-      query: '(((data_win_eventdata_commandLine:/.*[Ww][Ee][Vv][Tt][Uu][Tt][Ii][Ll] [Cc][Ll].*/ OR data_win_eventdata_commandLine:/.*[Cc][Ll][Ee][Aa][Rr]-[Ee][Vv][Ee][Nn][Tt][Ll][Oo][Gg].*/ OR data_win_eventdata_commandLine:/.*[Ff][Ss][Uu][Tt][Ii][Ll] [Uu][Ss][Nn] [Dd][Ee][Ll][Ee][Tt][Ee][Jj][Oo][Uu][Rr][Nn][Aa][Ll].*/ OR data_win_eventdata_commandLine:/.*[Vv][Ss][Ss][Aa][Dd][Mm][Ii][Nn] [Dd][Ee][Ll][Ee][Tt][Ee].*/ OR data_win_eventdata_commandLine:/.*[Ww][Ee][Vv][Tt][Uu][Tt][Ii][Ll] [Cc][Ll][Ee][Aa][Rr]-[Ll][Oo][Gg].*/)) OR ((data_win_system_eventID:"1102" OR data_win_system_eventID:"104")))'
-      pivot_on: [host]
-      window: 2h
-    - name: "DLL sideloading / execution from user-writable paths on this host"
-      query: '((data_win_system_eventID:"7" AND (data_win_eventdata_imageLoaded:/.*\\[Uu][Ss][Ee][Rr][Ss]\\.*/ OR data_win_eventdata_imageLoaded:/.*\\[Pp][Rr][Oo][Gg][Rr][Aa][Mm][Dd][Aa][Tt][Aa]\\.*/ OR data_win_eventdata_imageLoaded:/.*\\[Ww][Ii][Nn][Dd][Oo][Ww][Ss]\\[Tt][Ee][Mm][Pp]\\.*/ OR data_win_eventdata_imageLoaded:/.*\\[Aa][Pp][Pp][Dd][Aa][Tt][Aa]\\.*/ OR data_win_eventdata_imageLoaded:/.*\\[Pp][Uu][Bb][Ll][Ii][Cc]\\.*/ OR data_win_eventdata_imageLoaded:/.*\\\$[Rr][Ee][Cc][Yy][Cc][Ll][Ee].*/)) OR (data_win_system_eventID:"1" AND (data_win_eventdata_image:/.*\\[Uu][Ss][Ee][Rr][Ss]\\.*/ OR data_win_eventdata_image:/.*\\[Pp][Rr][Oo][Gg][Rr][Aa][Mm][Dd][Aa][Tt][Aa]\\.*/ OR data_win_eventdata_image:/.*\\[Ww][Ii][Nn][Dd][Oo][Ww][Ss]\\[Tt][Ee][Mm][Pp]\\.*/ OR data_win_eventdata_image:/.*\\[Aa][Pp][Pp][Dd][Aa][Tt][Aa]\\.*/ OR data_win_eventdata_image:/.*\\[Pp][Uu][Bb][Ll][Ii][Cc]\\.*/ OR data_win_eventdata_image:/.*\\\$[Rr][Ee][Cc][Yy][Cc][Ll][Ee].*/)))'
-      pivot_on: [host]
-      window: 2h
-    - name: "Follow-on LOLBin / signed-binary-proxy execution on this host"
-      query: 'data_win_system_eventID:"1" AND data_win_eventdata_image:/.*(\\[Rr][Uu][Nn][Dd][Ll][Ll]32\.[Ee][Xx][Ee]|\\[Rr][Ee][Gg][Ss][Vv][Rr]32\.[Ee][Xx][Ee]|\\[Mm][Ss][Hh][Tt][Aa]\.[Ee][Xx][Ee]|\\[Ii][Nn][Ss][Tt][Aa][Ll][Ll][Uu][Tt][Ii][Ll]\.[Ee][Xx][Ee]|\\[Rr][Ee][Gg][Aa][Ss][Mm]\.[Ee][Xx][Ee]|\\[Rr][Ee][Gg][Ss][Vv][Cc][Ss]\.[Ee][Xx][Ee]|\\[Mm][Ss][Bb][Uu][Ii][Ll][Dd]\.[Ee][Xx][Ee]|\\[Cc][Ee][Rr][Tt][Uu][Tt][Ii][Ll]\.[Ee][Xx][Ee]|\\[Bb][Ii][Tt][Ss][Aa][Dd][Mm][Ii][Nn]\.[Ee][Xx][Ee]|\\[Ww][Mm][Ii][Cc]\.[Ee][Xx][Ee]|\\[Cc][Mm][Ss][Tt][Pp]\.[Ee][Xx][Ee]|\\[Oo][Dd][Bb][Cc][Cc][Oo][Nn][Ff]\.[Ee][Xx][Ee]|\\[Ff][Oo][Rr][Ff][Ii][Ll][Ee][Ss]\.[Ee][Xx][Ee]|\\[Pp][Cc][Aa][Ll][Uu][Aa]\.[Ee][Xx][Ee]|\\[Mm][Aa][Vv][Ii][Nn][Jj][Ee][Cc][Tt]\.[Ee][Xx][Ee]|\\[Ss][Cc][Rr][Ii][Pp][Tt][Rr][Uu][Nn][Nn][Ee][Rr]\.[Ee][Xx][Ee])/'
-      pivot_on: [host]
-      window: 1h
+  # Behaviour-targeted hunts the engine runs around the alert (not a sweep).
+  - name: DLL or payload staged in C:\Users\Public or C:\PerfLogs on this host
+    query: data_win_system_eventID:"11" AND (data_win_eventdata_targetFilename:/.*:\\[Uu][Ss][Ee][Rr][Ss]\\[Pp][Uu][Bb][Ll][Ii][Cc]\\.*/ OR data_win_eventdata_targetFilename:/.*:\\[Pp][Ee][Rr][Ff][Ll][Oo][Gg][Ss]\\.*/)
+    pivot_on:
+    - host
+    window: 6h
+  - name: Trusted system binaries loading DLLs from user-writable paths on this host
+    query: data_win_system_eventID:"7" AND data_win_eventdata_image:/[Cc]:\\[Ww][Ii][Nn][Dd][Oo][Ww][Ss]\\.*/ AND (data_win_eventdata_imageLoaded:/.*:\\[Uu][Ss][Ee][Rr][Ss]\\.*/ OR data_win_eventdata_imageLoaded:/.*:\\[Pp][Rr][Oo][Gg][Rr][Aa][Mm][Dd][Aa][Tt][Aa]\\.*/ OR data_win_eventdata_imageLoaded:/[Cc]:\\[Ww][Ii][Nn][Dd][Oo][Ww][Ss]\\[Tt][Ee][Mm][Pp]\\.*/ OR data_win_eventdata_imageLoaded:/.*\\[Aa][Pp][Pp][Dd][Aa][Tt][Aa]\\.*/ OR data_win_eventdata_imageLoaded:/.*:\\[Pp][Ee][Rr][Ff][Ll][Oo][Gg][Ss]\\.*/ OR data_win_eventdata_imageLoaded:/.*\\\$[Rr][Ee][Cc][Yy][Cc][Ll][Ee].*/)
+    pivot_on:
+    - host
+    window: 2h
+  - name: Shell or LOLBin spawned by a system binary on this host
+    query: data_win_system_eventID:"1" AND data_win_eventdata_parentImage:/[Cc]:\\[Ww][Ii][Nn][Dd][Oo][Ww][Ss]\\.*/ AND (data_win_eventdata_image:/.*\\[Cc][Mm][Dd]\.[Ee][Xx][Ee]/ OR data_win_eventdata_image:/.*\\[Pp][Oo][Ww][Ee][Rr][Ss][Hh][Ee][Ll][Ll]\.[Ee][Xx][Ee]/ OR data_win_eventdata_image:/.*\\[Pp][Ww][Ss][Hh]\.[Ee][Xx][Ee]/ OR data_win_eventdata_image:/.*\\[Ww][Ss][Cc][Rr][Ii][Pp][Tt]\.[Ee][Xx][Ee]/ OR data_win_eventdata_image:/.*\\[Cc][Ss][Cc][Rr][Ii][Pp][Tt]\.[Ee][Xx][Ee]/ OR data_win_eventdata_image:/.*\\[Mm][Ss][Hh][Tt][Aa]\.[Ee][Xx][Ee]/ OR data_win_eventdata_image:/.*\\[Rr][Uu][Nn][Dd][Ll][Ll]32\.[Ee][Xx][Ee]/ OR data_win_eventdata_image:/.*\\[Rr][Ee][Gg][Ss][Vv][Rr]32\.[Ee][Xx][Ee]/)
+    pivot_on:
+    - host
+    window: 2h
+  - name: LSASS credential access or remote-thread injection on this host
+    query: (data_win_system_eventID:"10" AND data_win_eventdata_targetImage:/.*\\[Ll][Ss][Aa][Ss][Ss]\.[Ee][Xx][Ee]/) OR data_win_system_eventID:"8"
+    pivot_on:
+    - host
+    window: 2h

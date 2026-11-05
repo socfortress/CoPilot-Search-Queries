@@ -164,44 +164,58 @@ graylog:
   query: data_win_system_eventID:"7" AND (data_win_eventdata_image:/.*\\[Ee][Xx][Cc][Ee][Ll]\.[Ee][Xx][Ee]/ OR data_win_eventdata_image:/.*\\[Mm][Ss][Pp][Uu][Bb]\.[Ee][Xx][Ee]/ OR data_win_eventdata_image:/.*\\[Oo][Uu][Tt][Ll][Oo][Oo][Kk]\.[Ee][Xx][Ee]/ OR data_win_eventdata_image:/.*\\[Oo][Nn][Ee][Nn][Oo][Tt][Ee]\.[Ee][Xx][Ee]/ OR data_win_eventdata_image:/.*\\[Oo][Nn][Ee][Nn][Oo][Tt][Ee][Ii][Mm]\.[Ee][Xx][Ee]/ OR data_win_eventdata_image:/.*\\[Pp][Oo][Ww][Ee][Rr][Pp][Nn][Tt]\.[Ee][Xx][Ee]/ OR data_win_eventdata_image:/.*\\[Ww][Ii][Nn][Ww][Oo][Rr][Dd]\.[Ee][Xx][Ee]/) AND data_win_eventdata_imageLoaded:/.*\\[Cc][Ll][Rr]\.[Dd][Ll][Ll].*/
 
 correlation:
-  # Authored by the correlation engine for review. Related CoPilot Searches to run
-  # around an alert from this rule, scoped to the same host/user/IP within the window.
+  # Authored per-rule (behaviour-researched) for the correlation engine. Related CoPilot
+  # Searches + telemetry pivots to run around an alert, scoped to its host/user/ip/domain.
   related_rules:
-    - id: ec570e53-4c76-45a9-804d-dc3f355ff7a7
-      name: "7Zip Compressing Dump Files"
-      reason: "next kill-chain tactic: Collection"
-    - id: 0a1255c5-d732-4b62-ac02-b5152d34fb83
-      name: "ADExplorer Writing Complete AD Snapshot Into .dat File"
-      reason: "next kill-chain tactic: Discovery"
-    - id: 1ea13e8c-03ea-409b-877d-ce5c3d2c1cb3
-      name: "ADFS Database Named Pipe Connection By Uncommon Tool"
-      reason: "next kill-chain tactic: Collection"
-    - id: 75bf09fa-1dd7-4d18-9af9-dd9e492562eb
-      name: "ADSI-Cache File Creation By Uncommon Tool"
-      reason: "next kill-chain tactic: Command and Control"
-    - id: 33a2d1dd-f3b0-40bd-8baf-7974468927cc
-      name: "APT PRIVATELOG Image Load Pattern"
-      reason: "next kill-chain tactic: Privilege Escalation"
-    - id: 9aa01d62-7667-4d3b-acb8-8cb5103e2014
-      name: "APT27 - Emissary Panda Activity"
-      reason: "next kill-chain tactic: Execution"
+  - id: e6ce8457-68b1-485b-9bdd-3c2b5d679aa9
+    name: VBA DLL Loaded Via Office Application
+    reason: 'Precursor on the same process: VBE7.dll loading into the Office app means a macro is executing - the ''Enable Content'' step whose call into .NET is what triggers this clr.dll load.'
+  - id: ff0f2b05-09db-4095-b96d-1b75ca24894a
+    name: DotNET Assembly DLL Loaded Via Office Application
+    reason: 'Confirms real managed code: clr.dll is only the runtime shell, this catches the actual .NET assembly loading from the legacy GAC (C:\Windows\assembly) into the same Office process - they co-fire on a genuine payload, not an incidental runtime touch.'
+  - id: 90217a70-13fc-48e4-b3db-0d836c5824ac
+    name: GAC DLL Loaded Via Office Applications
+    reason: 'Same managed-code load via the .NET 4 GAC (C:\Windows\Microsoft.NET\assembly\GAC_MSIL): the payload resolves its assemblies here right after the CLR initialises; complements the legacy-GAC detection above.'
+  - id: bb2ba6fb-95d4-4a25-89fc-30bb736c021a
+    name: PowerShell Core DLL Loaded Via Office Application
+    reason: 'Escalation from the same foothold: Office loading System.Management.Automation.dll means the loaded CLR spun up an in-process PowerShell runspace - fileless execution that never launches powershell.exe.'
+  - id: 438025f9-5856-4663-83f7-52f878a70a50
+    name: Suspicious Microsoft Office Child Process
+    reason: 'Most common next step: the macro/.NET code then spawns a LOLBin or script interpreter (powershell/mshta/rundll32/regsvr32) from the same Office process - this is what turns ''CLR loaded'' into confirmed maldoc execution.'
+  - id: 7bdde3bf-2a42-4c39-aa31-a92b3e17afac
+    name: HackTool - LittleCorporal Generated Maldoc Injection
+    reason: 'Injection arm, one beat later: LittleCorporal maldocs load .NET into winword.exe (exactly this alert) then OpenProcess/inject via Microsoft.NET\Framework64\v2 call traces - a reciprocal, same-host continuation of this CLR load.'
+  - id: 3b5ba899-9842-4bc2-acc2-12308498bf42
+    name: Office Application Initiated Network Connection Over Uncommon Ports
+    reason: 'C2 / stager pull: the in-process .NET payload beacons out or fetches its next stage straight from the Office process over a non-standard port, with no browser or child process in between.'
+  - id: 4508a70e-97ef-4300-b62b-ff27992990ea
+    name: DotNet CLR DLL Loaded By Scripting Applications
+    reason: 'Next hop: once the Office maldoc spawns a script/LOLBin child (wscript/cscript/mshta/regsvr32/wmic), that child loading clr.dll fires this - the managed-code baton passed from Office to its child on the same host.'
   window: 1h
   enrichment_searches:
-  # Rule-specific telemetry pivots the engine runs around an alert from this rule,
-  # scoped to the alert's host/user/IP within the window (behaviour-targeted, not a sweep).
-    - name: "Office / browser spawning a script interpreter on this host"
-      query: 'data_win_system_eventID:"1" AND data_win_eventdata_parentImage:/.*(\\[Ww][Ii][Nn][Ww][Oo][Rr][Dd]\.[Ee][Xx][Ee]|\\[Ee][Xx][Cc][Ee][Ll]\.[Ee][Xx][Ee]|\\[Pp][Oo][Ww][Ee][Rr][Pp][Nn][Tt]\.[Ee][Xx][Ee]|\\[Oo][Uu][Tt][Ll][Oo][Oo][Kk]\.[Ee][Xx][Ee]|\\[Mm][Ss][Aa][Cc][Cc][Ee][Ss][Ss]\.[Ee][Xx][Ee]|\\[Mm][Ss][Pp][Uu][Bb]\.[Ee][Xx][Ee]|\\[Vv][Ii][Ss][Ii][Oo]\.[Ee][Xx][Ee]|\\[Cc][Hh][Rr][Oo][Mm][Ee]\.[Ee][Xx][Ee]|\\[Ff][Ii][Rr][Ee][Ff][Oo][Xx]\.[Ee][Xx][Ee]|\\[Mm][Ss][Ee][Dd][Gg][Ee]\.[Ee][Xx][Ee]|\\[Ii][Ee][Xx][Pp][Ll][Oo][Rr][Ee]\.[Ee][Xx][Ee])/ AND data_win_eventdata_image:/.*(\\[Pp][Oo][Ww][Ee][Rr][Ss][Hh][Ee][Ll][Ll]\.[Ee][Xx][Ee]|\\[Pp][Ww][Ss][Hh]\.[Ee][Xx][Ee]|\\[Pp][Oo][Ww][Ee][Rr][Ss][Hh][Ee][Ll][Ll]_[Ii][Ss][Ee]\.[Ee][Xx][Ee]|\\[Cc][Mm][Dd]\.[Ee][Xx][Ee]|\\[Ww][Ss][Cc][Rr][Ii][Pp][Tt]\.[Ee][Xx][Ee]|\\[Cc][Ss][Cc][Rr][Ii][Pp][Tt]\.[Ee][Xx][Ee]|\\[Mm][Ss][Hh][Tt][Aa]\.[Ee][Xx][Ee]|\\[Rr][Uu][Nn][Dd][Ll][Ll]32\.[Ee][Xx][Ee]|\\[Rr][Ee][Gg][Ss][Vv][Rr]32\.[Ee][Xx][Ee])/'
-      pivot_on: [host]
-      window: 1h
-    - name: "Other executions of this tool-set on this host (any arguments)"
-      query: 'data_win_system_eventID:"1" AND data_win_eventdata_image:/.*(\\[Ee][Xx][Cc][Ee][Ll]\.[Ee][Xx][Ee]|\\[Mm][Ss][Pp][Uu][Bb]\.[Ee][Xx][Ee]|\\[Oo][Uu][Tt][Ll][Oo][Oo][Kk]\.[Ee][Xx][Ee]|\\[Oo][Nn][Ee][Nn][Oo][Tt][Ee]\.[Ee][Xx][Ee]|\\[Oo][Nn][Ee][Nn][Oo][Tt][Ee][Ii][Mm]\.[Ee][Xx][Ee]|\\[Pp][Oo][Ww][Ee][Rr][Pp][Nn][Tt]\.[Ee][Xx][Ee]|\\[Ww][Ii][Nn][Ww][Oo][Rr][Dd]\.[Ee][Xx][Ee])/'
-      pivot_on: [host]
-      window: 2h
-    - name: "Autostart persistence written on this host (Run keys, services, IFEO)"
-      query: '(data_win_system_eventID:"12" OR data_win_system_eventID:"13") AND (data_win_eventdata_targetObject:/.*[Cc][Uu][Rr][Rr][Ee][Nn][Tt][Vv][Ee][Rr][Ss][Ii][Oo][Nn]\\[Rr][Uu][Nn].*/ OR data_win_eventdata_targetObject:/.*[Cc][Uu][Rr][Rr][Ee][Nn][Tt][Vv][Ee][Rr][Ss][Ii][Oo][Nn]\\[Rr][Uu][Nn][Oo][Nn][Cc][Ee].*/ OR data_win_eventdata_targetObject:/.*[Cc][Uu][Rr][Rr][Ee][Nn][Tt][Cc][Oo][Nn][Tt][Rr][Oo][Ll][Ss][Ee][Tt]\\[Ss][Ee][Rr][Vv][Ii][Cc][Ee][Ss]\\.*/ OR data_win_eventdata_targetObject:/.*[Ii][Mm][Aa][Gg][Ee] [Ff][Ii][Ll][Ee] [Ee][Xx][Ee][Cc][Uu][Tt][Ii][Oo][Nn] [Oo][Pp][Tt][Ii][Oo][Nn][Ss]\\.*/ OR data_win_eventdata_targetObject:/.*[Ww][Ii][Nn][Ll][Oo][Gg][Oo][Nn]\\[Ss][Hh][Ee][Ll][Ll].*/ OR data_win_eventdata_targetObject:/.*[Ww][Ii][Nn][Ll][Oo][Gg][Oo][Nn]\\[Uu][Ss][Ee][Rr][Ii][Nn][Ii][Tt].*/ OR data_win_eventdata_targetObject:/.*[Cc][Uu][Rr][Rr][Ee][Nn][Tt][Vv][Ee][Rr][Ss][Ii][Oo][Nn]\\[Ee][Xx][Pp][Ll][Oo][Rr][Ee][Rr]\\[Rr][Uu][Nn].*/ OR data_win_eventdata_targetObject:/.*[Pp][Oo][Ll][Ii][Cc][Ii][Ee][Ss]\\[Ee][Xx][Pp][Ll][Oo][Rr][Ee][Rr]\\[Rr][Uu][Nn].*/ OR data_win_eventdata_targetObject:/.*[Cc][Uu][Rr][Rr][Ee][Nn][Tt][Vv][Ee][Rr][Ss][Ii][Oo][Nn]\\[Ww][Ii][Nn][Dd][Oo][Ww][Ss]\\[Ll][Oo][Aa][Dd].*/)'
-      pivot_on: [host]
-      window: 4h
-    - name: "DLL sideloading / execution from user-writable paths on this host"
-      query: '((data_win_system_eventID:"7" AND (data_win_eventdata_imageLoaded:/.*\\[Uu][Ss][Ee][Rr][Ss]\\.*/ OR data_win_eventdata_imageLoaded:/.*\\[Pp][Rr][Oo][Gg][Rr][Aa][Mm][Dd][Aa][Tt][Aa]\\.*/ OR data_win_eventdata_imageLoaded:/.*\\[Ww][Ii][Nn][Dd][Oo][Ww][Ss]\\[Tt][Ee][Mm][Pp]\\.*/ OR data_win_eventdata_imageLoaded:/.*\\[Aa][Pp][Pp][Dd][Aa][Tt][Aa]\\.*/ OR data_win_eventdata_imageLoaded:/.*\\[Pp][Uu][Bb][Ll][Ii][Cc]\\.*/ OR data_win_eventdata_imageLoaded:/.*\\\$[Rr][Ee][Cc][Yy][Cc][Ll][Ee].*/)) OR (data_win_system_eventID:"1" AND (data_win_eventdata_image:/.*\\[Uu][Ss][Ee][Rr][Ss]\\.*/ OR data_win_eventdata_image:/.*\\[Pp][Rr][Oo][Gg][Rr][Aa][Mm][Dd][Aa][Tt][Aa]\\.*/ OR data_win_eventdata_image:/.*\\[Ww][Ii][Nn][Dd][Oo][Ww][Ss]\\[Tt][Ee][Mm][Pp]\\.*/ OR data_win_eventdata_image:/.*\\[Aa][Pp][Pp][Dd][Aa][Tt][Aa]\\.*/ OR data_win_eventdata_image:/.*\\[Pp][Uu][Bb][Ll][Ii][Cc]\\.*/ OR data_win_eventdata_image:/.*\\\$[Rr][Ee][Cc][Yy][Cc][Ll][Ee].*/)))'
-      pivot_on: [host]
-      window: 2h
+  # Behaviour-targeted hunts the engine runs around the alert (not a sweep).
+  - name: Office process spawning a script interpreter or LOLBin on this host
+    query: data_win_system_eventID:"1" AND data_win_eventdata_parentImage:/.*(\\[Ww][Ii][Nn][Ww][Oo][Rr][Dd]\.[Ee][Xx][Ee]|\\[Ee][Xx][Cc][Ee][Ll]\.[Ee][Xx][Ee]|\\[Pp][Oo][Ww][Ee][Rr][Pp][Nn][Tt]\.[Ee][Xx][Ee]|\\[Oo][Uu][Tt][Ll][Oo][Oo][Kk]\.[Ee][Xx][Ee]|\\[Mm][Ss][Pp][Uu][Bb]\.[Ee][Xx][Ee]|\\[Oo][Nn][Ee][Nn][Oo][Tt][Ee]\.[Ee][Xx][Ee])/ AND data_win_eventdata_image:/.*(\\[Pp][Oo][Ww][Ee][Rr][Ss][Hh][Ee][Ll][Ll]\.[Ee][Xx][Ee]|\\[Pp][Ww][Ss][Hh]\.[Ee][Xx][Ee]|\\[Cc][Mm][Dd]\.[Ee][Xx][Ee]|\\[Ww][Ss][Cc][Rr][Ii][Pp][Tt]\.[Ee][Xx][Ee]|\\[Cc][Ss][Cc][Rr][Ii][Pp][Tt]\.[Ee][Xx][Ee]|\\[Mm][Ss][Hh][Tt][Aa]\.[Ee][Xx][Ee]|\\[Rr][Uu][Nn][Dd][Ll][Ll]32\.[Ee][Xx][Ee]|\\[Rr][Ee][Gg][Ss][Vv][Rr]32\.[Ee][Xx][Ee]|\\[Ii][Nn][Ss][Tt][Aa][Ll][Ll][Uu][Tt][Ii][Ll]\.[Ee][Xx][Ee]|\\[Rr][Ee][Gg][Aa][Ss][Mm]\.[Ee][Xx][Ee]|\\[Rr][Ee][Gg][Ss][Vv][Cc][Ss]\.[Ee][Xx][Ee]|\\[Mm][Ss][Bb][Uu][Ii][Ll][Dd]\.[Ee][Xx][Ee]|\\[Bb][Ii][Tt][Ss][Aa][Dd][Mm][Ii][Nn]\.[Ee][Xx][Ee]|\\[Cc][Ee][Rr][Tt][Uu][Tt][Ii][Ll]\.[Ee][Xx][Ee]|\\[Ss][Cc][Hh][Tt][Aa][Ss][Kk][Ss]\.[Ee][Xx][Ee])/
+    pivot_on:
+    - host
+    window: 1h
+  - name: Process injection out of the Office app (remote thread or process-handle open) on this host
+    query: (data_win_system_eventID:"8" AND data_win_eventdata_sourceImage:/.*(\\[Ww][Ii][Nn][Ww][Oo][Rr][Dd]\.[Ee][Xx][Ee]|\\[Ee][Xx][Cc][Ee][Ll]\.[Ee][Xx][Ee]|\\[Pp][Oo][Ww][Ee][Rr][Pp][Nn][Tt]\.[Ee][Xx][Ee]|\\[Oo][Uu][Tt][Ll][Oo][Oo][Kk]\.[Ee][Xx][Ee]|\\[Mm][Ss][Pp][Uu][Bb]\.[Ee][Xx][Ee]|\\[Oo][Nn][Ee][Nn][Oo][Tt][Ee]\.[Ee][Xx][Ee])/) OR (data_win_system_eventID:"10" AND data_win_eventdata_sourceImage:/.*(\\[Ww][Ii][Nn][Ww][Oo][Rr][Dd]\.[Ee][Xx][Ee]|\\[Ee][Xx][Cc][Ee][Ll]\.[Ee][Xx][Ee]|\\[Pp][Oo][Ww][Ee][Rr][Pp][Nn][Tt]\.[Ee][Xx][Ee]|\\[Oo][Uu][Tt][Ll][Oo][Oo][Kk]\.[Ee][Xx][Ee]|\\[Mm][Ss][Pp][Uu][Bb]\.[Ee][Xx][Ee]|\\[Oo][Nn][Ee][Nn][Oo][Tt][Ee]\.[Ee][Xx][Ee])/)
+    pivot_on:
+    - host
+    window: 1h
+  - name: Outbound C2 connection or DNS query directly from the Office process on this host
+    query: (data_win_system_eventID:"3" AND data_win_eventdata_image:/.*(\\[Ww][Ii][Nn][Ww][Oo][Rr][Dd]\.[Ee][Xx][Ee]|\\[Ee][Xx][Cc][Ee][Ll]\.[Ee][Xx][Ee]|\\[Pp][Oo][Ww][Ee][Rr][Pp][Nn][Tt]\.[Ee][Xx][Ee]|\\[Oo][Uu][Tt][Ll][Oo][Oo][Kk]\.[Ee][Xx][Ee]|\\[Mm][Ss][Pp][Uu][Bb]\.[Ee][Xx][Ee]|\\[Oo][Nn][Ee][Nn][Oo][Tt][Ee]\.[Ee][Xx][Ee])/) OR (data_win_system_eventID:"22" AND data_win_eventdata_image:/.*(\\[Ww][Ii][Nn][Ww][Oo][Rr][Dd]\.[Ee][Xx][Ee]|\\[Ee][Xx][Cc][Ee][Ll]\.[Ee][Xx][Ee]|\\[Pp][Oo][Ww][Ee][Rr][Pp][Nn][Tt]\.[Ee][Xx][Ee]|\\[Oo][Uu][Tt][Ll][Oo][Oo][Kk]\.[Ee][Xx][Ee]|\\[Mm][Ss][Pp][Uu][Bb]\.[Ee][Xx][Ee]|\\[Oo][Nn][Ee][Nn][Oo][Tt][Ee]\.[Ee][Xx][Ee])/)
+    pivot_on:
+    - host
+    window: 2h
+  - name: Executable or script payload dropped by the Office process on this host
+    query: data_win_system_eventID:"11" AND data_win_eventdata_image:/.*(\\[Ww][Ii][Nn][Ww][Oo][Rr][Dd]\.[Ee][Xx][Ee]|\\[Ee][Xx][Cc][Ee][Ll]\.[Ee][Xx][Ee]|\\[Pp][Oo][Ww][Ee][Rr][Pp][Nn][Tt]\.[Ee][Xx][Ee]|\\[Oo][Uu][Tt][Ll][Oo][Oo][Kk]\.[Ee][Xx][Ee]|\\[Mm][Ss][Pp][Uu][Bb]\.[Ee][Xx][Ee]|\\[Oo][Nn][Ee][Nn][Oo][Tt][Ee]\.[Ee][Xx][Ee])/ AND data_win_eventdata_targetFilename:/.*\.([Ee][Xx][Ee]|[Dd][Ll][Ll]|[Ss][Cc][Rr]|[Pp][Ss]1|[Vv][Bb][Ss]|[Jj][Ss]|[Hh][Tt][Aa]|[Bb][Aa][Tt]|[Cc][Mm][Dd]|[Cc][Oo][Mm]|[Jj][Aa][Rr])/
+    pivot_on:
+    - host
+    window: 2h
+  - name: Other .NET runtime / scripting-automation DLLs loaded into the Office process on this host
+    query: data_win_system_eventID:"7" AND data_win_eventdata_image:/.*(\\[Ww][Ii][Nn][Ww][Oo][Rr][Dd]\.[Ee][Xx][Ee]|\\[Ee][Xx][Cc][Ee][Ll]\.[Ee][Xx][Ee]|\\[Pp][Oo][Ww][Ee][Rr][Pp][Nn][Tt]\.[Ee][Xx][Ee]|\\[Oo][Uu][Tt][Ll][Oo][Oo][Kk]\.[Ee][Xx][Ee]|\\[Mm][Ss][Pp][Uu][Bb]\.[Ee][Xx][Ee]|\\[Oo][Nn][Ee][Nn][Oo][Tt][Ee]\.[Ee][Xx][Ee])/ AND (data_win_eventdata_imageLoaded:/.*\\[Mm][Ss][Cc][Oo][Rr][Ee][Ee]\.[Dd][Ll][Ll]/ OR data_win_eventdata_imageLoaded:/.*\\[Mm][Ss][Cc][Oo][Rr][Ww][Kk][Ss]\.[Dd][Ll][Ll]/ OR data_win_eventdata_imageLoaded:/.*\\[Cc][Ll][Rr][Jj][Ii][Tt]\.[Dd][Ll][Ll]/ OR data_win_eventdata_imageLoaded:/.*\\[Vv][Bb][Ee]7\.[Dd][Ll][Ll]/ OR data_win_eventdata_imageLoaded:/.*[Ss][Yy][Ss][Tt][Ee][Mm]\.[Mm][Aa][Nn][Aa][Gg][Ee][Mm][Ee][Nn][Tt]\.[Aa][Uu][Tt][Oo][Mm][Aa][Tt][Ii][Oo][Nn].*/ OR data_win_eventdata_imageLoaded:/.*[Mm][Ii][Cc][Rr][Oo][Ss][Oo][Ff][Tt]\.[Nn][Ee][Tt]\\[Ff][Rr][Aa][Mm][Ee][Ww][Oo][Rr][Kk].*/)
+    pivot_on:
+    - host
+    window: 1h
