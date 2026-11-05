@@ -191,23 +191,58 @@ graylog:
   query: (data_process_exec_process_binary:/.*\/[Tt][Rr][Uu][Ff][Ff][Ll][Ee][Hh][Oo][Gg]/ OR ((data_process_exec_process_arguments:/.* [Dd][Oo][Cc][Kk][Ee][Rr] --[Ii][Mm][Aa][Gg][Ee] .*/ OR data_process_exec_process_arguments:/.* [Gg][Ii][Tt] .*/ OR data_process_exec_process_arguments:/.* [Gg][Ii][Tt][Hh][Uu][Bb] .*/ OR data_process_exec_process_arguments:/.* [Jj][Ii][Rr][Aa] .*/ OR data_process_exec_process_arguments:/.* [Ss][Ll][Aa][Cc][Kk] .*/ OR data_process_exec_process_arguments:/.* [Cc][Oo][Nn][Ff][Ll][Uu][Ee][Nn][Cc][Ee] .*/ OR data_process_exec_process_arguments:/.* [Ss][Hh][Aa][Rr][Ee][Pp][Oo][Ii][Nn][Tt] .*/ OR data_process_exec_process_arguments:/.* [Ss]3 .*/ OR data_process_exec_process_arguments:/.* [Gg][Cc][Ss] .*/) AND data_process_exec_process_arguments:/.* --[Rr][Ee][Ss][Uu][Ll][Tt][Ss]=[Vv][Ee][Rr][Ii][Ff][Ii][Ee][Dd].*/))
 
 correlation:
-  # Authored by the correlation engine for review.
+  # Authored per-rule (behaviour-researched) for the correlation engine. Related CoPilot
+  # Searches + telemetry pivots to run around an alert, scoped to its host/user/ip/domain.
+  related_rules:
+  - id: f0025a69-e1b7-4dda-a53c-db21fa2d4071
+    name: Script Interpreter Spawning Credential Scanner - Linux
+    reason: 'Same exec seen from the parent: a node/bun interpreter spawning trufflehog/gitleaks. Its presence on the host proves this TruffleHog run was launched by the Shai-Hulud payload, not an engineer''s CI secret-scan.'
+  - id: eb827bbd-670a-4d58-8446-c464d8ac2323
+    name: Shai-Hulud Malicious Bun Execution - Linux
+    reason: 'Immediate precursor: node executing bun_environment.js / setup_bun.js is the Shai-Hulud 2.0 loader that bootstraps the Bun runtime and then launches the TruffleHog secret sweep this rule catches.'
+  - id: 11bb9b26-4179-4a06-afcb-1ec31fce1627
+    name: Shai-Hulud Malware Indicators - Linux
+    reason: Same-host 'Shai-Hulud'/'SHA1HULUD' command-line markers attribute this TruffleHog execution to the npm worm rather than legitimate scanning, escalating the PUA hit to active compromise.
+  - id: efd2eb09-b72e-4a61-8dc7-b1382a1e8983
+    name: Shai-Hulud NPM Package Malicious Exfiltration via Curl
+    reason: 'Direct follow-on: curl -d POSTing the verified secrets TruffleHog just harvested to the hard-coded Shai-Hulud webhook.site endpoint - the exfiltration half of the same kill chain.'
+  - id: 00b90cc1-17ec-402c-96ad-3a8117d7a582
+    name: Suspicious Curl File Upload - Linux
+    reason: 'Generalized exfiltration: curl --data/--upload-file to any non-localhost host catches the same credential outflow when the actor uses a different C2 than the hard-coded Shai-Hulud webhook.'
+  - id: 3b4c5d6e-7f80-1234-5678-90abcdef1234
+    name: Linux SSH Key Discovery
+    reason: 'Co-occurring credential access: find/grep for id_rsa/authorized_keys harvests the SSH and git keys TruffleHog''s SaaS/repo scan misses and that Shai-Hulud reuses to propagate to other hosts and repos.'
+  - id: 4d5e6f7a-8b90-2345-6789-01abcdef2345
+    name: Linux Credential Discovery
+    reason: 'Co-occurring credential access: find/grep for password/credential/creds files is the on-disk complement to TruffleHog''s scan - the actor sweeping the local filesystem for the same secrets.'
+  - id: 0cf7a157-8879-41a2-8f55-388dd23746b7
+    name: Linux Recon Indicators
+    reason: 'Co-occurring discovery on the same Tetragon pipeline: hunting .htpasswd files and SUID binaries is the file-and-credential discovery (T1083/T1552.001, this rule''s own techniques) run alongside automated secret scanning to find local secrets and a privesc path.'
+  window: 2h
   enrichment_searches:
-  # Rule-specific telemetry pivots the engine runs around an alert from this rule,
-  # scoped to the alert's host/user/IP within the window (behaviour-targeted, not a sweep).
-    - name: "File / directory discovery commands on this host"
-      query: '((data_process_exec_process_binary:/.*(\/[Ff][Ii][Nn][Dd]|\/[Ll][Oo][Cc][Aa][Tt][Ee]|\/[Ll][Ss])/) OR (data_process_exec_process_binary:/.*(\/[Ww][Hh][Oo][Aa][Mm][Ii]|\/[Ii][Dd]|\/[Uu][Nn][Aa][Mm][Ee]|\/[Hh][Oo][Ss][Tt][Nn][Aa][Mm][Ee]|\/[Hh][Oo][Ss][Tt][Nn][Aa][Mm][Ee][Cc][Tt][Ll]|\/[Ss][Ss]|\/[Nn][Ee][Tt][Ss][Tt][Aa][Tt]|\/[Ii][Ff][Cc][Oo][Nn][Ff][Ii][Gg]|\/[Aa][Rr][Pp]|\/[Ww]|\/[Ww][Hh][Oo]|\/[Ll][Aa][Ss][Tt]|\/[Ll][Ss][Oo][Ff]|\/[Nn][Mm][Aa][Pp]|\/[Dd][Ii][Gg]|\/[Ff][Ii][Nn][Dd])/))'
-      pivot_on: [host]
-      window: 1h
-    - name: "Secret / key-file access on this host"
-      query: '((data_process_exec_process_arguments:/.*\/[Ee][Tt][Cc]\/[Ss][Hh][Aa][Dd][Oo][Ww].*/) OR (data_process_exec_process_arguments:/.*\/[Ee][Tt][Cc]\/[Pp][Aa][Ss][Ss][Ww][Dd].*/) OR (data_process_exec_process_arguments:/.*\/[Ee][Tt][Cc]\/[Ss][Uu][Dd][Oo][Ee][Rr][Ss].*/) OR (data_process_exec_process_arguments:/.*[Ii][Dd]_[Rr][Ss][Aa].*/) OR (data_process_exec_process_arguments:/.*\.[Ss][Ss][Hh]\/.*/) OR (data_process_exec_process_arguments:/.*\/[Ee][Tt][Cc]\/[Gg][Ss][Hh][Aa][Dd][Oo][Ww].*/))'
-      pivot_on: [host]
-      window: 2h
-    - name: "Other executions of this tool-set on this host (any arguments)"
-      query: 'data_process_exec_process_binary:/.*(\/[Tt][Rr][Uu][Ff][Ff][Ll][Ee][Hh][Oo][Gg])/'
-      pivot_on: [host]
-      window: 2h
-    - name: "Remote-access tooling on this host"
-      query: 'data_process_exec_process_binary:/.*(\/[Ss][Ss][Hh]|\/[Ss][Cc][Pp]|\/[Ss][Ff][Tt][Pp]|\/[Rr][Ss][Yy][Nn][Cc]|\/[Ss][Ss][Hh][Pp][Aa][Ss][Ss])/'
-      pivot_on: [host]
-      window: 2h
+  # Behaviour-targeted hunts the engine runs around the alert (not a sweep).
+  - name: Shai-Hulud Bun loader / npm supply-chain payload on this host
+    query: (data_process_exec_process_binary:/.*\/[Bb][Uu][Nn]/ OR data_process_exec_process_arguments:/.*[Bb][Uu][Nn]_[Ee][Nn][Vv][Ii][Rr][Oo][Nn][Mm][Ee][Nn][Tt]\.[Jj][Ss].*/ OR data_process_exec_process_arguments:/.*[Ss][Ee][Tt][Uu][Pp]_[Bb][Uu][Nn]\.[Jj][Ss].*/ OR data_process_exec_process_arguments:/.*[Bb][Uu][Nn]\.[Ss][Hh]\/[Ii][Nn][Ss][Tt][Aa][Ll][Ll].*/)
+    pivot_on:
+    - host
+    window: 2h
+  - name: Other credential / secret scanners on this host
+    query: (data_process_exec_process_binary:/.*(\/[Tt][Rr][Uu][Ff][Ff][Ll][Ee][Hh][Oo][Gg]|\/[Gg][Ii][Tt][Ll][Ee][Aa][Kk][Ss]|\/[Gg][Ii][Tt][Aa][Ll][Ll][Ss][Ee][Cc][Rr][Ee][Tt][Ss])/ OR data_process_exec_process_arguments:/.*[Gg][Ii][Tt][Ll][Ee][Aa][Kk][Ss].*/ OR data_process_exec_process_arguments:/.*[Dd][Ee][Tt][Ee][Cc][Tt]-[Ss][Ee][Cc][Rr][Ee][Tt][Ss].*/)
+    pivot_on:
+    - host
+    window: 2h
+  - name: Cloud / git / package credential files touched on this host
+    query: (data_process_exec_process_arguments:/.*\.[Aa][Ww][Ss]\/[Cc][Rr][Ee][Dd][Ee][Nn][Tt][Ii][Aa][Ll][Ss].*/ OR data_process_exec_process_arguments:/.*\.[Nn][Pp][Mm][Rr][Cc].*/ OR data_process_exec_process_arguments:/.*\.[Gg][Ii][Tt]-[Cc][Rr][Ee][Dd][Ee][Nn][Tt][Ii][Aa][Ll][Ss].*/ OR data_process_exec_process_arguments:/.*\.[Cc][Oo][Nn][Ff][Ii][Gg]\/[Gg][Cc][Ll][Oo][Uu][Dd].*/ OR data_process_exec_process_arguments:/.*\.[Dd][Oo][Cc][Kk][Ee][Rr]\/[Cc][Oo][Nn][Ff][Ii][Gg].*/ OR data_process_exec_process_arguments:/.*[Ii][Dd]_[Rr][Ss][Aa].*/ OR data_process_exec_process_arguments:/.*\.[Ss][Ss][Hh]\/.*/ OR data_process_exec_process_arguments:/.*\.[Ee][Nn][Vv].*/)
+    pivot_on:
+    - host
+    window: 2h
+  - name: Environment-variable secret dumping on this host
+    query: (data_process_exec_process_binary:/.*\/[Pp][Rr][Ii][Nn][Tt][Ee][Nn][Vv]/ OR data_process_exec_process_arguments:/.*[Pp][Rr][Ii][Nn][Tt][Ee][Nn][Vv].*/ OR data_process_exec_process_arguments:/.*\/[Pp][Rr][Oo][Cc]\/.*\/[Ee][Nn][Vv][Ii][Rr][Oo][Nn].*/)
+    pivot_on:
+    - host
+    window: 2h
+  - name: Exfiltration of harvested secrets via curl / wget on this host
+    query: ((data_process_exec_process_binary:/.*(\/[Cc][Uu][Rr][Ll]|\/[Ww][Gg][Ee][Tt])/ AND (data_process_exec_process_arguments:/.* -[Dd] .*/ OR data_process_exec_process_arguments:/.*--[Dd][Aa][Tt][Aa].*/ OR data_process_exec_process_arguments:/.*--[Ff][Oo][Rr][Mm].*/ OR data_process_exec_process_arguments:/.*--[Uu][Pp][Ll][Oo][Aa][Dd]-[Ff][Ii][Ll][Ee].*/ OR data_process_exec_process_arguments:/.*--[Pp][Oo][Ss][Tt]-[Dd][Aa][Tt][Aa].*/)) OR data_process_exec_process_arguments:/.*[Ww][Ee][Bb][Hh][Oo][Oo][Kk]\.[Ss][Ii][Tt][Ee].*/ OR data_process_exec_process_arguments:/.*[Rr][Ee][Qq][Uu][Ee][Ss][Tt][Bb][Ii][Nn].*/ OR data_process_exec_process_arguments:/.*[Pp][Ii][Pp][Ee][Dd][Rr][Ee][Aa][Mm]\.[Nn][Ee][Tt].*/)
+    pivot_on:
+    - host
+    window: 2h

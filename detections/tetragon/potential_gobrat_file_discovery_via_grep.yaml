@@ -156,23 +156,52 @@ graylog:
   query: data_process_exec_process_binary:/.*\/[Gg][Rr][Ee][Pp]/ AND (data_process_exec_process_arguments:/.*[Aa][Pp][Aa][Cc][Hh][Ee][Dd].*/ OR data_process_exec_process_arguments:/.*[Ff][Rr][Pp][Cc].*/ OR data_process_exec_process_arguments:/.*[Ss][Ss][Hh][Dd]\.[Ss][Hh].*/ OR data_process_exec_process_arguments:/.*[Zz][Oo][Nn][Ee]\.[Aa][Rr][Mm].*/)
 
 correlation:
-  # Authored by the correlation engine for review.
+  # Authored per-rule (behaviour-researched) for the correlation engine. Related CoPilot
+  # Searches + telemetry pivots to run around an alert, scoped to its host/user/ip/domain.
+  related_rules:
+  - id: cf610c15-ed71-46e1-bdf8-2bd1a99de6c4
+    name: Download File To Potentially Suspicious Directory Via Wget
+    reason: 'Ingress precursor from the same GobRAT research (both rules cite the JPCERT GobRAT blog): GobRAT''s Start Script fetches the RAT and its helpers via ''wget -O /tmp/<file>''. If it fired on this host shortly before, the grep is the loader verifying the apached/frpc components it just downloaded.'
+  - id: a2d9e2f3-0f43-4c7a-bcd9-9acfc0d723aa
+    name: Suspicious Download and Execute Pattern via Curl/Wget
+    reason: 'Higher-confidence loader step: curl/wget writing into /tmp or /dev/shm immediately followed by ''sh -c'' - i.e. the GobRAT Start Script staging and launching the payload the grep then enumerates. Co-firing on this host confirms attacker-driven ingress rather than admin activity.'
+  - id: 312b42b1-bded-4441-8b58-163a3af58775
+    name: Potentially Suspicious Execution From Tmp Folder
+    reason: 'The payoff, again sharing this rule''s JPCERT GobRAT references: a binary under /tmp/ actually executes - the masqueraded GobRAT body (''apached'') running from its staging path. Turns ''the components were grepped for'' into ''the RAT is running'' on this host.'
+  - id: 3be619f4-d9ec-4ea8-a173-18fdd01996ab
+    name: Flush Iptables Ufw Chain
+    reason: 'Documented GobRAT loader action: the Start Script flushes iptables (''-F'') to open the box for C2/proxy traffic before the implant runs. On the same host in-window it places this grep inside GobRAT''s firewall-takedown step.'
+  - id: 84c9e83c-599a-458a-a0cb-0ecce44e807a
+    name: UFW Disable Attempt
+    reason: ufw-based variant of the same firewall teardown the GobRAT loader performs ('ufw disable' / 'ufw-init force-stop'). Corroborates the defense-impairment that precedes the RAT's C2 on hosts running ufw rather than raw iptables.
+  - id: 6b14bac8-3e3a-4324-8109-42f0546a347f
+    name: Scheduled Cron Task/Job - Linux
+    reason: 'Persistence follow-on: a crontab job staged from /tmp to relaunch the implant on a schedule - the companion to the sshd.sh/zone.arm startup scripts this rule greps for. Confirms the GobRAT infection is being made to survive reboot.'
+  window: 2h
   enrichment_searches:
-  # Rule-specific telemetry pivots the engine runs around an alert from this rule,
-  # scoped to the alert's host/user/IP within the window (behaviour-targeted, not a sweep).
-    - name: "System / host reconnaissance commands on this host"
-      query: 'data_process_exec_process_binary:/.*(\/[Ww][Hh][Oo][Aa][Mm][Ii]|\/[Ii][Dd]|\/[Uu][Nn][Aa][Mm][Ee]|\/[Hh][Oo][Ss][Tt][Nn][Aa][Mm][Ee]|\/[Hh][Oo][Ss][Tt][Nn][Aa][Mm][Ee][Cc][Tt][Ll]|\/[Ss][Ss]|\/[Nn][Ee][Tt][Ss][Tt][Aa][Tt]|\/[Ii][Ff][Cc][Oo][Nn][Ff][Ii][Gg]|\/[Aa][Rr][Pp]|\/[Ww]|\/[Ww][Hh][Oo]|\/[Ll][Aa][Ss][Tt]|\/[Ll][Ss][Oo][Ff]|\/[Nn][Mm][Aa][Pp]|\/[Dd][Ii][Gg]|\/[Ff][Ii][Nn][Dd])/'
-      pivot_on: [host]
-      window: 1h
-    - name: "Privilege-escalation tooling executed on this host"
-      query: 'data_process_exec_process_binary:/.*(\/[Ss][Uu][Dd][Oo]|\/[Ss][Uu]|\/[Pp][Kk][Ee][Xx][Ee][Cc]|\/[Dd][Oo][Aa][Ss]|\/[Ss][Ee][Tt][Cc][Aa][Pp]|\/[Cc][Hh][Ss][Hh]|\/[Nn][Ee][Ww][Gg][Rr][Pp])/'
-      pivot_on: [host]
-      window: 2h
-    - name: "Shell / interpreter execution on this host"
-      query: '((data_process_exec_process_binary:/.*(\/[Bb][Aa][Ss][Hh]|\/[Ss][Hh]|\/[Dd][Aa][Ss][Hh]|\/[Zz][Ss][Hh]|\/[Kk][Ss][Hh]|\/[Aa][Ss][Hh]|\/[Bb][Uu][Ss][Yy][Bb][Oo][Xx])/) OR (data_process_exec_process_binary:/.*(\/[Pp][Yy][Tt][Hh][Oo][Nn]|\/[Pp][Yy][Tt][Hh][Oo][Nn]3|\/[Pp][Ee][Rr][Ll]|\/[Rr][Uu][Bb][Yy]|\/[Pp][Hh][Pp]|\/[Nn][Oo][Dd][Ee]|\/[Ll][Uu][Aa]|\/[Aa][Ww][Kk])/))'
-      pivot_on: [host]
-      window: 1h
-    - name: "Reconnaissance commands on this host"
-      query: 'data_process_exec_process_binary:/.*(\/[Ww][Hh][Oo][Aa][Mm][Ii]|\/[Ii][Dd]|\/[Uu][Nn][Aa][Mm][Ee]|\/[Hh][Oo][Ss][Tt][Nn][Aa][Mm][Ee]|\/[Hh][Oo][Ss][Tt][Nn][Aa][Mm][Ee][Cc][Tt][Ll]|\/[Ss][Ss]|\/[Nn][Ee][Tt][Ss][Tt][Aa][Tt]|\/[Ii][Ff][Cc][Oo][Nn][Ff][Ii][Gg]|\/[Aa][Rr][Pp]|\/[Ww]|\/[Ww][Hh][Oo]|\/[Ll][Aa][Ss][Tt]|\/[Ll][Ss][Oo][Ff]|\/[Nn][Mm][Aa][Pp]|\/[Dd][Ii][Gg]|\/[Ff][Ii][Nn][Dd])/'
-      pivot_on: [host]
-      window: 1h
+  # Behaviour-targeted hunts the engine runs around the alert (not a sweep).
+  - name: GobRAT component binaries (apached / frpc) actually executing on this host
+    query: (data_process_exec_process_binary:/.*\/[Aa][Pp][Aa][Cc][Hh][Ee][Dd]/ OR data_process_exec_process_binary:/.*\/[Ff][Rr][Pp][Cc]/)
+    pivot_on:
+    - host
+    window: 4h
+  - name: 'Loader ingress: wget/curl downloading a payload into a staging directory'
+    query: ((data_process_exec_process_binary:/.*\/[Ww][Gg][Ee][Tt]/ OR data_process_exec_process_binary:/.*\/[Cc][Uu][Rr][Ll]/) AND (data_process_exec_process_arguments:/.*\/[Tt][Mm][Pp]\/.*/ OR data_process_exec_process_arguments:/.*\/[Dd][Ee][Vv]\/[Ss][Hh][Mm]\/.*/ OR data_process_exec_process_arguments:/.*\/[Vv][Aa][Rr]\/[Tt][Mm][Pp]\/.*/))
+    pivot_on:
+    - host
+    window: 6h
+  - name: Host firewall teardown (iptables / ufw / firewalld / nft) on this host
+    query: (data_process_exec_process_binary:/.*\/[Ii][Pp][Tt][Aa][Bb][Ll][Ee][Ss]/ OR data_process_exec_process_binary:/.*\/[Ii][Pp]6[Tt][Aa][Bb][Ll][Ee][Ss]/ OR data_process_exec_process_binary:/.*\/[Uu][Ff][Ww]/ OR data_process_exec_process_binary:/.*\/[Ff][Ii][Rr][Ee][Ww][Aa][Ll][Ll]-[Cc][Mm][Dd]/ OR data_process_exec_process_binary:/.*\/[Nn][Ff][Tt]/)
+    pivot_on:
+    - host
+    window: 6h
+  - name: Persistence established on this host (cron / rc.local / init.d / systemd)
+    query: ((data_process_exec_process_binary:/.*\/[Cc][Rr][Oo][Nn][Tt][Aa][Bb]/) OR (data_process_exec_process_arguments:/.*\/[Ee][Tt][Cc]\/[Cc][Rr][Oo][Nn].*/) OR (data_process_exec_process_arguments:/.*[Rr][Cc]\.[Ll][Oo][Cc][Aa][Ll].*/) OR (data_process_exec_process_arguments:/.*\/[Ee][Tt][Cc]\/[Ii][Nn][Ii][Tt]\.[Dd]\/.*/) OR (data_process_exec_process_arguments:/.*\/[Ee][Tt][Cc]\/[Ss][Yy][Ss][Tt][Ee][Mm][Dd]\/.*/))
+    pivot_on:
+    - host
+    window: 6h
+  - name: Any process handling GobRAT artifact names (apached / frpc / sshd.sh / zone.arm)
+    query: (data_process_exec_process_arguments:/.*[Aa][Pp][Aa][Cc][Hh][Ee][Dd].*/ OR data_process_exec_process_arguments:/.*[Ff][Rr][Pp][Cc].*/ OR data_process_exec_process_arguments:/.*[Ss][Ss][Hh][Dd]\.[Ss][Hh].*/ OR data_process_exec_process_arguments:/.*[Zz][Oo][Nn][Ee]\.[Aa][Rr][Mm].*/)
+    pivot_on:
+    - host
+    window: 6h

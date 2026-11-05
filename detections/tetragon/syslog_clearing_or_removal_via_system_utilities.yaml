@@ -292,19 +292,58 @@ graylog:
   query: "((data_process_exec_process_arguments:/.*\\/[Vv][Aa][Rr]\\/[Ll][Oo][Gg]\\/[Ss][Yy][Ss][Ll][Oo][Gg].*/ AND ((data_process_exec_process_binary:/.*\\/[Rr][Mm]/ AND (data_process_exec_process_arguments:/.* -[Rr] .*/ OR data_process_exec_process_arguments:/.* -[Ff] .*/ OR data_process_exec_process_arguments:/.* -[Rr][Ff] .*/ OR data_process_exec_process_arguments:/.*\\/[Vv][Aa][Rr]\\/[Ll][Oo][Gg]\\/[Ss][Yy][Ss][Ll][Oo][Gg].*/)) OR data_process_exec_process_binary:/.*\\/[Uu][Nn][Ll][Ii][Nn][Kk]/ OR data_process_exec_process_binary:/.*\\/[Mm][Vv]/ OR (data_process_exec_process_binary:/.*\\/[Tt][Rr][Uu][Nn][Cc][Aa][Tt][Ee]/ AND data_process_exec_process_arguments:/.*0 .*/ AND data_process_exec_process_arguments:/.*\\/[Vv][Aa][Rr]\\/[Ll][Oo][Gg]\\/[Ss][Yy][Ss][Ll][Oo][Gg].*/ AND (data_process_exec_process_arguments:/.*-[Ss] .*/ OR data_process_exec_process_arguments:/.*-[Cc] .*/ OR data_process_exec_process_arguments:/.*--[Ss][Ii][Zz][Ee].*/)) OR (data_process_exec_process_binary:/.*\\/[Ll][Nn]/ AND data_process_exec_process_arguments:/.*\\/[Dd][Ee][Vv]\\/[Nn][Uu][Ll][Ll] .*/ AND data_process_exec_process_arguments:/.*\\/[Vv][Aa][Rr]\\/[Ll][Oo][Gg]\\/[Ss][Yy][Ss][Ll][Oo][Gg].*/ AND (data_process_exec_process_arguments:/.*-[Ss][Ff] .*/ OR data_process_exec_process_arguments:/.*-[Ss][Ff][Nn] .*/ OR data_process_exec_process_arguments:/.*-[Ss][Ff][Tt] .*/)) OR (data_process_exec_process_binary:/.*\\/[Cc][Pp]/ AND data_process_exec_process_arguments:/.*\\/[Dd][Ee][Vv]\\/[Nn][Uu][Ll][Ll].*/) OR (data_process_exec_process_binary:/.*\\/[Ss][Hh][Rr][Ee][Dd]/ AND data_process_exec_process_arguments:/.*-[Uu] .*/))) OR data_process_exec_process_arguments:/.* \\> \\/[Vv][Aa][Rr]\\/[Ll][Oo][Gg]\\/[Ss][Yy][Ss][Ll][Oo][Gg].*/ OR data_process_exec_process_arguments:/.* \\>\\/[Vv][Aa][Rr]\\/[Ll][Oo][Gg]\\/[Ss][Yy][Ss][Ll][Oo][Gg].*/ OR data_process_exec_process_arguments:/.* \\>\\| \\/[Vv][Aa][Rr]\\/[Ll][Oo][Gg]\\/[Ss][Yy][Ss][Ll][Oo][Gg].*/ OR data_process_exec_process_arguments:/.*: \\> \\/[Vv][Aa][Rr]\\/[Ll][Oo][Gg]\\/[Ss][Yy][Ss][Ll][Oo][Gg].*/ OR data_process_exec_process_arguments:/.*:\\> \\/[Vv][Aa][Rr]\\/[Ll][Oo][Gg]\\/[Ss][Yy][Ss][Ll][Oo][Gg].*/ OR data_process_exec_process_arguments:/.*:\\>\\/[Vv][Aa][Rr]\\/[Ll][Oo][Gg]\\/[Ss][Yy][Ss][Ll][Oo][Gg].*/ OR data_process_exec_process_arguments:/.*\\>\\|\\/[Vv][Aa][Rr]\\/[Ll][Oo][Gg]\\/[Ss][Yy][Ss][Ll][Oo][Gg].*/ OR data_process_exec_process_arguments:/.*[Jj][Oo][Uu][Rr][Nn][Aa][Ll][Cc][Tt][Ll] --[Vv][Aa][Cc][Uu][Uu][Mm].*/ OR data_process_exec_process_arguments:/.*[Jj][Oo][Uu][Rr][Nn][Aa][Ll][Cc][Tt][Ll] --[Rr][Oo][Tt][Aa][Tt][Ee].*/)"
 
 correlation:
-  # Authored by the correlation engine for review.
+  # Authored per-rule (behaviour-researched) for the correlation engine. Related CoPilot
+  # Searches + telemetry pivots to run around an alert, scoped to its host/user/ip/domain.
+  related_rules:
+  - id: 80915f59-9b56-4616-9de0-fd0dea6c12fe
+    name: Linux Logs Clearing Attempts
+    reason: The same rm/shred/unlink tool-set turned on the rest of /var/log (auth.log, messages, wtmp) instead of syslog alone. An actor emptying syslog almost never stops there, so a co-hit means the whole system-log record was destroyed in one coordinated evidence-wipe, not a single stray delete.
+  - id: bed26dea-4525-47f4-b24a-76e30e44ffb0
+    name: Audit Rules Deleted Via Auditctl
+    reason: auditctl -D destroys the kernel audit trail, the logging channel that outlives a syslog wipe. Purging /var/log/syslog while deleting audit rules in the same window is systematic takedown of both of the host's logging pipelines - the strongest 'blind the host' signature.
+  - id: 1182f3b3-e716-4efa-99ab-d2685d04360f
+    name: History File Deletion
+    reason: Deleting ~/.bash_history erases the exact commands that cleared syslog, typed in the same interactive session. A history wipe alongside the syslog removal places a live hands-on operator on the host and argues deliberate track-covering over benign log rotation.
+  - id: de25eeb8-3655-4643-ac3a-b662d3f26b6b
+    name: Disable Or Stop Services
+    reason: Emptying syslog is undone the instant rsyslog/systemd-journald writes the next line, so operators stop or mask the logging daemon to make the wipe stick. A systemctl/service stop of the syslog daemon on this host is what turns a one-off clear into permanent blinding.
+  - id: 34979410-e4b5-4e5d-8cfb-389fdff05c12
+    name: Remove Immutable File Attribute
+    reason: On a hardened host /var/log/syslog is set chattr +i, so rm/truncate/shred fail until the immutable bit is stripped. A 'chattr -i' on this host just before the clearing is the enabling precursor and near-proof the deletion was intentional tampering.
+  - id: e3a8a052-111f-4606-9aee-f28ebeb76776
+    name: Disabling Security Tools
+    reason: 'Killing EDR/firewall/SELinux (falcon-sensor, firewalld, setenforce 0) is the defense-evasion that rides with track-covering: an actor erasing syslog typically first blinds the sensors that would have shipped those log lines off-box before they could be wiped locally.'
+  - id: ea3ecad2-db86-4a89-ad0b-132a10d2db55
+    name: Interactive Bash Suspicious Children
+    reason: bash -i spawning nc/base64/pty.spawn is the hands-on-keyboard session the syslog clear is meant to erase. If it fired on this host you have recovered, from process telemetry, the very activity the attacker destroyed the local log to hide.
+  - id: 3be619f4-d9ec-4ea8-a173-18fdd01996ab
+    name: Flush Iptables Ufw Chain
+    reason: 'Part of the same host-blinding burst: flushing iptables to allow-all opens egress for exfil/C2 while clearing syslog hides the intrusion. A firewall flush together with a syslog wipe signals a coordinated ''open and blind the host'' teardown rather than maintenance.'
+  window: 2h
   enrichment_searches:
-  # Rule-specific telemetry pivots the engine runs around an alert from this rule,
-  # scoped to the alert's host/user/IP within the window (behaviour-targeted, not a sweep).
-    - name: "Other executions of this tool-set on this host (any arguments)"
-      query: 'data_process_exec_process_binary:/.*(\/[Uu][Nn][Ll][Ii][Nn][Kk]|\/[Tt][Rr][Uu][Nn][Cc][Aa][Tt][Ee]|\/[Ss][Hh][Rr][Ee][Dd])/'
-      pivot_on: [host]
-      window: 2h
-    - name: "Shell / interpreter execution on this host"
-      query: '((data_process_exec_process_binary:/.*(\/[Bb][Aa][Ss][Hh]|\/[Ss][Hh]|\/[Dd][Aa][Ss][Hh]|\/[Zz][Ss][Hh]|\/[Kk][Ss][Hh]|\/[Aa][Ss][Hh]|\/[Bb][Uu][Ss][Yy][Bb][Oo][Xx])/) OR (data_process_exec_process_binary:/.*(\/[Pp][Yy][Tt][Hh][Oo][Nn]|\/[Pp][Yy][Tt][Hh][Oo][Nn]3|\/[Pp][Ee][Rr][Ll]|\/[Rr][Uu][Bb][Yy]|\/[Pp][Hh][Pp]|\/[Nn][Oo][Dd][Ee]|\/[Ll][Uu][Aa]|\/[Aa][Ww][Kk])/))'
-      pivot_on: [host]
-      window: 1h
-    - name: "Reconnaissance commands on this host"
-      query: 'data_process_exec_process_binary:/.*(\/[Ww][Hh][Oo][Aa][Mm][Ii]|\/[Ii][Dd]|\/[Uu][Nn][Aa][Mm][Ee]|\/[Hh][Oo][Ss][Tt][Nn][Aa][Mm][Ee]|\/[Hh][Oo][Ss][Tt][Nn][Aa][Mm][Ee][Cc][Tt][Ll]|\/[Ss][Ss]|\/[Nn][Ee][Tt][Ss][Tt][Aa][Tt]|\/[Ii][Ff][Cc][Oo][Nn][Ff][Ii][Gg]|\/[Aa][Rr][Pp]|\/[Ww]|\/[Ww][Hh][Oo]|\/[Ll][Aa][Ss][Tt]|\/[Ll][Ss][Oo][Ff]|\/[Nn][Mm][Aa][Pp]|\/[Dd][Ii][Gg]|\/[Ff][Ii][Nn][Dd])/'
-      pivot_on: [host]
-      window: 1h
+  # Behaviour-targeted hunts the engine runs around the alert (not a sweep).
+  - name: Other system, auth and login logs destroyed or the journal purged on this host
+    query: ((data_process_exec_process_binary:/.*\/[Rr][Mm]/ OR data_process_exec_process_binary:/.*\/[Ss][Hh][Rr][Ee][Dd]/ OR data_process_exec_process_binary:/.*\/[Uu][Nn][Ll][Ii][Nn][Kk]/ OR data_process_exec_process_binary:/.*\/[Tt][Rr][Uu][Nn][Cc][Aa][Tt][Ee]/ OR data_process_exec_process_binary:/.*\/[Dd][Dd]/ OR data_process_exec_process_binary:/.*\/[Tt][Ee][Ee]/ OR data_process_exec_process_binary:/.*\/[Cc][Pp]/) AND (data_process_exec_process_arguments:/.*\/[Vv][Aa][Rr]\/[Ll][Oo][Gg]\/[Aa][Uu][Tt][Hh]\.[Ll][Oo][Gg].*/ OR data_process_exec_process_arguments:/.*\/[Vv][Aa][Rr]\/[Ll][Oo][Gg]\/[Ss][Ee][Cc][Uu][Rr][Ee].*/ OR data_process_exec_process_arguments:/.*\/[Vv][Aa][Rr]\/[Ll][Oo][Gg]\/[Mm][Ee][Ss][Ss][Aa][Gg][Ee][Ss].*/ OR data_process_exec_process_arguments:/.*\/[Vv][Aa][Rr]\/[Ll][Oo][Gg]\/[Kk][Ee][Rr][Nn]\.[Ll][Oo][Gg].*/ OR data_process_exec_process_arguments:/.*[Ww][Tt][Mm][Pp].*/ OR data_process_exec_process_arguments:/.*[Bb][Tt][Mm][Pp].*/ OR data_process_exec_process_arguments:/.*[Ll][Aa][Ss][Tt][Ll][Oo][Gg].*/)) OR data_process_exec_process_arguments:/.*[Jj][Oo][Uu][Rr][Nn][Aa][Ll][Cc][Tt][Ll] --[Vv][Aa][Cc][Uu][Uu][Mm].*/ OR data_process_exec_process_arguments:/.*[Jj][Oo][Uu][Rr][Nn][Aa][Ll][Cc][Tt][Ll] --[Rr][Oo][Tt][Aa][Tt][Ee].*/
+    pivot_on:
+    - host
+    window: 2h
+  - name: System logging daemon stopped/masked or audit rules deleted on this host
+    query: (((data_process_exec_process_binary:/.*\/[Ss][Yy][Ss][Tt][Ee][Mm][Cc][Tt][Ll]/ OR data_process_exec_process_binary:/.*\/[Ss][Ee][Rr][Vv][Ii][Cc][Ee]/ OR data_process_exec_process_binary:/.*\/[Cc][Hh][Kk][Cc][Oo][Nn][Ff][Ii][Gg]/) AND (data_process_exec_process_arguments:/.*[Rr][Ss][Yy][Ss][Ll][Oo][Gg].*/ OR data_process_exec_process_arguments:/.*[Ss][Yy][Ss][Ll][Oo][Gg]-[Nn][Gg].*/ OR data_process_exec_process_arguments:/.*[Ss][Yy][Ss][Tt][Ee][Mm][Dd]-[Jj][Oo][Uu][Rr][Nn][Aa][Ll][Dd].*/ OR data_process_exec_process_arguments:/.*[Jj][Oo][Uu][Rr][Nn][Aa][Ll][Dd].*/) AND (data_process_exec_process_arguments:/.*[Ss][Tt][Oo][Pp].*/ OR data_process_exec_process_arguments:/.*[Dd][Ii][Ss][Aa][Bb][Ll][Ee].*/ OR data_process_exec_process_arguments:/.*[Mm][Aa][Ss][Kk].*/)) OR (data_process_exec_process_binary:/.*\/[Aa][Uu][Dd][Ii][Tt][Cc][Tt][Ll]/ AND data_process_exec_process_arguments:/.* -[Dd].*/))
+    pivot_on:
+    - host
+    window: 2h
+  - name: Immutable attribute stripped from a protected file before the wipe on this host
+    query: data_process_exec_process_binary:/.*\/[Cc][Hh][Aa][Tt][Tt][Rr]/ AND data_process_exec_process_arguments:/.* -[Ii] .*/
+    pivot_on:
+    - host
+    window: 2h
+  - name: Shell history deleted or interactive attacker session on this host
+    query: ((data_process_exec_process_binary:/.*\/[Rr][Mm]/ OR data_process_exec_process_binary:/.*\/[Ss][Hh][Rr][Ee][Dd]/ OR data_process_exec_process_binary:/.*\/[Uu][Nn][Ll][Ii][Nn][Kk]/) AND (data_process_exec_process_arguments:/.*\.[Bb][Aa][Ss][Hh]_[Hh][Ii][Ss][Tt][Oo][Rr][Yy].*/ OR data_process_exec_process_arguments:/.*\.[Zz][Ss][Hh]_[Hh][Ii][Ss][Tt][Oo][Rr][Yy].*/ OR data_process_exec_process_arguments:/.*_[Hh][Ii][Ss][Tt][Oo][Rr][Yy].*/)) OR data_process_exec_parent_arguments:/[Bb][Aa][Ss][Hh] -[Ii]/ OR data_process_exec_process_arguments:/.*[Pp][Tt][Yy]\.[Ss][Pp][Aa][Ww][Nn].*/
+    pivot_on:
+    - host
+    window: 2h
+  - name: Privilege escalation to root preceding the syslog clearing on this host
+    query: data_process_exec_process_binary:/.*\/[Ss][Uu][Dd][Oo]/ OR data_process_exec_process_binary:/.*\/[Ss][Uu]/ OR data_process_exec_process_binary:/.*\/[Pp][Kk][Ee][Xx][Ee][Cc]/ OR data_process_exec_process_binary:/.*\/[Dd][Oo][Aa][Ss]/
+    pivot_on:
+    - host
+    window: 2h

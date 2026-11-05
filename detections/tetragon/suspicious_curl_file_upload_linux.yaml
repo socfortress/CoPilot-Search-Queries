@@ -177,29 +177,58 @@ graylog:
   query: data_process_exec_process_binary:/.*\/[Cc][Uu][Rr][Ll]/ AND (data_process_exec_process_arguments:/.* --[Ff][Oo][Rr][Mm].*/ OR data_process_exec_process_arguments:/.* --[Uu][Pp][Ll][Oo][Aa][Dd]-[Ff][Ii][Ll][Ee] .*/ OR data_process_exec_process_arguments:/.* --[Dd][Aa][Tt][Aa] .*/ OR data_process_exec_process_arguments:/.* --[Dd][Aa][Tt][Aa]-.*/ OR data_process_exec_process_arguments:/.*([ ]-[FTd][ ]).*/) AND _exists_:data_process_exec_process_arguments AND NOT (data_process_exec_process_arguments:/.*:\/\/[Ll][Oo][Cc][Aa][Ll][Hh][Oo][Ss][Tt].*/ OR data_process_exec_process_arguments:/.*:\/\/127\.0\.0\.1.*/)
 
 correlation:
-  # Authored by the correlation engine for review. Related CoPilot Searches to run
-  # around an alert from this rule, scoped to the same host/user/IP within the window.
+  # Authored per-rule (behaviour-researched) for the correlation engine. Related CoPilot
+  # Searches + telemetry pivots to run around an alert, scoped to its host/user/ip/domain.
   related_rules:
-    - id: 0a23a62d-c5b3-468b-a072-25064a9a8c87
-      name: "Axios NPM Compromise Indicators - Linux"
-      reason: "next kill-chain tactic: Command and Control"
-  window: 1h
+  - id: cb39d16b-b3b6-4a7a-8222-1cf24b686ffc
+    name: Data Exfiltration with Wget
+    reason: 'Sibling egress tool: wget --post-file is the exact wget analogue of this curl --upload-file/--form/--data POST. Both firing on the host means a deliberate file-exfiltration toolkit (often reading /etc/shadow), not incidental curl use.'
+  - id: c3d9e7f1-6a2b-4d8f-9c2b-5e6f7a8b9c0d
+    name: Linux Suspicious Curl Data Exfiltration
+    reason: The same curl upload flags (-F/--form/-T/--upload-file/-d/--data) narrowed to .aws/credentials and .aws/config. If it co-fires it identifies the uploaded payload as AWS cloud credentials being stolen.
+  - id: efd2eb09-b72e-4a61-8dc7-b1382a1e8983
+    name: Shai-Hulud NPM Package Malicious Exfiltration via Curl
+    reason: Same tool and behaviour (curl -d POST of collected data to an attacker webhook). Co-firing attributes this upload to the Shai-Hulud npm supply-chain worm rather than admin activity.
+  - id: b86d356d-6093-443d-971c-9b07db583c68
+    name: Suspicious Curl Change User Agents - Linux
+    reason: The same curl egress run with -A/--user-agent to spoof its User-Agent and blend the upload/beacon into normal web traffic - evasion applied to the very channel this rule caught.
+  - id: linux-proxy-socks-curl-001
+    name: Linux Proxy Socks Curl
+    reason: The same curl routed through -x/--proxy/SOCKS to conceal the exfil destination; it can fire on the same invocation and shows the upload endpoint is being deliberately obscured.
+  - id: fa4aaed5-4fe0-498d-bbc0-08e3346387ba
+    name: Copy Passwd Or Shadow From TMP Path
+    reason: 'Credential collection that typically precedes the upload: passwd/shadow copied into /tmp is exactly the kind of staged loot a curl --upload-file then exfiltrates.'
+  - id: a2d9e2f3-0f43-4c7a-bcd9-9acfc0d723aa
+    name: Suspicious Download and Execute Pattern via Curl/Wget
+    reason: 'The ingress half of two-way C2: curl/wget pulling a stager into /tmp or /dev/shm and running it via sh -c - the tooling-delivery step that commonly brackets the exfil this rule detects.'
+  - id: 7f734ed0-4f47-46c0-837f-6ee62505abd9
+    name: Potential Netcat Reverse Shell Execution
+    reason: A hands-on-keyboard foothold (nc -e <shell>) is the interactive channel from which an operator launches the curl upload; its presence on the host reframes the exfil as an active intrusion.
+  window: 2h
   enrichment_searches:
-  # Rule-specific telemetry pivots the engine runs around an alert from this rule,
-  # scoped to the alert's host/user/IP within the window (behaviour-targeted, not a sweep).
-    - name: "Downloader / ingress-tool-transfer on this host"
-      query: 'data_process_exec_process_binary:/.*(\/[Cc][Uu][Rr][Ll]|\/[Ww][Gg][Ee][Tt]|\/[Tt][Ff][Tt][Pp])/'
-      pivot_on: [host]
-      window: 1h
-    - name: "Outbound-transfer / upload tooling on this host"
-      query: '((data_process_exec_process_binary:/.*(\/[Cc][Uu][Rr][Ll]|\/[Ww][Gg][Ee][Tt]|\/[Tt][Ff][Tt][Pp])/) OR (data_process_exec_process_binary:/.*(\/[Ss][Cc][Pp]|\/[Rr][Ss][Yy][Nn][Cc]|\/[Rr][Cc][Ll][Oo][Nn][Ee]|\/[Cc][Uu][Rr][Ll])/))'
-      pivot_on: [host]
-      window: 2h
-    - name: "Shell / interpreter execution on this host"
-      query: '((data_process_exec_process_binary:/.*(\/[Bb][Aa][Ss][Hh]|\/[Ss][Hh]|\/[Dd][Aa][Ss][Hh]|\/[Zz][Ss][Hh]|\/[Kk][Ss][Hh]|\/[Aa][Ss][Hh]|\/[Bb][Uu][Ss][Yy][Bb][Oo][Xx])/) OR (data_process_exec_process_binary:/.*(\/[Pp][Yy][Tt][Hh][Oo][Nn]|\/[Pp][Yy][Tt][Hh][Oo][Nn]3|\/[Pp][Ee][Rr][Ll]|\/[Rr][Uu][Bb][Yy]|\/[Pp][Hh][Pp]|\/[Nn][Oo][Dd][Ee]|\/[Ll][Uu][Aa]|\/[Aa][Ww][Kk])/))'
-      pivot_on: [host]
-      window: 1h
-    - name: "Reconnaissance commands on this host"
-      query: 'data_process_exec_process_binary:/.*(\/[Ww][Hh][Oo][Aa][Mm][Ii]|\/[Ii][Dd]|\/[Uu][Nn][Aa][Mm][Ee]|\/[Hh][Oo][Ss][Tt][Nn][Aa][Mm][Ee]|\/[Hh][Oo][Ss][Tt][Nn][Aa][Mm][Ee][Cc][Tt][Ll]|\/[Ss][Ss]|\/[Nn][Ee][Tt][Ss][Tt][Aa][Tt]|\/[Ii][Ff][Cc][Oo][Nn][Ff][Ii][Gg]|\/[Aa][Rr][Pp]|\/[Ww]|\/[Ww][Hh][Oo]|\/[Ll][Aa][Ss][Tt]|\/[Ll][Ss][Oo][Ff]|\/[Nn][Mm][Aa][Pp]|\/[Dd][Ii][Gg]|\/[Ff][Ii][Nn][Dd])/'
-      pivot_on: [host]
-      window: 1h
+  # Behaviour-targeted hunts the engine runs around the alert (not a sweep).
+  - name: Data staged for exfiltration - archive/compression tooling on this host
+    query: data_process_exec_process_binary:/.*(\/[Tt][Aa][Rr]|\/[Gg][Zz][Ii][Pp]|\/[Bb][Zz][Ii][Pp]2|\/[Xx][Zz]|\/[Zz][Ss][Tt][Dd]|\/[Zz][Ii][Pp]|\/7[Zz]|\/7[Zz][Aa]|\/[Rr][Aa][Rr])/
+    pivot_on:
+    - host
+    window: 2h
+  - name: Alternate exfiltration / transfer tooling on this host
+    query: data_process_exec_process_binary:/.*(\/[Ss][Cc][Pp]|\/[Ss][Ff][Tt][Pp]|\/[Rr][Ss][Yy][Nn][Cc]|\/[Rr][Cc][Ll][Oo][Nn][Ee]|\/[Nn][Cc]|\/[Nn][Cc][Aa][Tt]|\/[Nn][Ee][Tt][Cc][Aa][Tt]|\/[Ss][Oo][Cc][Aa][Tt]|\/[Oo][Pp][Ee][Nn][Ss][Ss][Ll]|\/[Ff][Tt][Pp]|\/[Tt][Ff][Tt][Pp])/
+    pivot_on:
+    - host
+    window: 4h
+  - name: Sensitive credential / secret file paths referenced on this host
+    query: data_process_exec_process_arguments:/.*(\/etc\/shadow|\/etc\/passwd|\.ssh\/id_|\.aws\/credentials|\.aws\/config|\.kube\/config|\.env|\.bash_history|\.netrc|\.pgpass)/
+    pivot_on:
+    - host
+    window: 2h
+  - name: Web server or interpreter spawning a shell or egress tool (webshell provenance)
+    query: data_process_exec_parent_binary:/.*(\/[Nn][Gg][Ii][Nn][Xx]|\/[Aa][Pp][Aa][Cc][Hh][Ee]2|\/[Hh][Tt][Tt][Pp][Dd]|\/[Pp][Hh][Pp]|\/[Pp][Hh][Pp]-[Ff][Pp][Mm]|\/[Tt][Oo][Mm][Cc][Aa][Tt]|\/[Nn][Oo][Dd][Ee])/ AND data_process_exec_process_binary:/.*(\/[Cc][Uu][Rr][Ll]|\/[Ww][Gg][Ee][Tt]|\/[Bb][Aa][Ss][Hh]|\/[Ss][Hh]|\/[Nn][Cc]|\/[Nn][Cc][Aa][Tt]|\/[Ss][Oo][Cc][Aa][Tt]|\/[Pp][Yy][Tt][Hh][Oo][Nn]3|\/[Pp][Yy][Tt][Hh][Oo][Nn]|\/[Pp][Ee][Rr][Ll])/
+    pivot_on:
+    - host
+    window: 2h
+  - name: Curl/Wget pulling remote files to disk (ingress tool transfer) on this host
+    query: (data_process_exec_process_binary:/.*(\/[Cc][Uu][Rr][Ll]|\/[Ww][Gg][Ee][Tt])/) AND (data_process_exec_process_arguments:/.* -[Oo] .*/ OR data_process_exec_process_arguments:/.*--[Oo][Uu][Tt][Pp][Uu][Tt].*/ OR data_process_exec_process_arguments:/.*--[Rr][Ee][Mm][Oo][Tt][Ee]-[Nn][Aa][Mm][Ee].*/)
+    pivot_on:
+    - host
+    window: 4h

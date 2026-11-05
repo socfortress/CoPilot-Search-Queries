@@ -176,23 +176,58 @@ graylog:
   query: data_process_exec_parent_arguments:/[Bb][Aa][Ss][Hh] -[Ii]/ AND (data_process_exec_process_arguments:/.*-[Cc] [Ii][Mm][Pp][Oo][Rr][Tt] .*/ OR data_process_exec_process_arguments:/.*[Bb][Aa][Ss][Ee]64.*/ OR data_process_exec_process_arguments:/.*[Pp][Tt][Yy]\.[Ss][Pp][Aa][Ww][Nn].*/ OR data_process_exec_process_binary:/.*[Ww][Hh][Oo][Aa][Mm][Ii]/ OR data_process_exec_process_binary:/.*[Ii][Pp][Tt][Aa][Bb][Ll][Ee][Ss]/ OR data_process_exec_process_binary:/.*\/[Nn][Cc][Aa][Tt]/ OR data_process_exec_process_binary:/.*\/[Nn][Cc]/ OR data_process_exec_process_binary:/.*\/[Nn][Ee][Tt][Cc][Aa][Tt]/)
 
 correlation:
-  # Authored by the correlation engine for review.
+  # Authored per-rule (behaviour-researched) for the correlation engine. Related CoPilot
+  # Searches + telemetry pivots to run around an alert, scoped to its host/user/ip/domain.
+  related_rules:
+  - id: 7f734ed0-4f47-46c0-837f-6ee62505abd9
+    name: Potential Netcat Reverse Shell Execution
+    reason: This rule's child-match set explicitly includes */nc, */ncat and */netcat; a netcat child with -e/-c spawning a shell IS a backconnect reverse shell, so this detection both explains how the bash -i session was obtained and fires on the exact same nc process event.
+  - id: 32e62bc7-3de0-4bb1-90af-532978fe42c0
+    name: Python Reverse Shell Execution Via PTY And Socket Modules
+    reason: A python '-c import ... pty ... socket ... spawn ... .connect' one-liner is a primary way an interactive shell is established on Linux and overlaps this rule's own '*-c import*' and '*pty.spawn*' child matches - a strong precursor/co-fire pointing at the reverse-shell origin.
+  - id: c4042d54-110d-45dd-a0e1-05c47822c937
+    name: Python Spawning Pretty TTY Via PTY Module
+    reason: python 'import pty; pty.spawn' is the canonical step to upgrade a dumb reverse shell to a full TTY, which is exactly the '*pty.spawn*' child this rule keys on - it almost always co-fires in the same hands-on-keyboard session.
+  - id: ba592c6d-6888-43c3-b8c6-689b8fe47337
+    name: Linux Base64 Encoded Pipe to Shell
+    reason: This rule matches '*base64*' children; decoding a base64 blob and piping it to bash/sh (T1140) is the staging action an operator runs inside the interactive shell, so this detection is the same base64 behaviour promoted to a standalone alert.
+  - id: 818f7b24-0fba-4c49-a073-8b755573b9c7
+    name: Linux Webshell Indicators
+    reason: A suspicious shell child of a web-server process (httpd/nginx/apache2/tomcat/node) is the classic server-side precursor that drops an attacker into the interactive bash -i session this rule observes - prime root-cause candidate on web hosts.
+  - id: a2d9e2f3-0f43-4c7a-bcd9-9acfc0d723aa
+    name: Suspicious Download and Execute Pattern via Curl/Wget
+    reason: curl/wget pulling a payload into /tmp or /dev/shm and immediately running it is the staging step that commonly precedes or immediately follows landing the interactive shell, feeding the next-stage tooling the operator then runs by hand.
+  - id: 3be619f4-d9ec-4ea8-a173-18fdd01996ab
+    name: Flush Iptables Ufw Chain
+    reason: This rule flags */iptables children; flushing all chains to allow every connection is the malicious escalation of that iptables activity - the operator opening the host for C2/egress, a direct follow-on to the firewall tampering seen here.
+  - id: fa4aaed5-4fe0-498d-bbc0-08e3346387ba
+    name: Copy Passwd Or Shadow From TMP Path
+    reason: Copying /etc/passwd and /etc/shadow for offline cracking is a high-value credential-access action an operator takes right after landing and recon in an interactive shell - a genuine follow-on that advances this alert into the credential-theft phase.
+  window: 1h
   enrichment_searches:
-  # Rule-specific telemetry pivots the engine runs around an alert from this rule,
-  # scoped to the alert's host/user/IP within the window (behaviour-targeted, not a sweep).
-    - name: "Shell / interpreter execution on this host"
-      query: '((data_process_exec_process_binary:/.*(\/[Bb][Aa][Ss][Hh]|\/[Ss][Hh]|\/[Dd][Aa][Ss][Hh]|\/[Zz][Ss][Hh]|\/[Kk][Ss][Hh]|\/[Aa][Ss][Hh]|\/[Bb][Uu][Ss][Yy][Bb][Oo][Xx])/) OR (data_process_exec_process_binary:/.*(\/[Pp][Yy][Tt][Hh][Oo][Nn]|\/[Pp][Yy][Tt][Hh][Oo][Nn]3|\/[Pp][Ee][Rr][Ll]|\/[Rr][Uu][Bb][Yy]|\/[Pp][Hh][Pp]|\/[Nn][Oo][Dd][Ee]|\/[Ll][Uu][Aa]|\/[Aa][Ww][Kk])/))'
-      pivot_on: [host]
-      window: 1h
-    - name: "Other executions of this tool-set on this host (any arguments)"
-      query: 'data_process_exec_process_binary:/.*(\/[Ww][Hh][Oo][Aa][Mm][Ii]|\/[Ii][Pp][Tt][Aa][Bb][Ll][Ee][Ss]|\/[Nn][Cc][Aa][Tt]|\/[Nn][Ee][Tt][Cc][Aa][Tt])/'
-      pivot_on: [host]
-      window: 2h
-    - name: "Persistence via cron / systemd / shell profiles on this host"
-      query: '((data_process_exec_process_binary:/.*(\/[Cc][Rr][Oo][Nn][Tt][Aa][Bb]|\/[Ss][Yy][Ss][Tt][Ee][Mm][Cc][Tt][Ll]|\/[Aa][Tt]|\/[Uu][Pp][Dd][Aa][Tt][Ee]-[Rr][Cc]\.[Dd])/) OR (data_process_exec_process_arguments:/.*\/[Ee][Tt][Cc]\/[Cc][Rr][Oo][Nn].*/) OR (data_process_exec_process_arguments:/.*\/[Ee][Tt][Cc]\/[Ss][Yy][Ss][Tt][Ee][Mm][Dd].*/) OR (data_process_exec_process_arguments:/.*[Rr][Cc]\.[Ll][Oo][Cc][Aa][Ll].*/) OR (data_process_exec_process_arguments:/.*\.[Bb][Aa][Ss][Hh][Rr][Cc].*/) OR (data_process_exec_process_arguments:/.*\.[Bb][Aa][Ss][Hh]_[Pp][Rr][Oo][Ff][Ii][Ll][Ee].*/) OR (data_process_exec_process_arguments:/.*\/[Ee][Tt][Cc]\/[Pp][Rr][Oo][Ff][Ii][Ll][Ee].*/) OR (data_process_exec_process_arguments:/.*[Aa][Uu][Tt][Hh][Oo][Rr][Ii][Zz][Ee][Dd]_[Kk][Ee][Yy][Ss].*/) OR (data_process_exec_process_arguments:/.*\/[Ee][Tt][Cc]\/[Ii][Nn][Ii][Tt]\.[Dd].*/))'
-      pivot_on: [host]
-      window: 4h
-    - name: "Reconnaissance commands on this host"
-      query: 'data_process_exec_process_binary:/.*(\/[Ww][Hh][Oo][Aa][Mm][Ii]|\/[Ii][Dd]|\/[Uu][Nn][Aa][Mm][Ee]|\/[Hh][Oo][Ss][Tt][Nn][Aa][Mm][Ee]|\/[Hh][Oo][Ss][Tt][Nn][Aa][Mm][Ee][Cc][Tt][Ll]|\/[Ss][Ss]|\/[Nn][Ee][Tt][Ss][Tt][Aa][Tt]|\/[Ii][Ff][Cc][Oo][Nn][Ff][Ii][Gg]|\/[Aa][Rr][Pp]|\/[Ww]|\/[Ww][Hh][Oo]|\/[Ll][Aa][Ss][Tt]|\/[Ll][Ss][Oo][Ff]|\/[Nn][Mm][Aa][Pp]|\/[Dd][Ii][Gg]|\/[Ff][Ii][Nn][Dd])/'
-      pivot_on: [host]
-      window: 1h
+  # Behaviour-targeted hunts the engine runs around the alert (not a sweep).
+  - name: Full child-process activity of the interactive shell session on this host
+    query: data_process_exec_parent_arguments:/.*[Bb][Aa][Ss][Hh] -[Ii].*/ OR data_process_exec_parent_arguments:/.*[Ss][Hh] -[Ii].*/
+    pivot_on:
+    - host
+    window: 1h
+  - name: Reverse-shell / backconnect origin on this host (netcat, socat, /dev/tcp, python socket)
+    query: (data_process_exec_process_binary:/.*(\/[Nn][Cc]|\/[Nn][Cc][Aa][Tt]|\/[Nn][Ee][Tt][Cc][Aa][Tt]|\/[Ss][Oo][Cc][Aa][Tt])/ OR data_process_exec_process_arguments:/.*\/[Dd][Ee][Vv]\/[Tt][Cc][Pp]\/.*/ OR data_process_exec_process_arguments:/.*\/[Dd][Ee][Vv]\/[Uu][Dd][Pp]\/.*/ OR data_process_exec_process_arguments:/.*[Ss][Oo][Cc][Kk][Ee][Tt]\.[Ss][Oo][Cc][Kk][Ee][Tt].*/)
+    pivot_on:
+    - host
+    window: 2h
+  - name: Shell stabilization (TTY upgrade) and payload decoding on this host
+    query: (data_process_exec_process_arguments:/.*[Pp][Tt][Yy]\.[Ss][Pp][Aa][Ww][Nn].*/ OR data_process_exec_process_arguments:/.*[Ii][Mm][Pp][Oo][Rr][Tt] [Pp][Tt][Yy].*/ OR data_process_exec_process_arguments:/.*[Ss][Tt][Tt][Yy] [Rr][Aa][Ww].*/ OR data_process_exec_process_arguments:/.*[Bb][Aa][Ss][Ee]64 -[Dd].*/ OR (data_process_exec_process_binary:/.*\/[Ss][Cc][Rr][Ii][Pp][Tt]/ AND data_process_exec_process_arguments:/.*\/[Dd][Ee][Vv]\/[Nn][Uu][Ll][Ll].*/))
+    pivot_on:
+    - host
+    window: 1h
+  - name: Credential access and privilege escalation on this host
+    query: ((data_process_exec_process_binary:/.*(\/[Ss][Uu][Dd][Oo]|\/[Ss][Uu]|\/[Pp][Kk][Ee][Xx][Ee][Cc]|\/[Dd][Oo][Aa][Ss])/) OR (data_process_exec_process_arguments:/.*\/[Ee][Tt][Cc]\/[Ss][Hh][Aa][Dd][Oo][Ww].*/) OR (data_process_exec_process_arguments:/.*\/[Ee][Tt][Cc]\/[Ss][Uu][Dd][Oo][Ee][Rr][Ss].*/) OR (data_process_exec_process_arguments:/.*[Aa][Uu][Tt][Hh][Oo][Rr][Ii][Zz][Ee][Dd]_[Kk][Ee][Yy][Ss].*/) OR (data_process_exec_process_arguments:/.* -[Pp][Ee][Rr][Mm] -4000.*/))
+    pivot_on:
+    - host
+    window: 4h
+  - name: Defense evasion - firewall flush/disable, security service stop, history/log tampering on this host
+    query: ((data_process_exec_process_binary:/.*(\/[Ii][Pp][Tt][Aa][Bb][Ll][Ee][Ss]|\/[Nn][Ff][Tt]|\/[Uu][Ff][Ww])/ AND data_process_exec_process_arguments:/.*([Ff][Ll][Uu][Ss][Hh]| -[Ff] | -[Xx] |[Dd][Ii][Ss][Aa][Bb][Ll][Ee]).*/) OR (data_process_exec_process_binary:/.*\/[Ss][Yy][Ss][Tt][Ee][Mm][Cc][Tt][Ll]/ AND data_process_exec_process_arguments:/.*([Ss][Tt][Oo][Pp]|[Dd][Ii][Ss][Aa][Bb][Ll][Ee]|[Mm][Aa][Ss][Kk]).*/) OR (data_process_exec_process_arguments:/.*\.[Bb][Aa][Ss][Hh]_[Hh][Ii][Ss][Tt][Oo][Rr][Yy].*/))
+    pivot_on:
+    - host
+    window: 4h

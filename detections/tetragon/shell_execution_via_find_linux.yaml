@@ -165,23 +165,58 @@ graylog:
   query: data_process_exec_process_binary:/.*\/[Ff][Ii][Nn][Dd]/ AND data_process_exec_process_arguments:/.* \. .*/ AND data_process_exec_process_arguments:/.*-[Ee][Xx][Ee][Cc].*/ AND (data_process_exec_process_arguments:/.*\/[Bb][Ii][Nn]\/[Bb][Aa][Ss][Hh].*/ OR data_process_exec_process_arguments:/.*\/[Bb][Ii][Nn]\/[Dd][Aa][Ss][Hh].*/ OR data_process_exec_process_arguments:/.*\/[Bb][Ii][Nn]\/[Ff][Ii][Ss][Hh].*/ OR data_process_exec_process_arguments:/.*\/[Bb][Ii][Nn]\/[Ss][Hh].*/ OR data_process_exec_process_arguments:/.*\/[Bb][Ii][Nn]\/[Zz][Ss][Hh].*/)
 
 correlation:
-  # Authored by the correlation engine for review.
+  # Authored per-rule (behaviour-researched) for the correlation engine. Related CoPilot
+  # Searches + telemetry pivots to run around an alert, scoped to its host/user/ip/domain.
+  related_rules:
+  - id: 8344c0e5-5783-47cc-9cf9-a0f7fd03e6cf
+    name: Potential Discovery Activity Using Find - Linux
+    reason: 'Direct precursor: the SAME find binary run with -perm -4000/-u=s/-g=s enumerates SUID/SGID binaries; discovering that find (or a sibling LOLBin) carries the SUID bit is exactly what motivates this ''-exec /bin/sh -p'' breakout, so the discovery event typically fires minutes before this one on the same host.'
+  - id: 0f79c4d2-4e1f-4683-9c36-b5469a665e06
+    name: Access of Sudoers File Content
+    reason: 'Precursor/co-occurring privesc enumeration: reading /etc/sudoers to map who can run what as root is the other half of the privilege-escalation surface survey that accompanies SUID hunting right before an attacker chooses a LOLBin shell-escape vector.'
+  - id: 7ab8f73a-fcff-428b-84aa-6a5ff7877dea
+    name: Vim GTFOBin Abuse - Linux
+    reason: 'Co-occurring same TTP: vim '':!/bin/sh'' is the identical GTFOBins restricted-shell-breakout/SUID-privesc technique via a different binary; an attacker probing which LOLBin on the host yields a shell commonly tries several, so seeing this alongside find-exec strengthens the privesc narrative.'
+  - id: 8c1a5675-cb85-452f-a298-b01b22a51856
+    name: Suspicious Invocation of Shell via AWK - Linux
+    reason: 'Co-occurring same TTP: awk ''BEGIN{system("/bin/sh")}'' is a sibling GTFOBins shell escape with the identical break-out-of-restricted-environment intent on the same host/user.'
+  - id: bed978f8-7f3a-432b-82c5-9286a9b3031a
+    name: Shell Invocation via Env Command - Linux
+    reason: 'Co-occurring same TTP: ''env /bin/sh'' is a sibling GTFOBins escape; env is a frequent restricted-shell and sudo-allowlist bypass, so it pairs naturally with a find-exec breakout attempt.'
+  - id: 9b5de532-a757-4d70-946c-1f3e44f48b4d
+    name: Shell Execution GCC  - Linux
+    reason: 'Co-occurring same TTP: gcc (and c89/c99) spawning a shell is a sibling GTFOBins break-out, especially on developer/build hosts where a compiler is the LOLBin the attacker reaches for after find.'
+  - id: 47b3bbd4-1bf7-48cc-84ab-995362aaa75a
+    name: Shell Execution via Git - Linux
+    reason: 'Co-occurring same TTP: ''git -p help'' followed by '':!/bin/sh'' is a sibling GTFOBins pager-abuse shell escape with the same restricted-shell-breakout intent on the same host.'
+  - id: ea3ecad2-db86-4a89-ad0b-132a10d2db55
+    name: Interactive Bash Suspicious Children
+    reason: 'Direct follow-on: the interactive shell that find -exec spawns is exactly the ''bash -i'' parent this rule watches, and its firing (whoami, nc/ncat/netcat, base64, pty.spawn as children) confirms the breakout became a live, hands-on-keyboard foothold.'
+  window: 1h
   enrichment_searches:
-  # Rule-specific telemetry pivots the engine runs around an alert from this rule,
-  # scoped to the alert's host/user/IP within the window (behaviour-targeted, not a sweep).
-    - name: "File / directory discovery commands on this host"
-      query: '((data_process_exec_process_binary:/.*(\/[Ff][Ii][Nn][Dd]|\/[Ll][Oo][Cc][Aa][Tt][Ee]|\/[Ll][Ss])/) OR (data_process_exec_process_binary:/.*(\/[Ww][Hh][Oo][Aa][Mm][Ii]|\/[Ii][Dd]|\/[Uu][Nn][Aa][Mm][Ee]|\/[Hh][Oo][Ss][Tt][Nn][Aa][Mm][Ee]|\/[Hh][Oo][Ss][Tt][Nn][Aa][Mm][Ee][Cc][Tt][Ll]|\/[Ss][Ss]|\/[Nn][Ee][Tt][Ss][Tt][Aa][Tt]|\/[Ii][Ff][Cc][Oo][Nn][Ff][Ii][Gg]|\/[Aa][Rr][Pp]|\/[Ww]|\/[Ww][Hh][Oo]|\/[Ll][Aa][Ss][Tt]|\/[Ll][Ss][Oo][Ff]|\/[Nn][Mm][Aa][Pp]|\/[Dd][Ii][Gg]|\/[Ff][Ii][Nn][Dd])/))'
-      pivot_on: [host]
-      window: 1h
-    - name: "Other executions of this tool-set on this host (any arguments)"
-      query: 'data_process_exec_process_binary:/.*(\/[Ff][Ii][Nn][Dd])/'
-      pivot_on: [host]
-      window: 2h
-    - name: "Privilege-escalation tooling executed on this host"
-      query: 'data_process_exec_process_binary:/.*(\/[Ss][Uu][Dd][Oo]|\/[Ss][Uu]|\/[Pp][Kk][Ee][Xx][Ee][Cc]|\/[Dd][Oo][Aa][Ss]|\/[Ss][Ee][Tt][Cc][Aa][Pp]|\/[Cc][Hh][Ss][Hh]|\/[Nn][Ee][Ww][Gg][Rr][Pp])/'
-      pivot_on: [host]
-      window: 2h
-    - name: "Shell / interpreter execution on this host"
-      query: '((data_process_exec_process_binary:/.*(\/[Bb][Aa][Ss][Hh]|\/[Ss][Hh]|\/[Dd][Aa][Ss][Hh]|\/[Zz][Ss][Hh]|\/[Kk][Ss][Hh]|\/[Aa][Ss][Hh]|\/[Bb][Uu][Ss][Yy][Bb][Oo][Xx])/) OR (data_process_exec_process_binary:/.*(\/[Pp][Yy][Tt][Hh][Oo][Nn]|\/[Pp][Yy][Tt][Hh][Oo][Nn]3|\/[Pp][Ee][Rr][Ll]|\/[Rr][Uu][Bb][Yy]|\/[Pp][Hh][Pp]|\/[Nn][Oo][Dd][Ee]|\/[Ll][Uu][Aa]|\/[Aa][Ww][Kk])/))'
-      pivot_on: [host]
-      window: 1h
+  # Behaviour-targeted hunts the engine runs around the alert (not a sweep).
+  - name: A shell-escape LOLBin spawned an interactive shell on this host
+    query: (data_process_exec_process_binary:/.*\/([Bb][Aa][Ss][Hh]|[Dd][Aa][Ss][Hh]|[Ss][Hh]|[Zz][Ss][Hh]|[Kk][Ss][Hh]|[Ff][Ii][Ss][Hh]|[Cc][Ss][Hh])/) AND (data_process_exec_parent_binary:/.*\/([Ff][Ii][Nn][Dd]|[Aa][Ww][Kk]|[Gg][Aa][Ww][Kk]|[Vv][Ii][Mm]|[Vv][Ii]|[Ee][Nn][Vv]|[Gg][Cc][Cc]|[Gg][Ii][Tt]|[Ff][Ll][Oo][Cc][Kk]|[Nn][Ii][Cc][Ee]|[Rr][Ss][Yy][Nn][Cc]|[Nn][Mm][Aa][Pp]|[Pp][Ee][Rr][Ll]|[Cc][Aa][Pp][Ss][Hh]|[Tt][Aa][Rr])/)
+    pivot_on:
+    - host
+    window: 1h
+  - name: SUID / SGID / weak-permission binary discovery via find
+    query: data_process_exec_process_binary:/.*\/[Ff][Ii][Nn][Dd]/ AND (data_process_exec_process_arguments:/.*-[Pp][Ee][Rr][Mm] -4000.*/ OR data_process_exec_process_arguments:/.*-[Pp][Ee][Rr][Mm] -[Uu]=[Ss].*/ OR data_process_exec_process_arguments:/.*-[Pp][Ee][Rr][Mm] -2000.*/ OR data_process_exec_process_arguments:/.*-[Pp][Ee][Rr][Mm] -[Gg]=[Ss].*/)
+    pivot_on:
+    - host
+    window: 2h
+  - name: Privilege-escalation binary execution on this host
+    query: data_process_exec_process_binary:/.*\/([Ss][Uu][Dd][Oo]|[Ss][Uu]|[Dd][Oo][Aa][Ss]|[Pp][Kk][Ee][Xx][Ee][Cc]|[Ss][Ee][Tt][Cc][Aa][Pp]|[Nn][Ee][Ww][Gg][Rr][Pp]|[Cc][Hh][Ss][Hh])/
+    pivot_on:
+    - host
+    window: 2h
+  - name: Credential & privilege-config file access on this host
+    query: (data_process_exec_process_arguments:/.*\/[Ee][Tt][Cc]\/[Ss][Hh][Aa][Dd][Oo][Ww].*/ OR data_process_exec_process_arguments:/.*\/[Ee][Tt][Cc]\/[Ss][Uu][Dd][Oo][Ee][Rr][Ss].*/ OR data_process_exec_process_arguments:/.*\/[Ee][Tt][Cc]\/[Pp][Aa][Ss][Ss][Ww][Dd].*/ OR data_process_exec_process_arguments:/.*[Aa][Uu][Tt][Hh][Oo][Rr][Ii][Zz][Ee][Dd]_[Kk][Ee][Yy][Ss].*/ OR data_process_exec_process_arguments:/.*[Ii][Dd]_[Rr][Ss][Aa].*/)
+    pivot_on:
+    - host
+    window: 2h
+  - name: Reverse-shell / C2 egress tooling on this host
+    query: (data_process_exec_process_binary:/.*\/([Nn][Cc]|[Nn][Cc][Aa][Tt]|[Nn][Ee][Tt][Cc][Aa][Tt]|[Ss][Oo][Cc][Aa][Tt])/) OR (data_process_exec_process_arguments:/.*\/[Dd][Ee][Vv]\/[Tt][Cc][Pp]\/.*/) OR (data_process_exec_process_arguments:/.* -[Ee] \/[Bb][Ii][Nn]\/.*/)
+    pivot_on:
+    - host
+    window: 1h

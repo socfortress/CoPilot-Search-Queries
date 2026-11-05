@@ -165,23 +165,53 @@ graylog:
   query: data_process_exec_process_binary:/.*\/[Ff][Ll][Oo][Cc][Kk]/ AND data_process_exec_process_arguments:/.* -[Uu] .*/ AND (data_process_exec_process_arguments:/.*\/[Bb][Ii][Nn]\/[Bb][Aa][Ss][Hh].*/ OR data_process_exec_process_arguments:/.*\/[Bb][Ii][Nn]\/[Dd][Aa][Ss][Hh].*/ OR data_process_exec_process_arguments:/.*\/[Bb][Ii][Nn]\/[Ff][Ii][Ss][Hh].*/ OR data_process_exec_process_arguments:/.*\/[Bb][Ii][Nn]\/[Ss][Hh].*/ OR data_process_exec_process_arguments:/.*\/[Bb][Ii][Nn]\/[Zz][Ss][Hh].*/)
 
 correlation:
-  # Authored by the correlation engine for review.
+  # Authored per-rule (behaviour-researched) for the correlation engine. Related CoPilot
+  # Searches + telemetry pivots to run around an alert, scoped to its host/user/ip/domain.
+  related_rules:
+  - id: bed978f8-7f3a-432b-82c5-9286a9b3031a
+    name: Shell Invocation via Env Command - Linux
+    reason: 'Same GTFOBins restricted-shell breakout class as flock: env is a command-wrapper that exec''s /bin/sh just as `flock -u <path> /bin/sh` does. A second wrapper-breakout on the same host in-window means the operator is cycling LOLBin escape primitives, confirming the flock event is a deliberate restricted-environment escape, not scripted maintenance.'
+  - id: 6adfbf8f-52be-4444-9bac-81b539624146
+    name: Shell Execution via Find - Linux
+    reason: Sibling GTFOBins shell breakout (find -exec /bin/sh \;). An attacker who tries flock from a restricted shell typically sweeps several GTFOBins binaries; a find breakout on the same host corroborates hands-on breakout enumeration rather than an isolated flock false positive.
+  - id: 8c1a5675-cb85-452f-a298-b01b22a51856
+    name: Suspicious Invocation of Shell via AWK - Linux
+    reason: Another GTFOBins shell escape (awk 'BEGIN{system("/bin/sh")}'). Co-occurs with flock when an operator rotates through breakout techniques; raises confidence the flock shell was spawned to escape a restricted environment.
+  - id: c4042d54-110d-45dd-a0e1-05c47822c937
+    name: Python Spawning Pretty TTY Via PTY Module
+    reason: 'The canonical immediate next step after a non-interactive breakout: upgrade the flock-spawned shell to a real pty (python -c ''import pty; pty.spawn()'') so job control and interactivity work. A follow-on in the same process lineage on the same host.'
+  - id: ea3ecad2-db86-4a89-ad0b-132a10d2db55
+    name: Interactive Bash Suspicious Children
+    reason: Once flock yields an interactive `bash -i`, the attacker drives it by hand (whoami, nc, base64, pty.spawn). This rule firing on the same host is direct evidence the breakout shell is being actively operated, not idle.
+  - id: 0f79c4d2-4e1f-4683-9c36-b5469a665e06
+    name: Access of Sudoers File Content
+    reason: 'First objective once a shell is obtained: enumerate escalation paths by reading /etc/sudoers (the `sudo -l` goal). A sudoers read on the same host shortly after the flock breakout is the privilege-escalation reconnaissance of the same intrusion.'
+  - id: 0cf7a157-8879-41a2-8f55-388dd23746b7
+    name: Linux Recon Indicators
+    reason: A restricted-shell breakout is immediately followed by a host/identity recon burst (whoami/id/uname/netstat/ss). Recon indicators on the same host in-window are the orientation phase that follows the flock escape.
+  - id: fa4aaed5-4fe0-498d-bbc0-08e3346387ba
+    name: Copy Passwd Or Shadow From TMP Path
+    reason: 'Credential-access objective after the breakout: staging/copying /etc/passwd or /etc/shadow for offline cracking. On the same host in-window it marks the flock shell progressing from access to credential theft.'
+  window: 2h
   enrichment_searches:
-  # Rule-specific telemetry pivots the engine runs around an alert from this rule,
-  # scoped to the alert's host/user/IP within the window (behaviour-targeted, not a sweep).
-    - name: "File / directory discovery commands on this host"
-      query: '((data_process_exec_process_binary:/.*(\/[Ff][Ii][Nn][Dd]|\/[Ll][Oo][Cc][Aa][Tt][Ee]|\/[Ll][Ss])/) OR (data_process_exec_process_binary:/.*(\/[Ww][Hh][Oo][Aa][Mm][Ii]|\/[Ii][Dd]|\/[Uu][Nn][Aa][Mm][Ee]|\/[Hh][Oo][Ss][Tt][Nn][Aa][Mm][Ee]|\/[Hh][Oo][Ss][Tt][Nn][Aa][Mm][Ee][Cc][Tt][Ll]|\/[Ss][Ss]|\/[Nn][Ee][Tt][Ss][Tt][Aa][Tt]|\/[Ii][Ff][Cc][Oo][Nn][Ff][Ii][Gg]|\/[Aa][Rr][Pp]|\/[Ww]|\/[Ww][Hh][Oo]|\/[Ll][Aa][Ss][Tt]|\/[Ll][Ss][Oo][Ff]|\/[Nn][Mm][Aa][Pp]|\/[Dd][Ii][Gg]|\/[Ff][Ii][Nn][Dd])/))'
-      pivot_on: [host]
-      window: 1h
-    - name: "Other executions of this tool-set on this host (any arguments)"
-      query: 'data_process_exec_process_binary:/.*(\/[Ff][Ll][Oo][Cc][Kk])/'
-      pivot_on: [host]
-      window: 2h
-    - name: "Privilege-escalation tooling executed on this host"
-      query: 'data_process_exec_process_binary:/.*(\/[Ss][Uu][Dd][Oo]|\/[Ss][Uu]|\/[Pp][Kk][Ee][Xx][Ee][Cc]|\/[Dd][Oo][Aa][Ss]|\/[Ss][Ee][Tt][Cc][Aa][Pp]|\/[Cc][Hh][Ss][Hh]|\/[Nn][Ee][Ww][Gg][Rr][Pp])/'
-      pivot_on: [host]
-      window: 2h
-    - name: "Shell / interpreter execution on this host"
-      query: '((data_process_exec_process_binary:/.*(\/[Bb][Aa][Ss][Hh]|\/[Ss][Hh]|\/[Dd][Aa][Ss][Hh]|\/[Zz][Ss][Hh]|\/[Kk][Ss][Hh]|\/[Aa][Ss][Hh]|\/[Bb][Uu][Ss][Yy][Bb][Oo][Xx])/) OR (data_process_exec_process_binary:/.*(\/[Pp][Yy][Tt][Hh][Oo][Nn]|\/[Pp][Yy][Tt][Hh][Oo][Nn]3|\/[Pp][Ee][Rr][Ll]|\/[Rr][Uu][Bb][Yy]|\/[Pp][Hh][Pp]|\/[Nn][Oo][Dd][Ee]|\/[Ll][Uu][Aa]|\/[Aa][Ww][Kk])/))'
-      pivot_on: [host]
-      window: 1h
+  # Behaviour-targeted hunts the engine runs around the alert (not a sweep).
+  - name: Other GTFOBins / LOLBin shell break-outs on this host
+    query: ((data_process_exec_process_binary:/.*\/([Ff][Ii][Nn][Dd]|[Ee][Nn][Vv]|[Nn][Ii][Cc][Ee]|[Ff][Ll][Oo][Cc][Kk]|[Gg]?[Aa][Ww][Kk]|[Vv][Ii][Mm]|[Vv][Ii]|[Gg][Ii][Tt]|[Rr][Ss][Yy][Nn][Cc]|[Gg][Cc][Cc]|[Cc][Cc]|[Cc][Aa][Pp][Ss][Hh]|[Tt][Aa][Rr]|[Nn][Mm][Aa][Pp]|[Mm][Aa][Kk][Ee])/) AND (data_process_exec_process_arguments:/.*\/[Bb][Ii][Nn]\/([Bb][Aa][Ss][Hh]|[Dd][Aa][Ss][Hh]|[Zz][Ss][Hh]|[Ff][Ii][Ss][Hh]|[Ss][Hh]).*/ OR data_process_exec_process_arguments:/.* -[Cc] .*/))
+    pivot_on:
+    - host
+    window: 2h
+  - name: Interactive shell / PTY upgrade on this host
+    query: (data_process_exec_process_arguments:/.*[Pp][Tt][Yy]\.[Ss][Pp][Aa][Ww][Nn].*/ OR data_process_exec_process_arguments:/.*[Ii][Mm][Pp][Oo][Rr][Tt] [Pp][Tt][Yy].*/ OR (data_process_exec_process_binary:/.*\/[Ss][Cc][Rr][Ii][Pp][Tt]/ AND data_process_exec_process_arguments:/.*-[Qq]?[Cc] .*/) OR (data_process_exec_process_binary:/.*\/[Ss][Oo][Cc][Aa][Tt]/ AND data_process_exec_process_arguments:/.*[Pp][Tt][Yy].*/) OR (data_process_exec_process_binary:/.*\/[Ss][Tt][Tt][Yy]/ AND data_process_exec_process_arguments:/.*[Rr][Aa][Ww].*/))
+    pivot_on:
+    - host
+    window: 1h
+  - name: Privilege-escalation enumeration or attempts on this host
+    query: (data_process_exec_process_binary:/.*\/([Ss][Uu][Dd][Oo]|[Ss][Uu]|[Pp][Kk][Ee][Xx][Ee][Cc]|[Dd][Oo][Aa][Ss]|[Ss][Ee][Tt][Cc][Aa][Pp]|[Gg][Ee][Tt][Cc][Aa][Pp]|[Nn][Ee][Ww][Gg][Rr][Pp]|[Cc][Hh][Ss][Hh])/ OR data_process_exec_process_arguments:/.*\/[Ee][Tt][Cc]\/([Ss][Uu][Dd][Oo][Ee][Rr][Ss]|[Ss][Hh][Aa][Dd][Oo][Ww]|[Pp][Aa][Ss][Ss][Ww][Dd]).*/ OR data_process_exec_process_arguments:/.*-[Pp][Ee][Rr][Mm] .*[Uu]\+[Ss].*/ OR data_process_exec_process_arguments:/.*-[Pp][Ee][Rr][Mm] .*4000.*/)
+    pivot_on:
+    - host
+    window: 2h
+  - name: Tool download or reverse-shell egress on this host
+    query: (data_process_exec_process_binary:/.*\/([Ww][Gg][Ee][Tt]|[Cc][Uu][Rr][Ll]|[Nn][Cc]|[Nn][Cc][Aa][Tt]|[Nn][Ee][Tt][Cc][Aa][Tt])/ OR data_process_exec_process_arguments:/.*\/[Dd][Ee][Vv]\/[Tt][Cc][Pp]\/.*/ OR data_process_exec_process_arguments:/.*[Ss][Oo][Cc][Kk][Ee][Tt]\.[Ss][Oo][Cc][Kk][Ee][Tt].*/ OR (data_process_exec_process_binary:/.*\/[Ss][Oo][Cc][Aa][Tt]/ AND data_process_exec_process_arguments:/.*[Ee][Xx][Ee][Cc].*/))
+    pivot_on:
+    - host
+    window: 4h

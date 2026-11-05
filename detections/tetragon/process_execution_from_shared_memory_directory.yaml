@@ -146,19 +146,58 @@ graylog:
   query: data_process_exec_process_binary:/\/[Dd][Ee][Vv]\/[Ss][Hh][Mm]\/.*/
 
 correlation:
-  # Authored by the correlation engine for review.
+  # Authored per-rule (behaviour-researched) for the correlation engine. Related CoPilot
+  # Searches + telemetry pivots to run around an alert, scoped to its host/user/ip/domain.
+  related_rules:
+  - id: 818f7b24-0fba-4c49-a073-8b755573b9c7
+    name: Linux Webshell Indicators
+    reason: 'Foothold / parent: Tetragon stamps the spawning process in data_process_exec_parent_binary, and when the /dev/shm binary''s parent is a web server (nginx/apache2/php-fpm/tomcat), the fileless payload was dropped and launched through a webshell. Compare the alert''s parent_binary against this rule - it explains how an internet-facing Linux host got attacker code into RAM in the first place.'
+  - id: a2d9e2f3-0f43-4c7a-bcd9-9acfc0d723aa
+    name: Suspicious Download and Execute Pattern via Curl/Wget
+    reason: 'Direct delivery precursor: this rule matches curl/wget writing into /dev/shm (or /tmp) immediately followed by ''sh -c''. It is literally the command that stages the binary this rule then catches executing from /dev/shm, so co-firing on the same host reconstructs the download-then-run of the fileless payload.'
+  - id: cf610c15-ed71-46e1-bdf8-2bd1a99de6c4
+    name: Download File To Potentially Suspicious Directory Via Wget
+    reason: 'Delivery / ingress-tool-transfer: wget -O into a staging directory is how the ELF now running from /dev/shm was fetched onto the host. Seeing it shortly before this exec turns ''a binary ran from RAM'' into ''attacker-downloaded tooling ran from RAM'' - its own authored block already lists this /dev/shm rule as a fileless-evasion sibling.'
+  - id: 6419afd1-3742-47a5-a7e6-b50386cd15f8
+    name: Chmod Targeting Sensitive Directories
+    reason: 'Arming step: a dropped ELF must be made executable (chmod +x) before it can run as /dev/shm/<file>, so a chmod touching the staging path right before this event confirms a stage -> arm -> run sequence rather than a benign container IPC file (the exact false positive this rule warns about).'
+  - id: ba592c6d-6888-43c3-b8c6-689b8fe47337
+    name: Linux Base64 Encoded Pipe to Shell
+    reason: 'Fileless-staging companion (T1140): base64 ... | sh is the other way an actor materialises a payload in memory with no disk artifact, frequently decoding straight into /dev/shm. Same intrusion, same no-disk evasion intent as execution from shared memory.'
+  - id: 312b42b1-bded-4441-8b58-163a3af58775
+    name: Potentially Suspicious Execution From Tmp Folder
+    reason: 'Sibling staging-directory execution: /tmp is the twin of /dev/shm for running dropped payloads, and actors routinely use both (stage in /tmp, re-stage and run from /dev/shm to dodge disk scanning). It is the closest behavioural analog - if both fire on the host it is a coordinated staging-dir execution cluster, not a one-off.'
+  - id: 22236d75-d5a0-4287-bf06-c93b1770860f
+    name: Triple Cross eBPF Rootkit Install Commands
+    reason: 'Reference-cited payload / follow-on: this detection''s own references point at BPFDoor and eBPF rootkits, and a /dev/shm-staged loader frequently installs exactly this (sudo tc qdisc/filter deploying the Triple Cross eBPF rootkit). Its appearance names what the fileless binary was for - stealthy kernel-level persistence.'
+  - id: 9069ea3c-b213-4c52-be13-86506a227ab1
+    name: Linux Crypto Mining Indicators
+    reason: 'Most common real-world payload / follow-on: XMRig-style miners (--donate-level=0, -o pool.*, --algo=rx/0) are the single most frequent thing dropped into /dev/shm to run fileless. If the /dev/shm process or a child matches these args, the investigation resolves to resource-hijacking (T1496).'
+  window: 2h
   enrichment_searches:
-  # Rule-specific telemetry pivots the engine runs around an alert from this rule,
-  # scoped to the alert's host/user/IP within the window (behaviour-targeted, not a sweep).
-    - name: "Persistence via cron / systemd / shell profiles on this host"
-      query: '((data_process_exec_process_binary:/.*(\/[Cc][Rr][Oo][Nn][Tt][Aa][Bb]|\/[Ss][Yy][Ss][Tt][Ee][Mm][Cc][Tt][Ll]|\/[Aa][Tt]|\/[Uu][Pp][Dd][Aa][Tt][Ee]-[Rr][Cc]\.[Dd])/) OR (data_process_exec_process_arguments:/.*\/[Ee][Tt][Cc]\/[Cc][Rr][Oo][Nn].*/) OR (data_process_exec_process_arguments:/.*\/[Ee][Tt][Cc]\/[Ss][Yy][Ss][Tt][Ee][Mm][Dd].*/) OR (data_process_exec_process_arguments:/.*[Rr][Cc]\.[Ll][Oo][Cc][Aa][Ll].*/) OR (data_process_exec_process_arguments:/.*\.[Bb][Aa][Ss][Hh][Rr][Cc].*/) OR (data_process_exec_process_arguments:/.*\.[Bb][Aa][Ss][Hh]_[Pp][Rr][Oo][Ff][Ii][Ll][Ee].*/) OR (data_process_exec_process_arguments:/.*\/[Ee][Tt][Cc]\/[Pp][Rr][Oo][Ff][Ii][Ll][Ee].*/) OR (data_process_exec_process_arguments:/.*[Aa][Uu][Tt][Hh][Oo][Rr][Ii][Zz][Ee][Dd]_[Kk][Ee][Yy][Ss].*/) OR (data_process_exec_process_arguments:/.*\/[Ee][Tt][Cc]\/[Ii][Nn][Ii][Tt]\.[Dd].*/))'
-      pivot_on: [host]
-      window: 4h
-    - name: "Shell / interpreter execution on this host"
-      query: '((data_process_exec_process_binary:/.*(\/[Bb][Aa][Ss][Hh]|\/[Ss][Hh]|\/[Dd][Aa][Ss][Hh]|\/[Zz][Ss][Hh]|\/[Kk][Ss][Hh]|\/[Aa][Ss][Hh]|\/[Bb][Uu][Ss][Yy][Bb][Oo][Xx])/) OR (data_process_exec_process_binary:/.*(\/[Pp][Yy][Tt][Hh][Oo][Nn]|\/[Pp][Yy][Tt][Hh][Oo][Nn]3|\/[Pp][Ee][Rr][Ll]|\/[Rr][Uu][Bb][Yy]|\/[Pp][Hh][Pp]|\/[Nn][Oo][Dd][Ee]|\/[Ll][Uu][Aa]|\/[Aa][Ww][Kk])/))'
-      pivot_on: [host]
-      window: 1h
-    - name: "Reconnaissance commands on this host"
-      query: 'data_process_exec_process_binary:/.*(\/[Ww][Hh][Oo][Aa][Mm][Ii]|\/[Ii][Dd]|\/[Uu][Nn][Aa][Mm][Ee]|\/[Hh][Oo][Ss][Tt][Nn][Aa][Mm][Ee]|\/[Hh][Oo][Ss][Tt][Nn][Aa][Mm][Ee][Cc][Tt][Ll]|\/[Ss][Ss]|\/[Nn][Ee][Tt][Ss][Tt][Aa][Tt]|\/[Ii][Ff][Cc][Oo][Nn][Ff][Ii][Gg]|\/[Aa][Rr][Pp]|\/[Ww]|\/[Ww][Hh][Oo]|\/[Ll][Aa][Ss][Tt]|\/[Ll][Ss][Oo][Ff]|\/[Nn][Mm][Aa][Pp]|\/[Dd][Ii][Gg]|\/[Ff][Ii][Nn][Dd])/'
-      pivot_on: [host]
-      window: 1h
+  # Behaviour-targeted hunts the engine runs around the alert (not a sweep).
+  - name: Payload staged into /dev/shm or /tmp (downloaded, copied or decoded into RAM)
+    query: (data_process_exec_process_binary:/.*\/([Ww][Gg][Ee][Tt]|[Cc][Uu][Rr][Ll]|[Cc][Pp]|[Mm][Vv]|[Ss][Cc][Pp]|[Dd][Dd]|[Tt][Ee][Ee]|[Bb][Aa][Ss][Ee]64|[Oo][Pp][Ee][Nn][Ss][Ss][Ll])/) AND (data_process_exec_process_arguments:/.*\/[Dd][Ee][Vv]\/[Ss][Hh][Mm]\/.*/ OR data_process_exec_process_arguments:/.*\/[Tt][Mm][Pp]\/.*/)
+    pivot_on:
+    - host
+    window: 2h
+  - name: chmod arming a file in /dev/shm or /tmp (execute bit on the staged payload)
+    query: data_process_exec_process_binary:/.*\/[Cc][Hh][Mm][Oo][Dd]/ AND (data_process_exec_process_arguments:/.*\/[Dd][Ee][Vv]\/[Ss][Hh][Mm]\/.*/ OR data_process_exec_process_arguments:/.*\/[Tt][Mm][Pp]\/.*/)
+    pivot_on:
+    - host
+    window: 1h
+  - name: Web-server or app-server process spawning a shell/interpreter (webshell foothold)
+    query: data_process_exec_parent_binary:/.*\/([Nn][Gg][Ii][Nn][Xx]|[Aa][Pp][Aa][Cc][Hh][Ee]2|[Hh][Tt][Tt][Pp][Dd]|[Ll][Ii][Gg][Hh][Tt][Tt][Pp][Dd]|[Pp][Hh][Pp]-[Ff][Pp][Mm]|[Tt][Oo][Mm][Cc][Aa][Tt]|[Jj][Aa][Vv][Aa]|[Nn][Oo][Dd][Ee])/ AND data_process_exec_process_binary:/.*\/([Bb][Aa][Ss][Hh]|[Ss][Hh]|[Dd][Aa][Ss][Hh]|[Zz][Ss][Hh]|[Pp][Yy][Tt][Hh][Oo][Nn]3?|[Pp][Ee][Rr][Ll])/
+    pivot_on:
+    - host
+    window: 4h
+  - name: Other fileless / staging-directory executions on this host (shm, tmp, var/tmp, run/shm)
+    query: data_process_exec_process_binary:/\/[Dd][Ee][Vv]\/[Ss][Hh][Mm]\/.*/ OR data_process_exec_process_binary:/\/[Tt][Mm][Pp]\/.*/ OR data_process_exec_process_binary:/\/[Vv][Aa][Rr]\/[Tt][Mm][Pp]\/.*/ OR data_process_exec_process_binary:/\/[Rr][Uu][Nn]\/[Ss][Hh][Mm]\/.*/ OR (data_process_exec_process_binary:/.*\/([Bb][Aa][Ss][Hh]|[Ss][Hh]|[Pp][Yy][Tt][Hh][Oo][Nn]3?|[Pp][Ee][Rr][Ll])/ AND data_process_exec_process_arguments:/.*\/[Dd][Ee][Vv]\/[Ss][Hh][Mm]\/.*/)
+    pivot_on:
+    - host
+    window: 2h
+  - name: Follow-on C2 / reverse-shell indicators on this host (nc/ncat/socat, /dev/tcp, pty.spawn)
+    query: data_process_exec_process_binary:/.*\/([Nn][Cc]|[Nn][Cc][Aa][Tt]|[Nn][Ee][Tt][Cc][Aa][Tt]|[Ss][Oo][Cc][Aa][Tt])/ OR data_process_exec_process_arguments:/.*\/[Dd][Ee][Vv]\/[Tt][Cc][Pp]\/.*/ OR data_process_exec_process_arguments:/.*\/[Dd][Ee][Vv]\/[Uu][Dd][Pp]\/.*/ OR data_process_exec_process_arguments:/.*[Pp][Tt][Yy]\.[Ss][Pp][Aa][Ww][Nn].*/ OR data_process_exec_process_arguments:/.*[Ss][Oo][Cc][Kk][Ee][Tt]\.[Ss][Oo][Cc][Kk][Ee][Tt].*/
+    pivot_on:
+    - host
+    window: 2h

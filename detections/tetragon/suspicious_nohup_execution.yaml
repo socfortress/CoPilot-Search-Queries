@@ -137,23 +137,58 @@ graylog:
   query: data_process_exec_process_binary:/.*\/[Nn][Oo][Hh][Uu][Pp]/ AND data_process_exec_process_arguments:/.*\/[Tt][Mm][Pp]\/.*/
 
 correlation:
-  # Authored by the correlation engine for review.
+  # Authored per-rule (behaviour-researched) for the correlation engine. Related CoPilot
+  # Searches + telemetry pivots to run around an alert, scoped to its host/user/ip/domain.
+  related_rules:
+  - id: cf610c15-ed71-46e1-bdf8-2bd1a99de6c4
+    name: Download File To Potentially Suspicious Directory Via Wget
+    reason: 'Precursor/delivery: wget pulling a file into /tmp is how the binary this nohup launches arrives on the host. In a GobRAT-style loader the download and the nohup launch fire minutes apart on the same host.'
+  - id: a2d9e2f3-0f43-4c7a-bcd9-9acfc0d723aa
+    name: Suspicious Download and Execute Pattern via Curl/Wget
+    reason: 'Precursor: this detection already keys on curl/wget writing to /tmp and then running it - the download-and-execute half of the same dropper sequence whose final step is nohup backgrounding the dropped /tmp binary.'
+  - id: 6419afd1-3742-47a5-a7e6-b50386cd15f8
+    name: Chmod Targeting Sensitive Directories
+    reason: 'Immediate precursor: a dropped /tmp payload must be chmod +x''d before nohup can execute it, so a chmod on a world-writable directory seconds before this alert confirms the file being launched is attacker-staged, not a system binary.'
+  - id: e34cfa0c-0a50-4210-9cb3-5632d08eb041
+    name: Potential GobRAT File Discovery Via Grep
+    reason: 'Same malware family: this rule''s references are GobRAT, whose loader greps for its apached/frpc components to avoid reinfection. Co-occurrence on the host indicates this nohup launch is GobRAT rather than a benign background job.'
+  - id: 312b42b1-bded-4441-8b58-163a3af58775
+    name: Potentially Suspicious Execution From Tmp Folder
+    reason: 'Co-occurring halves of one launch: `nohup /tmp/x` emits two Tetragon execs - nohup with a /tmp argument (this rule) and the /tmp binary itself (this detection) - so both firing confirms the backgrounded process runs directly out of /tmp.'
+  - id: 2fade0b6-7423-4835-9d4f-335b39b83867
+    name: Shell Execution Of Process Located In Tmp Directory
+    reason: 'Follow-on confirmation: when the nohup''d /tmp binary is a loader/RAT it spawns shells, so a child whose parent_binary is in /tmp right after this alert shows the dropped payload is interactive and actively operating, not a one-shot tool.'
+  - id: 6b14bac8-3e3a-4324-8109-42f0546a347f
+    name: Scheduled Cron Task/Job - Linux
+    reason: 'Follow-on persistence: after backgrounding the implant, GobRAT-class droppers install a cron job (this rule even keys on crontab writing to /tmp) so it survives reboot; expect it within hours of the nohup launch on the same host.'
+  - id: 9069ea3c-b213-4c52-be13-86506a227ab1
+    name: Linux Crypto Mining Indicators
+    reason: 'Likely payload/impact: the single most common binary launched as `nohup /tmp/<file> &` on Linux is a long-running cryptominer, so mining-argument execution on the same host identifies what the backgrounded process actually is.'
+  window: 2h
   enrichment_searches:
-  # Rule-specific telemetry pivots the engine runs around an alert from this rule,
-  # scoped to the alert's host/user/IP within the window (behaviour-targeted, not a sweep).
-    - name: "Other executions of this tool-set on this host (any arguments)"
-      query: 'data_process_exec_process_binary:/.*(\/[Nn][Oo][Hh][Uu][Pp])/'
-      pivot_on: [host]
-      window: 2h
-    - name: "Persistence via cron / systemd / shell profiles on this host"
-      query: '((data_process_exec_process_binary:/.*(\/[Cc][Rr][Oo][Nn][Tt][Aa][Bb]|\/[Ss][Yy][Ss][Tt][Ee][Mm][Cc][Tt][Ll]|\/[Aa][Tt]|\/[Uu][Pp][Dd][Aa][Tt][Ee]-[Rr][Cc]\.[Dd])/) OR (data_process_exec_process_arguments:/.*\/[Ee][Tt][Cc]\/[Cc][Rr][Oo][Nn].*/) OR (data_process_exec_process_arguments:/.*\/[Ee][Tt][Cc]\/[Ss][Yy][Ss][Tt][Ee][Mm][Dd].*/) OR (data_process_exec_process_arguments:/.*[Rr][Cc]\.[Ll][Oo][Cc][Aa][Ll].*/) OR (data_process_exec_process_arguments:/.*\.[Bb][Aa][Ss][Hh][Rr][Cc].*/) OR (data_process_exec_process_arguments:/.*\.[Bb][Aa][Ss][Hh]_[Pp][Rr][Oo][Ff][Ii][Ll][Ee].*/) OR (data_process_exec_process_arguments:/.*\/[Ee][Tt][Cc]\/[Pp][Rr][Oo][Ff][Ii][Ll][Ee].*/) OR (data_process_exec_process_arguments:/.*[Aa][Uu][Tt][Hh][Oo][Rr][Ii][Zz][Ee][Dd]_[Kk][Ee][Yy][Ss].*/) OR (data_process_exec_process_arguments:/.*\/[Ee][Tt][Cc]\/[Ii][Nn][Ii][Tt]\.[Dd].*/))'
-      pivot_on: [host]
-      window: 4h
-    - name: "Shell / interpreter execution on this host"
-      query: '((data_process_exec_process_binary:/.*(\/[Bb][Aa][Ss][Hh]|\/[Ss][Hh]|\/[Dd][Aa][Ss][Hh]|\/[Zz][Ss][Hh]|\/[Kk][Ss][Hh]|\/[Aa][Ss][Hh]|\/[Bb][Uu][Ss][Yy][Bb][Oo][Xx])/) OR (data_process_exec_process_binary:/.*(\/[Pp][Yy][Tt][Hh][Oo][Nn]|\/[Pp][Yy][Tt][Hh][Oo][Nn]3|\/[Pp][Ee][Rr][Ll]|\/[Rr][Uu][Bb][Yy]|\/[Pp][Hh][Pp]|\/[Nn][Oo][Dd][Ee]|\/[Ll][Uu][Aa]|\/[Aa][Ww][Kk])/))'
-      pivot_on: [host]
-      window: 1h
-    - name: "Reconnaissance commands on this host"
-      query: 'data_process_exec_process_binary:/.*(\/[Ww][Hh][Oo][Aa][Mm][Ii]|\/[Ii][Dd]|\/[Uu][Nn][Aa][Mm][Ee]|\/[Hh][Oo][Ss][Tt][Nn][Aa][Mm][Ee]|\/[Hh][Oo][Ss][Tt][Nn][Aa][Mm][Ee][Cc][Tt][Ll]|\/[Ss][Ss]|\/[Nn][Ee][Tt][Ss][Tt][Aa][Tt]|\/[Ii][Ff][Cc][Oo][Nn][Ff][Ii][Gg]|\/[Aa][Rr][Pp]|\/[Ww]|\/[Ww][Hh][Oo]|\/[Ll][Aa][Ss][Tt]|\/[Ll][Ss][Oo][Ff]|\/[Nn][Mm][Aa][Pp]|\/[Dd][Ii][Gg]|\/[Ff][Ii][Nn][Dd])/'
-      pivot_on: [host]
-      window: 1h
+  # Behaviour-targeted hunts the engine runs around the alert (not a sweep).
+  - name: Payload delivery - download tools writing into world-writable paths
+    query: ((data_process_exec_process_binary:/.*\/([Ww][Gg][Ee][Tt]|[Cc][Uu][Rr][Ll]|[Tt][Ff][Tt][Pp]|[Ff][Tt][Pp][Gg][Ee][Tt])/) AND (data_process_exec_process_arguments:/.*\/([Tt][Mm][Pp]|[Vv][Aa][Rr]\/[Tt][Mm][Pp]|[Dd][Ee][Vv]\/[Ss][Hh][Mm])\/.*/))
+    pivot_on:
+    - host
+    window: 4h
+  - name: Dropped payload armed - chmod setting exec bit in a world-writable path
+    query: ((data_process_exec_process_binary:/.*\/[Cc][Hh][Mm][Oo][Dd]/) AND (data_process_exec_process_arguments:/.*([+][Xx]|[0-7][0-7][0-7]).*/) AND (data_process_exec_process_arguments:/.*\/([Tt][Mm][Pp]|[Vv][Aa][Rr]\/[Tt][Mm][Pp]|[Dd][Ee][Vv]\/[Ss][Hh][Mm])\/.*/))
+    pivot_on:
+    - host
+    window: 4h
+  - name: Execution out of world-writable paths - the dropped payload or its children
+    query: ((data_process_exec_process_binary:/.*\/([Tt][Mm][Pp]|[Vv][Aa][Rr]\/[Tt][Mm][Pp])\/.*/) OR (data_process_exec_process_binary:/\/[Dd][Ee][Vv]\/[Ss][Hh][Mm]\/.*/) OR (data_process_exec_parent_binary:/.*\/([Tt][Mm][Pp]|[Vv][Aa][Rr]\/[Tt][Mm][Pp])\/.*/) OR (data_process_exec_parent_binary:/\/[Dd][Ee][Vv]\/[Ss][Hh][Mm]\/.*/))
+    pivot_on:
+    - host
+    window: 2h
+  - name: Persistence established after launch - cron, systemd, init, profile, SSH keys
+    query: ((data_process_exec_process_binary:/.*\/([Cc][Rr][Oo][Nn][Tt][Aa][Bb]|[Ss][Yy][Ss][Tt][Ee][Mm][Cc][Tt][Ll]|[Aa][Tt]|[Uu][Pp][Dd][Aa][Tt][Ee]-[Rr][Cc]\.[Dd])/) OR (data_process_exec_process_arguments:/.*\/[Ee][Tt][Cc]\/([Cc][Rr][Oo][Nn]|[Ss][Yy][Ss][Tt][Ee][Mm][Dd]|[Ii][Nn][Ii][Tt]\.[Dd]|[Pp][Rr][Oo][Ff][Ii][Ll][Ee]).*/) OR (data_process_exec_process_arguments:/.*([Rr][Cc]\.[Ll][Oo][Cc][Aa][Ll]|\.[Bb][Aa][Ss][Hh][Rr][Cc]|\.[Bb][Aa][Ss][Hh]_[Pp][Rr][Oo][Ff][Ii][Ll][Ee]|[Aa][Uu][Tt][Hh][Oo][Rr][Ii][Zz][Ee][Dd]_[Kk][Ee][Yy][Ss]).*/))
+    pivot_on:
+    - host
+    window: 4h
+  - name: Launched implant behavior - reverse shell / remote-shell & C2 tooling
+    query: ((data_process_exec_process_binary:/.*\/([Nn][Cc]|[Nn][Cc][Aa][Tt]|[Ss][Oo][Cc][Aa][Tt])/ AND data_process_exec_process_arguments:/.* -[Ee] .*/) OR (data_process_exec_process_arguments:/.*\/[Dd][Ee][Vv]\/[Tt][Cc][Pp]\/.*/) OR (data_process_exec_process_arguments:/.*\/[Dd][Ee][Vv]\/[Uu][Dd][Pp]\/.*/) OR (data_process_exec_process_binary:/.*\/([Bb][Aa][Ss][Hh]|[Ss][Hh])/ AND data_process_exec_process_arguments:/.* -[Ii].*/))
+    pivot_on:
+    - host
+    window: 1h

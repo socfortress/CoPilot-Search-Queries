@@ -198,25 +198,58 @@ graylog:
   query: data_process_exec_process_binary:/.*\/[Gg][Ii][Tt]/ AND data_process_exec_process_arguments:/.* [Cc][Ll][Oo][Nn][Ee] .*/ AND (data_process_exec_process_arguments:/.*[Ee][Xx][Pp][Ll][Oo][Ii][Tt].*/ OR data_process_exec_process_arguments:/.*[Vv][Uu][Ll][Nn][Ss].*/ OR data_process_exec_process_arguments:/.*[Vv][Uu][Ll][Nn][Ee][Rr][Aa][Bb][Ii][Ll][Ii][Tt][Yy].*/ OR data_process_exec_process_arguments:/.*[Rr][Cc][Ee].*/ OR data_process_exec_process_arguments:/.*[Rr][Ee][Mm][Oo][Tt][Ee][Cc][Oo][Dd][Ee][Ee][Xx][Ee][Cc][Uu][Tt][Ii][Oo][Nn].*/ OR data_process_exec_process_arguments:/.*[Ii][Nn][Vv][Oo][Kk][Ee]-.*/ OR data_process_exec_process_arguments:/.*[Cc][Vv][Ee]-.*/ OR data_process_exec_process_arguments:/.*[Pp][Oo][Cc]-.*/ OR data_process_exec_process_arguments:/.*[Pp][Rr][Oo][Oo][Ff][Oo][Ff][Cc][Oo][Nn][Cc][Ee][Pp][Tt].*/ OR data_process_exec_process_arguments:/.*[Pp][Rr][Oo][Xx][Yy][Ss][Hh][Ee][Ll][Ll].*/ OR data_process_exec_process_arguments:/.*[Ll][Oo][Gg]4[Ss][Hh][Ee][Ll][Ll].*/ OR data_process_exec_process_arguments:/.*[Ee][Tt][Ee][Rr][Nn][Aa][Ll][Bb][Ll][Uu][Ee].*/ OR data_process_exec_process_arguments:/.*[Ee][Tt][Ee][Rr][Nn][Aa][Ll]-[Bb][Ll][Uu][Ee].*/ OR data_process_exec_process_arguments:/.*[Mm][Ss]17-.*/)
 
 correlation:
-  # Authored by the correlation engine for review. Related CoPilot Searches to run
-  # around an alert from this rule, scoped to the same host/user/IP within the window.
+  # Authored per-rule (behaviour-researched) for the correlation engine. Related CoPilot
+  # Searches + telemetry pivots to run around an alert, scoped to its host/user/ip/domain.
   related_rules:
-    - id: 0f79c4d2-4e1f-4683-9c36-b5469a665e06
-      name: "Access of Sudoers File Content"
-      reason: "next kill-chain tactic: Reconnaissance"
-  window: 1h
+  - id: a2d9e2f3-0f43-4c7a-bcd9-9acfc0d723aa
+    name: Suspicious Download and Execute Pattern via Curl/Wget
+    reason: 'Co-occurring ingress in the same staging burst: git clone is one fetch method; this catches the same operator curl/wget-ing payloads into /tmp or /dev/shm and running them via ''sh -c''. If it co-fires on this host, the exploit clone is confirmed hands-on-keyboard tooling staging, not a developer pulling a repo.'
+  - id: cf610c15-ed71-46e1-bdf8-2bd1a99de6c4
+    name: Download File To Potentially Suspicious Directory Via Wget
+    reason: 'The other half of the download burst: wget -O /tmp/<file> dropping additional exploit code or payloads next to the cloned repo. Pair it with this alert to see the full set of tooling the operator pulled onto the foothold.'
+  - id: 700fb7e8-2981-401c-8430-be58e189e741
+    name: Suspicious Package Installed - Linux
+    reason: 'Same captured-attacker workflow (this rule and that one both derive from the Koczwara attacker-shell-history reference): after cloning the PoC, the operator apt/yum-installs offensive network tooling (nmap, netcat, socat, proxychains) to arm and pivot from the foothold. Strong confirmation the clone is adversarial.'
+  - id: 30bcce26-51c5-49f2-99c8-7b59e3af36c7
+    name: Execution Of Script Located In Potentially Suspicious Directory
+    reason: 'Detonation step for a script PoC: bash/sh -c executing a script under /tmp - i.e. the cloned exploit actually being run. Turns ''they downloaded exploit code'' into ''they ran it on this host''.'
+  - id: 312b42b1-bded-4441-8b58-163a3af58775
+    name: Potentially Suspicious Execution From Tmp Folder
+    reason: 'Detonation step for a compiled/binary PoC: a process whose own path is under /tmp/ executes - the built or dropped exploit binary running out of the clone/working directory, the payoff that confirms the staged exploit was actually launched.'
+  - id: 0cf7a157-8879-41a2-8f55-388dd23746b7
+    name: Linux Recon Indicators
+    reason: 'Privilege-escalation targeting: ''find / -perm -4000'' SUID-binary hunting (and .htpasswd discovery) is how the operator picks the local privesc path that the just-cloned CVE/exploit PoC is meant to abuse.'
+  - id: 0f79c4d2-4e1f-4683-9c36-b5469a665e06
+    name: Access of Sudoers File Content
+    reason: 'Privilege-escalation triage: reading /etc/sudoers (via cat/grep/less) to enumerate who has sudo - the host assessment that selects which local exploit, freshly cloned, to weaponize for root.'
+  - id: 47b3bbd4-1bf7-48cc-84ab-995362aaa75a
+    name: Shell Execution via Git - Linux
+    reason: 'Same host, same binary abused a second way: git''s pager (''git -p help'') GTFOBins breakout spawning an interactive shell. On a host where git is already being used to clone exploit code, this is the operator upgrading a restricted/limited foothold shell so they can build and run that exploit.'
+  window: 2h
   enrichment_searches:
-  # Rule-specific telemetry pivots the engine runs around an alert from this rule,
-  # scoped to the alert's host/user/IP within the window (behaviour-targeted, not a sweep).
-    - name: "Privilege-escalation tooling executed on this host"
-      query: 'data_process_exec_process_binary:/.*(\/[Ss][Uu][Dd][Oo]|\/[Ss][Uu]|\/[Pp][Kk][Ee][Xx][Ee][Cc]|\/[Dd][Oo][Aa][Ss]|\/[Ss][Ee][Tt][Cc][Aa][Pp]|\/[Cc][Hh][Ss][Hh]|\/[Nn][Ee][Ww][Gg][Rr][Pp])/'
-      pivot_on: [host]
-      window: 2h
-    - name: "Shell / interpreter execution on this host"
-      query: '((data_process_exec_process_binary:/.*(\/[Bb][Aa][Ss][Hh]|\/[Ss][Hh]|\/[Dd][Aa][Ss][Hh]|\/[Zz][Ss][Hh]|\/[Kk][Ss][Hh]|\/[Aa][Ss][Hh]|\/[Bb][Uu][Ss][Yy][Bb][Oo][Xx])/) OR (data_process_exec_process_binary:/.*(\/[Pp][Yy][Tt][Hh][Oo][Nn]|\/[Pp][Yy][Tt][Hh][Oo][Nn]3|\/[Pp][Ee][Rr][Ll]|\/[Rr][Uu][Bb][Yy]|\/[Pp][Hh][Pp]|\/[Nn][Oo][Dd][Ee]|\/[Ll][Uu][Aa]|\/[Aa][Ww][Kk])/))'
-      pivot_on: [host]
-      window: 1h
-    - name: "Reconnaissance commands on this host"
-      query: 'data_process_exec_process_binary:/.*(\/[Ww][Hh][Oo][Aa][Mm][Ii]|\/[Ii][Dd]|\/[Uu][Nn][Aa][Mm][Ee]|\/[Hh][Oo][Ss][Tt][Nn][Aa][Mm][Ee]|\/[Hh][Oo][Ss][Tt][Nn][Aa][Mm][Ee][Cc][Tt][Ll]|\/[Ss][Ss]|\/[Nn][Ee][Tt][Ss][Tt][Aa][Tt]|\/[Ii][Ff][Cc][Oo][Nn][Ff][Ii][Gg]|\/[Aa][Rr][Pp]|\/[Ww]|\/[Ww][Hh][Oo]|\/[Ll][Aa][Ss][Tt]|\/[Ll][Ss][Oo][Ff]|\/[Nn][Mm][Aa][Pp]|\/[Dd][Ii][Gg]|\/[Ff][Ii][Nn][Dd])/'
-      pivot_on: [host]
-      window: 1h
+  # Behaviour-targeted hunts the engine runs around the alert (not a sweep).
+  - name: Other offensive-tooling git clones on this host (metasploit/impacket/linpeas/pspy/seclists/exploitdb)
+    query: data_process_exec_process_binary:/.*\/[Gg][Ii][Tt]/ AND data_process_exec_process_arguments:/.* [Cc][Ll][Oo][Nn][Ee] .*/ AND (data_process_exec_process_arguments:/.*[Mm][Ee][Tt][Aa][Ss][Pp][Ll][Oo][Ii][Tt].*/ OR data_process_exec_process_arguments:/.*[Ii][Mm][Pp][Aa][Cc][Kk][Ee][Tt].*/ OR data_process_exec_process_arguments:/.*[Ll][Ii][Nn][Pp][Ee][Aa][Ss].*/ OR data_process_exec_process_arguments:/.*[Pp][Ee][Aa][Ss][Ss].*/ OR data_process_exec_process_arguments:/.*[Pp][Ss][Pp][Yy].*/ OR data_process_exec_process_arguments:/.*[Ss][Ee][Cc][Ll][Ii][Ss][Tt][Ss].*/ OR data_process_exec_process_arguments:/.*[Pp][Rr][Ii][Vv][Ee][Ss][Cc].*/ OR data_process_exec_process_arguments:/.*[Pp][Aa][Yy][Ll][Oo][Aa][Dd].*/ OR data_process_exec_process_arguments:/.*[Ss][Hh][Ee][Ll][Ll][Cc][Oo][Dd][Ee].*/ OR data_process_exec_process_arguments:/.*[Ee][Xx][Pp][Ll][Oo][Ii][Tt][Dd][Bb].*/)
+    pivot_on:
+    - host
+    window: 2h
+  - name: Compiler / build-tool execution on this host (building the cloned exploit)
+    query: data_process_exec_process_binary:/.*(\/[Gg][Cc][Cc]|\/[Gg]\+\+|\/[Cc][Cc]|\/[Cc][Ll][Aa][Nn][Gg]|\/[Mm][Aa][Kk][Ee]|\/[Cc][Mm][Aa][Kk][Ee]|\/[Gg][Oo]|\/[Rr][Uu][Ss][Tt][Cc])/
+    pivot_on:
+    - host
+    window: 2h
+  - name: Privilege-escalation tooling executed on this host (sudo/su/pkexec/doas/setcap)
+    query: data_process_exec_process_binary:/.*(\/[Ss][Uu][Dd][Oo]|\/[Ss][Uu]|\/[Pp][Kk][Ee][Xx][Ee][Cc]|\/[Dd][Oo][Aa][Ss]|\/[Ss][Ee][Tt][Cc][Aa][Pp]|\/[Cc][Hh][Ss][Hh]|\/[Nn][Ee][Ww][Gg][Rr][Pp])/
+    pivot_on:
+    - host
+    window: 2h
+  - name: chmod setting the execute bit on the cloned/dropped payload
+    query: data_process_exec_process_binary:/.*\/[Cc][Hh][Mm][Oo][Dd]/ AND (data_process_exec_process_arguments:/.*\+[Xx].*/ OR data_process_exec_process_arguments:/.*7[0-7][0-7].*/)
+    pivot_on:
+    - host
+    window: 1h
+  - name: Reverse-shell / C2 indicators on this host (nc/ncat/netcat/socat, /dev/tcp, pty.spawn)
+    query: data_process_exec_process_binary:/.*(\/[Nn][Cc]|\/[Nn][Cc][Aa][Tt]|\/[Nn][Ee][Tt][Cc][Aa][Tt]|\/[Ss][Oo][Cc][Aa][Tt])/ OR data_process_exec_process_arguments:/.*\/[Dd][Ee][Vv]\/[Tt][Cc][Pp]\/.*/ OR data_process_exec_process_arguments:/.*[Pp][Tt][Yy]\.[Ss][Pp][Aa][Ww][Nn].*/
+    pivot_on:
+    - host
+    window: 2h

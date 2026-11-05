@@ -215,23 +215,58 @@ graylog:
   query: (data_process_exec_process_binary:/.*\/[Rr][Ss][Yy][Nn][Cc]/ OR data_process_exec_process_binary:/.*\/[Rr][Ss][Yy][Nn][Cc][Dd]/) AND data_process_exec_process_arguments:/.* -[Ee] .*/ AND (data_process_exec_process_arguments:/.*\/[Aa][Ss][Hh] .*/ OR data_process_exec_process_arguments:/.*\/[Bb][Aa][Ss][Hh] .*/ OR data_process_exec_process_arguments:/.*\/[Dd][Aa][Ss][Hh] .*/ OR data_process_exec_process_arguments:/.*\/[Cc][Ss][Hh] .*/ OR data_process_exec_process_arguments:/.*\/[Ss][Hh] .*/ OR data_process_exec_process_arguments:/.*\/[Zz][Ss][Hh] .*/ OR data_process_exec_process_arguments:/.*\/[Tt][Cc][Ss][Hh] .*/ OR data_process_exec_process_arguments:/.*\/[Kk][Ss][Hh] .*/ OR data_process_exec_process_arguments:/.*'[Aa][Ss][Hh] .*/ OR data_process_exec_process_arguments:/.*'[Bb][Aa][Ss][Hh] .*/ OR data_process_exec_process_arguments:/.*'[Dd][Aa][Ss][Hh] .*/ OR data_process_exec_process_arguments:/.*'[Cc][Ss][Hh] .*/ OR data_process_exec_process_arguments:/.*'[Ss][Hh] .*/ OR data_process_exec_process_arguments:/.*'[Zz][Ss][Hh] .*/ OR data_process_exec_process_arguments:/.*'[Tt][Cc][Ss][Hh] .*/ OR data_process_exec_process_arguments:/.*'[Kk][Ss][Hh] .*/)
 
 correlation:
-  # Authored by the correlation engine for review.
+  # Authored per-rule (behaviour-researched) for the correlation engine. Related CoPilot
+  # Searches + telemetry pivots to run around an alert, scoped to its host/user/ip/domain.
+  related_rules:
+  - id: 297241f3-8108-4b3a-8c15-2dda9f844594
+    name: Suspicious Invocation of Shell via Rsync
+    reason: 'The complementary half of ''rsync spawned a shell'': this target catches rsync run WITH ''-e <shell>'' (the GTFOBins/manual breakout), while this rule catches a shell as a child of rsync WITHOUT ''-e'' (CVE-2024-12084 rsync RCE). Same binary, same anomaly; co-firing on one host within minutes is near-certain true-positive confirmation and each catches a variant the other misses.'
+  - id: 8344c0e5-5783-47cc-9cf9-a0f7fd03e6cf
+    name: Potential Discovery Activity Using Find - Linux
+    reason: 'Textbook precursor: ''find / -perm -4000 / -perm -u=s'' SUID enumeration is exactly how an attacker discovers that rsync carries the SUID bit and is therefore abusable for a root GTFOBins breakout. Seeing this on the same host shortly before the rsync shell explains WHY rsync was chosen.'
+  - id: 0f79c4d2-4e1f-4683-9c36-b5469a665e06
+    name: Access of Sudoers File Content
+    reason: 'Precursor that locates the escalation path: reading /etc/sudoers reveals a NOPASSWD/sudo-allowed rsync, so the subsequent ''rsync -e <shell>'' runs as root. Confirms the breakout targeted a known-escalatable rsync rather than being benign admin use.'
+  - id: 6adfbf8f-52be-4444-9bac-81b539624146
+    name: Shell Execution via Find - Linux
+    reason: Sibling GTFOBins restricted-shell breakout ('find ... -exec /bin/sh'). An actor probing a host for an abusable SUID/sudo binary routinely tries several GTFOBins in quick succession, so a find-breakout on the same host within the window is the same hands-on privesc attempt, not coincidence.
+  - id: 7ab8f73a-fcff-428b-84aa-6a5ff7877dea
+    name: Vim GTFOBin Abuse - Linux
+    reason: Sibling GTFOBins breakout via an interactive editor (':!sh', ':py'), one of the most common restricted-shell escapes tried alongside rsync. Co-occurrence strengthens the conclusion that the operator is sweeping GTFOBins binaries on this host to escape or escalate.
+  - id: bed978f8-7f3a-432b-82c5-9286a9b3031a
+    name: Shell Invocation via Env Command - Linux
+    reason: Sibling GTFOBins breakout ('env /bin/sh') from the same restricted-environment-escape playbook. Like the rsync trick it uses an allowed utility to spawn an interpreter, so its presence on the same host in the window points to the same jailbreak/privesc objective.
+  - id: f74107df-b6c6-4e80-bf00-4170b658162b
+    name: Sudo Privilege Escalation CVE-2019-14287
+    reason: Co-occurring privilege-escalation attempt by a different route ('sudo -u#-1' to run as root). The rsync GTFOBins trick is one way to reach root; seeing this sudo-CVE abuse on the same host around the same time shows the actor actively trying multiple escalation paths.
+  - id: 0cf7a157-8879-41a2-8f55-388dd23746b7
+    name: Linux Recon Indicators
+    reason: Broad precursor recon (whoami/id, sudoers listing, credential-in-file searches - T1592.004/T1552.001) that typically runs before a privilege-escalation breakout. Ties together the enumeration phase that set up the choice of rsync as the escalation vector.
+  window: 2h
   enrichment_searches:
-  # Rule-specific telemetry pivots the engine runs around an alert from this rule,
-  # scoped to the alert's host/user/IP within the window (behaviour-targeted, not a sweep).
-    - name: "Shell / interpreter execution on this host"
-      query: '((data_process_exec_process_binary:/.*(\/[Bb][Aa][Ss][Hh]|\/[Ss][Hh]|\/[Dd][Aa][Ss][Hh]|\/[Zz][Ss][Hh]|\/[Kk][Ss][Hh]|\/[Aa][Ss][Hh]|\/[Bb][Uu][Ss][Yy][Bb][Oo][Xx])/) OR (data_process_exec_process_binary:/.*(\/[Pp][Yy][Tt][Hh][Oo][Nn]|\/[Pp][Yy][Tt][Hh][Oo][Nn]3|\/[Pp][Ee][Rr][Ll]|\/[Rr][Uu][Bb][Yy]|\/[Pp][Hh][Pp]|\/[Nn][Oo][Dd][Ee]|\/[Ll][Uu][Aa]|\/[Aa][Ww][Kk])/))'
-      pivot_on: [host]
-      window: 1h
-    - name: "Other executions of this tool-set on this host (any arguments)"
-      query: 'data_process_exec_process_binary:/.*(\/[Rr][Ss][Yy][Nn][Cc]|\/[Rr][Ss][Yy][Nn][Cc][Dd])/'
-      pivot_on: [host]
-      window: 2h
-    - name: "Persistence via cron / systemd / shell profiles on this host"
-      query: '((data_process_exec_process_binary:/.*(\/[Cc][Rr][Oo][Nn][Tt][Aa][Bb]|\/[Ss][Yy][Ss][Tt][Ee][Mm][Cc][Tt][Ll]|\/[Aa][Tt]|\/[Uu][Pp][Dd][Aa][Tt][Ee]-[Rr][Cc]\.[Dd])/) OR (data_process_exec_process_arguments:/.*\/[Ee][Tt][Cc]\/[Cc][Rr][Oo][Nn].*/) OR (data_process_exec_process_arguments:/.*\/[Ee][Tt][Cc]\/[Ss][Yy][Ss][Tt][Ee][Mm][Dd].*/) OR (data_process_exec_process_arguments:/.*[Rr][Cc]\.[Ll][Oo][Cc][Aa][Ll].*/) OR (data_process_exec_process_arguments:/.*\.[Bb][Aa][Ss][Hh][Rr][Cc].*/) OR (data_process_exec_process_arguments:/.*\.[Bb][Aa][Ss][Hh]_[Pp][Rr][Oo][Ff][Ii][Ll][Ee].*/) OR (data_process_exec_process_arguments:/.*\/[Ee][Tt][Cc]\/[Pp][Rr][Oo][Ff][Ii][Ll][Ee].*/) OR (data_process_exec_process_arguments:/.*[Aa][Uu][Tt][Hh][Oo][Rr][Ii][Zz][Ee][Dd]_[Kk][Ee][Yy][Ss].*/) OR (data_process_exec_process_arguments:/.*\/[Ee][Tt][Cc]\/[Ii][Nn][Ii][Tt]\.[Dd].*/))'
-      pivot_on: [host]
-      window: 4h
-    - name: "Reconnaissance commands on this host"
-      query: 'data_process_exec_process_binary:/.*(\/[Ww][Hh][Oo][Aa][Mm][Ii]|\/[Ii][Dd]|\/[Uu][Nn][Aa][Mm][Ee]|\/[Hh][Oo][Ss][Tt][Nn][Aa][Mm][Ee]|\/[Hh][Oo][Ss][Tt][Nn][Aa][Mm][Ee][Cc][Tt][Ll]|\/[Ss][Ss]|\/[Nn][Ee][Tt][Ss][Tt][Aa][Tt]|\/[Ii][Ff][Cc][Oo][Nn][Ff][Ii][Gg]|\/[Aa][Rr][Pp]|\/[Ww]|\/[Ww][Hh][Oo]|\/[Ll][Aa][Ss][Tt]|\/[Ll][Ss][Oo][Ff]|\/[Nn][Mm][Aa][Pp]|\/[Dd][Ii][Gg]|\/[Ff][Ii][Nn][Dd])/'
-      pivot_on: [host]
-      window: 1h
+  # Behaviour-targeted hunts the engine runs around the alert (not a sweep).
+  - name: Child processes spawned by rsync on this host
+    query: data_process_exec_parent_binary:/.*(\/[Rr][Ss][Yy][Nn][Cc]|\/[Rr][Ss][Yy][Nn][Cc][Dd])/
+    pivot_on:
+    - host
+    window: 1h
+  - name: rsync executed via sudo on this host (privilege-escalation vector)
+    query: (data_process_exec_parent_binary:/.*\/[Ss][Uu][Dd][Oo]/ AND data_process_exec_process_binary:/.*(\/[Rr][Ss][Yy][Nn][Cc]|\/[Rr][Ss][Yy][Nn][Cc][Dd])/) OR (data_process_exec_process_binary:/.*\/[Ss][Uu][Dd][Oo]/ AND data_process_exec_process_arguments:/.*[Rr][Ss][Yy][Nn][Cc].*/)
+    pivot_on:
+    - host
+    window: 2h
+  - name: SUID / sudo privilege-escalation enumeration on this host
+    query: (data_process_exec_process_binary:/.*\/[Ff][Ii][Nn][Dd]/ AND data_process_exec_process_arguments:/.*-[Pp][Ee][Rr][Mm] .*/) OR (data_process_exec_process_binary:/.*\/[Ss][Uu][Dd][Oo]/ AND data_process_exec_process_arguments:/.* -[Ll].*/) OR (data_process_exec_process_arguments:/.*\/[Ee][Tt][Cc]\/[Ss][Uu][Dd][Oo][Ee][Rr][Ss].*/)
+    pivot_on:
+    - host
+    window: 4h
+  - name: Shell spawned by other GTFOBins/LOLBin utilities on this host
+    query: data_process_exec_process_binary:/.*(\/[Aa][Ss][Hh]|\/[Bb][Aa][Ss][Hh]|\/[Dd][Aa][Ss][Hh]|\/[Cc][Ss][Hh]|\/[Kk][Ss][Hh]|\/[Ss][Hh]|\/[Tt][Cc][Ss][Hh]|\/[Zz][Ss][Hh])/ AND data_process_exec_parent_binary:/.*(\/[Ff][Ii][Nn][Dd]|\/[Gg][Ii][Tt]|\/[Nn][Ii][Cc][Ee]|\/[Vv][Ii][Mm]|\/[Ee][Nn][Vv]|\/[Aa][Ww][Kk]|\/[Tt][Aa][Rr]|\/[Cc][Aa][Pp][Ss][Hh]|\/[Ff][Ll][Oo][Cc][Kk]|\/[Gg][Cc][Cc])/
+    pivot_on:
+    - host
+    window: 2h
+  - name: Post-breakout credential access / persistence / log tampering on this host
+    query: (data_process_exec_process_arguments:/.*\/[Ee][Tt][Cc]\/[Ss][Hh][Aa][Dd][Oo][Ww].*/) OR (data_process_exec_process_arguments:/.*[Aa][Uu][Tt][Hh][Oo][Rr][Ii][Zz][Ee][Dd]_[Kk][Ee][Yy][Ss].*/) OR (data_process_exec_process_arguments:/.*\/[Ee][Tt][Cc]\/[Cc][Rr][Oo][Nn].*/) OR (data_process_exec_process_binary:/.*\/[Cc][Rr][Oo][Nn][Tt][Aa][Bb]/) OR (data_process_exec_process_arguments:/.*\.[Bb][Aa][Ss][Hh]_[Hh][Ii][Ss][Tt][Oo][Rr][Yy].*/)
+    pivot_on:
+    - host
+    window: 4h

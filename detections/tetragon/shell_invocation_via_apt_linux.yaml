@@ -149,23 +149,58 @@ graylog:
   query: (data_process_exec_process_binary:/.*\/[Aa][Pp][Tt]/ OR data_process_exec_process_binary:/.*\/[Aa][Pp][Tt]-[Gg][Ee][Tt]/) AND data_process_exec_process_arguments:/.*[Aa][Pp][Tt]::[Uu][Pp][Dd][Aa][Tt][Ee]::[Pp][Rr][Ee]-[Ii][Nn][Vv][Oo][Kk][Ee]::=.*/
 
 correlation:
-  # Authored by the correlation engine for review.
+  # Authored per-rule (behaviour-researched) for the correlation engine. Related CoPilot
+  # Searches + telemetry pivots to run around an alert, scoped to its host/user/ip/domain.
+  related_rules:
+  - id: linux-auditd-apt-get-privilege-escalation-001
+    name: Linux Auditd Apt-Get Privilege Escalation
+    reason: The exact same apt-get 'APT::Update::Pre-Invoke' breakout seen through the auditd sensor; co-firing on this host confirms the escalation is real (not a Tetragon field-parsing artifact) and pins the full sudo command line from an independent log source.
+  - id: linux-auditd-apt-privilege-escalation-001
+    name: Linux Auditd Apt Privilege Escalation
+    reason: Auditd view of the same Pre-Invoke breakout via the 'apt' wrapper rather than apt-get; corroborates this Tetragon alert and covers the variant whichever binary the operator used.
+  - id: linux-sudo-or-su-execution-001
+    name: Linux Sudo Or Su Execution
+    reason: The Pre-Invoke trick only yields root when apt is run under sudo, so a sudo/su execution on this host around the alert is the escalation vector itself and the likely 'sudo -l' enumeration that revealed apt was a permitted command.
+  - id: 0f79c4d2-4e1f-4683-9c36-b5469a665e06
+    name: Access of Sudoers File Content
+    reason: Reading /etc/sudoers to discover that apt/apt-get is a (NOPASSWD) sudo entry is the recon precursor that makes this specific breakout possible; seeing it on the same host explains how the attacker knew to abuse apt.
+  - id: 6adfbf8f-52be-4444-9bac-81b539624146
+    name: Shell Execution via Find - Linux
+    reason: find's '-exec' is the most common GTFOBins sudo-to-root breakout; an operator probing apt for a root shell routinely tries find and other sudo-able binaries on the same host, so a co-firing find breakout marks a deliberate privesc sweep, not isolated package maintenance.
+  - id: 7ab8f73a-fcff-428b-84aa-6a5ff7877dea
+    name: Vim GTFOBin Abuse - Linux
+    reason: This rule's own description covers 'break out from restricted environments', and vim's ':!'/'-c' shell escape is the canonical rbash/restricted-shell breakout the same operator would attempt alongside the apt escape to reach an unrestricted shell.
+  - id: f74107df-b6c6-4e80-bf00-4170b658162b
+    name: Sudo Privilege Escalation CVE-2019-14287
+    reason: Another sudo-abuse root escalation (the sudo -u#-1 bypass) on the same host within the window signals a focused privilege-escalation campaign rather than benign apt usage.
+  - id: 6a50f16c-3b7b-42d1-b081-0fdd3ba70a73
+    name: User Added To Root/Sudoers Group Using Usermod
+    reason: 'Immediate follow-on once the breakout yields a root shell: adding a user to the root/sudoers group with usermod cements the newly gained privileges into durable administrative access.'
+  window: 2h
   enrichment_searches:
-  # Rule-specific telemetry pivots the engine runs around an alert from this rule,
-  # scoped to the alert's host/user/IP within the window (behaviour-targeted, not a sweep).
-    - name: "File / directory discovery commands on this host"
-      query: '((data_process_exec_process_binary:/.*(\/[Ff][Ii][Nn][Dd]|\/[Ll][Oo][Cc][Aa][Tt][Ee]|\/[Ll][Ss])/) OR (data_process_exec_process_binary:/.*(\/[Ww][Hh][Oo][Aa][Mm][Ii]|\/[Ii][Dd]|\/[Uu][Nn][Aa][Mm][Ee]|\/[Hh][Oo][Ss][Tt][Nn][Aa][Mm][Ee]|\/[Hh][Oo][Ss][Tt][Nn][Aa][Mm][Ee][Cc][Tt][Ll]|\/[Ss][Ss]|\/[Nn][Ee][Tt][Ss][Tt][Aa][Tt]|\/[Ii][Ff][Cc][Oo][Nn][Ff][Ii][Gg]|\/[Aa][Rr][Pp]|\/[Ww]|\/[Ww][Hh][Oo]|\/[Ll][Aa][Ss][Tt]|\/[Ll][Ss][Oo][Ff]|\/[Nn][Mm][Aa][Pp]|\/[Dd][Ii][Gg]|\/[Ff][Ii][Nn][Dd])/))'
-      pivot_on: [host]
-      window: 1h
-    - name: "Privilege-escalation tooling executed on this host"
-      query: 'data_process_exec_process_binary:/.*(\/[Ss][Uu][Dd][Oo]|\/[Ss][Uu]|\/[Pp][Kk][Ee][Xx][Ee][Cc]|\/[Dd][Oo][Aa][Ss]|\/[Ss][Ee][Tt][Cc][Aa][Pp]|\/[Cc][Hh][Ss][Hh]|\/[Nn][Ee][Ww][Gg][Rr][Pp])/'
-      pivot_on: [host]
-      window: 2h
-    - name: "Shell / interpreter execution on this host"
-      query: '((data_process_exec_process_binary:/.*(\/[Bb][Aa][Ss][Hh]|\/[Ss][Hh]|\/[Dd][Aa][Ss][Hh]|\/[Zz][Ss][Hh]|\/[Kk][Ss][Hh]|\/[Aa][Ss][Hh]|\/[Bb][Uu][Ss][Yy][Bb][Oo][Xx])/) OR (data_process_exec_process_binary:/.*(\/[Pp][Yy][Tt][Hh][Oo][Nn]|\/[Pp][Yy][Tt][Hh][Oo][Nn]3|\/[Pp][Ee][Rr][Ll]|\/[Rr][Uu][Bb][Yy]|\/[Pp][Hh][Pp]|\/[Nn][Oo][Dd][Ee]|\/[Ll][Uu][Aa]|\/[Aa][Ww][Kk])/))'
-      pivot_on: [host]
-      window: 1h
-    - name: "Reconnaissance commands on this host"
-      query: 'data_process_exec_process_binary:/.*(\/[Ww][Hh][Oo][Aa][Mm][Ii]|\/[Ii][Dd]|\/[Uu][Nn][Aa][Mm][Ee]|\/[Hh][Oo][Ss][Tt][Nn][Aa][Mm][Ee]|\/[Hh][Oo][Ss][Tt][Nn][Aa][Mm][Ee][Cc][Tt][Ll]|\/[Ss][Ss]|\/[Nn][Ee][Tt][Ss][Tt][Aa][Tt]|\/[Ii][Ff][Cc][Oo][Nn][Ff][Ii][Gg]|\/[Aa][Rr][Pp]|\/[Ww]|\/[Ww][Hh][Oo]|\/[Ll][Aa][Ss][Tt]|\/[Ll][Ss][Oo][Ff]|\/[Nn][Mm][Aa][Pp]|\/[Dd][Ii][Gg]|\/[Ff][Ii][Nn][Dd])/'
-      pivot_on: [host]
-      window: 1h
+  # Behaviour-targeted hunts the engine runs around the alert (not a sweep).
+  - name: Shell spawned directly by apt / apt-get (breakout confirmation)
+    query: (data_process_exec_parent_binary:/.*\/[Aa][Pp][Tt]/ OR data_process_exec_parent_binary:/.*\/[Aa][Pp][Tt]-[Gg][Ee][Tt]/) AND data_process_exec_process_binary:/.*\/([Bb][Aa][Ss][Hh]|[Dd][Aa][Ss][Hh]|[Ss][Hh]|[Zz][Ss][Hh]|[Kk][Ss][Hh])/
+    pivot_on:
+    - host
+    window: 1h
+  - name: Sudo enumeration and sudo-invoked apt (escalation vector)
+    query: data_process_exec_process_binary:/.*\/[Ss][Uu][Dd][Oo]/ AND (data_process_exec_process_arguments:/.* -[Ll].*/ OR data_process_exec_process_arguments:/.*[Aa][Pp][Tt].*/)
+    pivot_on:
+    - host
+    window: 2h
+  - name: Other GTFOBins sudo breakouts on this host (campaign scope)
+    query: (data_process_exec_process_binary:/.*\/([Ff][Ii][Nn][Dd]|[Vv][Ii][Mm]|[Vv][Ii]|[Gg][Aa][Ww][Kk]|[Aa][Ww][Kk]|[Nn][Mm][Aa][Pp]|[Ll][Ee][Ss][Ss]|[Mm][Oo][Rr][Ee]|[Gg][Dd][Bb]|[Ee][Nn][Vv]|[Ff][Ll][Oo][Cc][Kk]|[Nn][Ii][Cc][Ee]|[Cc][Aa][Pp][Ss][Hh])/) AND (data_process_exec_process_arguments:/.*-[Ee][Xx][Ee][Cc].*/ OR data_process_exec_process_arguments:/.*\/[Bb][Ii][Nn]\/[Ss][Hh].*/ OR data_process_exec_process_arguments:/.*\/[Bb][Ii][Nn]\/[Bb][Aa][Ss][Hh].*/)
+    pivot_on:
+    - host
+    window: 2h
+  - name: Post-escalation account / sudoers / cron persistence
+    query: data_process_exec_process_binary:/.*\/([Uu][Ss][Ee][Rr][Aa][Dd][Dd]|[Aa][Dd][Dd][Uu][Ss][Ee][Rr]|[Uu][Ss][Ee][Rr][Mm][Oo][Dd]|[Pp][Aa][Ss][Ss][Ww][Dd]|[Cc][Hh][Pp][Aa][Ss][Ss][Ww][Dd]|[Vv][Ii][Ss][Uu][Dd][Oo]|[Cc][Rr][Oo][Nn][Tt][Aa][Bb])/
+    pivot_on:
+    - host
+    window: 4h
+  - name: Credential access to /etc/shadow or /etc/sudoers as root
+    query: (data_process_exec_process_binary:/.*\/([Cc][Aa][Tt]|[Cc][Pp]|[Ll][Ee][Ss][Ss]|[Mm][Oo][Rr][Ee]|[Hh][Ee][Aa][Dd]|[Tt][Aa][Ii][Ll]|[Gg][Rr][Ee][Pp]|[Ss][Tt][Rr][Ii][Nn][Gg][Ss]|[Vv][Ii]|[Vv][Ii][Mm]|[Nn][Aa][Nn][Oo])/) AND data_process_exec_process_arguments:/.*\/[Ee][Tt][Cc]\/([Ss][Hh][Aa][Dd][Oo][Ww]|[Gg][Ss][Hh][Aa][Dd][Oo][Ww]|[Ss][Uu][Dd][Oo][Ee][Rr][Ss]).*/
+    pivot_on:
+    - host
+    window: 2h

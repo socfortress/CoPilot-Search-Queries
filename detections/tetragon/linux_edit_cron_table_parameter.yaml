@@ -119,25 +119,55 @@ graylog:
   query: data_process_exec_process_binary:"/usr/bin/crontab" AND data_process_exec_process_arguments:/.*-e.*/ AND NOT _exists_:data_win_system_eventID AND NOT rule_groups:/.*windows.*/
 
 correlation:
-  # Authored by the correlation engine for review. Related CoPilot Searches to run
-  # around an alert from this rule, scoped to the same host/user/IP within the window.
+  # Authored per-rule (behaviour-researched) for the correlation engine. Related CoPilot
+  # Searches + telemetry pivots to run around an alert, scoped to its host/user/ip/domain.
   related_rules:
-    - id: a1b2c3d4-5e6f-7a8b-9c0d-1e2f3a4b5c6d
-      name: "Linux Kernel Module Insertion"
-      reason: "same analytic story: Linux Persistence"
-  window: 1h
+  - id: linux-edit-cron-table-parameter-001
+    name: Linux Edit Cron Table Parameter
+    reason: 'Auditd/syslog twin of this exact behaviour: it matches the same crontab invocation (including -e) through full_log, so the same interactive edit is independently confirmed by a second sensor on the host.'
+  - id: linux-auditd-crontab-listing-001
+    name: Linux Auditd Crontab Listing
+    reason: crontab -l enumerates existing jobs; attackers routinely list the current cron table immediately before modifying it, making this the common precursor to an interactive edit.
+  - id: 6b14bac8-3e3a-4324-8109-42f0546a347f
+    name: Scheduled Cron Task/Job - Linux
+    reason: Same crontab binary used non-interactively (crontab /tmp/<file>) to install a dropped cron table; the automated variant of the very persistence an interactive -e performs by hand.
+  - id: c2e234de-03a3-41e1-b39a-1e56dc17ba67
+    name: Remove Scheduled Cron Task/Job
+    reason: crontab -r wipes the crontab; cryptominers and intruders remove the existing table before (re)writing their own, so a remove frequently brackets this edit in the same cron-tampering sequence.
+  - id: linux-auditd-crontab-directory-files-modification-001
+    name: Linux Auditd Crontab Directory Files Modification
+    reason: crontab -e writes the user table under /var/spool/cron and intruders also touch /etc/cron.d; this flags the actual on-disk cron change that the edit produces or accompanies.
+  - id: linux-append-cronjob-entry-001
+    name: Linux Append Cronjob Entry On Existing Cronjob File
+    reason: Captures malicious lines appended to cron files (XorDDos/Kaiji/Kinsing tradecraft); the written persistence entry that an edit like this is being used to deliver.
+  - id: b3c8e2d1-4f1a-4b7c-9a22-91a6f2c4e8de
+    name: Linux Init Script Persistence Detection
+    reason: init.d/rc.local startup-script persistence; operators routinely layer a second persistence mechanism alongside cron in the same session, so this often co-occurs on the host (its own block reciprocally links this rule).
+  window: 2h
   enrichment_searches:
-  # Rule-specific telemetry pivots the engine runs around an alert from this rule,
-  # scoped to the alert's host/user/IP within the window (behaviour-targeted, not a sweep).
-    - name: "Cron scheduling on this host"
-      query: '((data_process_exec_process_binary:/.*(\/[Cc][Rr][Oo][Nn][Tt][Aa][Bb])/) OR (data_process_exec_process_arguments:/.*\/[Ee][Tt][Cc]\/[Cc][Rr][Oo][Nn].*/))'
-      pivot_on: [host]
-      window: 4h
-    - name: "Shell / interpreter execution on this host"
-      query: '((data_process_exec_process_binary:/.*(\/[Bb][Aa][Ss][Hh]|\/[Ss][Hh]|\/[Dd][Aa][Ss][Hh]|\/[Zz][Ss][Hh]|\/[Kk][Ss][Hh]|\/[Aa][Ss][Hh]|\/[Bb][Uu][Ss][Yy][Bb][Oo][Xx])/) OR (data_process_exec_process_binary:/.*(\/[Pp][Yy][Tt][Hh][Oo][Nn]|\/[Pp][Yy][Tt][Hh][Oo][Nn]3|\/[Pp][Ee][Rr][Ll]|\/[Rr][Uu][Bb][Yy]|\/[Pp][Hh][Pp]|\/[Nn][Oo][Dd][Ee]|\/[Ll][Uu][Aa]|\/[Aa][Ww][Kk])/))'
-      pivot_on: [host]
-      window: 1h
-    - name: "Reconnaissance commands on this host"
-      query: 'data_process_exec_process_binary:/.*(\/[Ww][Hh][Oo][Aa][Mm][Ii]|\/[Ii][Dd]|\/[Uu][Nn][Aa][Mm][Ee]|\/[Hh][Oo][Ss][Tt][Nn][Aa][Mm][Ee]|\/[Hh][Oo][Ss][Tt][Nn][Aa][Mm][Ee][Cc][Tt][Ll]|\/[Ss][Ss]|\/[Nn][Ee][Tt][Ss][Tt][Aa][Tt]|\/[Ii][Ff][Cc][Oo][Nn][Ff][Ii][Gg]|\/[Aa][Rr][Pp]|\/[Ww]|\/[Ww][Hh][Oo]|\/[Ll][Aa][Ss][Tt]|\/[Ll][Ss][Oo][Ff]|\/[Nn][Mm][Aa][Pp]|\/[Dd][Ii][Gg]|\/[Ff][Ii][Nn][Dd])/'
-      pivot_on: [host]
-      window: 1h
+  # Behaviour-targeted hunts the engine runs around the alert (not a sweep).
+  - name: Payload download / ingress tool transfer on this host
+    query: data_process_exec_process_binary:/.*\/([Ww][Gg][Ee][Tt]|[Cc][Uu][Rr][Ll]|[Tt][Ff][Tt][Pp]|[Ff][Tt][Pp]|[Ss][Cc][Pp]|[Ss][Ff][Tt][Pp]|[Ff][Ee][Tt][Cc][Hh])/
+    pivot_on:
+    - host
+    window: 4h
+  - name: 'Payload staging: execution from world-writable dirs or made executable'
+    query: ((data_process_exec_process_binary:/\/(tmp|dev\/shm|var\/tmp)\/.*/) OR (data_process_exec_process_binary:/.*\/[Cc][Hh][Mm][Oo][Dd]/ AND data_process_exec_process_arguments:/.*(\+[Xx]|777|755).*/))
+    pivot_on:
+    - host
+    window: 4h
+  - name: Privilege escalation around the cron edit (sudo/su/pkexec/doas)
+    query: data_process_exec_process_binary:/.*\/([Ss][Uu][Dd][Oo]|[Ss][Uu]|[Pp][Kk][Ee][Xx][Ee][Cc]|[Dd][Oo][Aa][Ss])/
+    pivot_on:
+    - host
+    window: 2h
+  - name: Cron daemon spawning a shell/interpreter/downloader (persistence firing)
+    query: data_process_exec_parent_binary:/.*\/([Cc][Rr][Oo][Nn][Dd]|[Cc][Rr][Oo][Nn]|[Aa][Nn][Aa][Cc][Rr][Oo][Nn])/ AND data_process_exec_process_binary:/.*\/([Bb][Aa][Ss][Hh]|[Dd][Aa][Ss][Hh]|[Zz][Ss][Hh]|[Kk][Ss][Hh]|[Ss][Hh]|[Pp][Yy][Tt][Hh][Oo][Nn]3?|[Pp][Ee][Rr][Ll]|[Ww][Gg][Ee][Tt]|[Cc][Uu][Rr][Ll]|[Nn][Cc][Aa][Tt]|[Nn][Cc]|[Ss][Oo][Cc][Aa][Tt])/
+    pivot_on:
+    - host
+    window: 6h
+  - name: Reverse shell / remote-access tooling on this host
+    query: ((data_process_exec_process_binary:/.*\/([Nn][Cc][Aa][Tt]|[Nn][Cc]|[Ss][Oo][Cc][Aa][Tt]|[Tt][Ee][Ll][Nn][Ee][Tt])/) OR (data_process_exec_process_arguments:/.*(\/[Dd][Ee][Vv]\/[Tt][Cc][Pp]|\/[Dd][Ee][Vv]\/[Uu][Dd][Pp]|[Bb][Aa][Ss][Hh] -[Ii]| -[Ee] ).*/))
+    pivot_on:
+    - host
+    window: 4h

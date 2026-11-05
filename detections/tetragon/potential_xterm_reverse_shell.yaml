@@ -143,23 +143,58 @@ graylog:
   query: data_process_exec_process_binary:/.*[Xx][Tt][Ee][Rr][Mm].*/ AND data_process_exec_process_arguments:/.*-[Dd][Ii][Ss][Pp][Ll][Aa][Yy].*/ AND data_process_exec_process_arguments:/.*:1/
 
 correlation:
-  # Authored by the correlation engine for review.
+  # Authored per-rule (behaviour-researched) for the correlation engine. Related CoPilot
+  # Searches + telemetry pivots to run around an alert, scoped to its host/user/ip/domain.
+  related_rules:
+  - id: 7f734ed0-4f47-46c0-837f-6ee62505abd9
+    name: Potential Netcat Reverse Shell Execution
+    reason: 'Co-occurring: xterm -display is one line on the same pentestmonkey/revshells cheat sheet this rule''s references cite. A hands-on operator who already has a foothold commonly runs the nc -e/-c shell and the xterm channel in the same session, so an nc reverse shell on this host in the window confirms a deliberate interactive-shell attempt, not a benign xterm launch.'
+  - id: 32e62bc7-3de0-4bb1-90af-532978fe42c0
+    name: Python Reverse Shell Execution Via PTY And Socket Modules
+    reason: 'Co-occurring: another entry on the same reverse-shell cheat sheet. A python socket+pty reverse shell on the same host within the window is a parallel attempt to open the same kind of egress interactive channel the xterm -display trick provides.'
+  - id: ea3ecad2-db86-4a89-ad0b-132a10d2db55
+    name: Interactive Bash Suspicious Children
+    reason: 'Co-occurring: an xterm -display reverse shell hands the attacker a full interactive TTY. An interactive bash spawning uncommon child processes on the same host is that hands-on-keyboard session acting through the channel.'
+  - id: 818f7b24-0fba-4c49-a073-8b755573b9c7
+    name: Linux Webshell Indicators
+    reason: 'Precursor: a web shell (shell/recon child of apache/nginx/tomcat/node) is a classic foothold from which an operator upgrades to an interactive reverse shell like xterm. If it fired on this host just before, it is the initial-access step that led to the xterm channel.'
+  - id: a2d9e2f3-0f43-4c7a-bcd9-9acfc0d723aa
+    name: Suspicious Download and Execute Pattern via Curl/Wget
+    reason: 'Precursor: operators stage tooling or payloads (even the X11/xterm package itself, rare on servers) via curl/wget into /tmp or /dev/shm before opening the channel. A download-and-execute on this host shortly before the xterm fire shows how the attacker set the stage.'
+  - id: 0cf7a157-8879-41a2-8f55-388dd23746b7
+    name: Linux Recon Indicators
+    reason: 'Follow-on: the first thing an operator does on a fresh interactive shell is enumerate the host (whoami/id/uname/netstat). Recon commands on the same host right after the xterm channel opens confirm live hands-on activity rather than an automated job.'
+  - id: 0f79c4d2-4e1f-4683-9c36-b5469a665e06
+    name: Access of Sudoers File Content
+    reason: 'Follow-on: once interactive, the operator enumerates privilege-escalation paths. Reading /etc/sudoers on this host after the reverse shell lands is the expected next step toward root and sharply raises the severity of the xterm alert.'
+  - id: 6b14bac8-3e3a-4324-8109-42f0546a347f
+    name: Scheduled Cron Task/Job - Linux
+    reason: 'Follow-on: to survive disconnect or reboot the operator installs persistence. A cron job (especially one dropped from /tmp) created on this host after the interactive shell is the attacker consolidating the access the xterm channel gave them.'
+  window: 2h
   enrichment_searches:
-  # Rule-specific telemetry pivots the engine runs around an alert from this rule,
-  # scoped to the alert's host/user/IP within the window (behaviour-targeted, not a sweep).
-    - name: "Shell / interpreter execution on this host"
-      query: '((data_process_exec_process_binary:/.*(\/[Bb][Aa][Ss][Hh]|\/[Ss][Hh]|\/[Dd][Aa][Ss][Hh]|\/[Zz][Ss][Hh]|\/[Kk][Ss][Hh]|\/[Aa][Ss][Hh]|\/[Bb][Uu][Ss][Yy][Bb][Oo][Xx])/) OR (data_process_exec_process_binary:/.*(\/[Pp][Yy][Tt][Hh][Oo][Nn]|\/[Pp][Yy][Tt][Hh][Oo][Nn]3|\/[Pp][Ee][Rr][Ll]|\/[Rr][Uu][Bb][Yy]|\/[Pp][Hh][Pp]|\/[Nn][Oo][Dd][Ee]|\/[Ll][Uu][Aa]|\/[Aa][Ww][Kk])/))'
-      pivot_on: [host]
-      window: 1h
-    - name: "Other executions of this tool-set on this host (any arguments)"
-      query: 'data_process_exec_process_binary:/.*(\/[Xx][Tt][Ee][Rr][Mm])/'
-      pivot_on: [host]
-      window: 2h
-    - name: "Persistence via cron / systemd / shell profiles on this host"
-      query: '((data_process_exec_process_binary:/.*(\/[Cc][Rr][Oo][Nn][Tt][Aa][Bb]|\/[Ss][Yy][Ss][Tt][Ee][Mm][Cc][Tt][Ll]|\/[Aa][Tt]|\/[Uu][Pp][Dd][Aa][Tt][Ee]-[Rr][Cc]\.[Dd])/) OR (data_process_exec_process_arguments:/.*\/[Ee][Tt][Cc]\/[Cc][Rr][Oo][Nn].*/) OR (data_process_exec_process_arguments:/.*\/[Ee][Tt][Cc]\/[Ss][Yy][Ss][Tt][Ee][Mm][Dd].*/) OR (data_process_exec_process_arguments:/.*[Rr][Cc]\.[Ll][Oo][Cc][Aa][Ll].*/) OR (data_process_exec_process_arguments:/.*\.[Bb][Aa][Ss][Hh][Rr][Cc].*/) OR (data_process_exec_process_arguments:/.*\.[Bb][Aa][Ss][Hh]_[Pp][Rr][Oo][Ff][Ii][Ll][Ee].*/) OR (data_process_exec_process_arguments:/.*\/[Ee][Tt][Cc]\/[Pp][Rr][Oo][Ff][Ii][Ll][Ee].*/) OR (data_process_exec_process_arguments:/.*[Aa][Uu][Tt][Hh][Oo][Rr][Ii][Zz][Ee][Dd]_[Kk][Ee][Yy][Ss].*/) OR (data_process_exec_process_arguments:/.*\/[Ee][Tt][Cc]\/[Ii][Nn][Ii][Tt]\.[Dd].*/))'
-      pivot_on: [host]
-      window: 4h
-    - name: "Reconnaissance commands on this host"
-      query: 'data_process_exec_process_binary:/.*(\/[Ww][Hh][Oo][Aa][Mm][Ii]|\/[Ii][Dd]|\/[Uu][Nn][Aa][Mm][Ee]|\/[Hh][Oo][Ss][Tt][Nn][Aa][Mm][Ee]|\/[Hh][Oo][Ss][Tt][Nn][Aa][Mm][Ee][Cc][Tt][Ll]|\/[Ss][Ss]|\/[Nn][Ee][Tt][Ss][Tt][Aa][Tt]|\/[Ii][Ff][Cc][Oo][Nn][Ff][Ii][Gg]|\/[Aa][Rr][Pp]|\/[Ww]|\/[Ww][Hh][Oo]|\/[Ll][Aa][Ss][Tt]|\/[Ll][Ss][Oo][Ff]|\/[Nn][Mm][Aa][Pp]|\/[Dd][Ii][Gg]|\/[Ff][Ii][Nn][Dd])/'
-      pivot_on: [host]
-      window: 1h
+  # Behaviour-targeted hunts the engine runs around the alert (not a sweep).
+  - name: X11 remote-display clients on this host (the reverse X11 channel)
+    query: (data_process_exec_process_binary:/.*(\/[Xx][Tt][Ee][Rr][Mm]|\/[Xx][Hh][Oo][Ss][Tt]|\/[Xx][Aa][Uu][Tt][Hh]|\/[Xx][Nn][Ee][Ss][Tt]|\/[Xx]11[Vv][Nn][Cc]|\/[Xx][Dd][Oo][Tt][Oo][Oo][Ll]|\/[Xx][Rr][Dd][Bb])/ OR data_process_exec_process_arguments:/.*-[Dd][Ii][Ss][Pp][Ll][Aa][Yy].*/ OR data_process_exec_process_arguments:/.*[Dd][Ii][Ss][Pp][Ll][Aa][Yy]=.*/)
+    pivot_on:
+    - host
+    window: 2h
+  - name: Other reverse-shell one-liner shapes on this host (/dev/tcp, socat exec, mkfifo, telnet)
+    query: (data_process_exec_process_arguments:/.*\/[Dd][Ee][Vv]\/[Tt][Cc][Pp]\/.*/ OR data_process_exec_process_arguments:/.*\/[Dd][Ee][Vv]\/[Uu][Dd][Pp]\/.*/ OR (data_process_exec_process_binary:/.*\/[Ss][Oo][Cc][Aa][Tt]/ AND data_process_exec_process_arguments:/.*[Ee][Xx][Ee][Cc].*/) OR data_process_exec_process_binary:/.*\/[Mm][Kk][Ff][Ii][Ff][Oo]/ OR data_process_exec_process_binary:/.*\/[Tt][Ee][Ll][Nn][Ee][Tt]/)
+    pivot_on:
+    - host
+    window: 1h
+  - name: Host reconnaissance after the interactive shell
+    query: data_process_exec_process_binary:/.*(\/[Ww][Hh][Oo][Aa][Mm][Ii]|\/[Ii][Dd]|\/[Uu][Nn][Aa][Mm][Ee]|\/[Hh][Oo][Ss][Tt][Nn][Aa][Mm][Ee]|\/[Ii][Pp]|\/[Ss][Ss]|\/[Nn][Ee][Tt][Ss][Tt][Aa][Tt]|\/[Ii][Ff][Cc][Oo][Nn][Ff][Ii][Gg]|\/[Aa][Rr][Pp])/
+    pivot_on:
+    - host
+    window: 1h
+  - name: Privilege-escalation enumeration and credential-file access on this host
+    query: ((data_process_exec_process_binary:/.*\/[Ss][Uu][Dd][Oo]/ AND data_process_exec_process_arguments:/.* -[Ll].*/) OR (data_process_exec_process_binary:/.*\/[Ff][Ii][Nn][Dd]/ AND data_process_exec_process_arguments:/.* -[Pp][Ee][Rr][Mm].*/) OR data_process_exec_process_arguments:/.*\/[Ee][Tt][Cc]\/[Ss][Hh][Aa][Dd][Oo][Ww].*/ OR data_process_exec_process_arguments:/.*\/[Ee][Tt][Cc]\/[Pp][Aa][Ss][Ss][Ww][Dd].*/ OR data_process_exec_process_binary:/.*\/[Pp][Kk][Ee][Xx][Ee][Cc]/ OR data_process_exec_process_binary:/.*\/[Dd][Oo][Aa][Ss]/)
+    pivot_on:
+    - host
+    window: 2h
+  - name: Persistence and account creation on this host
+    query: (data_process_exec_process_binary:/.*(\/[Cc][Rr][Oo][Nn][Tt][Aa][Bb]|\/[Ss][Yy][Ss][Tt][Ee][Mm][Cc][Tt][Ll]|\/[Uu][Ss][Ee][Rr][Aa][Dd][Dd]|\/[Uu][Ss][Ee][Rr][Mm][Oo][Dd]|\/[Aa][Tt])/ OR data_process_exec_process_arguments:/.*[Aa][Uu][Tt][Hh][Oo][Rr][Ii][Zz][Ee][Dd]_[Kk][Ee][Yy][Ss].*/ OR data_process_exec_process_arguments:/.*\.[Bb][Aa][Ss][Hh][Rr][Cc].*/ OR data_process_exec_process_arguments:/.*[Rr][Cc]\.[Ll][Oo][Cc][Aa][Ll].*/ OR data_process_exec_process_arguments:/.*\/[Ee][Tt][Cc]\/[Ss][Yy][Ss][Tt][Ee][Mm][Dd].*/)
+    pivot_on:
+    - host
+    window: 4h

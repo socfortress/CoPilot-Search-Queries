@@ -141,23 +141,58 @@ graylog:
   query: data_process_exec_process_binary:/.*[Cc][Rr][Oo][Nn][Tt][Aa][Bb]/ AND data_process_exec_process_arguments:/.*\/[Tt][Mm][Pp]\/.*/
 
 correlation:
-  # Authored by the correlation engine for review.
+  # Authored per-rule (behaviour-researched) for the correlation engine. Related CoPilot
+  # Searches + telemetry pivots to run around an alert, scoped to its host/user/ip/domain.
+  related_rules:
+  - id: 4e2a6c91-7f3d-4b6e-9a4f-1c8b0e5a92d4
+    name: Crontab Interactive Edit Execution
+    reason: 'Same crontab utility, interactive variant: this rule catches ''crontab /tmp/<file>'' (installing a job from a dropped file) and this catches ''crontab -e''. Both on one host inside the window means hands-on-keyboard cron persistence rather than a scripted one-off; pivot on data_process_exec_parent_binary to see if the same shell drove both.'
+  - id: c2e234de-03a3-41e1-b39a-1e56dc17ba67
+    name: Remove Scheduled Cron Task/Job
+    reason: 'Cron-lifecycle counterpart (crontab -r): attackers wipe the current crontab around planting theirs, and Linux coin-miners specifically run ''crontab -r'' to delete rival miners'' jobs. Co-firing with this install on the same host is the classic miner cron-hijack sequence.'
+  - id: cf610c15-ed71-46e1-bdf8-2bd1a99de6c4
+    name: Download File To Potentially Suspicious Directory Via Wget
+    reason: 'Precursor that stages the file this rule installs: the ''*/tmp/*'' argument here means a crontab (or payload) file was placed in /tmp, and wget -O /tmp/<file> is the most common way it got there. A wget-to-/tmp shortly before the crontab install confirms attacker-driven ingress, not admin activity.'
+  - id: a2d9e2f3-0f43-4c7a-bcd9-9acfc0d723aa
+    name: Suspicious Download and Execute Pattern via Curl/Wget
+    reason: Higher-confidence staging of the /tmp payload (curl/wget into /tmp or /dev/shm then 'sh -c'). The cron job this rule installs frequently re-runs this exact download-and-execute one-liner on schedule, so it both explains the /tmp drop and predicts the recurring payload.
+  - id: 312b42b1-bded-4441-8b58-163a3af58775
+    name: Potentially Suspicious Execution From Tmp Folder
+    reason: 'The payoff: a binary whose path is under /tmp/ executes - the scheduled job firing the payload it was pointed at. Turns ''a cron job was installed from /tmp'' into ''the /tmp payload actually ran'', the single most important follow-on to confirm live compromise.'
+  - id: 9069ea3c-b213-4c52-be13-86506a227ab1
+    name: Linux Crypto Mining Indicators
+    reason: 'Realized objective: cron-installed-from-/tmp is the dominant delivery for Linux coin-miners (XMRig). Miner command-line indicators on the same host after this install mean the persistence paid off in resource-hijacking impact; pairs with Remove Scheduled Cron Task/Job, as miners install then wipe competitors.'
+  - id: 31545105-3444-4584-bebf-c466353230d2
+    name: Touch Suspicious Service File
+    reason: 'Redundant-persistence co-occurrence: operators rarely rely on one mechanism, so a systemd .service file being timestomped/created on the same host within the window alongside this cron job signals a deliberate multi-vector persistence foothold to root out together.'
+  - id: 9d4548fa-bba0-4e88-bd66-5d5bf516cda0
+    name: Masquerading as Linux Crond Process
+    reason: 'Cron-themed defense evasion: ''cp /bin/sh .../crond'' disguises the payload as the legitimate cron daemon so the scheduled job''s child process blends in. On a host where a cron job was just installed from /tmp, a fake ''crond'' points to the same operator hiding what that job runs.'
+  window: 2h
   enrichment_searches:
-  # Rule-specific telemetry pivots the engine runs around an alert from this rule,
-  # scoped to the alert's host/user/IP within the window (behaviour-targeted, not a sweep).
-    - name: "Cron scheduling on this host"
-      query: '((data_process_exec_process_binary:/.*(\/[Cc][Rr][Oo][Nn][Tt][Aa][Bb])/) OR (data_process_exec_process_arguments:/.*\/[Ee][Tt][Cc]\/[Cc][Rr][Oo][Nn].*/))'
-      pivot_on: [host]
-      window: 4h
-    - name: "Other executions of this tool-set on this host (any arguments)"
-      query: 'data_process_exec_process_binary:/.*(\/[Cc][Rr][Oo][Nn][Tt][Aa][Bb])/'
-      pivot_on: [host]
-      window: 2h
-    - name: "Credential / secret-file access on this host"
-      query: '((data_process_exec_process_arguments:/.*\/[Ee][Tt][Cc]\/[Ss][Hh][Aa][Dd][Oo][Ww].*/) OR (data_process_exec_process_arguments:/.*\/[Ee][Tt][Cc]\/[Pp][Aa][Ss][Ss][Ww][Dd].*/) OR (data_process_exec_process_arguments:/.*\/[Ee][Tt][Cc]\/[Ss][Uu][Dd][Oo][Ee][Rr][Ss].*/) OR (data_process_exec_process_arguments:/.*[Ii][Dd]_[Rr][Ss][Aa].*/) OR (data_process_exec_process_arguments:/.*\.[Ss][Ss][Hh]\/.*/) OR (data_process_exec_process_arguments:/.*\/[Ee][Tt][Cc]\/[Gg][Ss][Hh][Aa][Dd][Oo][Ww].*/))'
-      pivot_on: [host]
-      window: 2h
-    - name: "Shell / interpreter execution on this host"
-      query: '((data_process_exec_process_binary:/.*(\/[Bb][Aa][Ss][Hh]|\/[Ss][Hh]|\/[Dd][Aa][Ss][Hh]|\/[Zz][Ss][Hh]|\/[Kk][Ss][Hh]|\/[Aa][Ss][Hh]|\/[Bb][Uu][Ss][Yy][Bb][Oo][Xx])/) OR (data_process_exec_process_binary:/.*(\/[Pp][Yy][Tt][Hh][Oo][Nn]|\/[Pp][Yy][Tt][Hh][Oo][Nn]3|\/[Pp][Ee][Rr][Ll]|\/[Rr][Uu][Bb][Yy]|\/[Pp][Hh][Pp]|\/[Nn][Oo][Dd][Ee]|\/[Ll][Uu][Aa]|\/[Aa][Ww][Kk])/))'
-      pivot_on: [host]
-      window: 1h
+  # Behaviour-targeted hunts the engine runs around the alert (not a sweep).
+  - name: Payload or crontab file staged in /tmp via a download tool
+    query: (data_process_exec_process_binary:/.*\/([Ww][Gg][Ee][Tt]|[Cc][Uu][Rr][Ll]|[Tt][Ff][Tt][Pp])/ AND data_process_exec_process_arguments:/.*\/[Tt][Mm][Pp]\/.*/)
+    pivot_on:
+    - host
+    window: 2h
+  - name: Execution of a binary or script from /tmp (the scheduled payload running)
+    query: (data_process_exec_process_binary:/\/[Tt][Mm][Pp]\/.*/ OR (data_process_exec_process_binary:/.*\/([Bb][Aa][Ss][Hh]|[Ss][Hh]|[Dd][Aa][Ss][Hh]|[Pp][Yy][Tt][Hh][Oo][Nn]3?|[Pp][Ee][Rr][Ll])/ AND data_process_exec_process_arguments:/.*\/[Tt][Mm][Pp]\/.*/))
+    pivot_on:
+    - host
+    window: 4h
+  - name: Other cron / at scheduling activity on this host
+    query: (data_process_exec_process_binary:/.*\/([Cc][Rr][Oo][Nn][Tt][Aa][Bb]|[Aa][Tt])/ OR data_process_exec_process_arguments:/.*\/[Ee][Tt][Cc]\/[Cc][Rr][Oo][Nn].*/ OR data_process_exec_process_arguments:/.*\/[Vv][Aa][Rr]\/[Ss][Pp][Oo][Oo][Ll]\/[Cc][Rr][Oo][Nn].*/)
+    pivot_on:
+    - host
+    window: 4h
+  - name: Reverse-shell / C2 / crypto-miner execution on this host
+    query: (data_process_exec_process_binary:/.*\/([Nn][Cc]|[Nn][Cc][Aa][Tt]|[Nn][Ee][Tt][Cc][Aa][Tt]|[Ss][Oo][Cc][Aa][Tt])/ OR data_process_exec_process_arguments:/.*\/[Dd][Ee][Vv]\/[Tt][Cc][Pp]\/.*/ OR data_process_exec_process_arguments:/.*[Ss][Tt][Rr][Aa][Tt][Uu][Mm]\+[Tt][Cc][Pp]:\/\/.*/ OR data_process_exec_process_arguments:/.*--[Dd][Oo][Nn][Aa][Tt][Ee]-[Ll][Ee][Vv][Ee][Ll].*/)
+    pivot_on:
+    - host
+    window: 4h
+  - name: Privilege escalation or sensitive credential/cron file access on this host
+    query: (data_process_exec_process_binary:/.*\/([Ss][Uu][Dd][Oo]|[Ss][Uu]|[Dd][Oo][Aa][Ss]|[Pp][Kk][Ee][Xx][Ee][Cc])/ OR data_process_exec_process_arguments:/.*\/[Ee][Tt][Cc]\/([Ss][Hh][Aa][Dd][Oo][Ww]|[Ss][Uu][Dd][Oo][Ee][Rr][Ss]|[Cc][Rr][Oo][Nn][Tt][Aa][Bb]).*/)
+    pivot_on:
+    - host
+    window: 2h

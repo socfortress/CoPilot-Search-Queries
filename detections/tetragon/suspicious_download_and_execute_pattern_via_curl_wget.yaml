@@ -167,19 +167,58 @@ graylog:
   query: (data_process_exec_process_arguments:/.*\/[Cc][Uu][Rr][Ll].*/ OR data_process_exec_process_arguments:/.*\/[Ww][Gg][Ee][Tt].*/) AND (data_process_exec_process_arguments:/.*\/[Tt][Mm][Pp]\/.*/ OR data_process_exec_process_arguments:/.*\/[Dd][Ee][Vv]\/[Ss][Hh][Mm]\/.*/) AND data_process_exec_process_arguments:/.*[Ss][Hh] -[Cc].*/
 
 correlation:
-  # Authored by the correlation engine for review.
+  # Authored per-rule (behaviour-researched) for the correlation engine. Related CoPilot
+  # Searches + telemetry pivots to run around an alert, scoped to its host/user/ip/domain.
+  related_rules:
+  - id: 818f7b24-0fba-4c49-a073-8b755573b9c7
+    name: Linux Webshell Indicators
+    reason: 'Precursor that explains how this ran: a web server (nginx/apache2/httpd/php-fpm/node) spawning a shell child is web-app RCE. If it fired on the same host just before, the ''sh -c'' curl/wget is attacker-driven ingress launched from a webshell - compare data_process_exec_parent_binary of this rule''s event against the web-server process.'
+  - id: cf610c15-ed71-46e1-bdf8-2bd1a99de6c4
+    name: Download File To Potentially Suspicious Directory Via Wget
+    reason: 'The download half of this same behaviour caught on its own: wget -O / --output-document writing into /tmp without the ''sh -c'' wrapper. It fires on the identical drop, so when both hit one host the fetch is confirmed ingress tooling (T1105), not an admin pull - match the two events'' data_process_exec_process_arguments for the same URL and target path.'
+  - id: 6419afd1-3742-47a5-a7e6-b50386cd15f8
+    name: Chmod Targeting Sensitive Directories
+    reason: 'The make-executable step between download and execution: chmod on a file under /tmp sets the execute bit on the payload this rule just fetched. A ''chmod +x /tmp/<file>'' immediately following the sh -c curl/wget is the clearest sign the drop is being staged to run.'
+  - id: 312b42b1-bded-4441-8b58-163a3af58775
+    name: Potentially Suspicious Execution From Tmp Folder
+    reason: 'The payoff for an ELF payload: a binary whose own path is under /tmp/ is executed, turning ''a file was fetched into /tmp'' into ''the downloaded binary actually ran''. The single most important follow-on for confirming the download-and-execute completed.'
+  - id: 30bcce26-51c5-49f2-99c8-7b59e3af36c7
+    name: Execution Of Script Located In Potentially Suspicious Directory
+    reason: 'The payoff for a script payload - which this rule explicitly targets (''particularly scripts''): bash/sh invoked to run a script located in /tmp. Catches the execution the /tmp-binary rule misses, because a dropped .sh runs as ''bash /tmp/x.sh'' (binary=/bin/bash, script path in arguments).'
+  - id: 5cd16c8f-44a6-4654-81e7-a84d6db507d4
+    name: Process Execution From Shared Memory Directory
+    reason: 'The fileless payoff for the /dev/shm branch of this rule: a binary executed straight out of RAM-backed /dev/shm so it never touches disk. When the curl/wget target was /dev/shm this fires as the payload runs - a deliberate disk-evasion follow-on (T1027.011).'
+  - id: 6b14bac8-3e3a-4324-8109-42f0546a347f
+    name: Scheduled Cron Task/Job - Linux
+    reason: 'Persistence anchored to the very directory this rule''s download targeted: crontab installing a job that references a file in /tmp. A dropped-and-executed stager that then schedules itself via cron from /tmp is a classic Linux persistence chain (T1053.003).'
+  - id: 9069ea3c-b213-4c52-be13-86506a227ab1
+    name: Linux Crypto Mining Indicators
+    reason: 'The most common payload delivered by this exact curl/wget-to-temp-and-execute pattern: an XMRig-style miner, identified by its command line (stratum+tcp/udp pools, --donate-level, --cpu-priority). Co-firing on the same host tells you the download-and-execute was a coinminer install (T1496 impact).'
+  window: 1h
   enrichment_searches:
-  # Rule-specific telemetry pivots the engine runs around an alert from this rule,
-  # scoped to the alert's host/user/IP within the window (behaviour-targeted, not a sweep).
-    - name: "Shell / interpreter execution on this host"
-      query: '((data_process_exec_process_binary:/.*(\/[Bb][Aa][Ss][Hh]|\/[Ss][Hh]|\/[Dd][Aa][Ss][Hh]|\/[Zz][Ss][Hh]|\/[Kk][Ss][Hh]|\/[Aa][Ss][Hh]|\/[Bb][Uu][Ss][Yy][Bb][Oo][Xx])/) OR (data_process_exec_process_binary:/.*(\/[Pp][Yy][Tt][Hh][Oo][Nn]|\/[Pp][Yy][Tt][Hh][Oo][Nn]3|\/[Pp][Ee][Rr][Ll]|\/[Rr][Uu][Bb][Yy]|\/[Pp][Hh][Pp]|\/[Nn][Oo][Dd][Ee]|\/[Ll][Uu][Aa]|\/[Aa][Ww][Kk])/))'
-      pivot_on: [host]
-      window: 1h
-    - name: "Persistence via cron / systemd / shell profiles on this host"
-      query: '((data_process_exec_process_binary:/.*(\/[Cc][Rr][Oo][Nn][Tt][Aa][Bb]|\/[Ss][Yy][Ss][Tt][Ee][Mm][Cc][Tt][Ll]|\/[Aa][Tt]|\/[Uu][Pp][Dd][Aa][Tt][Ee]-[Rr][Cc]\.[Dd])/) OR (data_process_exec_process_arguments:/.*\/[Ee][Tt][Cc]\/[Cc][Rr][Oo][Nn].*/) OR (data_process_exec_process_arguments:/.*\/[Ee][Tt][Cc]\/[Ss][Yy][Ss][Tt][Ee][Mm][Dd].*/) OR (data_process_exec_process_arguments:/.*[Rr][Cc]\.[Ll][Oo][Cc][Aa][Ll].*/) OR (data_process_exec_process_arguments:/.*\.[Bb][Aa][Ss][Hh][Rr][Cc].*/) OR (data_process_exec_process_arguments:/.*\.[Bb][Aa][Ss][Hh]_[Pp][Rr][Oo][Ff][Ii][Ll][Ee].*/) OR (data_process_exec_process_arguments:/.*\/[Ee][Tt][Cc]\/[Pp][Rr][Oo][Ff][Ii][Ll][Ee].*/) OR (data_process_exec_process_arguments:/.*[Aa][Uu][Tt][Hh][Oo][Rr][Ii][Zz][Ee][Dd]_[Kk][Ee][Yy][Ss].*/) OR (data_process_exec_process_arguments:/.*\/[Ee][Tt][Cc]\/[Ii][Nn][Ii][Tt]\.[Dd].*/))'
-      pivot_on: [host]
-      window: 4h
-    - name: "Reconnaissance commands on this host"
-      query: 'data_process_exec_process_binary:/.*(\/[Ww][Hh][Oo][Aa][Mm][Ii]|\/[Ii][Dd]|\/[Uu][Nn][Aa][Mm][Ee]|\/[Hh][Oo][Ss][Tt][Nn][Aa][Mm][Ee]|\/[Hh][Oo][Ss][Tt][Nn][Aa][Mm][Ee][Cc][Tt][Ll]|\/[Ss][Ss]|\/[Nn][Ee][Tt][Ss][Tt][Aa][Tt]|\/[Ii][Ff][Cc][Oo][Nn][Ff][Ii][Gg]|\/[Aa][Rr][Pp]|\/[Ww]|\/[Ww][Hh][Oo]|\/[Ll][Aa][Ss][Tt]|\/[Ll][Ss][Oo][Ff]|\/[Nn][Mm][Aa][Pp]|\/[Dd][Ii][Gg]|\/[Ff][Ii][Nn][Dd])/'
-      pivot_on: [host]
-      window: 1h
+  # Behaviour-targeted hunts the engine runs around the alert (not a sweep).
+  - name: chmod setting the execute bit on the dropped /tmp or /dev/shm payload
+    query: data_process_exec_process_binary:/.*\/[Cc][Hh][Mm][Oo][Dd]/ AND (data_process_exec_process_arguments:/.*\/[Tt][Mm][Pp]\/.*/ OR data_process_exec_process_arguments:/.*\/[Dd][Ee][Vv]\/[Ss][Hh][Mm]\/.*/)
+    pivot_on:
+    - host
+    window: 1h
+  - name: Execution of a binary or script out of /tmp or /dev/shm (the payload runs)
+    query: data_process_exec_process_binary:/\/[Tt][Mm][Pp]\/.*/ OR data_process_exec_process_binary:/\/[Dd][Ee][Vv]\/[Ss][Hh][Mm]\/.*/ OR ((data_process_exec_process_binary:/.*(\/[Bb][Aa][Ss][Hh]|\/[Ss][Hh]|\/[Dd][Aa][Ss][Hh]|\/[Pp][Yy][Tt][Hh][Oo][Nn]|\/[Pp][Yy][Tt][Hh][Oo][Nn]3|\/[Pp][Ee][Rr][Ll])/) AND (data_process_exec_process_arguments:/.*\/[Tt][Mm][Pp]\/.*/ OR data_process_exec_process_arguments:/.*\/[Dd][Ee][Vv]\/[Ss][Hh][Mm]\/.*/))
+    pivot_on:
+    - host
+    window: 1h
+  - name: Further ingress tool transfer - more downloaders pulling later stages
+    query: data_process_exec_process_binary:/.*(\/[Ww][Gg][Ee][Tt]|\/[Cc][Uu][Rr][Ll]|\/[Tt][Ff][Tt][Pp]|\/[Ff][Tt][Pp]|\/[Ss][Cc][Pp])/
+    pivot_on:
+    - host
+    window: 2h
+  - name: Persistence established on this host (cron / systemd / rc.local / shell profiles / authorized_keys)
+    query: (data_process_exec_process_binary:/.*(\/[Cc][Rr][Oo][Nn][Tt][Aa][Bb]|\/[Ss][Yy][Ss][Tt][Ee][Mm][Cc][Tt][Ll]|\/[Aa][Tt])/) OR data_process_exec_process_arguments:/.*\/[Ee][Tt][Cc]\/[Cc][Rr][Oo][Nn].*/ OR data_process_exec_process_arguments:/.*\/[Ee][Tt][Cc]\/[Ss][Yy][Ss][Tt][Ee][Mm][Dd]\/.*/ OR data_process_exec_process_arguments:/.*[Rr][Cc]\.[Ll][Oo][Cc][Aa][Ll].*/ OR data_process_exec_process_arguments:/.*\.[Bb][Aa][Ss][Hh][Rr][Cc].*/ OR data_process_exec_process_arguments:/.*[Aa][Uu][Tt][Hh][Oo][Rr][Ii][Zz][Ee][Dd]_[Kk][Ee][Yy][Ss].*/
+    pivot_on:
+    - host
+    window: 4h
+  - name: Reverse-shell / C2 indicators (nc/ncat/socat, /dev/tcp, pty.spawn)
+    query: data_process_exec_process_binary:/.*(\/[Nn][Cc]|\/[Nn][Cc][Aa][Tt]|\/[Nn][Ee][Tt][Cc][Aa][Tt]|\/[Ss][Oo][Cc][Aa][Tt])/ OR data_process_exec_process_arguments:/.*\/[Dd][Ee][Vv]\/[Tt][Cc][Pp]\/.*/ OR data_process_exec_process_arguments:/.*[Pp][Tt][Yy]\.[Ss][Pp][Aa][Ww][Nn].*/
+    pivot_on:
+    - host
+    window: 2h

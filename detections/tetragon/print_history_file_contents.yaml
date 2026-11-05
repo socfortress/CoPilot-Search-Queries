@@ -177,29 +177,58 @@ graylog:
   query: (data_process_exec_process_binary:/.*\/[Cc][Aa][Tt]/ OR data_process_exec_process_binary:/.*\/[Hh][Ee][Aa][Dd]/ OR data_process_exec_process_binary:/.*\/[Tt][Aa][Ii][Ll]/ OR data_process_exec_process_binary:/.*\/[Mm][Oo][Rr][Ee]/) AND (data_process_exec_process_arguments:/.*\/\.[Bb][Aa][Ss][Hh]_[Hh][Ii][Ss][Tt][Oo][Rr][Yy].*/ OR data_process_exec_process_arguments:/.*\/\.[Zz][Ss][Hh]_[Hh][Ii][Ss][Tt][Oo][Rr][Yy].*/ OR data_process_exec_process_arguments:/.*_[Hh][Ii][Ss][Tt][Oo][Rr][Yy]/ OR data_process_exec_process_arguments:/.*\.[Hh][Ii][Ss][Tt][Oo][Rr][Yy]/ OR data_process_exec_process_arguments:/.*[Zz][Hh][Ii][Ss][Tt][Oo][Rr][Yy]/)
 
 correlation:
-  # Authored by the correlation engine for review. Related CoPilot Searches to run
-  # around an alert from this rule, scoped to the same host/user/IP within the window.
+  # Authored per-rule (behaviour-researched) for the correlation engine. Related CoPilot
+  # Searches + telemetry pivots to run around an alert, scoped to its host/user/ip/domain.
   related_rules:
-    - id: 0f79c4d2-4e1f-4683-9c36-b5469a665e06
-      name: "Access of Sudoers File Content"
-      reason: "next kill-chain tactic: Reconnaissance"
+  - id: 1182f3b3-e716-4efa-99ab-d2685d04360f
+    name: History File Deletion
+    reason: 'Read-then-destroy of the exact same file: the operator cat/head/tail''s the shell history to mine it for passwords, hostnames and command patterns, then rm/shred''s it to cover tracks. A deletion of the same history on this host within the window closes the loop from this read and is strong evidence it was malicious, not admin tidying.'
+  - id: 0f79c4d2-4e1f-4683-9c36-b5469a665e06
+    name: Access of Sudoers File Content
+    reason: Same hands-on operator, same manual read-a-sensitive-file toolset (cat/head/tail/grep). /etc/sudoers is the natural companion to shell history in a privilege-escalation recon sweep -- history shows how admins work, sudoers shows who can escalate. Both on this host within the window is one credential/privesc discovery session.
+  - id: 0cf7a157-8879-41a2-8f55-388dd23746b7
+    name: Linux Recon Indicators
+    reason: Both detections derive from the linuxprivchecker enumeration script (shared reference). find -perm -4000 (SUID hunting) and -name .htpasswd (credential-file hunting) are the automated counterpart to manually reading history for secrets -- co-occurring post-compromise privilege-escalation reconnaissance on the same host.
+  - id: fa4aaed5-4fe0-498d-bbc0-08e3346387ba
+    name: Copy Passwd Or Shadow From TMP Path
+    reason: Same objective, harvest credentials from the host. After mining plaintext secrets out of shell history the operator typically grabs /etc/passwd and /etc/shadow for the hashes to crack offline. A passwd/shadow copy on this host within the window expands the read into active credential theft.
+  - id: a015e032-146d-4717-8944-7a1884122111
+    name: Linux HackTool Execution
+    reason: 'Direct follow-on to the credentials just harvested: linpeas/pspy for privilege-escalation enumeration and john/hashcat/hydra to crack the hashes and passwords recovered from history. This rule''s own reference is linuxprivchecker, so hacktool execution on the same host is the escalation stage of the same intrusion.'
+  - id: ea3ecad2-db86-4a89-ad0b-132a10d2db55
+    name: Interactive Bash Suspicious Children
+    reason: This read is a hands-on-keyboard command, and that rule captures the interactive bash session (bash -i spawning nc/whoami/base64/pty) it is typed into. Firing on the same host reconstructs the surrounding session and confirms a live operator rather than a scripted or legitimate job.
+  - id: 8737b7f6-8df3-4bb7-b1da-06019b99b687
+    name: Shell Invocation Via Ssh - Linux
+    reason: Shell history is full of `ssh user@host`, scp and db-client command lines, so reading it hands the operator the lateral-movement targets and usernames. An ssh-spawned shell on this host within the window is the pivot that acts on what the history disclosed.
+  - id: d7a650c4-226c-451e-948f-cc490db506aa
+    name: PUA - TruffleHog Execution - Linux
+    reason: 'Escalation of the same secret-harvesting objective: manually grepping shell history for credentials is the opening move, and running TruffleHog turns it into an automated sweep of the filesystem and repos for secrets. TruffleHog on the same host within the window signals the operator is scaling up credential collection.'
   window: 1h
   enrichment_searches:
-  # Rule-specific telemetry pivots the engine runs around an alert from this rule,
-  # scoped to the alert's host/user/IP within the window (behaviour-targeted, not a sweep).
-    - name: "Host / credential reconnaissance commands on this host"
-      query: '((data_process_exec_process_binary:/.*(\/[Ww][Hh][Oo][Aa][Mm][Ii]|\/[Ii][Dd]|\/[Uu][Nn][Aa][Mm][Ee]|\/[Hh][Oo][Ss][Tt][Nn][Aa][Mm][Ee]|\/[Hh][Oo][Ss][Tt][Nn][Aa][Mm][Ee][Cc][Tt][Ll]|\/[Ss][Ss]|\/[Nn][Ee][Tt][Ss][Tt][Aa][Tt]|\/[Ii][Ff][Cc][Oo][Nn][Ff][Ii][Gg]|\/[Aa][Rr][Pp]|\/[Ww]|\/[Ww][Hh][Oo]|\/[Ll][Aa][Ss][Tt]|\/[Ll][Ss][Oo][Ff]|\/[Nn][Mm][Aa][Pp]|\/[Dd][Ii][Gg]|\/[Ff][Ii][Nn][Dd])/) OR (((data_process_exec_process_arguments:/.*\/[Ee][Tt][Cc]\/[Ss][Hh][Aa][Dd][Oo][Ww].*/) OR (data_process_exec_process_arguments:/.*\/[Ee][Tt][Cc]\/[Pp][Aa][Ss][Ss][Ww][Dd].*/) OR (data_process_exec_process_arguments:/.*\/[Ee][Tt][Cc]\/[Ss][Uu][Dd][Oo][Ee][Rr][Ss].*/) OR (data_process_exec_process_arguments:/.*[Ii][Dd]_[Rr][Ss][Aa].*/) OR (data_process_exec_process_arguments:/.*\.[Ss][Ss][Hh]\/.*/) OR (data_process_exec_process_arguments:/.*\/[Ee][Tt][Cc]\/[Gg][Ss][Hh][Aa][Dd][Oo][Ww].*/))))'
-      pivot_on: [host]
-      window: 1h
-    - name: "Privilege-escalation tooling executed on this host"
-      query: 'data_process_exec_process_binary:/.*(\/[Ss][Uu][Dd][Oo]|\/[Ss][Uu]|\/[Pp][Kk][Ee][Xx][Ee][Cc]|\/[Dd][Oo][Aa][Ss]|\/[Ss][Ee][Tt][Cc][Aa][Pp]|\/[Cc][Hh][Ss][Hh]|\/[Nn][Ee][Ww][Gg][Rr][Pp])/'
-      pivot_on: [host]
-      window: 2h
-    - name: "Shell / interpreter execution on this host"
-      query: '((data_process_exec_process_binary:/.*(\/[Bb][Aa][Ss][Hh]|\/[Ss][Hh]|\/[Dd][Aa][Ss][Hh]|\/[Zz][Ss][Hh]|\/[Kk][Ss][Hh]|\/[Aa][Ss][Hh]|\/[Bb][Uu][Ss][Yy][Bb][Oo][Xx])/) OR (data_process_exec_process_binary:/.*(\/[Pp][Yy][Tt][Hh][Oo][Nn]|\/[Pp][Yy][Tt][Hh][Oo][Nn]3|\/[Pp][Ee][Rr][Ll]|\/[Rr][Uu][Bb][Yy]|\/[Pp][Hh][Pp]|\/[Nn][Oo][Dd][Ee]|\/[Ll][Uu][Aa]|\/[Aa][Ww][Kk])/))'
-      pivot_on: [host]
-      window: 1h
-    - name: "Reconnaissance commands on this host"
-      query: 'data_process_exec_process_binary:/.*(\/[Ww][Hh][Oo][Aa][Mm][Ii]|\/[Ii][Dd]|\/[Uu][Nn][Aa][Mm][Ee]|\/[Hh][Oo][Ss][Tt][Nn][Aa][Mm][Ee]|\/[Hh][Oo][Ss][Tt][Nn][Aa][Mm][Ee][Cc][Tt][Ll]|\/[Ss][Ss]|\/[Nn][Ee][Tt][Ss][Tt][Aa][Tt]|\/[Ii][Ff][Cc][Oo][Nn][Ff][Ii][Gg]|\/[Aa][Rr][Pp]|\/[Ww]|\/[Ww][Hh][Oo]|\/[Ll][Aa][Ss][Tt]|\/[Ll][Ss][Oo][Ff]|\/[Nn][Mm][Aa][Pp]|\/[Dd][Ii][Gg]|\/[Ff][Ii][Nn][Dd])/'
-      pivot_on: [host]
-      window: 1h
+  # Behaviour-targeted hunts the engine runs around the alert (not a sweep).
+  - name: Credential and secret-file access on this host
+    query: ((data_process_exec_process_arguments:/.*\/[Ee][Tt][Cc]\/[Ss][Hh][Aa][Dd][Oo][Ww].*/) OR (data_process_exec_process_arguments:/.*\/[Ee][Tt][Cc]\/[Pp][Aa][Ss][Ss][Ww][Dd].*/) OR (data_process_exec_process_arguments:/.*\/[Ee][Tt][Cc]\/[Ss][Uu][Dd][Oo][Ee][Rr][Ss].*/) OR (data_process_exec_process_arguments:/.*\/[Ee][Tt][Cc]\/[Gg][Ss][Hh][Aa][Dd][Oo][Ww].*/) OR (data_process_exec_process_arguments:/.*[Ii][Dd]_[Rr][Ss][Aa].*/) OR (data_process_exec_process_arguments:/.*[Ii][Dd]_[Ee][Dd]25519.*/) OR (data_process_exec_process_arguments:/.*\.[Ss][Ss][Hh]\/.*/) OR (data_process_exec_process_arguments:/.*\.[Aa][Ww][Ss]\/[Cc][Rr][Ee][Dd][Ee][Nn][Tt][Ii][Aa][Ll][Ss].*/) OR (data_process_exec_process_arguments:/.*\.[Nn][Ee][Tt][Rr][Cc].*/) OR (data_process_exec_process_arguments:/.*\.[Pp][Gg][Pp][Aa][Ss][Ss].*/) OR (data_process_exec_process_arguments:/.*\.[Gg][Ii][Tt]-[Cc][Rr][Ee][Dd][Ee][Nn][Tt][Ii][Aa][Ll][Ss].*/))
+    pivot_on:
+    - host
+    window: 2h
+  - name: Shell-history files read by any tool on this host
+    query: (data_process_exec_process_arguments:/.*\/\.[Bb][Aa][Ss][Hh]_[Hh][Ii][Ss][Tt][Oo][Rr][Yy].*/ OR data_process_exec_process_arguments:/.*\/\.[Zz][Ss][Hh]_[Hh][Ii][Ss][Tt][Oo][Rr][Yy].*/ OR data_process_exec_process_arguments:/.*_[Hh][Ii][Ss][Tt][Oo][Rr][Yy]/ OR data_process_exec_process_arguments:/.*\.[Hh][Ii][Ss][Tt][Oo][Rr][Yy]/ OR data_process_exec_process_arguments:/.*[Zz][Hh][Ii][Ss][Tt][Oo][Rr][Yy]/)
+    pivot_on:
+    - host
+    window: 1h
+  - name: Searching command history or files for secrets on this host
+    query: ((data_process_exec_process_binary:/.*(\/[Gg][Rr][Ee][Pp]|\/[Ee][Gg][Rr][Ee][Pp]|\/[Ff][Gg][Rr][Ee][Pp]|\/[Zz][Gg][Rr][Ee][Pp]|\/[Aa][Ww][Kk]|\/[Ss][Ee][Dd])/) AND (data_process_exec_process_arguments:/.*([Pp][Aa][Ss][Ss][Ww][Oo][Rr][Dd]|[Pp][Aa][Ss][Ss][Ww][Dd]|[Ss][Ee][Cc][Rr][Ee][Tt]|[Tt][Oo][Kk][Ee][Nn]|[Aa][Pp][Ii]_?[Kk][Ee][Yy]|[Cc][Rr][Ee][Dd][Ee][Nn][Tt][Ii][Aa][Ll]).*/))
+    pivot_on:
+    - host
+    window: 1h
+  - name: Remote-access and lateral-movement tooling on this host
+    query: data_process_exec_process_binary:/.*(\/[Ss][Ss][Hh]|\/[Ss][Cc][Pp]|\/[Ss][Ff][Tt][Pp]|\/[Ss][Ss][Hh][Pp][Aa][Ss][Ss]|\/[Rr][Ss][Yy][Nn][Cc]|\/[Mm][Yy][Ss][Qq][Ll]|\/[Pp][Ss][Qq][Ll]|\/[Mm][Oo][Nn][Gg][Oo]|\/[Nn][Cc]|\/[Nn][Cc][Aa][Tt]|\/[Nn][Ee][Tt][Cc][Aa][Tt]|\/[Tt][Ee][Ll][Nn][Ee][Tt])/
+    pivot_on:
+    - host
+    window: 4h
+  - name: Privilege-escalation enumeration and credential-cracking tooling on this host
+    query: data_process_exec_process_binary:/.*(\/[Ll][Ii][Nn][Pp][Ee][Aa][Ss].*|\/[Ll][Ii][Nn][Ee][Nn][Uu][Mm].*|\/[Ll][Ii][Nn][Uu][Xx][Pp][Rr][Ii][Vv][Cc][Hh][Ee][Cc][Kk][Ee][Rr].*|\/[Uu][Nn][Ii][Xx]-[Pp][Rr][Ii][Vv][Ee][Ss][Cc]-[Cc][Hh][Ee][Cc][Kk].*|\/[Pp][Ss][Pp][Yy].*|\/[Jj][Oo][Hh][Nn]|\/[Hh][Aa][Ss][Hh][Cc][Aa][Tt]|\/[Hh][Yy][Dd][Rr][Aa])/
+    pivot_on:
+    - host
+    window: 2h

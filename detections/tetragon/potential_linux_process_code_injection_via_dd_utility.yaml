@@ -151,23 +151,47 @@ graylog:
   query: data_process_exec_process_binary:/.*\/[Dd][Dd]/ AND data_process_exec_process_arguments:/.*[Oo][Ff]=.*/ AND data_process_exec_process_arguments:/.*\/[Pp][Rr][Oo][Cc]\/.*/ AND data_process_exec_process_arguments:/.*\/[Mm][Ee][Mm].*/
 
 correlation:
-  # Authored by the correlation engine for review.
+  # Authored per-rule (behaviour-researched) for the correlation engine. Related CoPilot
+  # Searches + telemetry pivots to run around an alert, scoped to its host/user/ip/domain.
+  related_rules:
+  - id: 5cd16c8f-44a6-4654-81e7-a84d6db507d4
+    name: Process Execution From Shared Memory Directory
+    reason: 'Co-occurring fileless tradecraft: the operator who overwrites /proc/<pid>/mem with dd to run code without touching disk typically stages and launches the loader/shellcode from the RAM-backed /dev/shm first. Both are the same disk-avoiding, memory-resident evasion pattern on one host.'
+  - id: a2d9e2f3-0f43-4c7a-bcd9-9acfc0d723aa
+    name: Suspicious Download and Execute Pattern via Curl/Wget
+    reason: 'Precursor delivery: curl/wget pulling content into /tmp or /dev/shm and piping it to sh is how the injector script and the raw shellcode are fetched onto the host moments before the dd write into process memory.'
+  - id: a015e032-146d-4717-8944-7a1884122111
+    name: Linux HackTool Execution
+    reason: 'Precursor tooling: msfvenom (in this rule''s binary list) generates the ELF/raw shellcode written into the victim''s memory, and pspy/linpeas are used to locate a target process and the privileges needed before injecting.'
+  - id: 7f734ed0-4f47-46c0-837f-6ee62505abd9
+    name: Potential Netcat Reverse Shell Execution
+    reason: 'Entry/C2 context: /proc/mem injection is a manual, interactive step usually driven over the operator''s reverse shell. An nc -e/-c shell on the same host in the window marks the hands-on-keyboard foothold the injection ran from.'
+  - id: 80915f59-9b56-4616-9de0-fd0dea6c12fe
+    name: Linux Logs Clearing Attempts
+    reason: 'Follow-on anti-forensics: the technique is chosen for stealth, so the same operator commonly wipes /var/log with rm/shred/unlink afterward to erase traces of the session that performed the injection.'
+  - id: 0326c3c8-7803-4a0f-8c5c-368f747f7c3e
+    name: Triple Cross eBPF Rootkit Execve Hijack
+    reason: 'Co-occurring sibling tradecraft: another ptrace-less, in-memory code-execution-hijack and privilege-escalation implant (eBPF). On the same host it signals an advanced operator layering process-memory injection with a kernel-level implant.'
+  window: 2h
   enrichment_searches:
-  # Rule-specific telemetry pivots the engine runs around an alert from this rule,
-  # scoped to the alert's host/user/IP within the window (behaviour-targeted, not a sweep).
-    - name: "Credential / secret-file access on this host"
-      query: '((data_process_exec_process_arguments:/.*\/[Ee][Tt][Cc]\/[Ss][Hh][Aa][Dd][Oo][Ww].*/) OR (data_process_exec_process_arguments:/.*\/[Ee][Tt][Cc]\/[Pp][Aa][Ss][Ss][Ww][Dd].*/) OR (data_process_exec_process_arguments:/.*\/[Ee][Tt][Cc]\/[Ss][Uu][Dd][Oo][Ee][Rr][Ss].*/) OR (data_process_exec_process_arguments:/.*[Ii][Dd]_[Rr][Ss][Aa].*/) OR (data_process_exec_process_arguments:/.*\.[Ss][Ss][Hh]\/.*/) OR (data_process_exec_process_arguments:/.*\/[Ee][Tt][Cc]\/[Gg][Ss][Hh][Aa][Dd][Oo][Ww].*/))'
-      pivot_on: [host]
-      window: 2h
-    - name: "Shell / interpreter execution on this host"
-      query: '((data_process_exec_process_binary:/.*(\/[Bb][Aa][Ss][Hh]|\/[Ss][Hh]|\/[Dd][Aa][Ss][Hh]|\/[Zz][Ss][Hh]|\/[Kk][Ss][Hh]|\/[Aa][Ss][Hh]|\/[Bb][Uu][Ss][Yy][Bb][Oo][Xx])/) OR (data_process_exec_process_binary:/.*(\/[Pp][Yy][Tt][Hh][Oo][Nn]|\/[Pp][Yy][Tt][Hh][Oo][Nn]3|\/[Pp][Ee][Rr][Ll]|\/[Rr][Uu][Bb][Yy]|\/[Pp][Hh][Pp]|\/[Nn][Oo][Dd][Ee]|\/[Ll][Uu][Aa]|\/[Aa][Ww][Kk])/))'
-      pivot_on: [host]
-      window: 1h
-    - name: "Reconnaissance commands on this host"
-      query: 'data_process_exec_process_binary:/.*(\/[Ww][Hh][Oo][Aa][Mm][Ii]|\/[Ii][Dd]|\/[Uu][Nn][Aa][Mm][Ee]|\/[Hh][Oo][Ss][Tt][Nn][Aa][Mm][Ee]|\/[Hh][Oo][Ss][Tt][Nn][Aa][Mm][Ee][Cc][Tt][Ll]|\/[Ss][Ss]|\/[Nn][Ee][Tt][Ss][Tt][Aa][Tt]|\/[Ii][Ff][Cc][Oo][Nn][Ff][Ii][Gg]|\/[Aa][Rr][Pp]|\/[Ww]|\/[Ww][Hh][Oo]|\/[Ll][Aa][Ss][Tt]|\/[Ll][Ss][Oo][Ff]|\/[Nn][Mm][Aa][Pp]|\/[Dd][Ii][Gg]|\/[Ff][Ii][Nn][Dd])/'
-      pivot_on: [host]
-      window: 1h
-    - name: "Privilege-escalation tooling executed on this host"
-      query: 'data_process_exec_process_binary:/.*(\/[Ss][Uu][Dd][Oo]|\/[Ss][Uu]|\/[Pp][Kk][Ee][Xx][Ee][Cc]|\/[Dd][Oo][Aa][Ss]|\/[Ss][Ee][Tt][Cc][Aa][Pp]|\/[Cc][Hh][Ss][Hh]|\/[Nn][Ee][Ww][Gg][Rr][Pp])/'
-      pivot_on: [host]
-      window: 2h
+  # Behaviour-targeted hunts the engine runs around the alert (not a sweep).
+  - name: Process memory-map and /proc/<pid>/mem access on this host
+    query: ((data_process_exec_process_arguments:/.*\/[Pp][Rr][Oo][Cc]\/.*\/[Mm][Aa][Pp][Ss].*/) OR (data_process_exec_process_arguments:/.*\/[Pp][Rr][Oo][Cc]\/.*\/[Mm][Ee][Mm].*/))
+    pivot_on:
+    - host
+    window: 2h
+  - name: Alternate process-injection vectors (gdb attach, /dev/mem, LD_PRELOAD) on this host
+    query: ((data_process_exec_process_binary:/.*\/[Gg][Dd][Bb]/) OR (data_process_exec_process_arguments:/.*\/[Dd][Ee][Vv]\/[Kk]?[Mm][Ee][Mm].*/) OR (data_process_exec_process_arguments:/.*[Ll][Dd]_[Pp][Rr][Ee][Ll][Oo][Aa][Dd].*/))
+    pivot_on:
+    - host
+    window: 2h
+  - name: Shellcode generation and raw-byte staging on this host
+    query: ((data_process_exec_process_binary:/.*\/[Mm][Ss][Ff][Vv][Ee][Nn][Oo][Mm]/) OR (data_process_exec_process_arguments:/.*[Mm][Ss][Ff][Vv][Ee][Nn][Oo][Mm].*/) OR (data_process_exec_process_arguments:/.*[Ss][Hh][Ee][Ll][Ll][Cc][Oo][Dd][Ee].*/) OR (data_process_exec_process_binary:/.*\/[Xx][Xx][Dd]/) OR (data_process_exec_process_arguments:/.*[Xx][Xx][Dd] -[Rr].*/))
+    pivot_on:
+    - host
+    window: 4h
+  - name: Running-process enumeration to select an injection target on this host
+    query: ((data_process_exec_process_binary:/.*\/[Pp][Ss][Pp][Yy].*/) OR (data_process_exec_process_arguments:/.*\/[Pp][Rr][Oo][Cc]\/.*\/[Cc][Mm][Dd][Ll][Ii][Nn][Ee].*/) OR (data_process_exec_process_arguments:/.*\/[Pp][Rr][Oo][Cc]\/.*\/[Ss][Tt][Aa][Tt][Uu][Ss].*/) OR (data_process_exec_process_arguments:/.*\/[Pp][Rr][Oo][Cc]\/.*\/[Ee][Xx][Ee].*/))
+    pivot_on:
+    - host
+    window: 2h

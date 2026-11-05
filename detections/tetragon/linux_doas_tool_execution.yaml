@@ -126,46 +126,58 @@ graylog:
   query: (data_process_exec_process_binary:"/usr/bin/doas" OR data_process_exec_parent_binary:"/usr/bin/doas" OR full_log:/.*\/usr\/bin\/doas.*/) AND NOT _exists_:data_win_system_eventID AND NOT rule_groups:/.*windows.*/
 
 correlation:
-  # Authored by the correlation engine for review. Related CoPilot Searches to run
-  # around an alert from this rule, scoped to the same host/user/IP within the window.
+  # Authored per-rule (behaviour-researched) for the correlation engine. Related CoPilot
+  # Searches + telemetry pivots to run around an alert, scoped to its host/user/ip/domain.
   related_rules:
-    - id: cbef820c-e1ff-407f-887f-0a9240a2d477
-      name: "Detect Path Interception By Creation Of program exe"
-      reason: "same analytic story: Privilege Escalation"
-    - id: 909f8fd8-7ac8-11eb-a1f3-acde48001122
-      name: "FodHelper UAC Bypass"
-      reason: "same analytic story: Privilege Escalation"
-    - id: 09725404-a44f-4ed3-9efa-8ed5d69e4c53
-      name: "Get-DomainGroup with PowerShell Script Block"
-      reason: "same analytic story: Privilege Escalation"
-    - id: 67740bd3-1506-469c-b91d-effc322cc6e5
-      name: "Get-WmiObject Ds_Group with PowerShell Script Block"
-      reason: "same analytic story: Privilege Escalation"
-    - id: 59b51620-94c9-11ec-b3d5-acde48001122
-      name: "Kerberos Pre-Authentication Flag Disabled with PowerShell"
-      reason: "same analytic story: Privilege Escalation"
-    - id: ea61e291-af05-4716-932a-67faddb6ae6f
-      name: "PowerShell COM Hijacking InProcServer32 Modification"
-      reason: "same analytic story: Privilege Escalation"
-    - id: 8470d755-0c13-45b3-bd63-387a373c10cf
-      name: "Reg exe Manipulating Windows Services Registry Keys"
-      reason: "same analytic story: Privilege Escalation"
-    - id: 7a1d4c9e-3b2f-4e6a-8f2d-1c9e7f3b5a8c
-      name: "Suspicious Container Exec Detection"
-      reason: "same analytic story: Privilege Escalation"
+  - id: lnx-doas-001
+    name: Linux doas Execution Detection
+    reason: Same doas invocation seen through auditd/syslog full_log instead of Tetragon process-exec; both firing on the host in-window confirms real doas elevation rather than a single-sensor artifact.
+  - id: linux-sudo-or-su-execution-001
+    name: Linux Sudo Or Su Execution
+    reason: sudo and su are the dominant elevation helpers; doas is the uncommon sibling, and an actor reaching for doas on a host usually also tries sudo/su, so together they map every elevation attempt on the box.
+  - id: linux-pkexec-privilege-escalation-001
+    name: Linux pkexec Privilege Escalation
+    reason: pkexec (PwnKit) is the third SUID elevation helper; concurrent pkexec and doas activity on one host signals an actor probing every available local-privilege-escalation path, not routine admin work.
+  - id: 0f79c4d2-4e1f-4683-9c36-b5469a665e06
+    name: Access of Sudoers File Content
+    reason: Reading /etc/sudoers to learn which elevation is permitted is the reconnaissance that precedes choosing doas or sudo; same Tetragon telemetry so it co-occurs in the same window on the host.
+  - id: f74107df-b6c6-4e80-bf00-4170b658162b
+    name: Sudo Privilege Escalation CVE-2019-14287
+    reason: An active sudo-exploitation attempt (-u#-1); seen alongside doas use it marks deliberate privilege-escalation exploitation on the host rather than a legitimate elevated command.
+  - id: 6a50f16c-3b7b-42d1-b081-0fdd3ba70a73
+    name: User Added To Root/Sudoers Group Using Usermod
+    reason: 'Prime follow-on: once elevated via doas, usermod -aG root/sudoers makes the privilege persistent - the escalation-to-persistence pivot that turns a doas event into an incident.'
+  - id: fa4aaed5-4fe0-498d-bbc0-08e3346387ba
+    name: Copy Passwd Or Shadow From TMP Path
+    reason: Copying /etc/shadow or /etc/passwd requires the root that doas just granted; credential harvesting is the usual objective immediately after a local privilege escalation.
+  - id: 6b14bac8-3e3a-4324-8109-42f0546a347f
+    name: Scheduled Cron Task/Job - Linux
+    reason: Writing a crontab from /tmp establishes root-level persistence, a frequent immediate abuse of freshly gained elevation on the same host.
   window: 1h
   enrichment_searches:
-  # Rule-specific telemetry pivots the engine runs around an alert from this rule,
-  # scoped to the alert's host/user/IP within the window (behaviour-targeted, not a sweep).
-    - name: "Privilege-escalation tooling executed on this host"
-      query: 'data_process_exec_process_binary:/.*(\/[Ss][Uu][Dd][Oo]|\/[Ss][Uu]|\/[Pp][Kk][Ee][Xx][Ee][Cc]|\/[Dd][Oo][Aa][Ss]|\/[Ss][Ee][Tt][Cc][Aa][Pp]|\/[Cc][Hh][Ss][Hh]|\/[Nn][Ee][Ww][Gg][Rr][Pp])/'
-      pivot_on: [host]
-      window: 2h
-    - name: "Shell / interpreter execution on this host"
-      query: '((data_process_exec_process_binary:/.*(\/[Bb][Aa][Ss][Hh]|\/[Ss][Hh]|\/[Dd][Aa][Ss][Hh]|\/[Zz][Ss][Hh]|\/[Kk][Ss][Hh]|\/[Aa][Ss][Hh]|\/[Bb][Uu][Ss][Yy][Bb][Oo][Xx])/) OR (data_process_exec_process_binary:/.*(\/[Pp][Yy][Tt][Hh][Oo][Nn]|\/[Pp][Yy][Tt][Hh][Oo][Nn]3|\/[Pp][Ee][Rr][Ll]|\/[Rr][Uu][Bb][Yy]|\/[Pp][Hh][Pp]|\/[Nn][Oo][Dd][Ee]|\/[Ll][Uu][Aa]|\/[Aa][Ww][Kk])/))'
-      pivot_on: [host]
-      window: 1h
-    - name: "Reconnaissance commands on this host"
-      query: 'data_process_exec_process_binary:/.*(\/[Ww][Hh][Oo][Aa][Mm][Ii]|\/[Ii][Dd]|\/[Uu][Nn][Aa][Mm][Ee]|\/[Hh][Oo][Ss][Tt][Nn][Aa][Mm][Ee]|\/[Hh][Oo][Ss][Tt][Nn][Aa][Mm][Ee][Cc][Tt][Ll]|\/[Ss][Ss]|\/[Nn][Ee][Tt][Ss][Tt][Aa][Tt]|\/[Ii][Ff][Cc][Oo][Nn][Ff][Ii][Gg]|\/[Aa][Rr][Pp]|\/[Ww]|\/[Ww][Hh][Oo]|\/[Ll][Aa][Ss][Tt]|\/[Ll][Ss][Oo][Ff]|\/[Nn][Mm][Aa][Pp]|\/[Dd][Ii][Gg]|\/[Ff][Ii][Nn][Dd])/'
-      pivot_on: [host]
-      window: 1h
+  # Behaviour-targeted hunts the engine runs around the alert (not a sweep).
+  - name: Child processes spawned by doas (the actually-elevated command)
+    query: data_process_exec_parent_binary:/.*\/[Dd][Oo][Aa][Ss]/
+    pivot_on:
+    - host
+    window: 1h
+  - name: doas config (/etc/doas.conf) read or modified on this host
+    query: data_process_exec_process_arguments:/.*\/[Ee][Tt][Cc]\/[Dd][Oo][Aa][Ss]\.[Cc][Oo][Nn][Ff].*/
+    pivot_on:
+    - host
+    window: 2h
+  - name: Other privilege-elevation helpers executed on this host
+    query: (data_process_exec_process_binary:/.*\/[Ss][Uu][Dd][Oo]/ OR data_process_exec_process_binary:/.*\/[Ss][Uu]/ OR data_process_exec_process_binary:/.*\/[Pp][Kk][Ee][Xx][Ee][Cc]/ OR data_process_exec_process_binary:/.*\/[Pp][Kk][Tt][Tt][Yy][Aa][Gg][Ee][Nn][Tt]/)
+    pivot_on:
+    - host
+    window: 2h
+  - name: Credential-store access on this host (what the elevation enabled)
+    query: data_process_exec_process_arguments:/.*(\/[Ee][Tt][Cc]\/[Ss][Hh][Aa][Dd][Oo][Ww]|\/[Ee][Tt][Cc]\/[Gg][Ss][Hh][Aa][Dd][Oo][Ww]|\/[Ee][Tt][Cc]\/[Ss][Uu][Dd][Oo][Ee][Rr][Ss]|\/\.[Ss][Ss][Hh]\/[Ii][Dd]_[Rr][Ss][Aa]).*/
+    pivot_on:
+    - host
+    window: 1h
+  - name: Privileged persistence and account changes on this host
+    query: (data_process_exec_process_binary:/.*\/[Uu][Ss][Ee][Rr][Aa][Dd][Dd]/ OR data_process_exec_process_binary:/.*\/[Uu][Ss][Ee][Rr][Mm][Oo][Dd]/ OR data_process_exec_process_binary:/.*\/[Gg][Rr][Oo][Uu][Pp][Aa][Dd][Dd]/ OR data_process_exec_process_binary:/.*\/[Pp][Aa][Ss][Ss][Ww][Dd]/ OR data_process_exec_process_binary:/.*\/[Cc][Rr][Oo][Nn][Tt][Aa][Bb]/ OR data_process_exec_process_binary:/.*\/[Vv][Ii][Ss][Uu][Dd][Oo]/)
+    pivot_on:
+    - host
+    window: 2h

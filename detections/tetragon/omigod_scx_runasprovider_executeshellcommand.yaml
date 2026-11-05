@@ -158,23 +158,58 @@ graylog:
   query: data_process_exec_process_uid:/[Rr][Oo][Oo][Tt]/ AND data_process_exec_process_auid:"0" AND data_process_exec_process_cwd:/\/[Vv][Aa][Rr]\/[Oo][Pp][Tt]\/[Mm][Ii][Cc][Rr][Oo][Ss][Oo][Ff][Tt]\/[Ss][Cc][Xx]\/[Tt][Mm][Pp]/ AND data_process_exec_process_arguments:/.*\/[Bb][Ii][Nn]\/[Ss][Hh].*/
 
 correlation:
-  # Authored by the correlation engine for review.
+  # Authored per-rule (behaviour-researched) for the correlation engine. Related CoPilot
+  # Searches + telemetry pivots to run around an alert, scoped to its host/user/ip/domain.
+  related_rules:
+  - id: 6eea1bf6-f8d2-488a-a742-e6ef6c1b67db
+    name: OMIGOD SCX RunAsProvider ExecuteScript
+    reason: The ExecuteScript variant of the identical OMI/SCX RunAsProvider abuse (same uid=root, auid=0, SCX tmp cwd, /bin/sh); public OMIGOD exploit toolkits invoke both Invoke_ExecuteShellCommand and Invoke_ExecuteScript, so the two fire together or back-to-back on the same host and together confirm the SCX shell execution is exploitation, not a benign management job.
+  - id: a2d9e2f3-0f43-4c7a-bcd9-9acfc0d723aa
+    name: Suspicious Download and Execute Pattern via Curl/Wget
+    reason: 'The root shell OMI runs most often exists to fetch a second stage: curl/wget pulling a script into /tmp or /dev/shm and piping to sh -c is the canonical OMIGOD follow-on that turned the unauthenticated RCE into payload deployment on the same host.'
+  - id: 312b42b1-bded-4441-8b58-163a3af58775
+    name: Potentially Suspicious Execution From Tmp Folder
+    reason: The second stage the OMI root shell drops then executes from /tmp (the SCX provider itself stages under a tmp path); a binary running out of /tmp/ on this host inside the window is that downloaded payload detonating as root.
+  - id: 9069ea3c-b213-4c52-be13-86506a227ab1
+    name: Linux Crypto Mining Indicators
+    reason: Cryptomining (XMRig/Mirai with stratum+tcp, --donate-level=0, modprobe msr allow_writes=on) was the overwhelming real-world OMIGOD outcome; a miner command line on the same host confirms the root RCE was weaponized for resource hijacking (T1496).
+  - id: 7f734ed0-4f47-46c0-837f-6ee62505abd9
+    name: Potential Netcat Reverse Shell Execution
+    reason: The OMI-executed /bin/sh command frequently opens an interactive reverse shell (nc -e <shell>), converting unauthenticated RCE into hands-on-keyboard root; a netcat reverse shell on this host in the window is the attacker claiming the foothold OMIGOD handed them.
+  - id: 6b14bac8-3e3a-4324-8109-42f0546a347f
+    name: Scheduled Cron Task/Job - Linux
+    reason: A root-level OMIGOD foothold installs a crontab from /tmp to survive reboot and relaunch the miner/implant; cron persistence staged from a tmp path on the same host is the classic post-exploitation step that follows SCX root execution (T1053.003).
+  - id: fa4aaed5-4fe0-498d-bbc0-08e3346387ba
+    name: Copy Passwd Or Shadow From TMP Path
+    reason: As root the attacker harvests credentials; cp of /etc/passwd or /etc/shadow via a tmp path - the same tmp staging area SCX uses - is the T1552.001 credential-access step that follows OMI RCE and feeds offline cracking and lateral movement.
+  - id: 80915f59-9b56-4616-9de0-fd0dea6c12fe
+    name: Linux Logs Clearing Attempts
+    reason: After operating as root the attacker deletes /var/log entries to erase the OMI exploitation trail; log clearing on this host inside the window marks the SCX shell execution as a deliberate intrusion rather than a benign SCX management task.
+  window: 2h
   enrichment_searches:
-  # Rule-specific telemetry pivots the engine runs around an alert from this rule,
-  # scoped to the alert's host/user/IP within the window (behaviour-targeted, not a sweep).
-    - name: "Privilege-escalation tooling executed on this host"
-      query: 'data_process_exec_process_binary:/.*(\/[Ss][Uu][Dd][Oo]|\/[Ss][Uu]|\/[Pp][Kk][Ee][Xx][Ee][Cc]|\/[Dd][Oo][Aa][Ss]|\/[Ss][Ee][Tt][Cc][Aa][Pp]|\/[Cc][Hh][Ss][Hh]|\/[Nn][Ee][Ww][Gg][Rr][Pp])/'
-      pivot_on: [host]
-      window: 2h
-    - name: "Credential / secret-file access on this host"
-      query: '((data_process_exec_process_arguments:/.*\/[Ee][Tt][Cc]\/[Ss][Hh][Aa][Dd][Oo][Ww].*/) OR (data_process_exec_process_arguments:/.*\/[Ee][Tt][Cc]\/[Pp][Aa][Ss][Ss][Ww][Dd].*/) OR (data_process_exec_process_arguments:/.*\/[Ee][Tt][Cc]\/[Ss][Uu][Dd][Oo][Ee][Rr][Ss].*/) OR (data_process_exec_process_arguments:/.*[Ii][Dd]_[Rr][Ss][Aa].*/) OR (data_process_exec_process_arguments:/.*\.[Ss][Ss][Hh]\/.*/) OR (data_process_exec_process_arguments:/.*\/[Ee][Tt][Cc]\/[Gg][Ss][Hh][Aa][Dd][Oo][Ww].*/))'
-      pivot_on: [host]
-      window: 2h
-    - name: "Shell / interpreter execution on this host"
-      query: '((data_process_exec_process_binary:/.*(\/[Bb][Aa][Ss][Hh]|\/[Ss][Hh]|\/[Dd][Aa][Ss][Hh]|\/[Zz][Ss][Hh]|\/[Kk][Ss][Hh]|\/[Aa][Ss][Hh]|\/[Bb][Uu][Ss][Yy][Bb][Oo][Xx])/) OR (data_process_exec_process_binary:/.*(\/[Pp][Yy][Tt][Hh][Oo][Nn]|\/[Pp][Yy][Tt][Hh][Oo][Nn]3|\/[Pp][Ee][Rr][Ll]|\/[Rr][Uu][Bb][Yy]|\/[Pp][Hh][Pp]|\/[Nn][Oo][Dd][Ee]|\/[Ll][Uu][Aa]|\/[Aa][Ww][Kk])/))'
-      pivot_on: [host]
-      window: 1h
-    - name: "Reconnaissance commands on this host"
-      query: 'data_process_exec_process_binary:/.*(\/[Ww][Hh][Oo][Aa][Mm][Ii]|\/[Ii][Dd]|\/[Uu][Nn][Aa][Mm][Ee]|\/[Hh][Oo][Ss][Tt][Nn][Aa][Mm][Ee]|\/[Hh][Oo][Ss][Tt][Nn][Aa][Mm][Ee][Cc][Tt][Ll]|\/[Ss][Ss]|\/[Nn][Ee][Tt][Ss][Tt][Aa][Tt]|\/[Ii][Ff][Cc][Oo][Nn][Ff][Ii][Gg]|\/[Aa][Rr][Pp]|\/[Ww]|\/[Ww][Hh][Oo]|\/[Ll][Aa][Ss][Tt]|\/[Ll][Ss][Oo][Ff]|\/[Nn][Mm][Aa][Pp]|\/[Dd][Ii][Gg]|\/[Ff][Ii][Nn][Dd])/'
-      pivot_on: [host]
-      window: 1h
+  # Behaviour-targeted hunts the engine runs around the alert (not a sweep).
+  - name: Children spawned by the OMI/SCX provider on this host
+    query: (data_process_exec_parent_binary:/.*\/[Oo][Mm][Ii]\/.*/ OR data_process_exec_parent_binary:/.*\/[Oo][Mm][Ii][Aa][Gg][Ee][Nn][Tt]/ OR data_process_exec_parent_binary:/.*\/[Oo][Mm][Ii][Ss][Ee][Rr][Vv][Ee][Rr]/ OR data_process_exec_parent_binary:/.*\/[Oo][Mm][Ii][Ee][Nn][Gg][Ii][Nn][Ee]/ OR data_process_exec_parent_binary:/.*\/[Mm][Ii][Cc][Rr][Oo][Ss][Oo][Ff][Tt]\/[Ss][Cc][Xx]\/.*/ OR data_process_exec_parent_binary:/.*\/[Ss][Cc][Xx][Aa][Dd][Mm][Ii][Nn]/)
+    pivot_on:
+    - host
+    window: 2h
+  - name: Azure IMDS / managed-identity token access on this host
+    query: (data_process_exec_process_arguments:/.*169\.254\.169\.254.*/ OR data_process_exec_process_arguments:/.*[Mm][Ee][Tt][Aa][Dd][Aa][Tt][Aa]\.[Aa][Zz][Uu][Rr][Ee]\.[Cc][Oo][Mm].*/ OR data_process_exec_process_arguments:/.*\/[Mm][Ee][Tt][Aa][Dd][Aa][Tt][Aa]\/[Ii][Nn][Ss][Tt][Aa][Nn][Cc][Ee].*/)
+    pivot_on:
+    - host
+    window: 2h
+  - name: Credential and secret-file access on this host
+    query: ((data_process_exec_process_arguments:/.*\/[Ee][Tt][Cc]\/[Ss][Hh][Aa][Dd][Oo][Ww].*/) OR (data_process_exec_process_arguments:/.*\/[Ee][Tt][Cc]\/[Pp][Aa][Ss][Ss][Ww][Dd].*/) OR (data_process_exec_process_arguments:/.*\/[Ee][Tt][Cc]\/[Ss][Uu][Dd][Oo][Ee][Rr][Ss].*/) OR (data_process_exec_process_arguments:/.*[Ii][Dd]_[Rr][Ss][Aa].*/) OR (data_process_exec_process_arguments:/.*\.[Ss][Ss][Hh]\/.*/) OR (data_process_exec_process_arguments:/.*\/[Ee][Tt][Cc]\/[Gg][Ss][Hh][Aa][Dd][Oo][Ww].*/))
+    pivot_on:
+    - host
+    window: 2h
+  - name: Reverse shell / interactive outbound shell on this host
+    query: ((data_process_exec_process_arguments:/.*\/[Dd][Ee][Vv]\/[Tt][Cc][Pp]\/.*/ OR data_process_exec_process_arguments:/.*\/[Dd][Ee][Vv]\/[Uu][Dd][Pp]\/.*/) OR (data_process_exec_process_arguments:/.* -[Ii].*/ AND (data_process_exec_process_binary:/.*\/[Bb][Aa][Ss][Hh]/ OR data_process_exec_process_binary:/.*\/[Ss][Hh]/)) OR (data_process_exec_process_binary:/.*\/[Pp][Yy][Tt][Hh][Oo][Nn][0-9.]*/ AND (data_process_exec_process_arguments:/.*[Pp][Tt][Yy]\.[Ss][Pp][Aa][Ww][Nn].*/ OR data_process_exec_process_arguments:/.*[Ss][Oo][Cc][Kk][Ee][Tt].*/)))
+    pivot_on:
+    - host
+    window: 1h
+  - name: 'Root persistence: SSH keys, new accounts, systemd, sudoers on this host'
+    query: ((data_process_exec_process_arguments:/.*[Aa][Uu][Tt][Hh][Oo][Rr][Ii][Zz][Ee][Dd]_[Kk][Ee][Yy][Ss].*/) OR (data_process_exec_process_binary:/.*\/[Uu][Ss][Ee][Rr][Aa][Dd][Dd]/ OR data_process_exec_process_binary:/.*\/[Aa][Dd][Dd][Uu][Ss][Ee][Rr]/ OR data_process_exec_process_binary:/.*\/[Uu][Ss][Ee][Rr][Mm][Oo][Dd]/) OR (data_process_exec_process_binary:/.*\/[Ss][Yy][Ss][Tt][Ee][Mm][Cc][Tt][Ll]/ AND data_process_exec_process_arguments:/.*[Ee][Nn][Aa][Bb][Ll][Ee].*/) OR (data_process_exec_process_arguments:/.*\/[Ee][Tt][Cc]\/[Ss][Uu][Dd][Oo][Ee][Rr][Ss].*/))
+    pivot_on:
+    - host
+    window: 4h

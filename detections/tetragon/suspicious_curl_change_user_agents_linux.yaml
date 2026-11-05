@@ -148,29 +148,58 @@ graylog:
   query: data_process_exec_process_binary:/.*\/[Cc][Uu][Rr][Ll]/ AND (data_process_exec_process_arguments:/.* -[Aa] .*/ OR data_process_exec_process_arguments:/.* --[Uu][Ss][Ee][Rr]-[Aa][Gg][Ee][Nn][Tt] .*/)
 
 correlation:
-  # Authored by the correlation engine for review. Related CoPilot Searches to run
-  # around an alert from this rule, scoped to the same host/user/IP within the window.
+  # Authored per-rule (behaviour-researched) for the correlation engine. Related CoPilot
+  # Searches + telemetry pivots to run around an alert, scoped to its host/user/ip/domain.
   related_rules:
-    - id: 0a23a62d-c5b3-468b-a072-25064a9a8c87
-      name: "Axios NPM Compromise Indicators - Linux"
-      reason: "next kill-chain tactic: Command and Control"
+  - id: 818f7b24-0fba-4c49-a073-8b755573b9c7
+    name: Linux Webshell Indicators
+    reason: 'Precursor/foothold: an attacker-driven curl is most often launched by a web-server process (nginx/apache/php-fpm/node) spawning a shell after web exploitation. If this fired on the same host just before, the UA-spoofed curl is webshell ingress, not admin activity - compare the curl event''s data_process_exec_parent_binary against the webshell''s child.'
+  - id: a2d9e2f3-0f43-4c7a-bcd9-9acfc0d723aa
+    name: Suspicious Download and Execute Pattern via Curl/Wget
+    reason: 'Same ingress-tool-transfer TTP at higher confidence: curl/wget writing into /tmp or /dev/shm then piped to ''sh -c''. Co-firing confirms the spoofed-UA request was a stager download that actually ran, turning this medium alert into a confirmed fetch-and-execute.'
+  - id: cf610c15-ed71-46e1-bdf8-2bd1a99de6c4
+    name: Download File To Potentially Suspicious Directory Via Wget
+    reason: 'Co-occurring sibling downloader: attackers routinely stage with both curl and wget. A wget -O into /tmp on the same host shows a multi-tool ingress campaign, and places this UA-spoofed curl inside it rather than treating it as a lone fetch.'
+  - id: 00b90cc1-17ec-402c-96ad-3a8117d7a582
+    name: Suspicious Curl File Upload - Linux
+    reason: Same curl binary on the outbound/exfil leg (-F/-T/-d/--data). UA spoofing is applied to both the inbound payload fetch and the outbound beacon, so an upload curl on the same host completes the C2 round-trip (fetch stage in, send data/results out).
+  - id: 6419afd1-3742-47a5-a7e6-b50386cd15f8
+    name: Chmod Targeting Sensitive Directories
+    reason: 'Immediate next step after the fetch: chmod +x on the just-downloaded file (typically under /tmp) to set the execute bit. A chmod touching /tmp/opt/etc right after the curl request is the standard arm-the-payload action before it is run.'
+  - id: 312b42b1-bded-4441-8b58-163a3af58775
+    name: Potentially Suspicious Execution From Tmp Folder
+    reason: 'The payoff: a process whose binary lives under /tmp executes. This turns ''curl fetched something'' into ''the downloaded payload ran'' - the single most important follow-on to confirm the UA-spoofed download delivered a working implant.'
+  - id: 9069ea3c-b213-4c52-be13-86506a227ab1
+    name: Linux Crypto Mining Indicators
+    reason: 'Most common real-world payoff of a Linux curl-download: a coin miner. Miner command-line flags (-o pool.*, --donate-level=0, --algo=rx/0) on the same host identify exactly what the spoofed-UA curl pulled down and ran.'
+  - id: efd2eb09-b72e-4a61-8dc7-b1382a1e8983
+    name: Shai-Hulud NPM Package Malicious Exfiltration via Curl
+    reason: Named supply-chain campaign whose IOC is curl exfil to a webhook endpoint. On a dev/CI host that builds npm packages, a UA-spoofed curl beacon may be the Shai-Hulud exfil itself - if that rule co-fires on this host, treat both as one incident.
   window: 1h
   enrichment_searches:
-  # Rule-specific telemetry pivots the engine runs around an alert from this rule,
-  # scoped to the alert's host/user/IP within the window (behaviour-targeted, not a sweep).
-    - name: "Reverse-shell / C2 tooling on this host"
-      query: '((((data_process_exec_process_binary:/.*(\/[Nn][Cc]|\/[Nn][Cc][Aa][Tt]|\/[Nn][Ee][Tt][Cc][Aa][Tt]|\/[Ss][Oo][Cc][Aa][Tt])/) OR (data_process_exec_process_arguments:/.*\/[Dd][Ee][Vv]\/[Tt][Cc][Pp]\/.*/) OR (data_process_exec_process_arguments:/.*[Bb][Aa][Ss][Hh] -[Ii].*/) OR (data_process_exec_process_arguments:/.*[Ss][Hh] -[Ii].*/) OR (data_process_exec_process_arguments:/.*[Mm][Kk][Ff][Ii][Ff][Oo].*/))) OR (data_process_exec_process_binary:/.*(\/[Cc][Uu][Rr][Ll]|\/[Ww][Gg][Ee][Tt]|\/[Nn][Cc]|\/[Nn][Cc][Aa][Tt]|\/[Nn][Ee][Tt][Cc][Aa][Tt]|\/[Ss][Oo][Cc][Aa][Tt]|\/[Oo][Pp][Ee][Nn][Ss][Ss][Ll]|\/[Tt][Ff][Tt][Pp])/))'
-      pivot_on: [host]
-      window: 1h
-    - name: "Outbound-transfer / upload tooling on this host"
-      query: '((data_process_exec_process_binary:/.*(\/[Cc][Uu][Rr][Ll]|\/[Ww][Gg][Ee][Tt]|\/[Tt][Ff][Tt][Pp])/) OR (data_process_exec_process_binary:/.*(\/[Ss][Cc][Pp]|\/[Rr][Ss][Yy][Nn][Cc]|\/[Rr][Cc][Ll][Oo][Nn][Ee]|\/[Cc][Uu][Rr][Ll])/))'
-      pivot_on: [host]
-      window: 2h
-    - name: "Shell / interpreter execution on this host"
-      query: '((data_process_exec_process_binary:/.*(\/[Bb][Aa][Ss][Hh]|\/[Ss][Hh]|\/[Dd][Aa][Ss][Hh]|\/[Zz][Ss][Hh]|\/[Kk][Ss][Hh]|\/[Aa][Ss][Hh]|\/[Bb][Uu][Ss][Yy][Bb][Oo][Xx])/) OR (data_process_exec_process_binary:/.*(\/[Pp][Yy][Tt][Hh][Oo][Nn]|\/[Pp][Yy][Tt][Hh][Oo][Nn]3|\/[Pp][Ee][Rr][Ll]|\/[Rr][Uu][Bb][Yy]|\/[Pp][Hh][Pp]|\/[Nn][Oo][Dd][Ee]|\/[Ll][Uu][Aa]|\/[Aa][Ww][Kk])/))'
-      pivot_on: [host]
-      window: 1h
-    - name: "Reconnaissance commands on this host"
-      query: 'data_process_exec_process_binary:/.*(\/[Ww][Hh][Oo][Aa][Mm][Ii]|\/[Ii][Dd]|\/[Uu][Nn][Aa][Mm][Ee]|\/[Hh][Oo][Ss][Tt][Nn][Aa][Mm][Ee]|\/[Hh][Oo][Ss][Tt][Nn][Aa][Mm][Ee][Cc][Tt][Ll]|\/[Ss][Ss]|\/[Nn][Ee][Tt][Ss][Tt][Aa][Tt]|\/[Ii][Ff][Cc][Oo][Nn][Ff][Ii][Gg]|\/[Aa][Rr][Pp]|\/[Ww]|\/[Ww][Hh][Oo]|\/[Ll][Aa][Ss][Tt]|\/[Ll][Ss][Oo][Ff]|\/[Nn][Mm][Aa][Pp]|\/[Dd][Ii][Gg]|\/[Ff][Ii][Nn][Dd])/'
-      pivot_on: [host]
-      window: 1h
+  # Behaviour-targeted hunts the engine runs around the alert (not a sweep).
+  - name: chmod making the curl-dropped payload executable (/tmp or /dev/shm)
+    query: data_process_exec_process_binary:/.*\/[Cc][Hh][Mm][Oo][Dd]/ AND (data_process_exec_process_arguments:/.*\/[Tt][Mm][Pp]\/.*/ OR data_process_exec_process_arguments:/.*\/[Dd][Ee][Vv]\/[Ss][Hh][Mm]\/.*/)
+    pivot_on:
+    - host
+    window: 1h
+  - name: Execution of a binary located in /tmp or /dev/shm (the fetched payload runs)
+    query: (data_process_exec_process_binary:/\/[Tt][Mm][Pp]\/.*/ OR data_process_exec_process_binary:/\/[Dd][Ee][Vv]\/[Ss][Hh][Mm]\/.*/)
+    pivot_on:
+    - host
+    window: 1h
+  - name: Fileless download-and-run stager (sh -c with curl/wget/base64, or python -c)
+    query: (data_process_exec_process_arguments:/.*[Ss][Hh] -[Cc] .*/ AND (data_process_exec_process_arguments:/.*[Cc][Uu][Rr][Ll].*/ OR data_process_exec_process_arguments:/.*[Ww][Gg][Ee][Tt].*/ OR data_process_exec_process_arguments:/.*[Bb][Aa][Ss][Ee]64.*/)) OR data_process_exec_process_arguments:/.*[Pp][Yy][Tt][Hh][Oo][Nn][0-9]? -[Cc] .*/
+    pivot_on:
+    - host
+    window: 1h
+  - name: C2 / reverse-shell establishment on this host (nc/ncat/socat, /dev/tcp, bash -i, mkfifo, pty.spawn)
+    query: data_process_exec_process_binary:/.*(\/[Nn][Cc]|\/[Nn][Cc][Aa][Tt]|\/[Nn][Ee][Tt][Cc][Aa][Tt]|\/[Ss][Oo][Cc][Aa][Tt])/ OR data_process_exec_process_arguments:/.*\/[Dd][Ee][Vv]\/[Tt][Cc][Pp]\/.*/ OR data_process_exec_process_arguments:/.*[Bb][Aa][Ss][Hh] -[Ii].*/ OR data_process_exec_process_arguments:/.*[Mm][Kk][Ff][Ii][Ff][Oo].*/ OR data_process_exec_process_arguments:/.*[Pp][Tt][Yy]\.[Ss][Pp][Aa][Ww][Nn].*/
+    pivot_on:
+    - host
+    window: 2h
+  - name: Download tooling fetching from a hardcoded raw IPv4 (curl/wget to an IP, no domain)
+    query: (data_process_exec_process_binary:/.*(\/[Cc][Uu][Rr][Ll]|\/[Ww][Gg][Ee][Tt])/) AND data_process_exec_process_arguments:/.*[0-9]{1,3}\.[0-9]{1,3}\.[0-9]{1,3}\.[0-9]{1,3}.*/
+    pivot_on:
+    - host
+    window: 2h

@@ -176,23 +176,58 @@ graylog:
   query: (data_process_exec_process_binary:/.*\/[Cc]89/ OR data_process_exec_process_binary:/.*\/[Cc]99/ OR data_process_exec_process_binary:/.*\/[Gg][Cc][Cc]/) AND data_process_exec_process_arguments:/.*-[Ww][Rr][Aa][Pp][Pp][Ee][Rr].*/ AND (data_process_exec_process_arguments:/.*\/[Bb][Ii][Nn]\/[Bb][Aa][Ss][Hh],-[Ss].*/ OR data_process_exec_process_arguments:/.*\/[Bb][Ii][Nn]\/[Dd][Aa][Ss][Hh],-[Ss].*/ OR data_process_exec_process_arguments:/.*\/[Bb][Ii][Nn]\/[Ff][Ii][Ss][Hh],-[Ss].*/ OR data_process_exec_process_arguments:/.*\/[Bb][Ii][Nn]\/[Ss][Hh],-[Ss].*/ OR data_process_exec_process_arguments:/.*\/[Bb][Ii][Nn]\/[Zz][Ss][Hh],-[Ss].*/)
 
 correlation:
-  # Authored by the correlation engine for review.
+  # Authored per-rule (behaviour-researched) for the correlation engine. Related CoPilot
+  # Searches + telemetry pivots to run around an alert, scoped to its host/user/ip/domain.
+  related_rules:
+  - id: linux-c89-privilege-escalation-001
+    name: Linux c89 Privilege Escalation
+    reason: Detects the identical '-wrapper' shell-spawn abuse on c89 - one of the exact compiler front-ends this GCC rule already matches. A breakout operator cycles gcc/c89/c99, so a c89 privesc hit on the same host is the same technique captured from the sudo/auditd angle.
+  - id: linux-c99-privilege-escalation-001
+    name: Linux c99 Privilege Escalation
+    reason: Same '-wrapper /bin/sh,-s' breakout on the c99 front-end, which this rule's binary set also matches. Co-firing with the GCC alert on one host confirms the attacker is enumerating the compiler-family GTFOBins escalation rather than running one tool once.
+  - id: 0f79c4d2-4e1f-4683-9c36-b5469a665e06
+    name: Access of Sudoers File Content
+    reason: Reading /etc/sudoers (or 'sudo -l') is the reconnaissance that reveals gcc/c89/c99 is sudo-allowed - the precursor that selects this breakout. Seeing it on the host shortly before the GCC alert establishes that the shell escape was deliberate privilege escalation.
+  - id: linux-sudo-or-su-execution-001
+    name: Linux Sudo Or Su Execution
+    reason: The gcc '-wrapper' trick is a GTFOBins *sudo* abuse; a correlated sudo/su execution on the same host is the privilege vehicle the breakout rides to turn a restricted shell into a root shell.
+  - id: linux-make-privilege-escalation-001
+    name: Linux Make Privilege Escalation
+    reason: make --eval is the adjacent build-toolchain GTFOBins sudo escalation. An operator who found gcc available on a developer/build host will commonly also try make, so a co-firing make privesc widens this into a toolchain-abuse incident on the same box.
+  - id: 6adfbf8f-52be-4444-9bac-81b539624146
+    name: Shell Execution via Find - Linux
+    reason: The same restricted-environment-breakout technique via a different living-off-the-land binary (find -exec /bin/sh). GTFOBins operators try several utilities in one session, so a find breakout on the same host marks the same hands-on-keyboard escape attempt.
+  - id: bed978f8-7f3a-432b-82c5-9286a9b3031a
+    name: Shell Invocation via Env Command - Linux
+    reason: Another core GTFOBins utility->/bin/sh breakout. Co-firing with the GCC breakout on one host is strong evidence of systematic restricted-shell escape - the operator working down the GTFOBins list - not an isolated event.
+  - id: 8344c0e5-5783-47cc-9cf9-a0f7fd03e6cf
+    name: Potential Discovery Activity Using Find - Linux
+    reason: Once the GCC breakout yields an interactive shell, host and file discovery via find is the typical immediate follow-on - the first post-escape enumeration step, confirming the shell was used and showing where the operator looked next.
+  window: 2h
   enrichment_searches:
-  # Rule-specific telemetry pivots the engine runs around an alert from this rule,
-  # scoped to the alert's host/user/IP within the window (behaviour-targeted, not a sweep).
-    - name: "File / directory discovery commands on this host"
-      query: '((data_process_exec_process_binary:/.*(\/[Ff][Ii][Nn][Dd]|\/[Ll][Oo][Cc][Aa][Tt][Ee]|\/[Ll][Ss])/) OR (data_process_exec_process_binary:/.*(\/[Ww][Hh][Oo][Aa][Mm][Ii]|\/[Ii][Dd]|\/[Uu][Nn][Aa][Mm][Ee]|\/[Hh][Oo][Ss][Tt][Nn][Aa][Mm][Ee]|\/[Hh][Oo][Ss][Tt][Nn][Aa][Mm][Ee][Cc][Tt][Ll]|\/[Ss][Ss]|\/[Nn][Ee][Tt][Ss][Tt][Aa][Tt]|\/[Ii][Ff][Cc][Oo][Nn][Ff][Ii][Gg]|\/[Aa][Rr][Pp]|\/[Ww]|\/[Ww][Hh][Oo]|\/[Ll][Aa][Ss][Tt]|\/[Ll][Ss][Oo][Ff]|\/[Nn][Mm][Aa][Pp]|\/[Dd][Ii][Gg]|\/[Ff][Ii][Nn][Dd])/))'
-      pivot_on: [host]
-      window: 1h
-    - name: "Other executions of this tool-set on this host (any arguments)"
-      query: 'data_process_exec_process_binary:/.*(\/[Cc]89|\/[Cc]99)/'
-      pivot_on: [host]
-      window: 2h
-    - name: "Privilege-escalation tooling executed on this host"
-      query: 'data_process_exec_process_binary:/.*(\/[Ss][Uu][Dd][Oo]|\/[Ss][Uu]|\/[Pp][Kk][Ee][Xx][Ee][Cc]|\/[Dd][Oo][Aa][Ss]|\/[Ss][Ee][Tt][Cc][Aa][Pp]|\/[Cc][Hh][Ss][Hh]|\/[Nn][Ee][Ww][Gg][Rr][Pp])/'
-      pivot_on: [host]
-      window: 2h
-    - name: "Shell / interpreter execution on this host"
-      query: '((data_process_exec_process_binary:/.*(\/[Bb][Aa][Ss][Hh]|\/[Ss][Hh]|\/[Dd][Aa][Ss][Hh]|\/[Zz][Ss][Hh]|\/[Kk][Ss][Hh]|\/[Aa][Ss][Hh]|\/[Bb][Uu][Ss][Yy][Bb][Oo][Xx])/) OR (data_process_exec_process_binary:/.*(\/[Pp][Yy][Tt][Hh][Oo][Nn]|\/[Pp][Yy][Tt][Hh][Oo][Nn]3|\/[Pp][Ee][Rr][Ll]|\/[Rr][Uu][Bb][Yy]|\/[Pp][Hh][Pp]|\/[Nn][Oo][Dd][Ee]|\/[Ll][Uu][Aa]|\/[Aa][Ww][Kk])/))'
-      pivot_on: [host]
-      window: 1h
+  # Behaviour-targeted hunts the engine runs around the alert (not a sweep).
+  - name: Compiler / wrapper-style shell breakout invocations on this host
+    query: data_process_exec_process_arguments:/.*\/[Bb][Ii][Nn]\/([Bb][Aa][Ss][Hh]|[Dd][Aa][Ss][Hh]|[Ff][Ii][Ss][Hh]|[Ss][Hh]|[Zz][Ss][Hh]),-[Ss].*/ OR data_process_exec_process_arguments:/.*-[Ww][Rr][Aa][Pp][Pp][Ee][Rr].*/
+    pivot_on:
+    - host
+    window: 2h
+  - name: Known GTFOBins utilities spawning an interactive shell on this host
+    query: (data_process_exec_process_binary:/.*\/([Ff][Ii][Nn][Dd]|[Aa][Ww][Kk]|[Gg][Aa][Ww][Kk]|[Vv][Ii][Mm]|[Nn][Ii][Cc][Ee]|[Ee][Nn][Vv]|[Cc][Aa][Pp][Ss][Hh]|[Ff][Ll][Oo][Cc][Kk]|[Gg][Ii][Tt]|[Rr][Ss][Yy][Nn][Cc]|[Mm][Aa][Kk][Ee]|[Gg][Dd][Bb])/) AND (data_process_exec_process_arguments:/.*\/[Bb][Ii][Nn]\/([Bb][Aa][Ss][Hh]|[Dd][Aa][Ss][Hh]|[Ff][Ii][Ss][Hh]|[Ss][Hh]|[Zz][Ss][Hh]).*/)
+    pivot_on:
+    - host
+    window: 2h
+  - name: Sudo or doas launching a compiler, make, or shell on this host
+    query: (data_process_exec_process_binary:/.*\/([Ss][Uu][Dd][Oo]|[Dd][Oo][Aa][Ss])/) AND (data_process_exec_process_arguments:/.*([Gg][Cc][Cc]|[Cc]89|[Cc]99|[Mm][Aa][Kk][Ee]|-[Ww][Rr][Aa][Pp][Pp][Ee][Rr]|\/[Bb][Ii][Nn]\/[A-Za-z]*[Ss][Hh]).*/)
+    pivot_on:
+    - host
+    window: 2h
+  - name: Sudo-rights and SUID / capabilities reconnaissance on this host
+    query: data_process_exec_process_arguments:/.*\/[Ee][Tt][Cc]\/[Ss][Uu][Dd][Oo][Ee][Rr][Ss].*/ OR (data_process_exec_process_binary:/.*\/[Ss][Uu][Dd][Oo]/ AND data_process_exec_process_arguments:/.*-[Ll].*/) OR (data_process_exec_process_binary:/.*\/[Ff][Ii][Nn][Dd]/ AND data_process_exec_process_arguments:/.*-[Pp][Ee][Rr][Mm].*/) OR data_process_exec_process_binary:/.*\/[Gg][Ee][Tt][Cc][Aa][Pp]/
+    pivot_on:
+    - host
+    window: 4h
+  - name: Credential and secret file access on this host
+    query: data_process_exec_process_arguments:/.*\/[Ee][Tt][Cc]\/([Ss][Hh][Aa][Dd][Oo][Ww]|[Gg][Ss][Hh][Aa][Dd][Oo][Ww]).*/ OR data_process_exec_process_arguments:/.*\/\.[Ss][Ss][Hh]\/.*/ OR data_process_exec_process_arguments:/.*[Ii][Dd]_[Rr][Ss][Aa].*/
+    pivot_on:
+    - host
+    window: 2h

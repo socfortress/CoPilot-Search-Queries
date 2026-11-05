@@ -258,19 +258,58 @@ graylog:
   query: (data_process_exec_parent_binary:/.*\/[Jj]2[Ee][Ee]\/[Cc][Ll][Uu][Ss][Tt][Ee][Rr]\/[Aa][Pp][Pp][Ss]\/[Ss][Aa][Pp]\.[Cc][Oo][Mm]\/[Ii][Rr][Jj]\/[Ss][Ee][Rr][Vv][Ll][Ee][Tt]_[Jj][Ss][Pp]\/[Ii][Rr][Jj]\/[Ww][Oo][Rr][Kk].*/ OR data_process_exec_parent_binary:/.*\/[Jj]2[Ee][Ee]\/[Cc][Ll][Uu][Ss][Tt][Ee][Rr]\/[Aa][Pp][Pp][Ss]\/[Ss][Aa][Pp]\.[Cc][Oo][Mm]\/[Ii][Rr][Jj]\/[Ss][Ee][Rr][Vv][Ll][Ee][Tt]_[Jj][Ss][Pp]\/[Ii][Rr][Jj]\/[Rr][Oo][Oo][Tt].*/ OR data_process_exec_process_cwd:/.*\/[Jj]2[Ee][Ee]\/[Cc][Ll][Uu][Ss][Tt][Ee][Rr]\/[Aa][Pp][Pp][Ss]\/[Ss][Aa][Pp]\.[Cc][Oo][Mm]\/[Ii][Rr][Jj]\/[Ss][Ee][Rr][Vv][Ll][Ee][Tt]_[Jj][Ss][Pp]\/[Ii][Rr][Jj]\/[Ww][Oo][Rr][Kk].*/ OR data_process_exec_process_cwd:/.*\/[Jj]2[Ee][Ee]\/[Cc][Ll][Uu][Ss][Tt][Ee][Rr]\/[Aa][Pp][Pp][Ss]\/[Ss][Aa][Pp]\.[Cc][Oo][Mm]\/[Ii][Rr][Jj]\/[Ss][Ee][Rr][Vv][Ll][Ee][Tt]_[Jj][Ss][Pp]\/[Ii][Rr][Jj]\/[Rr][Oo][Oo][Tt].*/) AND (data_process_exec_process_binary:/.*\/[Aa][Ss][Hh]/ OR data_process_exec_process_binary:/.*\/[Bb][Aa][Ss][Hh]/ OR data_process_exec_process_binary:/.*\/[Cc][Ss][Hh]/ OR data_process_exec_process_binary:/.*\/[Dd][Aa][Ss][Hh]/ OR data_process_exec_process_binary:/.*\/[Kk][Ss][Hh]/ OR data_process_exec_process_binary:/.*\/[Ss][Hh]/ OR data_process_exec_process_binary:/.*\/[Tt][Cc][Ss][Hh]/ OR data_process_exec_process_binary:/.*\/[Zz][Ss][Hh]/ OR data_process_exec_process_binary:/.*\/[Pp][Yy][Tt][Hh][Oo][Nn]/ OR data_process_exec_process_binary:/.*\/[Pp][Yy][Tt][Hh][Oo][Nn]2/ OR data_process_exec_process_binary:/.*\/[Pp][Yy][Tt][Hh][Oo][Nn]3/ OR data_process_exec_process_binary:/.*\/[Pp][Ee][Rr][Ll]/ OR data_process_exec_process_binary:/.*\/[Rr][Uu][Bb][Yy]/ OR data_process_exec_process_binary:/.*\/[Cc][Uu][Rr][Ll]/ OR data_process_exec_process_binary:/.*\/[Ww][Gg][Ee][Tt]/ OR data_process_exec_process_binary:/.*\/[Nn][Cc]/ OR data_process_exec_process_binary:/.*\/[Nn][Ee][Tt][Cc][Aa][Tt]/ OR data_process_exec_process_binary:/.*\/[Nn][Cc][Aa][Tt]/ OR data_process_exec_process_binary:/.*\/[Ss][Oo][Cc][Aa][Tt]/ OR data_process_exec_process_binary:/.*\/[Nn][Mm][Aa][Pp]/ OR data_process_exec_process_binary:/.*\/[Tt][Ee][Ll][Nn][Ee][Tt]/ OR data_process_exec_process_binary:/.*\/[Aa][Ww][Kk]/ OR data_process_exec_process_binary:/.*\/[Ss][Ee][Dd]/)
 
 correlation:
-  # Authored by the correlation engine for review.
+  # Authored per-rule (behaviour-researched) for the correlation engine. Related CoPilot
+  # Searches + telemetry pivots to run around an alert, scoped to its host/user/ip/domain.
+  related_rules:
+  - id: d292e0af-9a18-420c-9525-ec0ac3936892
+    name: Suspicious Java Children Processes
+    reason: The SAP NetWeaver J2EE servlet engine runs on a JVM, so a webshell under it makes the spawned shell a child of 'java'. This is the parent-class of this detection and typically fires on the same or an adjacent exec event - the strongest confirmation that the SAP process itself ran the shell.
+  - id: 818f7b24-0fba-4c49-a073-8b755573b9c7
+    name: Linux Webshell Indicators
+    reason: 'Same webshell behaviour class (T1505.003): a web-facing service process spawning a shell. Confirms the host is under webshell-driven command execution, and fires alongside this SAP-specific rule if a reverse proxy (nginx/apache) also fronts the SAP instance.'
+  - id: a2d9e2f3-0f43-4c7a-bcd9-9acfc0d723aa
+    name: Suspicious Download and Execute Pattern via Curl/Wget
+    reason: 'The #1 documented CVE-2025-31324 follow-on: the webshell uses curl/wget (both in this rule''s own child list) to pull a second-stage loader (KrustyLoader/Sliver/Brute Ratel/miners) into /tmp or /dev/shm and run it - the direct next step once the shell lands.'
+  - id: 7f734ed0-4f47-46c0-837f-6ee62505abd9
+    name: Potential Netcat Reverse Shell Execution
+    reason: nc/netcat are in this rule's child-process list; spawning nc with -e is the operator upgrading the webshell into an interactive reverse shell for hands-on-keyboard access to the SAP host.
+  - id: 32e62bc7-3de0-4bb1-90af-532978fe42c0
+    name: Python Reverse Shell Execution Via PTY And Socket Modules
+    reason: python is in this rule's child list; a socket+pty reverse shell is the standard way to turn the stateless webshell foothold into a stable interactive TTY on the compromised SAP server.
+  - id: 0cf7a157-8879-41a2-8f55-388dd23746b7
+    name: Linux Recon Indicators
+    reason: 'The first thing a webshell operator runs after landing: host/account/SUID/credential discovery. Co-occurs on the same host within minutes of this alert and tells you the intruder is actively enumerating.'
+  - id: 312b42b1-bded-4441-8b58-163a3af58775
+    name: Potentially Suspicious Execution From Tmp Folder
+    reason: The second-stage payload the webshell downloads lands in /tmp (writable by the SAP <sid>adm user) and executes from there; this fires when that loader/miner runs, pairing the 'download' half with the 'execute' half of staging.
+  - id: 6b14bac8-3e3a-4324-8109-42f0546a347f
+    name: Scheduled Cron Task/Job - Linux
+    reason: 'Persistence follow-on: after the SAP foothold, operators install a crontab job (often from /tmp) to survive SAP restarts and patching. Its presence on the same host means the intrusion has moved past initial access.'
+  window: 1h
   enrichment_searches:
-  # Rule-specific telemetry pivots the engine runs around an alert from this rule,
-  # scoped to the alert's host/user/IP within the window (behaviour-targeted, not a sweep).
-    - name: "Shell / interpreter execution on this host"
-      query: '((data_process_exec_process_binary:/.*(\/[Bb][Aa][Ss][Hh]|\/[Ss][Hh]|\/[Dd][Aa][Ss][Hh]|\/[Zz][Ss][Hh]|\/[Kk][Ss][Hh]|\/[Aa][Ss][Hh]|\/[Bb][Uu][Ss][Yy][Bb][Oo][Xx])/) OR (data_process_exec_process_binary:/.*(\/[Pp][Yy][Tt][Hh][Oo][Nn]|\/[Pp][Yy][Tt][Hh][Oo][Nn]3|\/[Pp][Ee][Rr][Ll]|\/[Rr][Uu][Bb][Yy]|\/[Pp][Hh][Pp]|\/[Nn][Oo][Dd][Ee]|\/[Ll][Uu][Aa]|\/[Aa][Ww][Kk])/))'
-      pivot_on: [host]
-      window: 1h
-    - name: "Reconnaissance commands on this host"
-      query: 'data_process_exec_process_binary:/.*(\/[Ww][Hh][Oo][Aa][Mm][Ii]|\/[Ii][Dd]|\/[Uu][Nn][Aa][Mm][Ee]|\/[Hh][Oo][Ss][Tt][Nn][Aa][Mm][Ee]|\/[Hh][Oo][Ss][Tt][Nn][Aa][Mm][Ee][Cc][Tt][Ll]|\/[Ss][Ss]|\/[Nn][Ee][Tt][Ss][Tt][Aa][Tt]|\/[Ii][Ff][Cc][Oo][Nn][Ff][Ii][Gg]|\/[Aa][Rr][Pp]|\/[Ww]|\/[Ww][Hh][Oo]|\/[Ll][Aa][Ss][Tt]|\/[Ll][Ss][Oo][Ff]|\/[Nn][Mm][Aa][Pp]|\/[Dd][Ii][Gg]|\/[Ff][Ii][Nn][Dd])/'
-      pivot_on: [host]
-      window: 1h
-    - name: "Persistence via cron / systemd / shell profiles on this host"
-      query: '((data_process_exec_process_binary:/.*(\/[Cc][Rr][Oo][Nn][Tt][Aa][Bb]|\/[Ss][Yy][Ss][Tt][Ee][Mm][Cc][Tt][Ll]|\/[Aa][Tt]|\/[Uu][Pp][Dd][Aa][Tt][Ee]-[Rr][Cc]\.[Dd])/) OR (data_process_exec_process_arguments:/.*\/[Ee][Tt][Cc]\/[Cc][Rr][Oo][Nn].*/) OR (data_process_exec_process_arguments:/.*\/[Ee][Tt][Cc]\/[Ss][Yy][Ss][Tt][Ee][Mm][Dd].*/) OR (data_process_exec_process_arguments:/.*[Rr][Cc]\.[Ll][Oo][Cc][Aa][Ll].*/) OR (data_process_exec_process_arguments:/.*\.[Bb][Aa][Ss][Hh][Rr][Cc].*/) OR (data_process_exec_process_arguments:/.*\.[Bb][Aa][Ss][Hh]_[Pp][Rr][Oo][Ff][Ii][Ll][Ee].*/) OR (data_process_exec_process_arguments:/.*\/[Ee][Tt][Cc]\/[Pp][Rr][Oo][Ff][Ii][Ll][Ee].*/) OR (data_process_exec_process_arguments:/.*[Aa][Uu][Tt][Hh][Oo][Rr][Ii][Zz][Ee][Dd]_[Kk][Ee][Yy][Ss].*/) OR (data_process_exec_process_arguments:/.*\/[Ee][Tt][Cc]\/[Ii][Nn][Ii][Tt]\.[Dd].*/))'
-      pivot_on: [host]
-      window: 4h
+  # Behaviour-targeted hunts the engine runs around the alert (not a sweep).
+  - name: Second-stage payload download into world-writable directories
+    query: ((data_process_exec_process_binary:/.*(\/[Cc][Uu][Rr][Ll]|\/[Ww][Gg][Ee][Tt]|\/[Tt][Ff][Tt][Pp]|\/[Ff][Ee][Tt][Cc][Hh])/) AND (data_process_exec_process_arguments:/.*([Hh][Tt][Tt][Pp][Ss]?:\/\/|\/[Tt][Mm][Pp]\/|\/[Dd][Ee][Vv]\/[Ss][Hh][Mm]|\/[Vv][Aa][Rr]\/[Tt][Mm][Pp]).*/))
+    pivot_on:
+    - host
+    window: 1h
+  - name: Reverse shell / interactive network callback from the webshell
+    query: ((data_process_exec_process_arguments:/.*\/[Dd][Ee][Vv]\/[Tt][Cc][Pp]\/.*/) OR (data_process_exec_process_binary:/.*(\/[Nn][Cc]|\/[Nn][Cc][Aa][Tt]|\/[Nn][Ee][Tt][Cc][Aa][Tt]|\/[Ss][Oo][Cc][Aa][Tt])/ AND data_process_exec_process_arguments:/.*(-[Ee] |[Ee][Xx][Ee][Cc]:|[Ss][Yy][Ss][Tt][Ee][Mm]:).*/) OR (data_process_exec_process_arguments:/.*[Ss][Oo][Cc][Kk][Ee][Tt].*/ AND data_process_exec_process_arguments:/.*([Pp][Tt][Yy]|[Ss][Pp][Aa][Ww][Nn]|\/[Bb][Ii][Nn]\/[Ss][Hh]).*/))
+    pivot_on:
+    - host
+    window: 1h
+  - name: Host / account / network reconnaissance burst
+    query: (data_process_exec_process_binary:/.*(\/[Ww][Hh][Oo][Aa][Mm][Ii]|\/[Ii][Dd]|\/[Uu][Nn][Aa][Mm][Ee]|\/[Hh][Oo][Ss][Tt][Nn][Aa][Mm][Ee]|\/[Ii][Pp]|\/[Ii][Ff][Cc][Oo][Nn][Ff][Ii][Gg]|\/[Ss][Ss]|\/[Nn][Ee][Tt][Ss][Tt][Aa][Tt]|\/[Aa][Rr][Pp]|\/[Ll][Ss][Cc][Pp][Uu]|\/[Dd][Mm][Ii][Dd][Ee][Cc][Oo][Dd][Ee]|\/[Ll][Aa][Ss][Tt]|\/[Ww])/)
+    pivot_on:
+    - host
+    window: 1h
+  - name: Payload execution from /tmp, /dev/shm or /var/tmp
+    query: (data_process_exec_process_binary:/.*(\/[Tt][Mm][Pp]\/|\/[Dd][Ee][Vv]\/[Ss][Hh][Mm]\/|\/[Vv][Aa][Rr]\/[Tt][Mm][Pp]\/).*/)
+    pivot_on:
+    - host
+    window: 2h
+  - name: Persistence via cron / systemd / init / SSH keys / shell profiles
+    query: ((data_process_exec_process_binary:/.*(\/[Cc][Rr][Oo][Nn][Tt][Aa][Bb]|\/[Ss][Yy][Ss][Tt][Ee][Mm][Cc][Tt][Ll]|\/[Ss][Yy][Ss][Tt][Ee][Mm][Dd]-[Rr][Uu][Nn]|\/[Aa][Tt]|\/[Uu][Pp][Dd][Aa][Tt][Ee]-[Rr][Cc]\.[Dd])/) OR (data_process_exec_process_arguments:/.*(\/[Ee][Tt][Cc]\/[Cc][Rr][Oo][Nn]|\/[Vv][Aa][Rr]\/[Ss][Pp][Oo][Oo][Ll]\/[Cc][Rr][Oo][Nn]|\/[Ee][Tt][Cc]\/[Ss][Yy][Ss][Tt][Ee][Mm][Dd]|[Rr][Cc]\.[Ll][Oo][Cc][Aa][Ll]|\.[Bb][Aa][Ss][Hh][Rr][Cc]|\.[Bb][Aa][Ss][Hh]_[Pp][Rr][Oo][Ff][Ii][Ll][Ee]|\/[Ee][Tt][Cc]\/[Pp][Rr][Oo][Ff][Ii][Ll][Ee]|[Aa][Uu][Tt][Hh][Oo][Rr][Ii][Zz][Ee][Dd]_[Kk][Ee][Yy][Ss]|\/[Ee][Tt][Cc]\/[Ii][Nn][Ii][Tt]\.[Dd]).*/))
+    pivot_on:
+    - host
+    window: 4h

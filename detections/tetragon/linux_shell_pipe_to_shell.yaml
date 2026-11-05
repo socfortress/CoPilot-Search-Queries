@@ -178,19 +178,58 @@ graylog:
   query: (data_process_exec_process_arguments:/[Ss][Hh] -[Cc] .*/ OR data_process_exec_process_arguments:/[Bb][Aa][Ss][Hh] -[Cc] .*/) AND (data_process_exec_process_arguments:/.*\| [Bb][Aa][Ss][Hh] .*/ OR data_process_exec_process_arguments:/.*\| [Ss][Hh] .*/ OR data_process_exec_process_arguments:/.*\|[Bb][Aa][Ss][Hh] .*/ OR data_process_exec_process_arguments:/.*\|[Ss][Hh] .*/ OR data_process_exec_process_arguments:/.*\| [Bb][Aa][Ss][Hh]/ OR data_process_exec_process_arguments:/.*\| [Ss][Hh]/ OR data_process_exec_process_arguments:/.*\|[Bb][Aa][Ss][Hh]/ OR data_process_exec_process_arguments:/.* \|[Ss][Hh]/)
 
 correlation:
-  # Authored by the correlation engine for review.
+  # Authored per-rule (behaviour-researched) for the correlation engine. Related CoPilot
+  # Searches + telemetry pivots to run around an alert, scoped to its host/user/ip/domain.
+  related_rules:
+  - id: a2d9e2f3-0f43-4c7a-bcd9-9acfc0d723aa
+    name: Suspicious Download and Execute Pattern via Curl/Wget
+    reason: 'This is the left-hand side of the same command: ''sh -c "curl URL | bash"'' is a fetch-and-execute, and this rule fires on the curl/wget-into-/tmp-or-/dev/shm half. The two routinely match the same event or sibling events in one command chain, so a co-hit confirms remote code was actually pulled before being piped to the shell.'
+  - id: ba592c6d-6888-43c3-b8c6-689b8fe47337
+    name: Linux Base64 Encoded Pipe to Shell
+    reason: 'Nearest sibling detection: identical ''| bash''/''| sh'' pipe-to-shell primitive, but the left side is a base64 blob instead of a remote fetch. Attackers commonly stage the obfuscated variant alongside or instead of the plaintext one, so it catches the payload delivery this rule''s non-base64 wildcards would miss on the same host.'
+  - id: ea3ecad2-db86-4a89-ad0b-132a10d2db55
+    name: Interactive Bash Suspicious Children
+    reason: The '| bash'/'| sh' that this rule detects frequently lands an interactive shell; this rule fires when that 'bash -i' parent then spawns recon (whoami), base64, pty.spawn or nc/ncat children. A co-hit is the next stage of the same session — the fetched script dropping into hands-on-keyboard activity.
+  - id: 7f734ed0-4f47-46c0-837f-6ee62505abd9
+    name: Potential Netcat Reverse Shell Execution
+    reason: 'Establishing C2 is a top payload of a pipe-to-shell stager: the fetched script calls ''nc -e''/''ncat'' to open a reverse shell. Seeing this on the same host shortly after confirms the piped code''s objective was interactive remote control, escalating the alert from suspicious execution to active compromise.'
+  - id: 9069ea3c-b213-4c52-be13-86506a227ab1
+    name: Linux Crypto Mining Indicators
+    reason: Cryptomining is the single most common outcome of a Linux 'curl|bash' dropper; the miner config (stratum+tcp pools, --donate-level=0, the 'sh -c /sbin/modprobe msr allow_writes=on' MSR tweak) is exactly what the piped script installs. A co-hit identifies the dropped payload as a coin miner.
+  - id: 6b14bac8-3e3a-4324-8109-42f0546a347f
+    name: Scheduled Cron Task/Job - Linux
+    reason: Persistence is the standard follow-on of a pipe-to-shell dropper. This rule fires when the script registers a crontab job from /tmp, which is how a staged payload survives reboot. A co-hit on the same host turns a one-shot execution into an established foothold.
+  - id: 5cd16c8f-44a6-4654-81e7-a84d6db507d4
+    name: Process Execution From Shared Memory Directory
+    reason: Pipe-to-shell is a fileless-execution technique; the code it runs often writes a second stage to /dev/shm (RAM-backed, never touches disk) and executes it from there. A co-hit shows the piped shell staged and ran fileless malware, a strong escalation signal for the same host.
+  - id: 2fade0b6-7423-4835-9d4f-335b39b83867
+    name: Shell Execution Of Process Located In Tmp Directory
+    reason: 'Complements the /dev/shm case with the other canonical staging directory: a payload fetched by the pipe-to-shell lands in /tmp and then spawns a shell, so this rule''s ''parent binary in /tmp -> shell'' is the fetched stager running its next command. Confirms where the second stage was dropped.'
+  window: 2h
   enrichment_searches:
-  # Rule-specific telemetry pivots the engine runs around an alert from this rule,
-  # scoped to the alert's host/user/IP within the window (behaviour-targeted, not a sweep).
-    - name: "Shell / interpreter execution on this host"
-      query: '((data_process_exec_process_binary:/.*(\/[Bb][Aa][Ss][Hh]|\/[Ss][Hh]|\/[Dd][Aa][Ss][Hh]|\/[Zz][Ss][Hh]|\/[Kk][Ss][Hh]|\/[Aa][Ss][Hh]|\/[Bb][Uu][Ss][Yy][Bb][Oo][Xx])/) OR (data_process_exec_process_binary:/.*(\/[Pp][Yy][Tt][Hh][Oo][Nn]|\/[Pp][Yy][Tt][Hh][Oo][Nn]3|\/[Pp][Ee][Rr][Ll]|\/[Rr][Uu][Bb][Yy]|\/[Pp][Hh][Pp]|\/[Nn][Oo][Dd][Ee]|\/[Ll][Uu][Aa]|\/[Aa][Ww][Kk])/))'
-      pivot_on: [host]
-      window: 1h
-    - name: "Reconnaissance commands on this host"
-      query: 'data_process_exec_process_binary:/.*(\/[Ww][Hh][Oo][Aa][Mm][Ii]|\/[Ii][Dd]|\/[Uu][Nn][Aa][Mm][Ee]|\/[Hh][Oo][Ss][Tt][Nn][Aa][Mm][Ee]|\/[Hh][Oo][Ss][Tt][Nn][Aa][Mm][Ee][Cc][Tt][Ll]|\/[Ss][Ss]|\/[Nn][Ee][Tt][Ss][Tt][Aa][Tt]|\/[Ii][Ff][Cc][Oo][Nn][Ff][Ii][Gg]|\/[Aa][Rr][Pp]|\/[Ww]|\/[Ww][Hh][Oo]|\/[Ll][Aa][Ss][Tt]|\/[Ll][Ss][Oo][Ff]|\/[Nn][Mm][Aa][Pp]|\/[Dd][Ii][Gg]|\/[Ff][Ii][Nn][Dd])/'
-      pivot_on: [host]
-      window: 1h
-    - name: "Privilege-escalation tooling executed on this host"
-      query: 'data_process_exec_process_binary:/.*(\/[Ss][Uu][Dd][Oo]|\/[Ss][Uu]|\/[Pp][Kk][Ee][Xx][Ee][Cc]|\/[Dd][Oo][Aa][Ss]|\/[Ss][Ee][Tt][Cc][Aa][Pp]|\/[Cc][Hh][Ss][Hh]|\/[Nn][Ee][Ww][Gg][Rr][Pp])/'
-      pivot_on: [host]
-      window: 2h
+  # Behaviour-targeted hunts the engine runs around the alert (not a sweep).
+  - name: Remote download tooling or URL fetch on this host (the fetch feeding the pipe)
+    query: (data_process_exec_process_binary:/.*\/[Cc][Uu][Rr][Ll]/ OR data_process_exec_process_binary:/.*\/[Ww][Gg][Ee][Tt]/ OR data_process_exec_process_binary:/.*\/[Ff][Ee][Tt][Cc][Hh]/ OR data_process_exec_process_binary:/.*\/[Aa][Rr][Ii][Aa]2[Cc]/ OR data_process_exec_process_arguments:/.*[Hh][Tt][Tt][Pp]:\/\/.*/ OR data_process_exec_process_arguments:/.*[Hh][Tt][Tt][Pp][Ss]:\/\/.*/ OR data_process_exec_process_arguments:/.*[Ff][Tt][Pp]:\/\/.*/)
+    pivot_on:
+    - host
+    window: 1h
+  - name: Obfuscated decode-and-pipe-to-shell delivery (base64/xxd/openssl/eval piped to a shell)
+    query: ((data_process_exec_process_arguments:/.*[Bb][Aa][Ss][Ee]64.*/ OR data_process_exec_process_arguments:/.*[Xx][Xx][Dd] .*/ OR data_process_exec_process_arguments:/.*[Oo][Pp][Ee][Nn][Ss][Ss][Ll] [Ee][Nn][Cc].*/ OR data_process_exec_process_arguments:/.*[Ee][Vv][Aa][Ll] .*/) AND (data_process_exec_process_arguments:/.*\| [Bb][Aa][Ss][Hh].*/ OR data_process_exec_process_arguments:/.*\|[Bb][Aa][Ss][Hh].*/ OR data_process_exec_process_arguments:/.*\| [Ss][Hh].*/ OR data_process_exec_process_arguments:/.*\|[Ss][Hh].*/))
+    pivot_on:
+    - host
+    window: 1h
+  - name: Reverse-shell or interactive-shell egress (payload spawned by the piped shell)
+    query: (((data_process_exec_process_binary:/.*\/[Nn][Cc]/ OR data_process_exec_process_binary:/.*\/[Nn][Cc][Aa][Tt]/ OR data_process_exec_process_binary:/.*\/[Nn][Ee][Tt][Cc][Aa][Tt]/ OR data_process_exec_process_binary:/.*\/[Ss][Oo][Cc][Aa][Tt]/) AND data_process_exec_process_arguments:/.* -[Ee] .*/) OR data_process_exec_process_arguments:/.*\/[Dd][Ee][Vv]\/[Tt][Cc][Pp]\/.*/ OR data_process_exec_process_arguments:/.*[Pp][Tt][Yy]\.[Ss][Pp][Aa][Ww][Nn].*/ OR data_process_exec_parent_arguments:/.*[Bb][Aa][Ss][Hh] -[Ii].*/)
+    pivot_on:
+    - host
+    window: 2h
+  - name: Fileless execution from RAM/temp staging directories (where the fetched stage lands)
+    query: (data_process_exec_process_binary:/\/[Tt][Mm][Pp]\/.*/ OR data_process_exec_process_binary:/\/[Dd][Ee][Vv]\/[Ss][Hh][Mm]\/.*/ OR data_process_exec_process_binary:/\/[Vv][Aa][Rr]\/[Tt][Mm][Pp]\/.*/ OR data_process_exec_process_binary:/\/[Rr][Uu][Nn]\/[Ss][Hh][Mm]\/.*/ OR data_process_exec_parent_binary:/\/[Tt][Mm][Pp]\/.*/ OR data_process_exec_parent_binary:/\/[Dd][Ee][Vv]\/[Ss][Hh][Mm]\/.*/)
+    pivot_on:
+    - host
+    window: 2h
+  - name: Persistence established after the pipe-to-shell (cron / systemd / shell-profile / SSH keys)
+    query: (data_process_exec_process_binary:/.*\/[Cc][Rr][Oo][Nn][Tt][Aa][Bb]/ OR data_process_exec_process_binary:/.*\/[Ss][Yy][Ss][Tt][Ee][Mm][Cc][Tt][Ll]/ OR data_process_exec_process_arguments:/.*\/[Ee][Tt][Cc]\/[Cc][Rr][Oo][Nn].*/ OR data_process_exec_process_arguments:/.*\/[Ee][Tt][Cc]\/[Ss][Yy][Ss][Tt][Ee][Mm][Dd]\/.*/ OR data_process_exec_process_arguments:/.*\.[Bb][Aa][Ss][Hh][Rr][Cc].*/ OR data_process_exec_process_arguments:/.*[Aa][Uu][Tt][Hh][Oo][Rr][Ii][Zz][Ee][Dd]_[Kk][Ee][Yy][Ss].*/)
+    pivot_on:
+    - host
+    window: 6h

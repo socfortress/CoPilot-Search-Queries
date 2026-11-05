@@ -182,23 +182,53 @@ graylog:
   query: data_process_exec_process_binary:/.*[Rr][Uu][Bb][Yy].*/ AND data_process_exec_process_arguments:/.* -[Ee].*/ AND data_process_exec_process_arguments:/.*[Rr][Ss][Oo][Cc][Kk][Ee][Tt].*/ AND data_process_exec_process_arguments:/.*[Tt][Cc][Pp][Ss][Oo][Cc][Kk][Ee][Tt].*/ AND (data_process_exec_process_arguments:/.* [Aa][Ss][Hh].*/ OR data_process_exec_process_arguments:/.* [Bb][Aa][Ss][Hh].*/ OR data_process_exec_process_arguments:/.* [Bb][Ss][Hh].*/ OR data_process_exec_process_arguments:/.* [Cc][Ss][Hh].*/ OR data_process_exec_process_arguments:/.* [Kk][Ss][Hh].*/ OR data_process_exec_process_arguments:/.* [Pp][Dd][Kk][Ss][Hh].*/ OR data_process_exec_process_arguments:/.* [Ss][Hh].*/ OR data_process_exec_process_arguments:/.* [Tt][Cc][Ss][Hh].*/)
 
 correlation:
-  # Authored by the correlation engine for review.
+  # Authored per-rule (behaviour-researched) for the correlation engine. Related CoPilot
+  # Searches + telemetry pivots to run around an alert, scoped to its host/user/ip/domain.
+  related_rules:
+  - id: 818f7b24-0fba-4c49-a073-8b755573b9c7
+    name: Linux Webshell Indicators
+    reason: 'Precursor / root cause: a popped web app (apache/nginx/node, Rails included) spawning a child is how ''ruby -e'' gets launched in the first place; a web-server process parenting the interpreter on this host moments before is the initial-access that produced this reverse shell.'
+  - id: a2d9e2f3-0f43-4c7a-bcd9-9acfc0d723aa
+    name: Suspicious Download and Execute Pattern via Curl/Wget
+    reason: 'Precursor / delivery: the ruby one-liner''s stager or its second stage is typically pulled into /tmp or /dev/shm with curl|wget and run immediately before the TCPSocket shell opens, so a download-and-run on this host just prior is the delivery step of the same intrusion.'
+  - id: ea3ecad2-db86-4a89-ad0b-132a10d2db55
+    name: Interactive Bash Suspicious Children
+    reason: 'Near-simultaneous same-event: this payload ends in exec(''/bin/sh -i''), which IS the interactive shell, and its uncommon children (whoami, nc, base64, pty.spawn) are exactly what that rule flags - the two describe one shell from the exec side and the parent side.'
+  - id: c4042d54-110d-45dd-a0e1-05c47822c937
+    name: Python Spawning Pretty TTY Via PTY Module
+    reason: 'Immediate follow-on: a raw TCPSocket shell is non-interactive (no job control, no sudo), so the operator''s first move is upgrading to a real TTY via python ''import pty; pty.spawn()''; seeing it seconds after confirms a live hands-on-keyboard operator on the shell this rule caught.'
+  - id: 0cf7a157-8879-41a2-8f55-388dd23746b7
+    name: Linux Recon Indicators
+    reason: 'Follow-on enumeration: once the shell is live the operator hunts for a way up, and this rule''s SUID sweep (''find -perm -4000'') and .htpasswd search is the classic first recon run through a fresh reverse shell on the same host.'
+  - id: 7f734ed0-4f47-46c0-837f-6ee62505abd9
+    name: Potential Netcat Reverse Shell Execution
+    reason: 'Co-occurring alternate egress: operators keep a fallback channel and ''nc -e sh'' is the most universal one; a netcat reverse shell on the same host within the window is the same session reaching back out, not a separate incident.'
+  - id: 32e62bc7-3de0-4bb1-90af-532978fe42c0
+    name: Python Reverse Shell Execution Via PTY And Socket Modules
+    reason: 'Co-occurring near-identical technique: an interpreter opening a socket to spawn a shell - the python socket/pty one-liner sits directly beside ruby''s on the revshells/pentestmonkey cheat sheet this rule cites, so both firing on one host is one actor trying whichever interpreter answers.'
+  - id: 259df6bc-003f-4306-9f54-4ff1a08fa38e
+    name: Potential Perl Reverse Shell Execution
+    reason: 'Co-occurring alternate one-liner: ''perl -e'' with socket strings from the same cheat sheet; an operator fires whichever interpreter is present on the box, so a perl reverse shell alongside the ruby one on this host is the same hands-on-keyboard attacker.'
+  window: 2h
   enrichment_searches:
-  # Rule-specific telemetry pivots the engine runs around an alert from this rule,
-  # scoped to the alert's host/user/IP within the window (behaviour-targeted, not a sweep).
-    - name: "Other executions of this tool-set on this host (any arguments)"
-      query: 'data_process_exec_process_binary:/.*(\/[Rr][Uu][Bb][Yy])/'
-      pivot_on: [host]
-      window: 2h
-    - name: "Persistence via cron / systemd / shell profiles on this host"
-      query: '((data_process_exec_process_binary:/.*(\/[Cc][Rr][Oo][Nn][Tt][Aa][Bb]|\/[Ss][Yy][Ss][Tt][Ee][Mm][Cc][Tt][Ll]|\/[Aa][Tt]|\/[Uu][Pp][Dd][Aa][Tt][Ee]-[Rr][Cc]\.[Dd])/) OR (data_process_exec_process_arguments:/.*\/[Ee][Tt][Cc]\/[Cc][Rr][Oo][Nn].*/) OR (data_process_exec_process_arguments:/.*\/[Ee][Tt][Cc]\/[Ss][Yy][Ss][Tt][Ee][Mm][Dd].*/) OR (data_process_exec_process_arguments:/.*[Rr][Cc]\.[Ll][Oo][Cc][Aa][Ll].*/) OR (data_process_exec_process_arguments:/.*\.[Bb][Aa][Ss][Hh][Rr][Cc].*/) OR (data_process_exec_process_arguments:/.*\.[Bb][Aa][Ss][Hh]_[Pp][Rr][Oo][Ff][Ii][Ll][Ee].*/) OR (data_process_exec_process_arguments:/.*\/[Ee][Tt][Cc]\/[Pp][Rr][Oo][Ff][Ii][Ll][Ee].*/) OR (data_process_exec_process_arguments:/.*[Aa][Uu][Tt][Hh][Oo][Rr][Ii][Zz][Ee][Dd]_[Kk][Ee][Yy][Ss].*/) OR (data_process_exec_process_arguments:/.*\/[Ee][Tt][Cc]\/[Ii][Nn][Ii][Tt]\.[Dd].*/))'
-      pivot_on: [host]
-      window: 4h
-    - name: "Shell / interpreter execution on this host"
-      query: '((data_process_exec_process_binary:/.*(\/[Bb][Aa][Ss][Hh]|\/[Ss][Hh]|\/[Dd][Aa][Ss][Hh]|\/[Zz][Ss][Hh]|\/[Kk][Ss][Hh]|\/[Aa][Ss][Hh]|\/[Bb][Uu][Ss][Yy][Bb][Oo][Xx])/) OR (data_process_exec_process_binary:/.*(\/[Pp][Yy][Tt][Hh][Oo][Nn]|\/[Pp][Yy][Tt][Hh][Oo][Nn]3|\/[Pp][Ee][Rr][Ll]|\/[Rr][Uu][Bb][Yy]|\/[Pp][Hh][Pp]|\/[Nn][Oo][Dd][Ee]|\/[Ll][Uu][Aa]|\/[Aa][Ww][Kk])/))'
-      pivot_on: [host]
-      window: 1h
-    - name: "Reconnaissance commands on this host"
-      query: 'data_process_exec_process_binary:/.*(\/[Ww][Hh][Oo][Aa][Mm][Ii]|\/[Ii][Dd]|\/[Uu][Nn][Aa][Mm][Ee]|\/[Hh][Oo][Ss][Tt][Nn][Aa][Mm][Ee]|\/[Hh][Oo][Ss][Tt][Nn][Aa][Mm][Ee][Cc][Tt][Ll]|\/[Ss][Ss]|\/[Nn][Ee][Tt][Ss][Tt][Aa][Tt]|\/[Ii][Ff][Cc][Oo][Nn][Ff][Ii][Gg]|\/[Aa][Rr][Pp]|\/[Ww]|\/[Ww][Hh][Oo]|\/[Ll][Aa][Ss][Tt]|\/[Ll][Ss][Oo][Ff]|\/[Nn][Mm][Aa][Pp]|\/[Dd][Ii][Gg]|\/[Ff][Ii][Nn][Dd])/'
-      pivot_on: [host]
-      window: 1h
+  # Behaviour-targeted hunts the engine runs around the alert (not a sweep).
+  - name: Interactive shell and TTY upgrade on this host
+    query: ((data_process_exec_process_binary:/.*\/([Bb][Aa][Ss][Hh]|[Ss][Hh]|[Dd][Aa][Ss][Hh]|[Zz][Ss][Hh]|[Aa][Ss][Hh])/ AND data_process_exec_process_arguments:/.* -[Ii].*/) OR data_process_exec_process_arguments:/.*[Pp][Tt][Yy]\.[Ss][Pp][Aa][Ww][Nn].*/ OR data_process_exec_process_arguments:/.*[Ss][Cc][Rr][Ii][Pp][Tt] .*-[Qq][Cc].*/)
+    pivot_on:
+    - host
+    window: 1h
+  - name: Socket-based reverse-shell one-liners (alternate egress) on this host
+    query: (data_process_exec_process_arguments:/.*[Tt][Cc][Pp][Ss][Oo][Cc][Kk][Ee][Tt].*/ OR data_process_exec_process_arguments:/.*[Ff][Ss][Oo][Cc][Kk][Oo][Pp][Ee][Nn].*/ OR data_process_exec_process_arguments:/.*[Ss][Oo][Cc][Kk][Ee][Tt]\.[Ss][Oo][Cc][Kk][Ee][Tt].*/ OR data_process_exec_process_arguments:/.*\/[Dd][Ee][Vv]\/[Tt][Cc][Pp]\/.*/ OR (data_process_exec_process_binary:/.*\/([Nn][Cc]|[Nn][Cc][Aa][Tt])/ AND data_process_exec_process_arguments:/.* -[Ee] .*/))
+    pivot_on:
+    - host
+    window: 2h
+  - name: Post-exploitation recon and privilege-escalation enumeration on this host
+    query: ((data_process_exec_process_binary:/.*(\/[Ww][Hh][Oo][Aa][Mm][Ii]|\/[Ii][Dd]|\/[Uu][Nn][Aa][Mm][Ee]|\/[Hh][Oo][Ss][Tt][Nn][Aa][Mm][Ee]|\/[Ss][Ss]|\/[Nn][Ee][Tt][Ss][Tt][Aa][Tt]|\/[Ii][Ff][Cc][Oo][Nn][Ff][Ii][Gg]|\/[Aa][Rr][Pp]|\/[Ll][Ss][Oo][Ff]|\/[Nn][Mm][Aa][Pp])/) OR (data_process_exec_process_arguments:/.* -[Pp][Ee][Rr][Mm] -4000.*/) OR (data_process_exec_process_arguments:/.*[Ss][Uu][Dd][Oo] -[Ll].*/))
+    pivot_on:
+    - host
+    window: 1h
+  - name: Payload staging in /tmp or /dev/shm on this host
+    query: ((data_process_exec_process_binary:/.*\/([Cc][Uu][Rr][Ll]|[Ww][Gg][Ee][Tt])/ AND (data_process_exec_process_arguments:/.*\/[Tt][Mm][Pp]\/.*/ OR data_process_exec_process_arguments:/.*\/[Dd][Ee][Vv]\/[Ss][Hh][Mm]\/.*/)) OR data_process_exec_process_binary:/.*\/[Tt][Mm][Pp]\/.*/ OR data_process_exec_process_binary:/.*\/[Dd][Ee][Vv]\/[Ss][Hh][Mm]\/.*/)
+    pivot_on:
+    - host
+    window: 2h

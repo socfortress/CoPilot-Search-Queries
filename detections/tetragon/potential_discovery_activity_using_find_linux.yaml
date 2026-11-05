@@ -170,23 +170,58 @@ graylog:
   query: data_process_exec_process_binary:/.*\/[Ff][Ii][Nn][Dd]/ AND (data_process_exec_process_arguments:/.*-[Pp][Ee][Rr][Mm] -4000.*/ OR data_process_exec_process_arguments:/.*-[Pp][Ee][Rr][Mm] -2000.*/ OR data_process_exec_process_arguments:/.*-[Pp][Ee][Rr][Mm] 0777.*/ OR data_process_exec_process_arguments:/.*-[Pp][Ee][Rr][Mm] -222.*/ OR data_process_exec_process_arguments:/.*-[Pp][Ee][Rr][Mm] -[Oo] [Ww].*/ OR data_process_exec_process_arguments:/.*-[Pp][Ee][Rr][Mm] -[Oo] [Xx].*/ OR data_process_exec_process_arguments:/.*-[Pp][Ee][Rr][Mm] -[Uu]=[Ss].*/ OR data_process_exec_process_arguments:/.*-[Pp][Ee][Rr][Mm] -[Gg]=[Ss].*/)
 
 correlation:
-  # Authored by the correlation engine for review.
+  # Authored per-rule (behaviour-researched) for the correlation engine. Related CoPilot
+  # Searches + telemetry pivots to run around an alert, scoped to its host/user/ip/domain.
+  related_rules:
+  - id: 6adfbf8f-52be-4444-9bac-81b539624146
+    name: Shell Execution via Find - Linux
+    reason: 'Direct privesc payoff on the same binary: if the SUID set this alert enumerated includes find, the actor abuses it with ''find . -exec /bin/sh \;'' to spawn a root shell (GTFOBins find#shell).'
+  - id: linux-find-privilege-escalation-001
+    name: Linux Find Privilege Escalation
+    reason: 'Same binary escalating: ''find -exec'' to run commands as root, the payoff step right after enumerating SUID/SGID files with find.'
+  - id: 0cf7a157-8879-41a2-8f55-388dd23746b7
+    name: Linux Recon Indicators
+    reason: Near-sibling detection firing on the identical '-perm -4000' SUID enumeration (linuxprivchecker) - confirms this is privesc recon and is often the very same command.
+  - id: a015e032-146d-4717-8944-7a1884122111
+    name: Linux HackTool Execution
+    reason: 'Driver of the recon: LinPEAS/pspy run ''find -perm'' internally, so a hit means this find enumeration was produced by a known local-privesc enumeration tool.'
+  - id: 0f79c4d2-4e1f-4683-9c36-b5469a665e06
+    name: Access of Sudoers File Content
+    reason: 'Co-occurring recon in the same session: reading /etc/sudoers to list who has sudo, run alongside SUID/world-writable enumeration to map the privesc surface.'
+  - id: linux-pkexec-privilege-escalation-001
+    name: Linux pkexec Privilege Escalation
+    reason: 'Follow-on escalation: pkexec (PwnKit, CVE-2021-4034) is the most common SUID binary surfaced by this enumeration and then abused to reach root.'
+  - id: 7ab8f73a-fcff-428b-84aa-6a5ff7877dea
+    name: Vim GTFOBin Abuse - Linux
+    reason: 'Follow-on escalation: abusing a discovered SUID/sudo vim via '':!/bin/sh'' or ''-c'' to break out to a root shell, a classic use of a binary found by this scan.'
+  - id: f74107df-b6c6-4e80-bf00-4170b658162b
+    name: Sudo Privilege Escalation CVE-2019-14287
+    reason: 'Follow-on escalation: the ''sudo -u#-1'' exploit attempted once the actor has mapped the host''s privilege-escalation surface.'
+  window: 1h
   enrichment_searches:
-  # Rule-specific telemetry pivots the engine runs around an alert from this rule,
-  # scoped to the alert's host/user/IP within the window (behaviour-targeted, not a sweep).
-    - name: "File / directory discovery commands on this host"
-      query: '((data_process_exec_process_binary:/.*(\/[Ff][Ii][Nn][Dd]|\/[Ll][Oo][Cc][Aa][Tt][Ee]|\/[Ll][Ss])/) OR (data_process_exec_process_binary:/.*(\/[Ww][Hh][Oo][Aa][Mm][Ii]|\/[Ii][Dd]|\/[Uu][Nn][Aa][Mm][Ee]|\/[Hh][Oo][Ss][Tt][Nn][Aa][Mm][Ee]|\/[Hh][Oo][Ss][Tt][Nn][Aa][Mm][Ee][Cc][Tt][Ll]|\/[Ss][Ss]|\/[Nn][Ee][Tt][Ss][Tt][Aa][Tt]|\/[Ii][Ff][Cc][Oo][Nn][Ff][Ii][Gg]|\/[Aa][Rr][Pp]|\/[Ww]|\/[Ww][Hh][Oo]|\/[Ll][Aa][Ss][Tt]|\/[Ll][Ss][Oo][Ff]|\/[Nn][Mm][Aa][Pp]|\/[Dd][Ii][Gg]|\/[Ff][Ii][Nn][Dd])/))'
-      pivot_on: [host]
-      window: 1h
-    - name: "Other executions of this tool-set on this host (any arguments)"
-      query: 'data_process_exec_process_binary:/.*(\/[Ff][Ii][Nn][Dd])/'
-      pivot_on: [host]
-      window: 2h
-    - name: "Privilege-escalation tooling executed on this host"
-      query: 'data_process_exec_process_binary:/.*(\/[Ss][Uu][Dd][Oo]|\/[Ss][Uu]|\/[Pp][Kk][Ee][Xx][Ee][Cc]|\/[Dd][Oo][Aa][Ss]|\/[Ss][Ee][Tt][Cc][Aa][Pp]|\/[Cc][Hh][Ss][Hh]|\/[Nn][Ee][Ww][Gg][Rr][Pp])/'
-      pivot_on: [host]
-      window: 2h
-    - name: "Shell / interpreter execution on this host"
-      query: '((data_process_exec_process_binary:/.*(\/[Bb][Aa][Ss][Hh]|\/[Ss][Hh]|\/[Dd][Aa][Ss][Hh]|\/[Zz][Ss][Hh]|\/[Kk][Ss][Hh]|\/[Aa][Ss][Hh]|\/[Bb][Uu][Ss][Yy][Bb][Oo][Xx])/) OR (data_process_exec_process_binary:/.*(\/[Pp][Yy][Tt][Hh][Oo][Nn]|\/[Pp][Yy][Tt][Hh][Oo][Nn]3|\/[Pp][Ee][Rr][Ll]|\/[Rr][Uu][Bb][Yy]|\/[Pp][Hh][Pp]|\/[Nn][Oo][Dd][Ee]|\/[Ll][Uu][Aa]|\/[Aa][Ww][Kk])/))'
-      pivot_on: [host]
-      window: 1h
+  # Behaviour-targeted hunts the engine runs around the alert (not a sweep).
+  - name: SUID binary shell-escape or privilege-escalation utility on this host
+    query: ((data_process_exec_process_binary:/.*\/[Ff][Ii][Nn][Dd]/ AND data_process_exec_process_arguments:/.*-[Ee][Xx][Ee][Cc].*/) OR (data_process_exec_process_binary:/.*(\/[Vv][Ii][Mm]|\/[Rr][Vv][Ii][Mm]|\/[Vv][Ii]|\/[Nn][Mm][Aa][Pp]|\/[Gg][Dd][Bb]|\/[Aa][Ww][Kk]|\/[Gg][Aa][Ww][Kk]|\/[Ee][Nn][Vv])/ AND data_process_exec_process_arguments:/.*(\/[Bb][Ii][Nn]\/[Ss][Hh]|\/[Bb][Ii][Nn]\/[Bb][Aa][Ss][Hh]|\/[Bb][Ii][Nn]\/[Dd][Aa][Ss][Hh]|\/[Bb][Ii][Nn]\/[Zz][Ss][Hh]|--[Ii][Nn][Tt][Ee][Rr][Aa][Cc][Tt][Ii][Vv][Ee]).*/) OR data_process_exec_process_binary:/.*(\/[Pp][Kk][Ee][Xx][Ee][Cc]|\/[Dd][Oo][Aa][Ss])/)
+    pivot_on:
+    - host
+    window: 2h
+  - name: Privilege-escalation enumeration (capabilities, kernel, sudo rights, cron) on this host
+    query: ((data_process_exec_process_binary:/.*\/[Gg][Ee][Tt][Cc][Aa][Pp]/) OR (data_process_exec_process_binary:/.*\/[Uu][Nn][Aa][Mm][Ee]/ AND data_process_exec_process_arguments:/.*-[Aa].*/) OR (data_process_exec_process_binary:/.*\/[Ss][Uu][Dd][Oo]/ AND data_process_exec_process_arguments:/.*-[Ll].*/) OR (data_process_exec_process_binary:/.*\/[Cc][Rr][Oo][Nn][Tt][Aa][Bb]/ AND data_process_exec_process_arguments:/.*-[Ll].*/))
+    pivot_on:
+    - host
+    window: 1h
+  - name: Sudoers / credential file access on this host
+    query: ((data_process_exec_process_arguments:/.*\/[Ee][Tt][Cc]\/[Ss][Uu][Dd][Oo][Ee][Rr][Ss].*/) OR (data_process_exec_process_arguments:/.*\/[Ee][Tt][Cc]\/[Ss][Hh][Aa][Dd][Oo][Ww].*/) OR (data_process_exec_process_arguments:/.*\/[Ee][Tt][Cc]\/[Pp][Aa][Ss][Ss][Ww][Dd].*/))
+    pivot_on:
+    - host
+    window: 2h
+  - name: Local privilege-escalation enumeration tooling on this host
+    query: data_process_exec_process_binary:/.*(\/[Ll][Ii][Nn][Pp][Ee][Aa][Ss].*|\/[Pp][Ss][Pp][Yy].*|\/[Ll][Ii][Nn][Uu][Xx]-[Ee][Xx][Pp][Ll][Oo][Ii][Tt]-[Ss][Uu][Gg][Gg][Ee][Ss][Tt][Ee][Rr].*|\/[Ll][Ss][Ee]\.[Ss][Hh]|\/[Ll][Ee][Ss]\.[Ss][Hh]|\/[Ll][Ii][Nn][Ee][Nn][Uu][Mm].*)/
+    pivot_on:
+    - host
+    window: 4h
+  - name: SUID/SGID or setcap capability backdoor creation on this host
+    query: ((data_process_exec_process_binary:/.*\/[Cc][Hh][Mm][Oo][Dd]/ AND data_process_exec_process_arguments:/.*([Uu]\+[Ss]|[Gg]\+[Ss]|4[0-7][0-7][0-7]|2[0-7][0-7][0-7]|6[0-7][0-7][0-7]).*/) OR (data_process_exec_process_binary:/.*\/[Ss][Ee][Tt][Cc][Aa][Pp]/ AND data_process_exec_process_arguments:/.*[Cc][Aa][Pp]_[Ss][Ee][Tt][Uu][Ii][Dd].*/))
+    pivot_on:
+    - host
+    window: 2h

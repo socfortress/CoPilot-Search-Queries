@@ -148,23 +148,58 @@ graylog:
   query: data_process_exec_process_binary:/.*\/[Mm][Oo][Uu][Nn][Tt]/ AND data_process_exec_process_arguments:/.*[Hh][Ii][Dd][Ee][Pp][Ii][Dd]=2.*/ AND data_process_exec_process_arguments:/.* -[Oo] .*/
 
 correlation:
-  # Authored by the correlation engine for review.
+  # Authored per-rule (behaviour-researched) for the correlation engine. Related CoPilot
+  # Searches + telemetry pivots to run around an alert, scoped to its host/user/ip/domain.
+  related_rules:
+  - id: a1b2c3d4-5e6f-7a8b-9c0d-1e2f3a4b5c6d
+    name: Linux Kernel Module Insertion
+    reason: 'insmod loading a kernel module is the escalated, kernel-level form of the same process-concealment goal: a LKM rootkit (e.g. Diamorphine) hides processes/files/ports far more thoroughly than hidepid=2. Both need CAP_SYS_ADMIN and are the same implant''s stealth setup, so an insmod on this host near the mount strongly indicates rootkit deployment, not admin tuning.'
+  - id: f1e2d3c4-5b6a-7d8e-9f0a-1b2c3d4e5f6a
+    name: Linux Kernel Module Load
+    reason: modprobe is the alternate loader for the same kernel-rootkit beat as insmod; an attacker who remounts /proc to hide processes commonly also side-loads a process-hiding module. A modprobe of a non-stock module on this host within the window corroborates kernel-level stealth accompanying the user-space hidepid hiding.
+  - id: 0326c3c8-7803-4a0f-8c5c-368f747f7c3e
+    name: Triple Cross eBPF Rootkit Execve Hijack
+    reason: This eBPF rootkit hooks execve to hide and hijack process execution — the exact same objective as hidepid=2 (making attacker processes invisible), achieved in-kernel via eBPF. Its presence on the host means the operator is layering eBPF-based process concealment on top of the /proc mount trick.
+  - id: bed26dea-4525-47f4-b24a-76e30e44ffb0
+    name: Audit Rules Deleted Via Auditctl
+    reason: Deleting audit rules (auditctl -D) blinds the Linux audit subsystem that would otherwise record the hidden processes' syscalls. Hiding processes from users and disabling the auditor that logs them are the same 'remove visibility' step, so an auditctl -D on this host in the same session is a direct companion action.
+  - id: e3a8a052-111f-4606-9aee-f28ebeb76776
+    name: Disabling Security Tools
+    reason: Stopping/masking/killing EDR and AV agents (Wazuh, Falco, osquery, auditd, CrowdStrike) removes the sensors that would surface the concealed processes. A root operator who remounts /proc to evade per-user process visibility routinely also tears down endpoint monitoring in the same window — the defense-evasion sibling of this mount.
+  - id: 80915f59-9b56-4616-9de0-fd0dea6c12fe
+    name: Linux Logs Clearing Attempts
+    reason: 'Deleting or shredding /var/log content is the anti-forensic follow-on to process hiding: after concealing live activity via hidepid=2, the operator erases the recorded evidence of how they got there. Log destruction on this host near the mount points to deliberate track-covering rather than maintenance.'
+  - id: 1182f3b3-e716-4efa-99ab-d2685d04360f
+    name: History File Deletion
+    reason: Wiping .bash_history/.zsh_history removes the record of the very commands (including the hidepid mount and any rootkit install) typed in a hands-on-keyboard session. History deletion on the same host/user in the window is a strong tell that the hidepid mount was interactive intruder activity being cleaned up afterward.
+  - id: 34979410-e4b5-4e5d-8cfb-389fdff05c12
+    name: Remove Immutable File Attribute
+    reason: chattr -i strips immutability so protected files (/etc/passwd, sudoers, SSH keys, service units) can be overwritten for implant and persistence setup. A root operator staging stealth via hidepid frequently unlocks such files in the same session; chattr -i on this host is part of the same implant-deployment chain.
+  window: 2h
   enrichment_searches:
-  # Rule-specific telemetry pivots the engine runs around an alert from this rule,
-  # scoped to the alert's host/user/IP within the window (behaviour-targeted, not a sweep).
-    - name: "Other executions of this tool-set on this host (any arguments)"
-      query: 'data_process_exec_process_binary:/.*(\/[Mm][Oo][Uu][Nn][Tt])/'
-      pivot_on: [host]
-      window: 2h
-    - name: "Remote-access tooling on this host"
-      query: 'data_process_exec_process_binary:/.*(\/[Ss][Ss][Hh]|\/[Ss][Cc][Pp]|\/[Ss][Ff][Tt][Pp]|\/[Rr][Ss][Yy][Nn][Cc]|\/[Ss][Ss][Hh][Pp][Aa][Ss][Ss])/'
-      pivot_on: [host]
-      window: 2h
-    - name: "Shell / interpreter execution on this host"
-      query: '((data_process_exec_process_binary:/.*(\/[Bb][Aa][Ss][Hh]|\/[Ss][Hh]|\/[Dd][Aa][Ss][Hh]|\/[Zz][Ss][Hh]|\/[Kk][Ss][Hh]|\/[Aa][Ss][Hh]|\/[Bb][Uu][Ss][Yy][Bb][Oo][Xx])/) OR (data_process_exec_process_binary:/.*(\/[Pp][Yy][Tt][Hh][Oo][Nn]|\/[Pp][Yy][Tt][Hh][Oo][Nn]3|\/[Pp][Ee][Rr][Ll]|\/[Rr][Uu][Bb][Yy]|\/[Pp][Hh][Pp]|\/[Nn][Oo][Dd][Ee]|\/[Ll][Uu][Aa]|\/[Aa][Ww][Kk])/))'
-      pivot_on: [host]
-      window: 1h
-    - name: "Reconnaissance commands on this host"
-      query: 'data_process_exec_process_binary:/.*(\/[Ww][Hh][Oo][Aa][Mm][Ii]|\/[Ii][Dd]|\/[Uu][Nn][Aa][Mm][Ee]|\/[Hh][Oo][Ss][Tt][Nn][Aa][Mm][Ee]|\/[Hh][Oo][Ss][Tt][Nn][Aa][Mm][Ee][Cc][Tt][Ll]|\/[Ss][Ss]|\/[Nn][Ee][Tt][Ss][Tt][Aa][Tt]|\/[Ii][Ff][Cc][Oo][Nn][Ff][Ii][Gg]|\/[Aa][Rr][Pp]|\/[Ww]|\/[Ww][Hh][Oo]|\/[Ll][Aa][Ss][Tt]|\/[Ll][Ss][Oo][Ff]|\/[Nn][Mm][Aa][Pp]|\/[Dd][Ii][Gg]|\/[Ff][Ii][Nn][Dd])/'
-      pivot_on: [host]
-      window: 1h
+  # Behaviour-targeted hunts the engine runs around the alert (not a sweep).
+  - name: Additional /proc remounts, hidepid, and bind-mount hiding on this host
+    query: (data_process_exec_process_binary:/.*\/[Mm][Oo][Uu][Nn][Tt]/ AND data_process_exec_process_arguments:/.*([Hh][Ii][Dd][Ee][Pp][Ii][Dd]|[Rr][Ee][Mm][Oo][Uu][Nn][Tt]|[Bb][Ii][Nn][Dd]).*/) OR data_process_exec_process_binary:/.*\/[Uu][Mm][Oo][Uu][Nn][Tt]/
+    pivot_on:
+    - host
+    window: 2h
+  - name: Kernel module / rootkit load activity on this host
+    query: data_process_exec_process_binary:/.*(\/[Ii][Nn][Ss][Mm][Oo][Dd]|\/[Mm][Oo][Dd][Pp][Rr][Oo][Bb][Ee]|\/[Rr][Mm][Mm][Oo][Dd]|\/[Kk][Mm][Oo][Dd]|\/[Dd][Ee][Pp][Mm][Oo][Dd])/
+    pivot_on:
+    - host
+    window: 2h
+  - name: Disabling auditing or security sensors on this host
+    query: (data_process_exec_process_binary:/.*\/[Aa][Uu][Dd][Ii][Tt][Cc][Tt][Ll]/ AND data_process_exec_process_arguments:/.* -[Dd].*/) OR (data_process_exec_process_binary:/.*\/[Ss][Ee][Tt][Ee][Nn][Ff][Oo][Rr][Cc][Ee]/ AND data_process_exec_process_arguments:/.*0.*/) OR ((data_process_exec_process_binary:/.*(\/[Ss][Yy][Ss][Tt][Ee][Mm][Cc][Tt][Ll]|\/[Ss][Ee][Rr][Vv][Ii][Cc][Ee])/) AND data_process_exec_process_arguments:/.*([Ss][Tt][Oo][Pp]|[Mm][Aa][Ss][Kk]|[Dd][Ii][Ss][Aa][Bb][Ll][Ee]).*/ AND data_process_exec_process_arguments:/.*([Aa][Uu][Dd][Ii][Tt][Dd]|[Ww][Aa][Zz][Uu][Hh]|[Ff][Aa][Ll][Cc][Oo]|[Oo][Ss][Qq][Uu][Ee][Rr][Yy]|[Ss][Yy][Ss][Mm][Oo][Nn]).*/)
+    pivot_on:
+    - host
+    window: 2h
+  - name: Log and shell-history tampering on this host
+    query: ((data_process_exec_process_binary:/.*(\/[Rr][Mm]|\/[Ss][Hh][Rr][Ee][Dd]|\/[Tt][Rr][Uu][Nn][Cc][Aa][Tt][Ee]|\/[Uu][Nn][Ll][Ii][Nn][Kk])/) AND data_process_exec_process_arguments:/.*(\/[Vv][Aa][Rr]\/[Ll][Oo][Gg]|[Hh][Ii][Ss][Tt][Oo][Rr][Yy]|[Ww][Tt][Mm][Pp]|[Bb][Tt][Mm][Pp]).*/) OR (data_process_exec_process_binary:/.*\/[Cc][Hh][Aa][Tt][Tt][Rr]/ AND data_process_exec_process_arguments:/.* -[Ii].*/) OR (data_process_exec_process_binary:/.*\/[Jj][Oo][Uu][Rr][Nn][Aa][Ll][Cc][Tt][Ll]/ AND data_process_exec_process_arguments:/.*[Vv][Aa][Cc][Uu][Uu][Mm].*/)
+    pivot_on:
+    - host
+    window: 4h
+  - name: Privileged account and SSH-key persistence on this host
+    query: ((data_process_exec_process_binary:/.*(\/[Uu][Ss][Ee][Rr][Mm][Oo][Dd]|\/[Uu][Ss][Ee][Rr][Aa][Dd][Dd]|\/[Aa][Dd][Dd][Uu][Ss][Ee][Rr])/) AND data_process_exec_process_arguments:/.*([Ss][Uu][Dd][Oo]|[Rr][Oo][Oo][Tt]|[Ww][Hh][Ee][Ee][Ll]).*/) OR data_process_exec_process_arguments:/.*[Aa][Uu][Tt][Hh][Oo][Rr][Ii][Zz][Ee][Dd]_[Kk][Ee][Yy][Ss].*/
+    pivot_on:
+    - host
+    window: 6h
