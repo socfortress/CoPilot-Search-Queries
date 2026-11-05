@@ -193,19 +193,58 @@ graylog:
   query: data_process_exec_parent_binary:/.*\/[Nn][Oo][Dd][Ee]/ AND ((data_process_exec_process_binary:/.*\/[Bb][Uu][Nn]/ AND (data_process_exec_process_arguments:/.*[Bb][Uu][Nn]_[Ee][Nn][Vv][Ii][Rr][Oo][Nn][Mm][Ee][Nn][Tt]\.[Jj][Ss].*/ OR data_process_exec_process_arguments:/.*[Hh][Tt][Tt][Pp][Ss]:\/\/[Gg][Ii][Tt][Hh][Uu][Bb]\.[Cc][Oo][Mm]\/[Aa][Cc][Tt][Ii][Oo][Nn][Ss]\/[Rr][Uu][Nn][Nn][Ee][Rr]\/[Rr][Ee][Ll][Ee][Aa][Ss][Ee][Ss]\/[Dd][Oo][Ww][Nn][Ll][Oo][Aa][Dd]\/[Vv]2\.330\.0.*/)) OR (data_process_exec_process_arguments:/.*[Cc][Uu][Rr][Ll] .*/ AND data_process_exec_process_arguments:/.*-[Ff][Ss][Ss][Ll].*/ AND data_process_exec_process_arguments:/.*[Hh][Tt][Tt][Pp][Ss]:\/\/[Bb][Uu][Nn]\.[Ss][Hh]\/[Ii][Nn][Ss][Tt][Aa][Ll][Ll].*/ AND data_process_exec_process_arguments:/.*[Bb][Aa][Ss][Hh].*/) OR (data_process_exec_process_arguments:/.*[Bb][Aa][Ss][Hh] -[Cc] \"[Ss][Oo][Uu][Rr][Cc][Ee] .*/ AND data_process_exec_process_arguments:/.*\&\& [Ee][Cc][Hh][Oo].*/))
 
 correlation:
-  # Authored by the correlation engine for review.
+  # Authored per-rule (behaviour-researched) for the correlation engine. Related CoPilot
+  # Searches + telemetry pivots to run around an alert, scoped to its host/user/ip/domain.
+  related_rules:
+  - id: 11bb9b26-4179-4a06-afcb-1ec31fce1627
+    name: Shai-Hulud Malware Indicators - Linux
+    reason: 'Same malware, same host: once bun_environment.js runs, the worm''s other command-line fingerprints (''shai-hulud''/''sha1hulud'' strings in created repo names, branches and workflow files) appear in process arguments. A concurrent hit is near-definitive confirmation this is Shai-Hulud, not a benign bun_environment.js.'
+  - id: f0025a69-e1b7-4dda-a53c-db21fa2d4071
+    name: Script Interpreter Spawning Credential Scanner - Linux
+    reason: 'The direct next action of the payload: bun/node spawns TruffleHog/Gitleaks to harvest secrets. This rule keys on exactly that node|bun parent -> credential-scanner child chain and explicitly names the ''Second Coming'' campaign, so it should fire minutes after this one on the same host.'
+  - id: d7a650c4-226c-451e-948f-cc490db506aa
+    name: PUA - TruffleHog Execution - Linux
+    reason: 'Second detection angle on the same credential-theft step: TruffleHog run with --results=verified regardless of parent process. Catches the harvest when bun spawns it via an intermediate shell (so the parent is not node/bun), which the parent-anchored scanner rule would miss; documented as observed in the Shai-Hulud campaign.'
+  - id: efd2eb09-b72e-4a61-8dc7-b1382a1e8983
+    name: Shai-Hulud NPM Package Malicious Exfiltration via Curl
+    reason: 'The exfiltration stage of this exact campaign: after secrets are collected the payload curls them (curl -d) to an attacker webhook.site endpoint. Same host, same incident - this rule confirms stolen data left the box, which escalates severity and scopes blast radius.'
+  - id: 3c6f5e4a-8d0b-6abc-d9e2-4f7a6b8c9d0e
+    name: TanStack Supply-Chain Attack Execution Indicators - Linux
+    reason: Sibling Shai-Hulud variant using the identical delivery mechanism - an npm pre/postinstall hook that downloads and runs the Bun runtime to execute the payload. A host that pulls one poisoned package often pulls others in the same wave, so both firing points to a single npm supply-chain compromise to triage together.
+  - id: 0a23a62d-c5b3-468b-a072-25064a9a8c87
+    name: Axios NPM Compromise Indicators - Linux
+    reason: 'Same initial-access vector and parent context: a malicious npm postinstall dropper with a node/bun parent that curls a payload and runs it detached. Co-occurrence confirms the host is executing untrusted npm lifecycle scripts, the precondition that led to this Bun execution.'
+  - id: c3d9e7f1-6a2b-4d8f-9c2b-5e6f7a8b9c0d
+    name: Linux Suspicious Curl Data Exfiltration
+    reason: 'Generalises the exfil/credential-theft follow-on beyond the single webhook IOC: curl with -d/--form/--upload-file or requests touching AWS credential files. Shai-Hulud steals cloud tokens and pushes them out, so this flags the outbound leg even when the destination differs from the known webhook.site IOC.'
+  - id: a2d9e2f3-0f43-4c7a-bcd9-9acfc0d723aa
+    name: Suspicious Download and Execute Pattern via Curl/Wget
+    reason: 'Second-stage staging: the payload fetches further components (the setup_bun.js install step, the GitHub Actions runner it drops for persistence, helper tooling) with curl/wget into tmp/shm and executes them. A hit here on the same host places the fetch-and-run stager alongside this execution in the kill chain.'
+  window: 2h
   enrichment_searches:
-  # Rule-specific telemetry pivots the engine runs around an alert from this rule,
-  # scoped to the alert's host/user/IP within the window (behaviour-targeted, not a sweep).
-    - name: "Persistence via cron / systemd / shell profiles on this host"
-      query: '((data_process_exec_process_binary:/.*(\/[Cc][Rr][Oo][Nn][Tt][Aa][Bb]|\/[Ss][Yy][Ss][Tt][Ee][Mm][Cc][Tt][Ll]|\/[Aa][Tt]|\/[Uu][Pp][Dd][Aa][Tt][Ee]-[Rr][Cc]\.[Dd])/) OR (data_process_exec_process_arguments:/.*\/[Ee][Tt][Cc]\/[Cc][Rr][Oo][Nn].*/) OR (data_process_exec_process_arguments:/.*\/[Ee][Tt][Cc]\/[Ss][Yy][Ss][Tt][Ee][Mm][Dd].*/) OR (data_process_exec_process_arguments:/.*[Rr][Cc]\.[Ll][Oo][Cc][Aa][Ll].*/) OR (data_process_exec_process_arguments:/.*\.[Bb][Aa][Ss][Hh][Rr][Cc].*/) OR (data_process_exec_process_arguments:/.*\.[Bb][Aa][Ss][Hh]_[Pp][Rr][Oo][Ff][Ii][Ll][Ee].*/) OR (data_process_exec_process_arguments:/.*\/[Ee][Tt][Cc]\/[Pp][Rr][Oo][Ff][Ii][Ll][Ee].*/) OR (data_process_exec_process_arguments:/.*[Aa][Uu][Tt][Hh][Oo][Rr][Ii][Zz][Ee][Dd]_[Kk][Ee][Yy][Ss].*/) OR (data_process_exec_process_arguments:/.*\/[Ee][Tt][Cc]\/[Ii][Nn][Ii][Tt]\.[Dd].*/))'
-      pivot_on: [host]
-      window: 4h
-    - name: "Shell / interpreter execution on this host"
-      query: '((data_process_exec_process_binary:/.*(\/[Bb][Aa][Ss][Hh]|\/[Ss][Hh]|\/[Dd][Aa][Ss][Hh]|\/[Zz][Ss][Hh]|\/[Kk][Ss][Hh]|\/[Aa][Ss][Hh]|\/[Bb][Uu][Ss][Yy][Bb][Oo][Xx])/) OR (data_process_exec_process_binary:/.*(\/[Pp][Yy][Tt][Hh][Oo][Nn]|\/[Pp][Yy][Tt][Hh][Oo][Nn]3|\/[Pp][Ee][Rr][Ll]|\/[Rr][Uu][Bb][Yy]|\/[Pp][Hh][Pp]|\/[Nn][Oo][Dd][Ee]|\/[Ll][Uu][Aa]|\/[Aa][Ww][Kk])/))'
-      pivot_on: [host]
-      window: 1h
-    - name: "Reconnaissance commands on this host"
-      query: 'data_process_exec_process_binary:/.*(\/[Ww][Hh][Oo][Aa][Mm][Ii]|\/[Ii][Dd]|\/[Uu][Nn][Aa][Mm][Ee]|\/[Hh][Oo][Ss][Tt][Nn][Aa][Mm][Ee]|\/[Hh][Oo][Ss][Tt][Nn][Aa][Mm][Ee][Cc][Tt][Ll]|\/[Ss][Ss]|\/[Nn][Ee][Tt][Ss][Tt][Aa][Tt]|\/[Ii][Ff][Cc][Oo][Nn][Ff][Ii][Gg]|\/[Aa][Rr][Pp]|\/[Ww]|\/[Ww][Hh][Oo]|\/[Ll][Aa][Ss][Tt]|\/[Ll][Ss][Oo][Ff]|\/[Nn][Mm][Aa][Pp]|\/[Dd][Ii][Gg]|\/[Ff][Ii][Nn][Dd])/'
-      pivot_on: [host]
-      window: 1h
+  # Behaviour-targeted hunts the engine runs around the alert (not a sweep).
+  - name: Credential scanner (TruffleHog / Gitleaks) execution on this host
+    query: (data_process_exec_process_binary:/.*\/[Tt][Rr][Uu][Ff][Ff][Ll][Ee][Hh][Oo][Gg]/ OR data_process_exec_process_binary:/.*\/[Gg][Ii][Tt][Ll][Ee][Aa][Kk][Ss]/ OR data_process_exec_process_arguments:/.*[Tt][Rr][Uu][Ff][Ff][Ll][Ee][Hh][Oo][Gg].*/ OR data_process_exec_process_arguments:/.*[Gg][Ii][Tt][Ll][Ee][Aa][Kk][Ss].*/)
+    pivot_on:
+    - host
+    window: 2h
+  - name: Access to developer and cloud credential stores on this host
+    query: (data_process_exec_process_arguments:/.*\.[Nn][Pp][Mm][Rr][Cc].*/ OR data_process_exec_process_arguments:/.*\.[Aa][Ww][Ss]\/[Cc][Rr][Ee][Dd][Ee][Nn][Tt][Ii][Aa][Ll][Ss].*/ OR data_process_exec_process_arguments:/.*\/\.[Cc][Oo][Nn][Ff][Ii][Gg]\/[Gg][Cc][Ll][Oo][Uu][Dd].*/ OR data_process_exec_process_arguments:/.*\/\.[Ss][Ss][Hh]\/[Ii][Dd]_.*/ OR data_process_exec_process_arguments:/.*\.[Nn][Ee][Tt][Rr][Cc].*/ OR data_process_exec_process_arguments:/.*[Gg][Ii][Tt][Hh][Uu][Bb]_[Tt][Oo][Kk][Ee][Nn].*/ OR data_process_exec_process_arguments:/.*[Nn][Pp][Mm]_[Tt][Oo][Kk][Ee][Nn].*/)
+    pivot_on:
+    - host
+    window: 2h
+  - name: Secret exfiltration via curl/wget to webhooks or GitHub API
+    query: (((data_process_exec_process_binary:/.*\/[Cc][Uu][Rr][Ll]/ OR data_process_exec_process_binary:/.*\/[Ww][Gg][Ee][Tt]/) AND (data_process_exec_process_arguments:/.* -[Dd] .*/ OR data_process_exec_process_arguments:/.*--[Dd][Aa][Tt][Aa].*/ OR data_process_exec_process_arguments:/.*--[Ff][Oo][Rr][Mm].*/ OR data_process_exec_process_arguments:/.*--[Uu][Pp][Ll][Oo][Aa][Dd]-[Ff][Ii][Ll][Ee].*/ OR data_process_exec_process_arguments:/.* -[Tt] .*/)) OR data_process_exec_process_arguments:/.*[Ww][Ee][Bb][Hh][Oo][Oo][Kk]\.[Ss][Ii][Tt][Ee].*/ OR data_process_exec_process_arguments:/.*[Aa][Pp][Ii]\.[Gg][Ii][Tt][Hh][Uu][Bb]\.[Cc][Oo][Mm].*/)
+    pivot_on:
+    - host
+    window: 2h
+  - name: GitHub Actions self-hosted runner staged for persistence
+    query: (data_process_exec_process_arguments:/.*[Gg][Ii][Tt][Hh][Uu][Bb]\.[Cc][Oo][Mm]\/[Aa][Cc][Tt][Ii][Oo][Nn][Ss]\/[Rr][Uu][Nn][Nn][Ee][Rr].*/ OR data_process_exec_process_arguments:/.*[Aa][Cc][Tt][Ii][Oo][Nn][Ss]-[Rr][Uu][Nn][Nn][Ee][Rr].*/ OR data_process_exec_process_binary:/.*\/[Cc][Oo][Nn][Ff][Ii][Gg]\.[Ss][Hh]/ OR data_process_exec_process_binary:/.*\/[Rr][Uu][Nn]\.[Ss][Hh]/ OR data_process_exec_process_arguments:/.*[Rr][Uu][Nn][Nn][Ee][Rr]\.[Ll][Ii][Ss][Tt][Ee][Nn][Ee][Rr].*/)
+    pivot_on:
+    - host
+    window: 6h
+  - name: npm/bun/node package operations - delivery hooks and worm propagation
+    query: ((data_process_exec_process_binary:/.*\/[Nn][Pp][Mm]/ OR data_process_exec_process_binary:/.*\/[Nn][Pp][Xx]/ OR data_process_exec_process_binary:/.*\/[Pp][Nn][Pp][Mm]/ OR data_process_exec_process_binary:/.*\/[Yy][Aa][Rr][Nn]/ OR data_process_exec_process_binary:/.*\/[Bb][Uu][Nn]/) AND (data_process_exec_process_arguments:/.* [Ii][Nn][Ss][Tt][Aa][Ll][Ll].*/ OR data_process_exec_process_arguments:/.* [Pp][Uu][Bb][Ll][Ii][Ss][Hh].*/ OR data_process_exec_process_arguments:/.* [Rr][Uu][Nn] .*/)) OR data_process_exec_process_arguments:/.*[Ss][Ee][Tt][Uu][Pp]_[Bb][Uu][Nn]\.[Jj][Ss].*/
+    pivot_on:
+    - host
+    window: 6h

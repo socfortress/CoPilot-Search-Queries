@@ -147,19 +147,58 @@ graylog:
   query: data_audit_type:/[Ee][Xx][Ee][Cc][Vv][Ee]/ AND data_audit_execve_a0:/[Cc][Pp]/ AND data_audit_execve_a1:/\/[Bb][Ii][Nn]\/[Ss][Hh]/ AND data_audit_execve_a2:/.*\/[Cc][Rr][Oo][Nn][Dd]/
 
 correlation:
-  # Authored by the correlation engine for review.
+  # Authored per-rule (behaviour-researched) for the correlation engine. Related CoPilot
+  # Searches + telemetry pivots to run around an alert, scoped to its host/user/ip/domain.
+  related_rules:
+  - id: 1543ae20-cbdf-4ec1-8d12-7664d667a825
+    name: Suspicious Commands Linux
+    reason: Its auditd query matches the identical execve 'cp /bin/sh' that this rule keys on; the masquerade is a specialized case of it, so both fire on the very same copy event - strongest same-event corroboration that the shell binary was duplicated.
+  - id: a39d7fa7-3fbd-4dc2-97e1-d87f546b1bbc
+    name: Program Executions in Suspicious Folders
+    reason: When the copied /bin/sh (now named crond) is run from /tmp or a web root, its data_audit_exe trips this folder-based rule - the direct auditd follow-on proving the masqueraded binary actually executed, not just got copied.
+  - id: 312b42b1-bded-4441-8b58-163a3af58775
+    name: Potentially Suspicious Execution From Tmp Folder
+    reason: 'Tetragon process_exec view of the same follow-on: the disguised /tmp/crond binary executing is caught by this /tmp-path rule, confirming the run through a second, independent sensor on the host.'
+  - id: 2fade0b6-7423-4835-9d4f-335b39b83867
+    name: Shell Execution Of Process Located In Tmp Directory
+    reason: The masqueraded crond is a copy of /bin/sh sitting in /tmp; when it spawns child shells its /tmp parent_binary trips this rule - evidence the disguised shell is being driven interactively rather than left dormant.
+  - id: ea3ecad2-db86-4a89-ad0b-132a10d2db55
+    name: Interactive Bash Suspicious Children
+    reason: Once the disguised shell is interactive it spawns recon/base64/netcat children exactly as this rule detects - the hands-on-keyboard phase that immediately follows a successfully planted shell.
+  - id: f7158a64-6204-4d6d-868a-6e6378b467e0
+    name: Suspicious C2 Activities
+    reason: The purpose of a disguised interactive shell is typically C2 and staging; this auditd rule flags wget/curl/nc/socat/ssh on the same host, the expected next-stage network tooling the crond shell reaches for.
+  - id: 6b14bac8-3e3a-4324-8109-42f0546a347f
+    name: Scheduled Cron Task/Job - Linux
+    reason: Masquerading specifically AS crond betrays interest in the scheduler; this rule flags real crontab persistence staged from /tmp - the cron-based foothold the 'crond' disguise is designed to blend into.
+  - id: 0cf7a157-8879-41a2-8f55-388dd23746b7
+    name: Linux Recon Indicators
+    reason: A freshly obtained interactive shell routinely enumerates SUID binaries (find -perm -4000) to plan privilege escalation, which this rule detects - the likely immediate next move after the shell is planted.
+  window: 2h
   enrichment_searches:
-  # Rule-specific telemetry pivots the engine runs around an alert from this rule,
-  # scoped to the alert's host/user/IP within the window (behaviour-targeted, not a sweep).
-    - name: "Shell / interpreter execution on this host"
-      query: '((data_process_exec_process_binary:/.*(\/[Bb][Aa][Ss][Hh]|\/[Ss][Hh]|\/[Dd][Aa][Ss][Hh]|\/[Zz][Ss][Hh]|\/[Kk][Ss][Hh]|\/[Aa][Ss][Hh]|\/[Bb][Uu][Ss][Yy][Bb][Oo][Xx])/) OR (data_process_exec_process_binary:/.*(\/[Pp][Yy][Tt][Hh][Oo][Nn]|\/[Pp][Yy][Tt][Hh][Oo][Nn]3|\/[Pp][Ee][Rr][Ll]|\/[Rr][Uu][Bb][Yy]|\/[Pp][Hh][Pp]|\/[Nn][Oo][Dd][Ee]|\/[Ll][Uu][Aa]|\/[Aa][Ww][Kk])/))'
-      pivot_on: [host]
-      window: 1h
-    - name: "Reconnaissance commands on this host"
-      query: 'data_process_exec_process_binary:/.*(\/[Ww][Hh][Oo][Aa][Mm][Ii]|\/[Ii][Dd]|\/[Uu][Nn][Aa][Mm][Ee]|\/[Hh][Oo][Ss][Tt][Nn][Aa][Mm][Ee]|\/[Hh][Oo][Ss][Tt][Nn][Aa][Mm][Ee][Cc][Tt][Ll]|\/[Ss][Ss]|\/[Nn][Ee][Tt][Ss][Tt][Aa][Tt]|\/[Ii][Ff][Cc][Oo][Nn][Ff][Ii][Gg]|\/[Aa][Rr][Pp]|\/[Ww]|\/[Ww][Hh][Oo]|\/[Ll][Aa][Ss][Tt]|\/[Ll][Ss][Oo][Ff]|\/[Nn][Mm][Aa][Pp]|\/[Dd][Ii][Gg]|\/[Ff][Ii][Nn][Dd])/'
-      pivot_on: [host]
-      window: 1h
-    - name: "Privilege-escalation tooling executed on this host"
-      query: 'data_process_exec_process_binary:/.*(\/[Ss][Uu][Dd][Oo]|\/[Ss][Uu]|\/[Pp][Kk][Ee][Xx][Ee][Cc]|\/[Dd][Oo][Aa][Ss]|\/[Ss][Ee][Tt][Cc][Aa][Pp]|\/[Cc][Hh][Ss][Hh]|\/[Nn][Ee][Ww][Gg][Rr][Pp])/'
-      pivot_on: [host]
-      window: 2h
+  # Behaviour-targeted hunts the engine runs around the alert (not a sweep).
+  - name: Masqueraded crond binary executing from a non-standard path
+    query: data_audit_exe:/.*\/[Cc][Rr][Oo][Nn][Dd]/ AND NOT (data_audit_exe:/\/[Uu][Ss][Rr]\/[Ss][Bb][Ii][Nn]\/[Cc][Rr][Oo][Nn][Dd]/ OR data_audit_exe:/\/[Ss][Bb][Ii][Nn]\/[Cc][Rr][Oo][Nn][Dd]/ OR data_audit_exe:/\/[Uu][Ss][Rr]\/[Bb][Ii][Nn]\/[Cc][Rr][Oo][Nn][Dd]/)
+    pivot_on:
+    - host
+    window: 1h
+  - name: Binary execution from world-writable staging directories
+    query: (data_audit_exe:/\/[Tt][Mm][Pp]\/.*/ OR data_audit_exe:/\/[Dd][Ee][Vv]\/[Ss][Hh][Mm]\/.*/ OR data_audit_exe:/\/[Vv][Aa][Rr]\/[Tt][Mm][Pp]\/.*/)
+    pivot_on:
+    - host
+    window: 2h
+  - name: Host and user reconnaissance commands
+    query: data_audit_exe:/.*(\/[Ww][Hh][Oo][Aa][Mm][Ii]|\/[Ii][Dd]|\/[Uu][Nn][Aa][Mm][Ee]|\/[Hh][Oo][Ss][Tt][Nn][Aa][Mm][Ee]|\/[Hh][Oo][Ss][Tt][Nn][Aa][Mm][Ee][Cc][Tt][Ll]|\/[Ww]|\/[Ww][Hh][Oo]|\/[Ll][Aa][Ss][Tt]|\/[Gg][Rr][Oo][Uu][Pp][Ss]|\/[Ss][Ss]|\/[Nn][Ee][Tt][Ss][Tt][Aa][Tt]|\/[Ii][Ff][Cc][Oo][Nn][Ff][Ii][Gg]|\/[Ii][Pp]|\/[Aa][Rr][Pp]|\/[Ll][Ss][Oo][Ff]|\/[Ff][Ii][Nn][Dd])/
+    pivot_on:
+    - host
+    window: 1h
+  - name: Privilege-escalation tooling executed on this host
+    query: data_audit_exe:/.*(\/[Ss][Uu][Dd][Oo]|\/[Ss][Uu]|\/[Pp][Kk][Ee][Xx][Ee][Cc]|\/[Dd][Oo][Aa][Ss]|\/[Ss][Ee][Tt][Cc][Aa][Pp]|\/[Cc][Hh][Ss][Hh]|\/[Nn][Ee][Ww][Gg][Rr][Pp])/
+    pivot_on:
+    - host
+    window: 2h
+  - name: Cron scheduling tooling invoked on this host
+    query: data_audit_exe:/.*(\/[Cc][Rr][Oo][Nn][Tt][Aa][Bb]|\/[Aa][Tt])/
+    pivot_on:
+    - host
+    window: 4h

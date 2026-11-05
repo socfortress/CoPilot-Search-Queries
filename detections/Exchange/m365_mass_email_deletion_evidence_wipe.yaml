@@ -92,46 +92,58 @@ aggregation:
   condition: ">"
 
 correlation:
-  # Authored by the correlation engine for review. Related CoPilot Searches to run
-  # around an alert from this rule, scoped to the same host/user/IP within the window.
+  # Authored per-rule (behaviour-researched) for the correlation engine. Related CoPilot
+  # Searches + telemetry pivots to run around an alert, scoped to its host/user/ip/domain.
   related_rules:
-    - id: M365_Email_Forwarding_Created
-      name: "M365 Email Forwarding Created"
-      reason: "same analytic story: Business Email Compromise"
-    - id: M365_Inbox_Rule_Created
-      name: "M365 Inbox Rule Created"
-      reason: "same analytic story: Business Email Compromise"
-    - id: d8b0a4fe-07a8-41be-bd39-b14afa025d95
-      name: "Activity from Anonymous IP Addresses"
-      reason: "next kill-chain tactic: Command and Control"
-    - id: 0f2468a2-5055-4212-a368-7321198ee706
-      name: "Activity from Infrequent Country"
-      reason: "next kill-chain tactic: Command and Control"
-    - id: 2b669496-d215-47d8-bd9a-f4a45bf07cda
-      name: "Data Exfiltration to Unsanctioned Apps"
-      reason: "next kill-chain tactic: Exfiltration"
-    - id: M365_Mass_External_Sharing
-      name: "M365 Mass External Sharing"
-      reason: "next kill-chain tactic: Collection"
-    - id: M365_Mass_File_Deletion
-      name: "M365 Mass File Deletion"
-      reason: "next kill-chain tactic: Impact"
-    - id: M365_Mass_File_Download
-      name: "M365 Mass File Download"
-      reason: "next kill-chain tactic: Collection"
-  window: 1h
+  - id: M365_Inbox_Rule_Created
+    name: M365 Inbox Rule Created
+    reason: 'Tightest behavioural pairing on the same mailbox: BEC attackers first create an inbox rule to move replies/NDRs to Deleted Items or mark-as-read, then bulk-delete the thread. A New-InboxRule by this user just before the wipe shows the hide-then-delete tradecraft, not a user housekeeping their inbox.'
+  - id: M365_Email_Forwarding_Created
+    name: M365 Email Forwarding Created
+    reason: 'Set-Mailbox forwarding siphons a copy of the mail to an attacker address before the local copies are destroyed. Forwarding + mass deletion on the same mailbox is collect-then-wipe: the attacker keeps the stream while erasing the victim''s record of it.'
+  - id: ff246f56-7f24-402a-baca-b86540e3925c
+    name: Microsoft 365 - User Restricted from Sending Email
+    reason: 'Direct corroboration of the outbound abuse being erased: the account sent enough spam/phishing that Microsoft throttled it. When this fires on the same user, the mass deletion is almost certainly wiping the Sent Items evidence of that outbound campaign.'
+  - id: d7eab125-5f94-43df-8710-795b80fa1189
+    name: Microsoft 365 - Impossible Travel Activity
+    reason: The canonical account-takeover signal. If the same user has an impossible-travel sign-in in the window, it places the compromise this deletion is covering up and turns a 'bulk cleanup' false positive into a confirmed ATO.
+  - id: d8b0a4fe-07a8-41be-bd39-b14afa025d95
+    name: Activity from Anonymous IP Addresses
+    reason: 'Establishes a hands-on-keyboard adversary: the destructive session was driven from Tor/VPN/anonymiser infrastructure. Same user/IP anonymisation around the deletion is strong evidence of deliberate anti-forensics rather than a user clearing mail.'
+  - id: c191e2fa-f9d6-4ccf-82af-4f2aba08359f
+    name: Logon from a Risky IP Address
+    reason: Threat-intel-flagged malicious sign-in source for the account. A risky-IP logon for this user corroborates that the mailbox was accessed by an attacker and gives the ClientIP to pivot the rest of the incident on.
+  - id: 60de9b57-dc4d-48b9-a6a0-b39e0469f876
+    name: Disabling Multi Factor Authentication
+    reason: 'Persistence step in the takeover (T1556): weaken auth to keep access, then operate. MFA disable for this user shortly before the wipe fits the compromise-persist-then-clean-up sequence and raises confidence the account is attacker-controlled.'
+  - id: 0f2468a2-5055-4212-a368-7321198ee706
+    name: Activity from Infrequent Country
+    reason: Geo-baseline anomaly distinct from impossible-travel (first-seen country vs velocity). A sign-in from a country this user never operates from, in the same window, is independent corroboration of the account takeover behind the deletion.
+  window: 2h
   enrichment_searches:
-  # Rule-specific telemetry pivots the engine runs around an alert from this rule,
-  # scoped to the alert's host/user/IP within the window (behaviour-targeted, not a sweep).
-    - name: "Mail access / rules / forwarding by this user"
-      query: '(((data_office365_Operation:/.*[Mm][Aa][Ii][Ll][Ii][Tt][Ee][Mm][Ss][Aa][Cc][Cc][Ee][Ss][Ss][Ee][Dd].*/ OR data_office365_Operation:/.*[Ss][Ee][Nn][Dd].*/ OR data_office365_Operation:/.*[Ss][Ee][Nn][Dd][Aa][Ss].*/ OR data_office365_Operation:/.*[Ss][Ee][Nn][Dd][Oo][Nn][Bb][Ee][Hh][Aa][Ll][Ff].*/ OR data_office365_Operation:/.*[Mm][Aa][Ii][Ll][Bb][Oo][Xx][Ll][Oo][Gg][Ii][Nn].*/)) OR ((data_office365_Operation:/.*[Nn][Ee][Ww]-[Ii][Nn][Bb][Oo][Xx][Rr][Uu][Ll][Ee].*/ OR data_office365_Operation:/.*[Ss][Ee][Tt]-[Ii][Nn][Bb][Oo][Xx][Rr][Uu][Ll][Ee].*/ OR data_office365_Operation:/.*[Ss][Ee][Tt]-[Mm][Aa][Ii][Ll][Bb][Oo][Xx].*/ OR data_office365_Operation:/.*[Nn][Ee][Ww]-[Tt][Rr][Aa][Nn][Ss][Pp][Oo][Rr][Tt][Rr][Uu][Ll][Ee].*/ OR data_office365_Operation:/.*[Ss][Ee][Tt]-[Tt][Rr][Aa][Nn][Ss][Pp][Oo][Rr][Tt][Rr][Uu][Ll][Ee].*/ OR data_office365_Operation:/.*[Aa][Dd][Dd]-[Mm][Aa][Ii][Ll][Bb][Oo][Xx][Pp][Ee][Rr][Mm][Ii][Ss][Ss][Ii][Oo][Nn].*/ OR data_office365_Operation:/.*[Aa][Dd][Dd]-[Rr][Ee][Cc][Ii][Pp][Ii][Ee][Nn][Tt][Pp][Ee][Rr][Mm][Ii][Ss][Ss][Ii][Oo][Nn].*/)))'
-      pivot_on: [user]
-      window: 6h
-    - name: "Mailbox rule / forwarding / permission changes by this user"
-      query: '(data_office365_Operation:/.*[Nn][Ee][Ww]-[Ii][Nn][Bb][Oo][Xx][Rr][Uu][Ll][Ee].*/ OR data_office365_Operation:/.*[Ss][Ee][Tt]-[Ii][Nn][Bb][Oo][Xx][Rr][Uu][Ll][Ee].*/ OR data_office365_Operation:/.*[Ss][Ee][Tt]-[Mm][Aa][Ii][Ll][Bb][Oo][Xx].*/ OR data_office365_Operation:/.*[Nn][Ee][Ww]-[Tt][Rr][Aa][Nn][Ss][Pp][Oo][Rr][Tt][Rr][Uu][Ll][Ee].*/ OR data_office365_Operation:/.*[Ss][Ee][Tt]-[Tt][Rr][Aa][Nn][Ss][Pp][Oo][Rr][Tt][Rr][Uu][Ll][Ee].*/ OR data_office365_Operation:/.*[Aa][Dd][Dd]-[Mm][Aa][Ii][Ll][Bb][Oo][Xx][Pp][Ee][Rr][Mm][Ii][Ss][Ss][Ii][Oo][Nn].*/ OR data_office365_Operation:/.*[Aa][Dd][Dd]-[Rr][Ee][Cc][Ii][Pp][Ii][Ee][Nn][Tt][Pp][Ee][Rr][Mm][Ii][Ss][Ss][Ii][Oo][Nn].*/)'
-      pivot_on: [user]
-      window: 24h
-    - name: "Mail access / send operations by this user"
-      query: '(data_office365_Operation:/.*[Mm][Aa][Ii][Ll][Ii][Tt][Ee][Mm][Ss][Aa][Cc][Cc][Ee][Ss][Ss][Ee][Dd].*/ OR data_office365_Operation:/.*[Ss][Ee][Nn][Dd].*/ OR data_office365_Operation:/.*[Ss][Ee][Nn][Dd][Aa][Ss].*/ OR data_office365_Operation:/.*[Ss][Ee][Nn][Dd][Oo][Nn][Bb][Ee][Hh][Aa][Ll][Ff].*/ OR data_office365_Operation:/.*[Mm][Aa][Ii][Ll][Bb][Oo][Xx][Ll][Oo][Gg][Ii][Nn].*/)'
-      pivot_on: [user]
-      window: 6h
+  # Behaviour-targeted hunts the engine runs around the alert (not a sweep).
+  - name: Inbox and transport rule changes by this user
+    query: data_office365_Operation:("New-InboxRule" OR "Set-InboxRule" OR "UpdateInboxRules" OR "Remove-InboxRule" OR "Disable-InboxRule" OR "New-TransportRule" OR "Set-TransportRule")
+    pivot_on:
+    - user
+    window: 6h
+  - name: Mailbox forwarding, delegation and permission grants by this user
+    query: data_office365_Operation:("Set-Mailbox" OR "Add-MailboxPermission" OR "Add-RecipientPermission" OR "Set-MailboxFolderPermission" OR "Add-MailboxFolderPermission")
+    pivot_on:
+    - user
+    window: 24h
+  - name: Suspicious sign-ins and failed logons for this account
+    query: data_office365_Operation:("UserLoggedIn" OR "MailboxLogin" OR "UserLoginFailed")
+    pivot_on:
+    - user
+    window: 24h
+  - name: Full mail-purge footprint for this user beyond the alert window
+    query: data_office365_Operation:("HardDelete" OR "SoftDelete" OR "MoveToDeletedItems")
+    pivot_on:
+    - user
+    window: 2h
+  - name: BEC tradecraft from the same source IP across accounts
+    query: data_office365_Operation:("New-InboxRule" OR "Set-InboxRule" OR "Set-Mailbox" OR "Add-MailboxPermission" OR "UserLoggedIn" OR "MailboxLogin")
+    pivot_on:
+    - ip
+    window: 24h

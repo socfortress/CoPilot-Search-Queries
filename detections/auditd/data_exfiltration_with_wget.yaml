@@ -142,19 +142,58 @@ graylog:
   query: data_audit_type:/[Ee][Xx][Ee][Cc][Vv][Ee]/ AND data_audit_execve_a0:/[Ww][Gg][Ee][Tt]/ AND data_audit_execve_a1:/--[Pp][Oo][Ss][Tt]-[Ff][Ii][Ll][Ee]=.*/
 
 correlation:
-  # Authored by the correlation engine for review.
+  # Authored per-rule (behaviour-researched) for the correlation engine. Related CoPilot
+  # Searches + telemetry pivots to run around an alert, scoped to its host/user/ip/domain.
+  related_rules:
+  - id: linux-auditd-possible-access-credential-files-001
+    name: Linux Auditd Possible Access To Credential Files
+    reason: This rule's own scenario is wget abusing a sudo misconfig to read /etc/shadow; this detects the cat/less/vim read of /etc/shadow and /etc/passwd on the same host - the credential-dump step that produces the very hashes then posted out via wget --post-file. Same auditd data source, so it fires on the same telemetry stream.
+  - id: fa4aaed5-4fe0-498d-bbc0-08e3346387ba
+    name: Copy Passwd Or Shadow From TMP Path
+    reason: Staging /etc/shadow or /etc/passwd into /tmp is the collection step immediately before exfil; wget --post-file= then uploads that staged hash file off the box, so this detection and the wget rule are the two halves of one shadow-theft-and-exfil sequence (this rule already lists the wget rule as its exfil follow-on).
+  - id: linux-auditd-possible-access-sudoers-file-001
+    name: Linux Auditd Possible Access To Sudoers File
+    reason: 'Reading /etc/sudoers is how an operator discovers the misconfigured ''NOPASSWD: wget'' entry this rule''s description names as the privilege path; sudoers enumeration on the same host explains how wget was allowed to read root-only files before posting them out. Same auditd data source.'
+  - id: linux-sudo-or-su-execution-001
+    name: Linux Sudo Or Su Execution
+    reason: The rule abuses a sudo permission for wget; a sudo/su invocation on the same host just before this fires is the actual privilege-escalation action (sudo wget --post-file) that let the attacker read and exfiltrate a protected file. Same auditd data source.
+  - id: linux-auditd-data-transfer-size-limits-via-split-001
+    name: Linux Auditd Data Transfer Size Limits Via Split
+    reason: split -b chunks a large sensitive file into size-limited pieces to slip under egress/DLP thresholds; split on the same host before wget --post-file means the data was deliberately prepared for this exfil - both carry the 'Data Exfiltration' analytic story and the same auditd source.
+  - id: 00b90cc1-17ec-402c-96ad-3a8117d7a582
+    name: Suspicious Curl File Upload - Linux
+    reason: curl adding a file to a web request (-F/-T/--upload-file/--data) is the exact same file-exfil behaviour as wget --post-file through the alternate downloader; an operator scripting one routinely falls back to the other, so catching it on the same host widens the picture of what was posted out and where.
+  - id: c3d9e7f1-6a2b-4d8f-9c2b-5e6f7a8b9c0d
+    name: Linux Suspicious Curl Data Exfiltration
+    reason: A co-occurring curl exfil of ~/.aws credentials is the cloud-secret counterpart to this host-credential exfil; one hands-on-keyboard session often pushes both local hashes (wget --post-file) and cloud keys (curl) out, so this expands the stolen-data scope (this rule already lists the wget rule as its exfil sibling).
+  - id: 3b4c5d6e-7f80-1234-5678-90abcdef1234
+    name: Linux SSH Key Discovery
+    reason: find/grep hunting for id_rsa and authorized_keys locates the private keys an operator exfiltrates; SSH-key discovery on the same host before wget --post-file points to the keys being the payload staged for this upload, enabling follow-on lateral movement.
+  window: 2h
   enrichment_searches:
-  # Rule-specific telemetry pivots the engine runs around an alert from this rule,
-  # scoped to the alert's host/user/IP within the window (behaviour-targeted, not a sweep).
-    - name: "Shell / interpreter execution on this host"
-      query: '((data_process_exec_process_binary:/.*(\/[Bb][Aa][Ss][Hh]|\/[Ss][Hh]|\/[Dd][Aa][Ss][Hh]|\/[Zz][Ss][Hh]|\/[Kk][Ss][Hh]|\/[Aa][Ss][Hh]|\/[Bb][Uu][Ss][Yy][Bb][Oo][Xx])/) OR (data_process_exec_process_binary:/.*(\/[Pp][Yy][Tt][Hh][Oo][Nn]|\/[Pp][Yy][Tt][Hh][Oo][Nn]3|\/[Pp][Ee][Rr][Ll]|\/[Rr][Uu][Bb][Yy]|\/[Pp][Hh][Pp]|\/[Nn][Oo][Dd][Ee]|\/[Ll][Uu][Aa]|\/[Aa][Ww][Kk])/))'
-      pivot_on: [host]
-      window: 1h
-    - name: "Reconnaissance commands on this host"
-      query: 'data_process_exec_process_binary:/.*(\/[Ww][Hh][Oo][Aa][Mm][Ii]|\/[Ii][Dd]|\/[Uu][Nn][Aa][Mm][Ee]|\/[Hh][Oo][Ss][Tt][Nn][Aa][Mm][Ee]|\/[Hh][Oo][Ss][Tt][Nn][Aa][Mm][Ee][Cc][Tt][Ll]|\/[Ss][Ss]|\/[Nn][Ee][Tt][Ss][Tt][Aa][Tt]|\/[Ii][Ff][Cc][Oo][Nn][Ff][Ii][Gg]|\/[Aa][Rr][Pp]|\/[Ww]|\/[Ww][Hh][Oo]|\/[Ll][Aa][Ss][Tt]|\/[Ll][Ss][Oo][Ff]|\/[Nn][Mm][Aa][Pp]|\/[Dd][Ii][Gg]|\/[Ff][Ii][Nn][Dd])/'
-      pivot_on: [host]
-      window: 1h
-    - name: "Outbound-transfer / upload tooling on this host"
-      query: '((data_process_exec_process_binary:/.*(\/[Cc][Uu][Rr][Ll]|\/[Ww][Gg][Ee][Tt]|\/[Tt][Ff][Tt][Pp])/) OR (data_process_exec_process_binary:/.*(\/[Ss][Cc][Pp]|\/[Rr][Ss][Yy][Nn][Cc]|\/[Rr][Cc][Ll][Oo][Nn][Ee]|\/[Cc][Uu][Rr][Ll])/))'
-      pivot_on: [host]
-      window: 2h
+  # Behaviour-targeted hunts the engine runs around the alert (not a sweep).
+  - name: Other outbound transfer / exfiltration tooling on this host
+    query: data_audit_exe:/.*(\/[Cc][Uu][Rr][Ll]|\/[Ss][Cc][Pp]|\/[Ss][Ff][Tt][Pp]|\/[Rr][Ss][Yy][Nn][Cc]|\/[Rr][Cc][Ll][Oo][Nn][Ee]|\/[Tt][Ff][Tt][Pp]|\/[Nn][Cc]|\/[Nn][Cc][Aa][Tt]|\/[Nn][Ee][Tt][Cc][Aa][Tt]|\/[Ss][Oo][Cc][Aa][Tt]|\/[Oo][Pp][Ee][Nn][Ss][Ss][Ll])/
+    pivot_on:
+    - host
+    window: 2h
+  - name: Collection staging via archive / compression / encryption on this host
+    query: data_audit_exe:/.*(\/[Tt][Aa][Rr]|\/[Gg][Zz][Ii][Pp]|\/[Bb][Zz][Ii][Pp]2|\/[Xx][Zz]|\/[Zz][Ii][Pp]|\/7[Zz]|\/7[Zz][Aa]|\/7[Zz][Rr]|\/[Zz][Ss][Tt][Dd]|\/[Gg][Pp][Gg]|\/[Ss][Pp][Ll][Ii][Tt])/
+    pivot_on:
+    - host
+    window: 2h
+  - name: Secret / credential files referenced in command arguments on this host
+    query: (data_audit_execve_a1:/.*(\/[Ee][Tt][Cc]\/[Ss][Hh][Aa][Dd][Oo][Ww]|\/[Ee][Tt][Cc]\/[Pp][Aa][Ss][Ss][Ww][Dd]|\.[Ss][Ss][Hh]\/|[Ii][Dd]_[Rr][Ss][Aa]|[Ii][Dd]_[Ee][Cc][Dd][Ss][Aa]|[Aa][Uu][Tt][Hh][Oo][Rr][Ii][Zz][Ee][Dd]_[Kk][Ee][Yy][Ss]|\.[Aa][Ww][Ss]\/).*/ OR data_audit_execve_a2:/.*(\/[Ee][Tt][Cc]\/[Ss][Hh][Aa][Dd][Oo][Ww]|\/[Ee][Tt][Cc]\/[Pp][Aa][Ss][Ss][Ww][Dd]|\.[Ss][Ss][Hh]\/|[Ii][Dd]_[Rr][Ss][Aa]|[Ii][Dd]_[Ee][Cc][Dd][Ss][Aa]|[Aa][Uu][Tt][Hh][Oo][Rr][Ii][Zz][Ee][Dd]_[Kk][Ee][Yy][Ss]|\.[Aa][Ww][Ss]\/).*/)
+    pivot_on:
+    - host
+    window: 2h
+  - name: Privilege-escalation binaries executed on this host
+    query: data_audit_exe:/.*(\/[Ss][Uu][Dd][Oo]|\/[Ss][Uu]|\/[Pp][Kk][Ee][Xx][Ee][Cc]|\/[Dd][Oo][Aa][Ss])/
+    pivot_on:
+    - host
+    window: 2h
+  - name: Shell / interpreter execution on this host
+    query: ((data_audit_exe:/.*(\/[Bb][Aa][Ss][Hh]|\/[Ss][Hh]|\/[Dd][Aa][Ss][Hh]|\/[Zz][Ss][Hh]|\/[Kk][Ss][Hh]|\/[Bb][Uu][Ss][Yy][Bb][Oo][Xx])/) OR (data_audit_exe:/.*(\/[Pp][Yy][Tt][Hh][Oo][Nn]|\/[Pp][Yy][Tt][Hh][Oo][Nn]3|\/[Pp][Ee][Rr][Ll]|\/[Rr][Uu][Bb][Yy]|\/[Pp][Hh][Pp]|\/[Nn][Oo][Dd][Ee]|\/[Aa][Ww][Kk])/))
+    pivot_on:
+    - host
+    window: 1h

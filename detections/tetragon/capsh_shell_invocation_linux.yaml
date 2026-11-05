@@ -137,23 +137,58 @@ graylog:
   query: data_process_exec_process_binary:/.*\/[Cc][Aa][Pp][Ss][Hh]/ AND data_process_exec_process_arguments:/.* --/
 
 correlation:
-  # Authored by the correlation engine for review.
+  # Authored per-rule (behaviour-researched) for the correlation engine. Related CoPilot
+  # Searches + telemetry pivots to run around an alert, scoped to its host/user/ip/domain.
+  related_rules:
+  - id: 6adfbf8f-52be-4444-9bac-81b539624146
+    name: Shell Execution via Find - Linux
+    reason: Sibling restricted-shell-breakout GTFOBin (find ... -exec /bin/sh). An actor enumerating LOLBins to escape rbash or spawn an interactive shell commonly tries find alongside capsh; co-firing on the same host confirms deliberate breakout rather than a one-off capsh call.
+  - id: bed978f8-7f3a-432b-82c5-9286a9b3031a
+    name: Shell Invocation via Env Command - Linux
+    reason: Same restricted-shell-breakout family, direct-exec style (env /bin/sh). A second breakout binary spawning a shell on the same host within minutes of capsh indicates the actor is cycling through GTFOBins escapes.
+  - id: 8c1a5675-cb85-452f-a298-b01b22a51856
+    name: Suspicious Invocation of Shell via AWK - Linux
+    reason: Interpreter-style GTFOBin breakout (awk BEGIN{system(/bin/sh)}). Co-occurrence with capsh points to systematic restricted-shell escape attempts from the same session, not legitimate text processing.
+  - id: 7ab8f73a-fcff-428b-84aa-6a5ff7877dea
+    name: Vim GTFOBin Abuse - Linux
+    reason: The canonical restricted-shell escape (vi/vim :!/bin/sh). When a user is boxed into rbash, capsh and a vim breakout are two of the most-tried escapes, so vim abuse firing nearby strengthens the breakout hypothesis for the capsh event.
+  - id: 0cf7a157-8879-41a2-8f55-388dd23746b7
+    name: Linux Recon Indicators
+    reason: 'Precursor privilege-escalation recon: find -perm -4000 hunts SUID binaries, the exact step that reveals capsh is SUID and therefore abusable for root (capsh''s GTFOBins SUID path). Seeing this before/around capsh explains why capsh was chosen.'
+  - id: 0f79c4d2-4e1f-4683-9c36-b5469a665e06
+    name: Access of Sudoers File Content
+    reason: 'Privilege-escalation enumeration: reading /etc/sudoers lists which binaries and users carry sudo rights. An actor in a capsh-spawned shell does this to plan the root escalation that capsh (via sudo/SUID) is itself a vector for.'
+  - id: f74107df-b6c6-4e80-bf00-4170b658162b
+    name: Sudo Privilege Escalation CVE-2019-14287
+    reason: 'Co-occurring root-escalation attempt: capsh (--gid=0 --uid=0 --) and the sudo -u#-1 bypass are two routes to the same objective, root. Both firing on one host means the actor is actively trying to become root from the shell they obtained.'
+  - id: ea3ecad2-db86-4a89-ad0b-132a10d2db55
+    name: Interactive Bash Suspicious Children
+    reason: 'Follow-on: capsh -- drops into an interactive /bin/bash, and this rule flags that shell then launching recon/reverse-shell/pty children (whoami, nc, pty.spawn, base64) - i.e. what the attacker does with the shell capsh just handed them.'
+  window: 2h
   enrichment_searches:
-  # Rule-specific telemetry pivots the engine runs around an alert from this rule,
-  # scoped to the alert's host/user/IP within the window (behaviour-targeted, not a sweep).
-    - name: "Shell / interpreter execution on this host"
-      query: '((data_process_exec_process_binary:/.*(\/[Bb][Aa][Ss][Hh]|\/[Ss][Hh]|\/[Dd][Aa][Ss][Hh]|\/[Zz][Ss][Hh]|\/[Kk][Ss][Hh]|\/[Aa][Ss][Hh]|\/[Bb][Uu][Ss][Yy][Bb][Oo][Xx])/) OR (data_process_exec_process_binary:/.*(\/[Pp][Yy][Tt][Hh][Oo][Nn]|\/[Pp][Yy][Tt][Hh][Oo][Nn]3|\/[Pp][Ee][Rr][Ll]|\/[Rr][Uu][Bb][Yy]|\/[Pp][Hh][Pp]|\/[Nn][Oo][Dd][Ee]|\/[Ll][Uu][Aa]|\/[Aa][Ww][Kk])/))'
-      pivot_on: [host]
-      window: 1h
-    - name: "Other executions of this tool-set on this host (any arguments)"
-      query: 'data_process_exec_process_binary:/.*(\/[Cc][Aa][Pp][Ss][Hh])/'
-      pivot_on: [host]
-      window: 2h
-    - name: "Persistence via cron / systemd / shell profiles on this host"
-      query: '((data_process_exec_process_binary:/.*(\/[Cc][Rr][Oo][Nn][Tt][Aa][Bb]|\/[Ss][Yy][Ss][Tt][Ee][Mm][Cc][Tt][Ll]|\/[Aa][Tt]|\/[Uu][Pp][Dd][Aa][Tt][Ee]-[Rr][Cc]\.[Dd])/) OR (data_process_exec_process_arguments:/.*\/[Ee][Tt][Cc]\/[Cc][Rr][Oo][Nn].*/) OR (data_process_exec_process_arguments:/.*\/[Ee][Tt][Cc]\/[Ss][Yy][Ss][Tt][Ee][Mm][Dd].*/) OR (data_process_exec_process_arguments:/.*[Rr][Cc]\.[Ll][Oo][Cc][Aa][Ll].*/) OR (data_process_exec_process_arguments:/.*\.[Bb][Aa][Ss][Hh][Rr][Cc].*/) OR (data_process_exec_process_arguments:/.*\.[Bb][Aa][Ss][Hh]_[Pp][Rr][Oo][Ff][Ii][Ll][Ee].*/) OR (data_process_exec_process_arguments:/.*\/[Ee][Tt][Cc]\/[Pp][Rr][Oo][Ff][Ii][Ll][Ee].*/) OR (data_process_exec_process_arguments:/.*[Aa][Uu][Tt][Hh][Oo][Rr][Ii][Zz][Ee][Dd]_[Kk][Ee][Yy][Ss].*/) OR (data_process_exec_process_arguments:/.*\/[Ee][Tt][Cc]\/[Ii][Nn][Ii][Tt]\.[Dd].*/))'
-      pivot_on: [host]
-      window: 4h
-    - name: "Reconnaissance commands on this host"
-      query: 'data_process_exec_process_binary:/.*(\/[Ww][Hh][Oo][Aa][Mm][Ii]|\/[Ii][Dd]|\/[Uu][Nn][Aa][Mm][Ee]|\/[Hh][Oo][Ss][Tt][Nn][Aa][Mm][Ee]|\/[Hh][Oo][Ss][Tt][Nn][Aa][Mm][Ee][Cc][Tt][Ll]|\/[Ss][Ss]|\/[Nn][Ee][Tt][Ss][Tt][Aa][Tt]|\/[Ii][Ff][Cc][Oo][Nn][Ff][Ii][Gg]|\/[Aa][Rr][Pp]|\/[Ww]|\/[Ww][Hh][Oo]|\/[Ll][Aa][Ss][Tt]|\/[Ll][Ss][Oo][Ff]|\/[Nn][Mm][Aa][Pp]|\/[Dd][Ii][Gg]|\/[Ff][Ii][Nn][Dd])/'
-      pivot_on: [host]
-      window: 1h
+  # Behaviour-targeted hunts the engine runs around the alert (not a sweep).
+  - name: Other restricted-shell-breakout GTFOBins spawning a shell on this host
+    query: (data_process_exec_process_binary:/.*(\/[Ff][Ii][Nn][Dd]|\/[Ee][Nn][Vv]|\/[Aa][Ww][Kk]|\/[Gg][Aa][Ww][Kk]|\/[Mm][Aa][Ww][Kk]|\/[Nn][Aa][Ww][Kk]|\/[Vv][Ii]|\/[Vv][Ii][Mm]|\/[Rr][Vv][Ii][Mm]|\/[Vv][Ii][Mm][Dd][Ii][Ff][Ff]|\/[Nn][Ii][Cc][Ee]|\/[Ff][Ll][Oo][Cc][Kk]|\/[Rr][Ss][Yy][Nn][Cc]|\/[Gg][Ii][Tt]|\/[Tt][Aa][Rr])/ AND (data_process_exec_process_arguments:/.*\/[Bb][Ii][Nn]\/[Bb][Aa][Ss][Hh].*/ OR data_process_exec_process_arguments:/.*\/[Bb][Ii][Nn]\/[Ss][Hh].*/ OR data_process_exec_process_arguments:/.*\/[Bb][Ii][Nn]\/[Dd][Aa][Ss][Hh].*/ OR data_process_exec_process_arguments:/.*\/[Bb][Ii][Nn]\/[Zz][Ss][Hh].*/ OR data_process_exec_process_arguments:/.*\/[Bb][Ii][Nn]\/[Kk][Ss][Hh].*/ OR data_process_exec_process_arguments:/.*\/[Bb][Ii][Nn]\/[Ff][Ii][Ss][Hh].*/))
+    pivot_on:
+    - host
+    window: 2h
+  - name: Privilege-escalation and capability-manipulation tooling on this host
+    query: data_process_exec_process_binary:/.*(\/[Ss][Uu][Dd][Oo]|\/[Ss][Uu]|\/[Pp][Kk][Ee][Xx][Ee][Cc]|\/[Dd][Oo][Aa][Ss]|\/[Ss][Ee][Tt][Cc][Aa][Pp]|\/[Gg][Ee][Tt][Cc][Aa][Pp]|\/[Cc][Aa][Pp][Ss][Hh]|\/[Cc][Hh][Ss][Hh]|\/[Nn][Ee][Ww][Gg][Rr][Pp]|\/[Uu][Ss][Ee][Rr][Mm][Oo][Dd]|\/[Gg][Pp][Aa][Ss][Ss][Ww][Dd])/
+    pivot_on:
+    - host
+    window: 2h
+  - name: SUID / SGID / capability binary discovery on this host
+    query: ((data_process_exec_process_arguments:/.* -[Pp][Ee][Rr][Mm] -4000.*/ OR data_process_exec_process_arguments:/.* -[Pp][Ee][Rr][Mm] -[Uu]=[Ss].*/ OR data_process_exec_process_arguments:/.* -[Pp][Ee][Rr][Mm] -2000.*/) OR (data_process_exec_process_binary:/.*\/[Gg][Ee][Tt][Cc][Aa][Pp]/))
+    pivot_on:
+    - host
+    window: 4h
+  - name: Post-breakout reconnaissance commands on this host
+    query: data_process_exec_process_binary:/.*(\/[Ww][Hh][Oo][Aa][Mm][Ii]|\/[Ii][Dd]|\/[Uu][Nn][Aa][Mm][Ee]|\/[Hh][Oo][Ss][Tt][Nn][Aa][Mm][Ee]|\/[Hh][Oo][Ss][Tt][Nn][Aa][Mm][Ee][Cc][Tt][Ll]|\/[Ss][Ss]|\/[Nn][Ee][Tt][Ss][Tt][Aa][Tt]|\/[Ii][Ff][Cc][Oo][Nn][Ff][Ii][Gg]|\/[Aa][Rr][Pp]|\/[Ww]|\/[Ww][Hh][Oo]|\/[Ll][Aa][Ss][Tt]|\/[Ll][Ss][Oo][Ff]|\/[Nn][Mm][Aa][Pp]|\/[Dd][Ii][Gg]|\/[Ff][Ii][Nn][Dd])/
+    pivot_on:
+    - host
+    window: 1h
+  - name: Reverse-shell / PTY-upgrade and remote tooling on this host
+    query: ((data_process_exec_process_binary:/.*(\/[Nn][Cc]|\/[Nn][Cc][Aa][Tt]|\/[Nn][Ee][Tt][Cc][Aa][Tt]|\/[Ss][Oo][Cc][Aa][Tt])/) OR (data_process_exec_process_arguments:/.*[Pp][Tt][Yy]\.[Ss][Pp][Aa][Ww][Nn].*/) OR (data_process_exec_process_arguments:/.*\/[Dd][Ee][Vv]\/[Tt][Cc][Pp].*/) OR (data_process_exec_process_arguments:/.*[Bb][Aa][Ss][Hh] -[Ii].*/))
+    pivot_on:
+    - host
+    window: 2h

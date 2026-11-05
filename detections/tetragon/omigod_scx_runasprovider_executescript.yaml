@@ -161,23 +161,58 @@ graylog:
   query: data_process_exec_process_uid:/[Rr][Oo][Oo][Tt]/ AND data_process_exec_process_auid:"0" AND data_process_exec_process_cwd:/\/[Vv][Aa][Rr]\/[Oo][Pp][Tt]\/[Mm][Ii][Cc][Rr][Oo][Ss][Oo][Ff][Tt]\/[Ss][Cc][Xx]\/[Tt][Mm][Pp]/ AND data_process_exec_process_arguments:/.*\/[Ee][Tt][Cc]\/[Oo][Pp][Tt]\/[Mm][Ii][Cc][Rr][Oo][Ss][Oo][Ff][Tt]\/[Ss][Cc][Xx]\/[Cc][Oo][Nn][Ff]\/[Tt][Mm][Pp][Dd][Ii][Rr]\/[Ss][Cc][Xx].*/
 
 correlation:
-  # Authored by the correlation engine for review.
+  # Authored per-rule (behaviour-researched) for the correlation engine. Related CoPilot
+  # Searches + telemetry pivots to run around an alert, scoped to its host/user/ip/domain.
+  related_rules:
+  - id: 21541900-27a9-4454-9c4c-3f0a4240344a
+    name: OMIGOD SCX RunAsProvider ExecuteShellCommand
+    reason: Identical OMIGOD exploit (CVE-2021-38647) against the same SCX/OMI agent, same root cwd /var/opt/microsoft/scx/tmp - the twin RunAsProvider method; the two frequently fire together or interchangeably as the attacker tries both unauth-RCE primitives on the same host.
+  - id: a2d9e2f3-0f43-4c7a-bcd9-9acfc0d723aa
+    name: Suspicious Download and Execute Pattern via Curl/Wget
+    reason: 'Canonical next step after OMIGOD root RCE: the attacker-controlled /bin/sh script pulls a second-stage payload into /tmp or /dev/shm then runs it via sh -c - exactly what this rule matches, showing the ExecuteScript foothold moved to stager delivery.'
+  - id: 9069ea3c-b213-4c52-be13-86506a227ab1
+    name: Linux Crypto Mining Indicators
+    reason: OMIGOD's dominant real-world outcome (per the Wiz advisory) was mass deployment of XMRig/Mirai cryptominers; a miner launched on this host soon after the SCX root RCE turns the exploit alert into a confirmed compromise.
+  - id: 7f734ed0-4f47-46c0-837f-6ee62505abd9
+    name: Potential Netcat Reverse Shell Execution
+    reason: The ExecuteScript payload commonly spawns a reverse shell for interactive hands-on-keyboard control as root; a netcat -e/-c shell on this host in the same window is the interactive-C2 follow-on to the OMIGOD RCE.
+  - id: 312b42b1-bded-4441-8b58-163a3af58775
+    name: Potentially Suspicious Execution From Tmp Folder
+    reason: OMIGOD itself drops its scx* script into /tmp, and dropped second-stage binaries typically execute from /tmp too; a process whose binary lives in /tmp right after this alert is the staged payload running on the compromised host.
+  - id: 6b14bac8-3e3a-4324-8109-42f0546a347f
+    name: Scheduled Cron Task/Job - Linux
+    reason: 'Persistence after root RCE: this rule catches crontab jobs installed from /tmp, the usual way OMIGOD-dropped miners and implants survive reboot - a strong post-exploitation persistence signal on the same host.'
+  - id: fa4aaed5-4fe0-498d-bbc0-08e3346387ba
+    name: Copy Passwd Or Shadow From TMP Path
+    reason: Running as root via OMIGOD, the attacker can harvest /etc/shadow for offline cracking and lateral movement; copying passwd/shadow via a /tmp path (the same staging dir OMIGOD uses) is a credential-access follow-on tightly tied to this foothold.
+  - id: 0f79c4d2-4e1f-4683-9c36-b5469a665e06
+    name: Access of Sudoers File Content
+    reason: 'Post-exploitation discovery: reading /etc/sudoers to map which accounts hold sudo rights, so the intruder can backdoor a privileged user for stealthy re-entry after the OMIGOD root shell - account mapping on the same host in the incident window.'
+  window: 2h
   enrichment_searches:
-  # Rule-specific telemetry pivots the engine runs around an alert from this rule,
-  # scoped to the alert's host/user/IP within the window (behaviour-targeted, not a sweep).
-    - name: "Privilege-escalation tooling executed on this host"
-      query: 'data_process_exec_process_binary:/.*(\/[Ss][Uu][Dd][Oo]|\/[Ss][Uu]|\/[Pp][Kk][Ee][Xx][Ee][Cc]|\/[Dd][Oo][Aa][Ss]|\/[Ss][Ee][Tt][Cc][Aa][Pp]|\/[Cc][Hh][Ss][Hh]|\/[Nn][Ee][Ww][Gg][Rr][Pp])/'
-      pivot_on: [host]
-      window: 2h
-    - name: "Credential / secret-file access on this host"
-      query: '((data_process_exec_process_arguments:/.*\/[Ee][Tt][Cc]\/[Ss][Hh][Aa][Dd][Oo][Ww].*/) OR (data_process_exec_process_arguments:/.*\/[Ee][Tt][Cc]\/[Pp][Aa][Ss][Ss][Ww][Dd].*/) OR (data_process_exec_process_arguments:/.*\/[Ee][Tt][Cc]\/[Ss][Uu][Dd][Oo][Ee][Rr][Ss].*/) OR (data_process_exec_process_arguments:/.*[Ii][Dd]_[Rr][Ss][Aa].*/) OR (data_process_exec_process_arguments:/.*\.[Ss][Ss][Hh]\/.*/) OR (data_process_exec_process_arguments:/.*\/[Ee][Tt][Cc]\/[Gg][Ss][Hh][Aa][Dd][Oo][Ww].*/))'
-      pivot_on: [host]
-      window: 2h
-    - name: "Shell / interpreter execution on this host"
-      query: '((data_process_exec_process_binary:/.*(\/[Bb][Aa][Ss][Hh]|\/[Ss][Hh]|\/[Dd][Aa][Ss][Hh]|\/[Zz][Ss][Hh]|\/[Kk][Ss][Hh]|\/[Aa][Ss][Hh]|\/[Bb][Uu][Ss][Yy][Bb][Oo][Xx])/) OR (data_process_exec_process_binary:/.*(\/[Pp][Yy][Tt][Hh][Oo][Nn]|\/[Pp][Yy][Tt][Hh][Oo][Nn]3|\/[Pp][Ee][Rr][Ll]|\/[Rr][Uu][Bb][Yy]|\/[Pp][Hh][Pp]|\/[Nn][Oo][Dd][Ee]|\/[Ll][Uu][Aa]|\/[Aa][Ww][Kk])/))'
-      pivot_on: [host]
-      window: 1h
-    - name: "Reconnaissance commands on this host"
-      query: 'data_process_exec_process_binary:/.*(\/[Ww][Hh][Oo][Aa][Mm][Ii]|\/[Ii][Dd]|\/[Uu][Nn][Aa][Mm][Ee]|\/[Hh][Oo][Ss][Tt][Nn][Aa][Mm][Ee]|\/[Hh][Oo][Ss][Tt][Nn][Aa][Mm][Ee][Cc][Tt][Ll]|\/[Ss][Ss]|\/[Nn][Ee][Tt][Ss][Tt][Aa][Tt]|\/[Ii][Ff][Cc][Oo][Nn][Ff][Ii][Gg]|\/[Aa][Rr][Pp]|\/[Ww]|\/[Ww][Hh][Oo]|\/[Ll][Aa][Ss][Tt]|\/[Ll][Ss][Oo][Ff]|\/[Nn][Mm][Aa][Pp]|\/[Dd][Ii][Gg]|\/[Ff][Ii][Nn][Dd])/'
-      pivot_on: [host]
-      window: 1h
+  # Behaviour-targeted hunts the engine runs around the alert (not a sweep).
+  - name: SCX/OMI management agent spawning child processes on this host
+    query: data_process_exec_parent_binary:/.*(\/[Oo][Mm][Ii]\/|\/[Ss][Cc][Xx]\/|[Oo][Mm][Ii][Ss][Ee][Rr][Vv][Ee][Rr]|[Oo][Mm][Ii][Aa][Gg][Ee][Nn][Tt]|[Ss][Cc][Xx][Cc][Ii][Mm][Pp][Rr][Oo][Vv][Aa][Gg][Tt]).*/
+    pivot_on:
+    - host
+    window: 2h
+  - name: Second-stage payload fetched via download utilities on this host
+    query: data_process_exec_process_binary:/.*\/([Cc][Uu][Rr][Ll]|[Ww][Gg][Ee][Tt]|[Tt][Ff][Tt][Pp]|[Ff][Tt][Pp]|[Ss][Cc][Pp]|[Ff][Ee][Tt][Cc][Hh]|[Ll][Yy][Nn][Xx]|[Aa][Rr][Ii][Aa]2[Cc])/
+    pivot_on:
+    - host
+    window: 2h
+  - name: Payload executed from world-writable staging directories on this host
+    query: (data_process_exec_process_binary:/\/([Tt][Mm][Pp]|[Vv][Aa][Rr]\/[Tt][Mm][Pp]|[Dd][Ee][Vv]\/[Ss][Hh][Mm]|[Rr][Uu][Nn]\/[Ss][Hh][Mm])\/.*/ OR data_process_exec_parent_binary:/\/([Tt][Mm][Pp]|[Vv][Aa][Rr]\/[Tt][Mm][Pp]|[Dd][Ee][Vv]\/[Ss][Hh][Mm]|[Rr][Uu][Nn]\/[Ss][Hh][Mm])\/.*/)
+    pivot_on:
+    - host
+    window: 2h
+  - name: Persistence via cron, systemd units, or SSH authorized_keys on this host
+    query: ((data_process_exec_process_binary:/.*\/([Cc][Rr][Oo][Nn][Tt][Aa][Bb]|[Ss][Yy][Ss][Tt][Ee][Mm][Cc][Tt][Ll]|[Uu][Pp][Dd][Aa][Tt][Ee]-[Rr][Cc]\.[Dd]|[Cc][Hh][Kk][Cc][Oo][Nn][Ff][Ii][Gg])/) OR (data_process_exec_process_arguments:/.*([Aa][Uu][Tt][Hh][Oo][Rr][Ii][Zz][Ee][Dd]_[Kk][Ee][Yy][Ss]|\/[Ee][Tt][Cc]\/[Ss][Yy][Ss][Tt][Ee][Mm][Dd]\/|\/[Ee][Tt][Cc]\/[Cc][Rr][Oo][Nn]|\/[Ee][Tt][Cc]\/[Rr][Cc]\.[Ll][Oo][Cc][Aa][Ll]).*/))
+    pivot_on:
+    - host
+    window: 4h
+  - name: New privileged account created or sudoers granted on this host
+    query: ((data_process_exec_process_binary:/.*\/([Uu][Ss][Ee][Rr][Aa][Dd][Dd]|[Aa][Dd][Dd][Uu][Ss][Ee][Rr]|[Uu][Ss][Ee][Rr][Mm][Oo][Dd]|[Gg][Rr][Oo][Uu][Pp][Aa][Dd][Dd])/) OR (data_process_exec_process_arguments:/.*\/[Ee][Tt][Cc]\/[Ss][Uu][Dd][Oo][Ee][Rr][Ss].*/))
+    pivot_on:
+    - host
+    window: 4h

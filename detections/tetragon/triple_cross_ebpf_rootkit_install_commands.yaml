@@ -157,19 +157,52 @@ graylog:
   query: data_process_exec_process_binary:/.*\/[Ss][Uu][Dd][Oo]/ AND data_process_exec_process_arguments:/.* [Tt][Cc] .*/ AND data_process_exec_process_arguments:/.* [Ee][Nn][Pp]0[Ss]3 .*/ AND (data_process_exec_process_arguments:/.* [Qq][Dd][Ii][Ss][Cc] .*/ OR data_process_exec_process_arguments:/.* [Ff][Ii][Ll][Tt][Ee][Rr] .*/)
 
 correlation:
-  # Authored by the correlation engine for review.
+  # Authored per-rule (behaviour-researched) for the correlation engine. Related CoPilot
+  # Searches + telemetry pivots to run around an alert, scoped to its host/user/ip/domain.
+  related_rules:
+  - id: 0326c3c8-7803-4a0f-8c5c-368f747f7c3e
+    name: Triple Cross eBPF Rootkit Execve Hijack
+    reason: 'Same toolkit, sibling component: deployer.sh drops the execve_hijack SUID helper for privilege escalation in the very run that attaches the tc/eBPF network backdoor. Its appearance on the same host in the window is the TripleCross install continuing, and is the single strongest confirmation this tc command is the rootkit and not stray traffic-control tuning.'
+  - id: 7692f583-bd30-4008-8615-75dab3f08a99
+    name: Enable BPF Kprobes Tracing
+    reason: 'Co-occurring kernel-hook primitive from the same deploy: alongside the tc/qdisc network attach, the TripleCross campaign arms kprobe trace events via /sys/kernel/debug/tracing. Both firing on one host in the window shows an operator wiring the eBPF/kprobe subsystem end to end, i.e. an eBPF rootkit install in progress.'
+  - id: f8341cb2-ee25-43fa-a975-d8a5a9714b39
+    name: BPFtrace Unsafe Option Usage
+    reason: Same weaponized-eBPF tradecraft (shares the identical offensive-BPF references). A root user attaching an eBPF program to the NIC and also running bpftrace --unsafe on the same host is deliberately abusing the eBPF subsystem to run code in kernel context, not debugging; the co-sighting hardens the verdict.
+  - id: 808146b2-9332-4d78-9416-d7e47012d83d
+    name: BPFDoor Abnormal Process ID or Lock File Accessed
+    reason: 'Behavioural twin from the same family: BPFDoor is a BPF network backdoor activated by magic trigger packets, which is exactly the capability TripleCross''s tc-ingress eBPF classifier implements. A BPFDoor indicator on the same host corroborates that a BPF-based network implant is present and that this tc attach is backdoor installation.'
+  - id: e3a8a052-111f-4606-9aee-f28ebeb76776
+    name: Disabling Security Tools
+    reason: 'Defense-evasion follow-on: after planting kernel-level eBPF hooks, operators blind the userland sensors (stop/disable Wazuh, auditd, EDR; stop the iptables service) so the backdoor and its trigger traffic go unobserved. Seen near this alert it both confirms intent and raises incident severity.'
+  - id: a2d9e2f3-0f43-4c7a-bcd9-9acfc0d723aa
+    name: Suspicious Download and Execute Pattern via Curl/Wget
+    reason: 'Ingress precursor: the TripleCross objects/scripts are commonly staged into /tmp or /dev/shm with curl/wget and executed shortly before deployer.sh attaches the eBPF program. A download-and-run on the same host just ahead of this alert answers the ''how did it get here'' half of the install.'
+  window: 4h
   enrichment_searches:
-  # Rule-specific telemetry pivots the engine runs around an alert from this rule,
-  # scoped to the alert's host/user/IP within the window (behaviour-targeted, not a sweep).
-    - name: "Other executions of this tool-set on this host (any arguments)"
-      query: 'data_process_exec_process_binary:/.*(\/[Ss][Uu][Dd][Oo])/'
-      pivot_on: [host]
-      window: 2h
-    - name: "Shell / interpreter execution on this host"
-      query: '((data_process_exec_process_binary:/.*(\/[Bb][Aa][Ss][Hh]|\/[Ss][Hh]|\/[Dd][Aa][Ss][Hh]|\/[Zz][Ss][Hh]|\/[Kk][Ss][Hh]|\/[Aa][Ss][Hh]|\/[Bb][Uu][Ss][Yy][Bb][Oo][Xx])/) OR (data_process_exec_process_binary:/.*(\/[Pp][Yy][Tt][Hh][Oo][Nn]|\/[Pp][Yy][Tt][Hh][Oo][Nn]3|\/[Pp][Ee][Rr][Ll]|\/[Rr][Uu][Bb][Yy]|\/[Pp][Hh][Pp]|\/[Nn][Oo][Dd][Ee]|\/[Ll][Uu][Aa]|\/[Aa][Ww][Kk])/))'
-      pivot_on: [host]
-      window: 1h
-    - name: "Reconnaissance commands on this host"
-      query: 'data_process_exec_process_binary:/.*(\/[Ww][Hh][Oo][Aa][Mm][Ii]|\/[Ii][Dd]|\/[Uu][Nn][Aa][Mm][Ee]|\/[Hh][Oo][Ss][Tt][Nn][Aa][Mm][Ee]|\/[Hh][Oo][Ss][Tt][Nn][Aa][Mm][Ee][Cc][Tt][Ll]|\/[Ss][Ss]|\/[Nn][Ee][Tt][Ss][Tt][Aa][Tt]|\/[Ii][Ff][Cc][Oo][Nn][Ff][Ii][Gg]|\/[Aa][Rr][Pp]|\/[Ww]|\/[Ww][Hh][Oo]|\/[Ll][Aa][Ss][Tt]|\/[Ll][Ss][Oo][Ff]|\/[Nn][Mm][Aa][Pp]|\/[Dd][Ii][Gg]|\/[Ff][Ii][Nn][Dd])/'
-      pivot_on: [host]
-      window: 1h
+  # Behaviour-targeted hunts the engine runs around the alert (not a sweep).
+  - name: eBPF program loading and network-hook (tc/qdisc/clsact/xdp) tooling on this host
+    query: ((data_process_exec_process_binary:/.*\/([Bb][Pp][Ff][Tt][Oo][Oo][Ll]|[Tt][Cc]|[Bb][Pp][Ff][Tt][Rr][Aa][Cc][Ee])/) OR (data_process_exec_process_arguments:/.*[Qq][Dd][Ii][Ss][Cc].*/) OR (data_process_exec_process_arguments:/.*[Cc][Ll][Ss][Aa][Cc][Tt].*/) OR (data_process_exec_process_arguments:/.*[Xx][Dd][Pp].*/) OR (data_process_exec_process_arguments:/.*[Ii][Nn][Gg][Rr][Ee][Ss][Ss] [Bb][Pp][Ff].*/))
+    pivot_on:
+    - host
+    window: 2h
+  - name: eBPF map/program pinning (bpffs) and kprobe trace-event setup on this host
+    query: ((data_process_exec_process_arguments:/.*\/[Ss][Yy][Ss]\/[Ff][Ss]\/[Bb][Pp][Ff].*/) OR (data_process_exec_process_arguments:/.*[Bb][Pp][Ff][Ff][Ss].*/) OR (data_process_exec_process_arguments:/.*\/[Ss][Yy][Ss]\/[Kk][Ee][Rr][Nn][Ee][Ll]\/[Dd][Ee][Bb][Uu][Gg]\/[Tt][Rr][Aa][Cc][Ii][Nn][Gg].*/) OR (data_process_exec_process_arguments:/.*[Kk][Pp][Rr][Oo][Bb][Ee]_[Ee][Vv][Ee][Nn][Tt][Ss].*/))
+    pivot_on:
+    - host
+    window: 2h
+  - name: Toolkit ingress (wget/curl/git) and on-host eBPF build toolchain (clang/make/gcc) on this host
+    query: ((data_process_exec_process_binary:/.*\/([Ww][Gg][Ee][Tt]|[Cc][Uu][Rr][Ll]|[Gg][Ii][Tt]|[Ss][Cc][Pp]|[Tt][Ff][Tt][Pp])/) OR (data_process_exec_process_binary:/.*\/([Mm][Aa][Kk][Ee]|[Cc][Ll][Aa][Nn][Gg]|[Gg][Cc][Cc]|[Cc][Cc]|[Ll][Ll][Vv][Mm]-[Ss][Tt][Rr][Ii][Pp]|[Ll][Dd])/))
+    pivot_on:
+    - host
+    window: 4h
+  - name: Privilege escalation to the root this eBPF install runs under on this host
+    query: data_process_exec_process_binary:/.*\/([Ss][Uu][Dd][Oo]|[Ss][Uu]|[Pp][Kk][Ee][Xx][Ee][Cc]|[Dd][Oo][Aa][Ss]|[Ss][Ee][Tt][Cc][Aa][Pp])/
+    pivot_on:
+    - host
+    window: 2h
+  - name: Security-sensor/firewall teardown and log wiping on this host (hide the rootkit)
+    query: ((data_process_exec_process_binary:/.*\/([Ss][Ee][Tt][Ee][Nn][Ff][Oo][Rr][Cc][Ee]|[Aa][Uu][Dd][Ii][Tt][Cc][Tt][Ll]|[Ii][Pp][Tt][Aa][Bb][Ll][Ee][Ss]|[Uu][Ff][Ww])/) OR (data_process_exec_process_binary:/.*\/([Ss][Yy][Ss][Tt][Ee][Mm][Cc][Tt][Ll]|[Ss][Ee][Rr][Vv][Ii][Cc][Ee])/ AND data_process_exec_process_arguments:/.*([Ss][Tt][Oo][Pp]|[Dd][Ii][Ss][Aa][Bb][Ll][Ee]|[Mm][Aa][Ss][Kk]).*([Ww][Aa][Zz][Uu][Hh]|[Tt][Ee][Tt][Rr][Aa][Gg][Oo][Nn]|[Aa][Uu][Dd][Ii][Tt][Dd]|[Ff][Aa][Ll][Cc][Oo][Nn]|[Oo][Ss][Qq][Uu][Ee][Rr][Yy]).*/) OR (data_process_exec_process_binary:/.*\/([Rr][Mm]|[Ss][Hh][Rr][Ee][Dd]|[Tt][Rr][Uu][Nn][Cc][Aa][Tt][Ee])/ AND data_process_exec_process_arguments:/.*\/[Vv][Aa][Rr]\/[Ll][Oo][Gg].*/))
+    pivot_on:
+    - host
+    window: 4h

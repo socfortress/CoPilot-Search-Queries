@@ -105,25 +105,55 @@ graylog:
   query: data_process_exec_process_binary:"\/usr\/sbin\/insmod" AND NOT _exists_:data_win_system_eventID AND NOT rule_groups:/.*windows.*/
 
 correlation:
-  # Authored by the correlation engine for review. Related CoPilot Searches to run
-  # around an alert from this rule, scoped to the same host/user/IP within the window.
+  # Authored per-rule (behaviour-researched) for the correlation engine. Related CoPilot
+  # Searches + telemetry pivots to run around an alert, scoped to its host/user/ip/domain.
   related_rules:
-    - id: 4e2a6c91-7f3d-4b6e-9a4f-1c8b0e5a92d4
-      name: "Crontab Interactive Edit Execution"
-      reason: "same analytic story: Linux Persistence"
+  - id: 106d7cbd-80ff-4985-b682-a7043e5acb72
+    name: Loading of Kernel Module via Insmod
+    reason: The same insmod load seen through Linux Auditd (init_module/finit_module SYSCALL, matched on data_audit_command=insmod) rather than Tetragon exec; correlating the two proves a real kernel-module load (not a parsing artifact) and adds the auid of the account that ran it.
+  - id: 474b415a-d917-4f3b-8c62-9e1a0d5f7b48
+    name: Authencesn Crypto Module Load via Modprobe - Copy-Fail Indicator
+    reason: 'Local-privilege-escalation precursor on the kernel-module surface: this authencesn/kmod Copy-Fail chain (CVE-2026-31431) yields root, and loading an LKM needs CAP_SYS_MODULE, so a root gain via modprobe/kmod just before the insmod explains how the attacker could load the module.'
+  - id: linux-kernel-module-rmmod-utility-001
+    name: Linux Kernel Module Using Rmmod Utility
+    reason: rmmod is the raw counterpart to raw insmod; rootkit loaders rmmod a conflicting/old or a defensive module before inserting theirs (or unload an older build to reload a patched one), so insmod+rmmod churn on one host in the window marks an install rather than a routine load.
+  - id: linux-unload-module-via-modprobe-001
+    name: Linux Unload Module Via Modprobe
+    reason: modprobe -r is the dependency-aware unload path used to drop a module and its dependents during the same install sequence; seeing it alongside the insmod widens the module-management churn that separates kernel tampering from a single legitimate load.
+  - id: d9f4b1a6-3c52-4a5c-9c8e-6b7f3e21a0dd
+    name: Linux Kernel Driver Activity Detection
+    reason: 'Filesystem corroboration of the load: the malicious .ko is typically dropped into /lib/modules/.../kernel/drivers (to load by name or masquerade as a real driver) and depmod rescans it there, pairing the insmod exec with the on-disk module it inserted.'
+  - id: cf610c15-ed71-46e1-bdf8-2bd1a99de6c4
+    name: Download File To Potentially Suspicious Directory Via Wget
+    reason: 'Ingress precursor: the .ko (or its source to build) is commonly fetched to a staging directory like /tmp via wget right before loading, so a download to a suspicious directory on the same host in the window is how the module arrived.'
+  - id: linux-sudo-or-su-execution-001
+    name: Linux Sudo Or Su Execution
+    reason: insmod requires root (CAP_SYS_MODULE); a sudo or su on the same host immediately before the load surfaces the account that escalated to run it, tying the kernel change to a specific user and session.
   window: 1h
   enrichment_searches:
-  # Rule-specific telemetry pivots the engine runs around an alert from this rule,
-  # scoped to the alert's host/user/IP within the window (behaviour-targeted, not a sweep).
-    - name: "Shell / interpreter execution on this host"
-      query: '((data_process_exec_process_binary:/.*(\/[Bb][Aa][Ss][Hh]|\/[Ss][Hh]|\/[Dd][Aa][Ss][Hh]|\/[Zz][Ss][Hh]|\/[Kk][Ss][Hh]|\/[Aa][Ss][Hh]|\/[Bb][Uu][Ss][Yy][Bb][Oo][Xx])/) OR (data_process_exec_process_binary:/.*(\/[Pp][Yy][Tt][Hh][Oo][Nn]|\/[Pp][Yy][Tt][Hh][Oo][Nn]3|\/[Pp][Ee][Rr][Ll]|\/[Rr][Uu][Bb][Yy]|\/[Pp][Hh][Pp]|\/[Nn][Oo][Dd][Ee]|\/[Ll][Uu][Aa]|\/[Aa][Ww][Kk])/))'
-      pivot_on: [host]
-      window: 1h
-    - name: "Reconnaissance commands on this host"
-      query: 'data_process_exec_process_binary:/.*(\/[Ww][Hh][Oo][Aa][Mm][Ii]|\/[Ii][Dd]|\/[Uu][Nn][Aa][Mm][Ee]|\/[Hh][Oo][Ss][Tt][Nn][Aa][Mm][Ee]|\/[Hh][Oo][Ss][Tt][Nn][Aa][Mm][Ee][Cc][Tt][Ll]|\/[Ss][Ss]|\/[Nn][Ee][Tt][Ss][Tt][Aa][Tt]|\/[Ii][Ff][Cc][Oo][Nn][Ff][Ii][Gg]|\/[Aa][Rr][Pp]|\/[Ww]|\/[Ww][Hh][Oo]|\/[Ll][Aa][Ss][Tt]|\/[Ll][Ss][Oo][Ff]|\/[Nn][Mm][Aa][Pp]|\/[Dd][Ii][Gg]|\/[Ff][Ii][Nn][Dd])/'
-      pivot_on: [host]
-      window: 1h
-    - name: "Privilege-escalation tooling executed on this host"
-      query: 'data_process_exec_process_binary:/.*(\/[Ss][Uu][Dd][Oo]|\/[Ss][Uu]|\/[Pp][Kk][Ee][Xx][Ee][Cc]|\/[Dd][Oo][Aa][Ss]|\/[Ss][Ee][Tt][Cc][Aa][Pp]|\/[Cc][Hh][Ss][Hh]|\/[Nn][Ee][Ww][Gg][Rr][Pp])/'
-      pivot_on: [host]
-      window: 2h
+  # Behaviour-targeted hunts the engine runs around the alert (not a sweep).
+  - name: Kernel-module management utilities on this host (insmod/rmmod/modprobe/depmod/kmod/lsmod)
+    query: (data_process_exec_process_binary:/.*\/([Ii][Nn][Ss][Mm][Oo][Dd]|[Rr][Mm][Mm][Oo][Dd]|[Mm][Oo][Dd][Pp][Rr][Oo][Bb][Ee]|[Dd][Ee][Pp][Mm][Oo][Dd]|[Kk][Mm][Oo][Dd]|[Ll][Ss][Mm][Oo][Dd])/ OR data_audit_command:/.*([Ii][Nn][Ss][Mm][Oo][Dd]|[Rr][Mm][Mm][Oo][Dd]|[Mm][Oo][Dd][Pp][Rr][Oo][Bb][Ee]|[Dd][Ee][Pp][Mm][Oo][Dd]|[Kk][Mm][Oo][Dd])/)
+    pivot_on:
+    - host
+    window: 1h
+  - name: Kernel module (.ko) file referenced in a command line on this host
+    query: (data_process_exec_process_arguments:/.*\/.*\.[Kk][Oo].*/ OR full_log:/.*\/.*\.[Kk][Oo].*/)
+    pivot_on:
+    - host
+    window: 2h
+  - name: On-host compiler/build toolchain or kernel build tree touched (module compiled on target)
+    query: (data_process_exec_process_binary:/.*\/([Gg][Cc][Cc]|[Cc][Cc]|[Cc][Ll][Aa][Nn][Gg]|[Gg]\+\+|[Mm][Aa][Kk][Ee]|[Tt][Cc][Cc]|[Cc]89|[Cc]99)/ OR data_process_exec_process_arguments:/.*\/[Ll][Ii][Bb]\/[Mm][Oo][Dd][Uu][Ll][Ee][Ss]\/.*/)
+    pivot_on:
+    - host
+    window: 4h
+  - name: File download / ingress tooling on this host (wget/curl/tftp/scp/ftp)
+    query: (data_process_exec_process_binary:/.*\/([Ww][Gg][Ee][Tt]|[Cc][Uu][Rr][Ll]|[Tt][Ff][Tt][Pp]|[Ss][Cc][Pp]|[Ff][Tt][Pp]|[Ss][Ff][Tt][Pp])/ OR full_log:/.*\/[Uu][Ss][Rr]\/[Bb][Ii][Nn]\/([Ww][Gg][Ee][Tt]|[Cc][Uu][Rr][Ll])/)
+    pivot_on:
+    - host
+    window: 4h
+  - name: Log, audit and shell-history tampering on this host (post-install evasion)
+    query: ((data_process_exec_process_binary:/.*\/[Aa][Uu][Dd][Ii][Tt][Cc][Tt][Ll]/ AND data_process_exec_process_arguments:/.*-[DdEe].*/) OR (data_process_exec_process_binary:/.*\/([Rr][Mm]|[Ss][Hh][Rr][Ee][Dd]|[Tt][Rr][Uu][Nn][Cc][Aa][Tt][Ee])/ AND data_process_exec_process_arguments:/.*\/[Vv][Aa][Rr]\/[Ll][Oo][Gg]\/.*/) OR data_process_exec_process_binary:/.*\/[Cc][Hh][Aa][Tt][Tt][Rr]/ OR data_process_exec_process_arguments:/.*[Bb][Aa][Ss][Hh]_[Hh][Ii][Ss][Tt][Oo][Rr][Yy].*/)
+    pivot_on:
+    - host
+    window: 2h

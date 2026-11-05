@@ -134,19 +134,58 @@ graylog:
   query: data_win_system_eventID:"15" AND data_win_eventdata_image:/.*\\[Rr][Ee][Gg][Ee][Dd][Ii][Tt]\.[Ee][Xx][Ee]/
 
 correlation:
-  # Authored by the correlation engine for review.
+  # Authored per-rule (behaviour-researched) for the correlation engine. Related CoPilot
+  # Searches + telemetry pivots to run around an alert, scoped to its host/user/ip/domain.
+  related_rules:
+  - id: 0b80ade5-6997-4b1d-99a1-71701778ea61
+    name: Imports Registry Key From an ADS
+    reason: 'Direct reverse of this exact action: same regedit + ADS, reading the hidden registry payload back in (regedit /i file:stream). The hide-then-reapply cycle completes here, often minutes to hours after the export.'
+  - id: 77946e79-97f1-45a2-84b4-f37b5c0d8682
+    name: Suspicious Registry Modification From ADS Via Regini.EXE
+    reason: Sibling LOLBin that reads registry data straight out of an alternate data stream; the attacker's alternate tool for applying the key they just stashed, so it is the other likely follow-on to the ADS export.
+  - id: 7f43c430-5001-4f8b-aaa9-c3b88f18fa5c
+    name: Execute From Alternate Data Streams
+    reason: The retrieval/execution side of the same ADS stash. Its own logic treats 'regedit /E' as an ADS-write primitive, so it watches the identical technique and catches a payload being pulled or run out of a stream on this host.
+  - id: b69888d4-380c-45ce-9cf9-d9ce46e67821
+    name: Hidden Executable In NTFS Alternate Data Stream
+    reason: 'Same EventID 15 sensor on the same host: a PE hidden in an ADS (non-zero Imphash). Fires when the host is being used to stash executable payloads in streams, not just one registry key - the broader stealth-staging picture.'
+  - id: 573df571-a223-43bc-846e-3f98da481eca
+    name: Creation Of a Suspicious ADS File Outside a Browser Download
+    reason: Same EventID 15 sensor catching non-browser ADS files (including .reg) written to the stream. Corroborates ongoing alternate-data-stream stashing on this host from a different angle than the regedit-specific match.
+  - id: a699b30e-d010-46c8-bbd1-ee2e26765fe9
+    name: Powershell Store File In Alternate Data Stream
+    reason: Same T1564.004 ADS-hiding goal carried out with PowerShell (Astaroth-style). If PowerShell also fired on this host, it shows the actor's ADS tradecraft spans tools and the regedit export is one step of a wider hide operation.
+  - id: 82880171-b475-4201-b811-e9c826cd5eaa
+    name: Exports Critical Registry Keys To a File
+    reason: Same actor intent - regedit dumping the registry, specifically SAM/SYSTEM/SECURITY - in its non-stealth form. If the hidden ADS held a credential hive, this is the precursor or sibling to hunt for on the same host, tying the stealth export to credential theft.
+  - id: windows-modify-registry-regedit-silent-import-001
+    name: Windows Modify Registry Regedit Silent Reg Import
+    reason: 'Plausible next step: regedit /s silently applying a .reg payload (possibly the one just hidden in the ADS) with no user prompt - the quiet counterpart to this stealth export, and classic Azorult-style registry tradecraft.'
+  window: 2h
   enrichment_searches:
-  # Rule-specific telemetry pivots the engine runs around an alert from this rule,
-  # scoped to the alert's host/user/IP within the window (behaviour-targeted, not a sweep).
-    - name: "Other executions of this tool-set on this host (any arguments)"
-      query: 'data_win_system_eventID:"1" AND data_win_eventdata_image:/.*(\\[Rr][Ee][Gg][Ee][Dd][Ii][Tt]\.[Ee][Xx][Ee])/'
-      pivot_on: [host]
-      window: 2h
-    - name: "Execution of programs from user-writable paths on this host"
-      query: 'data_win_system_eventID:"1" AND (data_win_eventdata_image:/.*\\[Uu][Ss][Ee][Rr][Ss]\\.*/ OR data_win_eventdata_image:/.*\\[Pp][Rr][Oo][Gg][Rr][Aa][Mm][Dd][Aa][Tt][Aa]\\.*/ OR data_win_eventdata_image:/.*\\[Ww][Ii][Nn][Dd][Oo][Ww][Ss]\\[Tt][Ee][Mm][Pp]\\.*/ OR data_win_eventdata_image:/.*\\[Aa][Pp][Pp][Dd][Aa][Tt][Aa]\\.*/ OR data_win_eventdata_image:/.*\\[Pp][Uu][Bb][Ll][Ii][Cc]\\.*/ OR data_win_eventdata_image:/.*\\\$[Rr][Ee][Cc][Yy][Cc][Ll][Ee].*/)'
-      pivot_on: [host]
-      window: 1h
-    - name: "Autostart persistence written on this host"
-      query: '(data_win_system_eventID:"12" OR data_win_system_eventID:"13") AND (data_win_eventdata_targetObject:/.*[Cc][Uu][Rr][Rr][Ee][Nn][Tt][Vv][Ee][Rr][Ss][Ii][Oo][Nn]\\[Rr][Uu][Nn].*/ OR data_win_eventdata_targetObject:/.*[Cc][Uu][Rr][Rr][Ee][Nn][Tt][Vv][Ee][Rr][Ss][Ii][Oo][Nn]\\[Rr][Uu][Nn][Oo][Nn][Cc][Ee].*/ OR data_win_eventdata_targetObject:/.*[Cc][Uu][Rr][Rr][Ee][Nn][Tt][Cc][Oo][Nn][Tt][Rr][Oo][Ll][Ss][Ee][Tt]\\[Ss][Ee][Rr][Vv][Ii][Cc][Ee][Ss]\\.*/ OR data_win_eventdata_targetObject:/.*[Ii][Mm][Aa][Gg][Ee] [Ff][Ii][Ll][Ee] [Ee][Xx][Ee][Cc][Uu][Tt][Ii][Oo][Nn] [Oo][Pp][Tt][Ii][Oo][Nn][Ss]\\.*/ OR data_win_eventdata_targetObject:/.*[Ww][Ii][Nn][Ll][Oo][Gg][Oo][Nn]\\[Ss][Hh][Ee][Ll][Ll].*/ OR data_win_eventdata_targetObject:/.*[Ww][Ii][Nn][Ll][Oo][Gg][Oo][Nn]\\[Uu][Ss][Ee][Rr][Ii][Nn][Ii][Tt].*/ OR data_win_eventdata_targetObject:/.*[Cc][Uu][Rr][Rr][Ee][Nn][Tt][Vv][Ee][Rr][Ss][Ii][Oo][Nn]\\[Ee][Xx][Pp][Ll][Oo][Rr][Ee][Rr]\\[Rr][Uu][Nn].*/ OR data_win_eventdata_targetObject:/.*[Pp][Oo][Ll][Ii][Cc][Ii][Ee][Ss]\\[Ee][Xx][Pp][Ll][Oo][Rr][Ee][Rr]\\[Rr][Uu][Nn].*/ OR data_win_eventdata_targetObject:/.*[Cc][Uu][Rr][Rr][Ee][Nn][Tt][Vv][Ee][Rr][Ss][Ii][Oo][Nn]\\[Ww][Ii][Nn][Dd][Oo][Ww][Ss]\\[Ll][Oo][Aa][Dd].*/)'
-      pivot_on: [host]
-      window: 2h
+  # Behaviour-targeted hunts the engine runs around the alert (not a sweep).
+  - name: Hidden registry payload re-applied via regedit/regini/reg on this host
+    query: data_win_system_eventID:"1" AND (data_win_eventdata_image:/.*\\[Rr][Ee][Gg][Ee][Dd][Ii][Tt]\.[Ee][Xx][Ee]/ OR data_win_eventdata_image:/.*\\[Rr][Ee][Gg][Ii][Nn][Ii]\.[Ee][Xx][Ee]/ OR data_win_eventdata_image:/.*\\[Rr][Ee][Gg]\.[Ee][Xx][Ee]/) AND (data_win_eventdata_commandLine:/.* \/[SsIi] .*/ OR data_win_eventdata_commandLine:/.* [Ii][Mm][Pp][Oo][Rr][Tt] .*/ OR data_win_eventdata_commandLine:/.*(:[^ \\]).*/ OR data_win_eventdata_commandLine:/.*\.[Rr][Ee][Gg].*/)
+    pivot_on:
+    - host
+    window: 2h
+  - name: Other non-Mark-of-the-Web ADS streams created on this host
+    query: data_win_system_eventID:"15" AND data_win_eventdata_targetFilename:/.*:[^ \\].*/ AND NOT (data_win_eventdata_targetFilename:/.*:[Zz][Oo][Nn][Ee]\.[Ii][Dd][Ee][Nn][Tt][Ii][Ff][Ii][Ee][Rr]/)
+    pivot_on:
+    - host
+    window: 4h
+  - name: Process image launched directly from an alternate data stream on this host
+    query: data_win_system_eventID:"1" AND data_win_eventdata_image:/.*\..*:[^ \\].*/
+    pivot_on:
+    - host
+    window: 2h
+  - name: Credential registry hive (SAM/SECURITY/SYSTEM) export or save on this host
+    query: data_win_system_eventID:"1" AND (data_win_eventdata_commandLine:/.*[Hh][Kk][Ll][Mm]\\[Ss][Aa][Mm].*/ OR data_win_eventdata_commandLine:/.*[Hh][Kk][Ll][Mm]\\[Ss][Ee][Cc][Uu][Rr][Ii][Tt][Yy].*/ OR data_win_eventdata_commandLine:/.*[Hh][Kk][Ee][Yy]_[Ll][Oo][Cc][Aa][Ll]_[Mm][Aa][Cc][Hh][Ii][Nn][Ee]\\[Ss][Aa][Mm].*/ OR (data_win_eventdata_image:/.*\\[Rr][Ee][Gg]\.[Ee][Xx][Ee]/ AND data_win_eventdata_commandLine:/.* [Ss][Aa][Vv][Ee] .*/))
+    pivot_on:
+    - host
+    window: 2h
+  - name: Registry LOLBins spawned by a script host or Office app on this host
+    query: data_win_system_eventID:"1" AND (data_win_eventdata_image:/.*\\[Rr][Ee][Gg][Ee][Dd][Ii][Tt]\.[Ee][Xx][Ee]/ OR data_win_eventdata_image:/.*\\[Rr][Ee][Gg][Ii][Nn][Ii]\.[Ee][Xx][Ee]/ OR data_win_eventdata_image:/.*\\[Rr][Ee][Gg]\.[Ee][Xx][Ee]/) AND (data_win_eventdata_parentImage:/.*\\[Pp][Oo][Ww][Ee][Rr][Ss][Hh][Ee][Ll][Ll]\.[Ee][Xx][Ee]/ OR data_win_eventdata_parentImage:/.*\\[Pp][Ww][Ss][Hh]\.[Ee][Xx][Ee]/ OR data_win_eventdata_parentImage:/.*\\[Cc][Mm][Dd]\.[Ee][Xx][Ee]/ OR data_win_eventdata_parentImage:/.*\\[Ww][Ss][Cc][Rr][Ii][Pp][Tt]\.[Ee][Xx][Ee]/ OR data_win_eventdata_parentImage:/.*\\[Cc][Ss][Cc][Rr][Ii][Pp][Tt]\.[Ee][Xx][Ee]/ OR data_win_eventdata_parentImage:/.*\\[Mm][Ss][Hh][Tt][Aa]\.[Ee][Xx][Ee]/ OR data_win_eventdata_parentImage:/.*\\[Ww][Ii][Nn][Ww][Oo][Rr][Dd]\.[Ee][Xx][Ee]/ OR data_win_eventdata_parentImage:/.*\\[Ee][Xx][Cc][Ee][Ll]\.[Ee][Xx][Ee]/)
+    pivot_on:
+    - host
+    window: 1h

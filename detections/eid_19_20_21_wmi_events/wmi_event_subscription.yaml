@@ -146,44 +146,58 @@ graylog:
   query: (data_win_system_eventID:"19" OR data_win_system_eventID:"20" OR data_win_system_eventID:"21") AND (data_win_system_eventID:"19" OR data_win_system_eventID:"20" OR data_win_system_eventID:"21")
 
 correlation:
-  # Authored by the correlation engine for review. Related CoPilot Searches to run
-  # around an alert from this rule, scoped to the same host/user/IP within the window.
+  # Authored per-rule (behaviour-researched) for the correlation engine. Related CoPilot
+  # Searches + telemetry pivots to run around an alert, scoped to its host/user/ip/domain.
   related_rules:
-    - id: ec570e53-4c76-45a9-804d-dc3f355ff7a7
-      name: "7Zip Compressing Dump Files"
-      reason: "next kill-chain tactic: Collection"
-    - id: 0255a820-e564-4e40-af2b-6ac61160335c
-      name: "A New Trust Was Created To A Domain"
-      reason: "next kill-chain tactic: Persistence"
-    - id: 35ba1d85-724d-42a3-889f-2e2362bcaf23
-      name: "AD Privileged Users or Groups Reconnaissance"
-      reason: "next kill-chain tactic: Discovery"
-    - id: 0a1255c5-d732-4b62-ac02-b5152d34fb83
-      name: "ADExplorer Writing Complete AD Snapshot Into .dat File"
-      reason: "next kill-chain tactic: Discovery"
-    - id: 1ea13e8c-03ea-409b-877d-ce5c3d2c1cb3
-      name: "ADFS Database Named Pipe Connection By Uncommon Tool"
-      reason: "next kill-chain tactic: Collection"
-    - id: 75bf09fa-1dd7-4d18-9af9-dd9e492562eb
-      name: "ADSI-Cache File Creation By Uncommon Tool"
-      reason: "next kill-chain tactic: Command and Control"
+  - id: ebef4391-1a81-4761-a40a-1db446c0e625
+    name: NewActiveScriptEventConsumer Creation Attempt via Wmic.EXE
+    reason: 'Direct precursor: the wmic.exe CREATE command that registers the ActiveScriptEventConsumer whose FilterToConsumerBinding produces these EID 19/20/21 events - the process that planted the subscription.'
+  - id: 9e07f6e7-83aa-45c6-998e-0af26efd0a85
+    name: Powershell WMI Persistence
+    reason: 'Direct precursor (Empire/CIM method): PowerShell New-CimInstance against root/subscription building __EventFilter + CommandLineEventConsumer - the script that creates exactly the subscription this rule observes.'
+  - id: 1dd05363-104e-4b4a-b963-196a534b03a1
+    name: Potential Suspicious Mofcomp Execution
+    reason: 'Alternative precursor: mofcomp.exe compiling a malicious .mof installs the filter/consumer/binding into the WMI repository, generating these Sysmon WMI events.'
+  - id: fe21810c-2a8c-478f-8dd3-5a287fb2a0e0
+    name: Suspicious Scripting in a WMI Consumer
+    reason: 'Co-occurring sibling on the same EID 19/20/21 events: inspects the consumer command for script download-and-exec markers (New-Object Net.WebClient, IEX, -enc), showing the bound consumer is malicious.'
+  - id: 83844185-1c5b-45bc-bcf3-b5bf3084ca5b
+    name: Suspicious Encoded Scripts in a WMI Consumer
+    reason: 'Co-occurring sibling on the same WMI events: flags a base64 PE/shellcode payload embedded in the consumer destination - the high-confidence malicious case of this subscription.'
+  - id: windows-wmi-permanent-event-subscription-001
+    name: Windows WMI Permanent Event Subscription
+    reason: Near-duplicate detector of the same EID 19/20/21 activity; its co-firing confirms a repository-backed PERMANENT subscription (runs as SYSTEM, survives reboot) rather than a transient in-process one.
+  - id: b439f47d-ef52-4b29-9a2f-57d8a96cb6b8
+    name: WMI ActiveScriptEventConsumers Activity Via Scrcons.EXE DLL Load
+    reason: 'Follow-on execution: scrcons.exe loading vbscript/wsh scripting DLLs is the ActiveScriptEventConsumer from this subscription actually running its script when its trigger fires.'
+  - id: 8a582fe2-0882-4b89-a82a-da6b2dc32937
+    name: Suspicious WmiPrvSE Child Process
+    reason: 'Follow-on execution: a CommandLineEventConsumer''s payload spawns as a child of WmiPrvSE.exe; its firing means this persistence triggered and ran code (certutil/mshta/rundll32/powershell).'
   window: 1h
   enrichment_searches:
-  # Rule-specific telemetry pivots the engine runs around an alert from this rule,
-  # scoped to the alert's host/user/IP within the window (behaviour-targeted, not a sweep).
-    - name: "Autostart persistence written on this host (Run keys, services, IFEO)"
-      query: '(data_win_system_eventID:"12" OR data_win_system_eventID:"13") AND (data_win_eventdata_targetObject:/.*[Cc][Uu][Rr][Rr][Ee][Nn][Tt][Vv][Ee][Rr][Ss][Ii][Oo][Nn]\\[Rr][Uu][Nn].*/ OR data_win_eventdata_targetObject:/.*[Cc][Uu][Rr][Rr][Ee][Nn][Tt][Vv][Ee][Rr][Ss][Ii][Oo][Nn]\\[Rr][Uu][Nn][Oo][Nn][Cc][Ee].*/ OR data_win_eventdata_targetObject:/.*[Cc][Uu][Rr][Rr][Ee][Nn][Tt][Cc][Oo][Nn][Tt][Rr][Oo][Ll][Ss][Ee][Tt]\\[Ss][Ee][Rr][Vv][Ii][Cc][Ee][Ss]\\.*/ OR data_win_eventdata_targetObject:/.*[Ii][Mm][Aa][Gg][Ee] [Ff][Ii][Ll][Ee] [Ee][Xx][Ee][Cc][Uu][Tt][Ii][Oo][Nn] [Oo][Pp][Tt][Ii][Oo][Nn][Ss]\\.*/ OR data_win_eventdata_targetObject:/.*[Ww][Ii][Nn][Ll][Oo][Gg][Oo][Nn]\\[Ss][Hh][Ee][Ll][Ll].*/ OR data_win_eventdata_targetObject:/.*[Ww][Ii][Nn][Ll][Oo][Gg][Oo][Nn]\\[Uu][Ss][Ee][Rr][Ii][Nn][Ii][Tt].*/ OR data_win_eventdata_targetObject:/.*[Cc][Uu][Rr][Rr][Ee][Nn][Tt][Vv][Ee][Rr][Ss][Ii][Oo][Nn]\\[Ee][Xx][Pp][Ll][Oo][Rr][Ee][Rr]\\[Rr][Uu][Nn].*/ OR data_win_eventdata_targetObject:/.*[Pp][Oo][Ll][Ii][Cc][Ii][Ee][Ss]\\[Ee][Xx][Pp][Ll][Oo][Rr][Ee][Rr]\\[Rr][Uu][Nn].*/ OR data_win_eventdata_targetObject:/.*[Cc][Uu][Rr][Rr][Ee][Nn][Tt][Vv][Ee][Rr][Ss][Ii][Oo][Nn]\\[Ww][Ii][Nn][Dd][Oo][Ww][Ss]\\[Ll][Oo][Aa][Dd].*/)'
-      pivot_on: [host]
-      window: 2h
-    - name: "Memory/credential-dump creation & LSASS access on this host"
-      query: '((data_win_system_eventID:"1" AND data_win_eventdata_image:/.*(\\[Pp][Rr][Oo][Cc][Dd][Uu][Mm][Pp]\.[Ee][Xx][Ee]|\\[Pp][Rr][Oo][Cc][Dd][Uu][Mm][Pp]64\.[Ee][Xx][Ee]|\\[Ss][Qq][Ll][Dd][Uu][Mm][Pp][Ee][Rr]\.[Ee][Xx][Ee]|\\[Cc][Rr][Ee][Aa][Tt][Ee][Dd][Uu][Mm][Pp]\.[Ee][Xx][Ee]|\\[Rr][Dd][Rr][Ll][Ee][Aa][Kk][Dd][Ii][Aa][Gg]\.[Ee][Xx][Ee]|\\[Dd][Uu][Mm][Pp][Ee][Rr][Tt]\.[Ee][Xx][Ee]|\\[Nn][Aa][Nn][Oo][Dd][Uu][Mm][Pp]\.[Ee][Xx][Ee]|\\[Aa][Vv][Dd][Uu][Mm][Pp]\.[Ee][Xx][Ee])/) OR (data_win_system_eventID:"1" AND (data_win_eventdata_commandLine:/.*[Cc][Oo][Mm][Ss][Vv][Cc][Ss]\.[Dd][Ll][Ll].*/ OR data_win_eventdata_commandLine:/.*[Mm][Ii][Nn][Ii][Dd][Uu][Mm][Pp].*/ OR data_win_eventdata_commandLine:/.*[Dd][Uu][Mm][Pp][Ee][Rr][Tt].*/ OR data_win_eventdata_commandLine:/.*[Nn][Aa][Nn][Oo][Dd][Uu][Mm][Pp].*/ OR data_win_eventdata_commandLine:/.*[Ll][Ss][Aa][Ss][Ss].*/ OR data_win_eventdata_commandLine:/.*[Ss][Ee][Kk][Uu][Rr][Ll][Ss][Aa].*/ OR data_win_eventdata_commandLine:/.*[Nn][Tt][Dd][Ss]\.[Dd][Ii][Tt].*/ OR data_win_eventdata_commandLine:/.*[Nn][Tt][Dd][Ss][Uu][Tt][Ii][Ll].*/)) OR (data_win_system_eventID:"10" AND data_win_eventdata_targetImage:/.*(\\[Ll][Ss][Aa][Ss][Ss]\.[Ee][Xx][Ee])/))'
-      pivot_on: [host]
-      window: 1h
-    - name: "WMI process execution on this host"
-      query: '((data_win_system_eventID:"1" AND data_win_eventdata_image:/.*(\\[Ww][Mm][Ii][Cc]\.[Ee][Xx][Ee])/ AND (data_win_eventdata_commandLine:/.*[Pp][Rr][Oo][Cc][Ee][Ss][Ss] [Cc][Aa][Ll][Ll] [Cc][Rr][Ee][Aa][Tt][Ee].*/ OR data_win_eventdata_commandLine:/.*\/[Nn][Oo][Dd][Ee]:.*/)) OR (data_win_system_eventID:"1" AND data_win_eventdata_parentImage:/.*(\\[Ww][Mm][Ii][Pp][Rr][Vv][Ss][Ee]\.[Ee][Xx][Ee])/) OR (data_win_system_eventID:"1" AND data_win_eventdata_image:/.*(\\[Pp][Oo][Ww][Ee][Rr][Ss][Hh][Ee][Ll][Ll]\.[Ee][Xx][Ee]|\\[Pp][Ww][Ss][Hh]\.[Ee][Xx][Ee])/ AND (data_win_eventdata_commandLine:/.*[Ii][Nn][Vv][Oo][Kk][Ee]-[Ww][Mm][Ii][Mm][Ee][Tt][Hh][Oo][Dd].*/ OR data_win_eventdata_commandLine:/.*[Gg][Ee][Tt]-[Ww][Mm][Ii][Oo][Bb][Jj][Ee][Cc][Tt].*/ OR data_win_eventdata_commandLine:/.*[Ii][Nn][Vv][Oo][Kk][Ee]-[Cc][Ii][Mm][Mm][Ee][Tt][Hh][Oo][Dd].*/)))'
-      pivot_on: [host]
-      window: 2h
-    - name: "Follow-on LOLBin / signed-binary-proxy execution on this host"
-      query: 'data_win_system_eventID:"1" AND data_win_eventdata_image:/.*(\\[Rr][Uu][Nn][Dd][Ll][Ll]32\.[Ee][Xx][Ee]|\\[Rr][Ee][Gg][Ss][Vv][Rr]32\.[Ee][Xx][Ee]|\\[Mm][Ss][Hh][Tt][Aa]\.[Ee][Xx][Ee]|\\[Ii][Nn][Ss][Tt][Aa][Ll][Ll][Uu][Tt][Ii][Ll]\.[Ee][Xx][Ee]|\\[Rr][Ee][Gg][Aa][Ss][Mm]\.[Ee][Xx][Ee]|\\[Rr][Ee][Gg][Ss][Vv][Cc][Ss]\.[Ee][Xx][Ee]|\\[Mm][Ss][Bb][Uu][Ii][Ll][Dd]\.[Ee][Xx][Ee]|\\[Cc][Ee][Rr][Tt][Uu][Tt][Ii][Ll]\.[Ee][Xx][Ee]|\\[Bb][Ii][Tt][Ss][Aa][Dd][Mm][Ii][Nn]\.[Ee][Xx][Ee]|\\[Ww][Mm][Ii][Cc]\.[Ee][Xx][Ee]|\\[Cc][Mm][Ss][Tt][Pp]\.[Ee][Xx][Ee]|\\[Oo][Dd][Bb][Cc][Cc][Oo][Nn][Ff]\.[Ee][Xx][Ee]|\\[Ff][Oo][Rr][Ff][Ii][Ll][Ee][Ss]\.[Ee][Xx][Ee]|\\[Pp][Cc][Aa][Ll][Uu][Aa]\.[Ee][Xx][Ee]|\\[Mm][Aa][Vv][Ii][Nn][Jj][Ee][Cc][Tt]\.[Ee][Xx][Ee]|\\[Ss][Cc][Rr][Ii][Pp][Tt][Rr][Uu][Nn][Nn][Ee][Rr]\.[Ee][Xx][Ee])/'
-      pivot_on: [host]
-      window: 1h
+  # Behaviour-targeted hunts the engine runs around the alert (not a sweep).
+  - name: WMI event-subscription creation command on this host (wmic/mofcomp/PowerShell)
+    query: data_win_system_eventID:"1" AND ((data_win_eventdata_image:/.*\\[Ww][Mm][Ii][Cc]\.[Ee][Xx][Ee]/ AND data_win_eventdata_commandLine:/.* [Cc][Rr][Ee][Aa][Tt][Ee].*/ AND (data_win_eventdata_commandLine:/.*[Aa][Cc][Tt][Ii][Vv][Ee][Ss][Cc][Rr][Ii][Pp][Tt][Ee][Vv][Ee][Nn][Tt][Cc][Oo][Nn][Ss][Uu][Mm][Ee][Rr].*/ OR data_win_eventdata_commandLine:/.*[Cc][Oo][Mm][Mm][Aa][Nn][Dd][Ll][Ii][Nn][Ee][Ee][Vv][Ee][Nn][Tt][Cc][Oo][Nn][Ss][Uu][Mm][Ee][Rr].*/ OR data_win_eventdata_commandLine:/.*__[Ee][Vv][Ee][Nn][Tt][Ff][Ii][Ll][Tt][Ee][Rr].*/)) OR data_win_eventdata_image:/.*\\[Mm][Oo][Ff][Cc][Oo][Mm][Pp]\.[Ee][Xx][Ee]/ OR (data_win_eventdata_image:/.*(\\[Pp][Oo][Ww][Ee][Rr][Ss][Hh][Ee][Ll][Ll]\.[Ee][Xx][Ee]|\\[Pp][Ww][Ss][Hh]\.[Ee][Xx][Ee])/ AND (data_win_eventdata_commandLine:/.*[Ss][Ee][Tt]-[Ww][Mm][Ii][Ii][Nn][Ss][Tt][Aa][Nn][Cc][Ee].*/ OR data_win_eventdata_commandLine:/.*[Rr][Ee][Gg][Ii][Ss][Tt][Ee][Rr]-[Ww][Mm][Ii][Ee][Vv][Ee][Nn][Tt].*/ OR data_win_eventdata_commandLine:/.*[Rr][Ee][Gg][Ii][Ss][Tt][Ee][Rr]-[Cc][Ii][Mm][Ii][Nn][Dd][Ii][Cc][Aa][Tt][Ii][Oo][Nn][Ee][Vv][Ee][Nn][Tt].*/ OR data_win_eventdata_commandLine:/.*[Cc][Oo][Mm][Mm][Aa][Nn][Dd][Ll][Ii][Nn][Ee][Ee][Vv][Ee][Nn][Tt][Cc][Oo][Nn][Ss][Uu][Mm][Ee][Rr].*/ OR data_win_eventdata_commandLine:/.*__[Ee][Vv][Ee][Nn][Tt][Ff][Ii][Ll][Tt][Ee][Rr].*/)))
+    pivot_on:
+    - host
+    window: 2h
+  - name: WMI subscription creation in decoded PowerShell script blocks on this host
+    query: data_win_system_eventID:"4104" AND (data_win_eventdata_scriptBlockText:/.*__[Ee][Vv][Ee][Nn][Tt][Ff][Ii][Ll][Tt][Ee][Rr].*/ OR data_win_eventdata_scriptBlockText:/.*[Cc][Oo][Mm][Mm][Aa][Nn][Dd][Ll][Ii][Nn][Ee][Ee][Vv][Ee][Nn][Tt][Cc][Oo][Nn][Ss][Uu][Mm][Ee][Rr].*/ OR data_win_eventdata_scriptBlockText:/.*[Aa][Cc][Tt][Ii][Vv][Ee][Ss][Cc][Rr][Ii][Pp][Tt][Ee][Vv][Ee][Nn][Tt][Cc][Oo][Nn][Ss][Uu][Mm][Ee][Rr].*/ OR data_win_eventdata_scriptBlockText:/.*[Ff][Ii][Ll][Tt][Ee][Rr][Tt][Oo][Cc][Oo][Nn][Ss][Uu][Mm][Ee][Rr][Bb][Ii][Nn][Dd][Ii][Nn][Gg].*/ OR data_win_eventdata_scriptBlockText:/.*[Rr][Oo][Oo][Tt]\\[Ss][Uu][Bb][Ss][Cc][Rr][Ii][Pp][Tt][Ii][Oo][Nn].*/ OR data_win_eventdata_scriptBlockText:/.*[Rr][Oo][Oo][Tt]\/[Ss][Uu][Bb][Ss][Cc][Rr][Ii][Pp][Tt][Ii][Oo][Nn].*/ OR data_win_eventdata_scriptBlockText:/.*[Rr][Ee][Gg][Ii][Ss][Tt][Ee][Rr]-[Ww][Mm][Ii][Ee][Vv][Ee][Nn][Tt].*/ OR data_win_eventdata_scriptBlockText:/.*[Ss][Ee][Tt]-[Ww][Mm][Ii][Ii][Nn][Ss][Tt][Aa][Nn][Cc][Ee].*/)
+    pivot_on:
+    - host
+    window: 2h
+  - name: MOF file written on this host (MOF-based WMI persistence staging)
+    query: data_win_system_eventID:"11" AND data_win_eventdata_targetFilename:/.*\.[Mm][Oo][Ff]/
+    pivot_on:
+    - host
+    window: 2h
+  - name: WMI consumer payload execution on this host (child of WmiPrvSE / scrcons)
+    query: data_win_system_eventID:"1" AND (data_win_eventdata_parentImage:/.*\\[Ww][Mm][Ii][Pp][Rr][Vv][Ss][Ee]\.[Ee][Xx][Ee]/ OR data_win_eventdata_parentImage:/.*\\[Ss][Cc][Rr][Cc][Oo][Nn][Ss]\.[Ee][Xx][Ee]/)
+    pivot_on:
+    - host
+    window: 4h
+  - name: Outbound network beacon from the WMI consumer host process (scrcons / WmiPrvSE)
+    query: data_win_system_eventID:"3" AND (data_win_eventdata_image:/.*\\[Ss][Cc][Rr][Cc][Oo][Nn][Ss]\.[Ee][Xx][Ee]/ OR data_win_eventdata_image:/.*\\[Ww][Mm][Ii][Pp][Rr][Vv][Ss][Ee]\.[Ee][Xx][Ee]/)
+    pivot_on:
+    - host
+    window: 4h

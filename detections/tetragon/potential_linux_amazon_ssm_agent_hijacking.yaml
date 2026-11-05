@@ -158,29 +158,58 @@ graylog:
   query: data_process_exec_process_binary:/.*\/[Aa][Mm][Aa][Zz][Oo][Nn]-[Ss][Ss][Mm]-[Aa][Gg][Ee][Nn][Tt]/ AND data_process_exec_process_arguments:/.*-[Rr][Ee][Gg][Ii][Ss][Tt][Ee][Rr] .*/ AND data_process_exec_process_arguments:/.*-[Cc][Oo][Dd][Ee] .*/ AND data_process_exec_process_arguments:/.*-[Ii][Dd] .*/ AND data_process_exec_process_arguments:/.*-[Rr][Ee][Gg][Ii][Oo][Nn] .*/
 
 correlation:
-  # Authored by the correlation engine for review. Related CoPilot Searches to run
-  # around an alert from this rule, scoped to the same host/user/IP within the window.
+  # Authored per-rule (behaviour-researched) for the correlation engine. Related CoPilot
+  # Searches + telemetry pivots to run around an alert, scoped to its host/user/ip/domain.
   related_rules:
-    - id: 0a23a62d-c5b3-468b-a072-25064a9a8c87
-      name: "Axios NPM Compromise Indicators - Linux"
-      reason: "next kill-chain tactic: Command and Control"
-  window: 1h
+  - id: 7f734ed0-4f47-46c0-837f-6ee62505abd9
+    name: Potential Netcat Reverse Shell Execution
+    reason: 'Interactive foothold that precedes the hijack: the attacker needs a hands-on shell to type ''amazon-ssm-agent -register -code -id -region''. A reverse shell on the same host confirms a real intrusion (not admin re-registration) and shows the noisy C2 channel the stealthy SSM RAT is meant to replace.'
+  - id: a2d9e2f3-0f43-4c7a-bcd9-9acfc0d723aa
+    name: Suspicious Download and Execute Pattern via Curl/Wget
+    reason: 'Co-occurring stager: attackers fetch the hybrid-activation parameters or follow-on tooling via curl/wget into /tmp or /dev/shm right before or after re-registering the agent, so a download-and-execute on the same host in the window dates the intrusion and names the payload.'
+  - id: 6a50f16c-3b7b-42d1-b081-0fdd3ba70a73
+    name: User Added To Root/Sudoers Group Using Usermod
+    reason: 'Privilege-escalation precursor: re-registering amazon-ssm-agent and editing its systemd unit require root. Adding a user to root/sudoers is how the attacker gains and persists that privilege, and firing just before the hijack shows the same actor escalating then establishing the RAT.'
+  - id: 0cf7a157-8879-41a2-8f55-388dd23746b7
+    name: Linux Recon Indicators
+    reason: 'Post-foothold enumeration: SUID-binary (-perm -4000) and credential-file (.htpasswd) hunting on the same host is the discovery an attacker runs right after landing and before turning the SSM agent into a RAT, so it brackets the start of the same hands-on session.'
+  - id: 31545105-3444-4584-bebf-c466353230d2
+    name: Touch Suspicious Service File
+    reason: 'Adjacent service tampering: the hijacked agent runs as a systemd .service, so timestomping a .service unit on the same host hides the attacker''s edit to that unit (or a new persistence service dropped beside it) so the modified registration blends with legitimate files.'
+  - id: 6b14bac8-3e3a-4324-8109-42f0546a347f
+    name: Scheduled Cron Task/Job - Linux
+    reason: 'Parallel persistence: attackers back the SSM channel with a second foothold, and a crontab job dropped from /tmp on the same host is a common redundant persistence mechanism established alongside the hijacked agent in case the SSM registration is revoked.'
+  - id: e3a8a052-111f-4606-9aee-f28ebeb76776
+    name: Disabling Security Tools
+    reason: 'Follow-on defense evasion: having turned the signed AWS binary into a RAT, the attacker stops EDR/iptables services so the commands they then push through the SSM channel are not inspected, so this firing shortly after the hijack is the next expected step.'
+  - id: 1182f3b3-e716-4efa-99ab-d2685d04360f
+    name: History File Deletion
+    reason: 'Follow-on track-covering: the register command, including the attacker''s activation code and id, is typed at a shell and lands in ~/.bash_history; deleting the history file is the classic cleanup immediately after the hijack to erase the activation secrets.'
+  window: 2h
   enrichment_searches:
-  # Rule-specific telemetry pivots the engine runs around an alert from this rule,
-  # scoped to the alert's host/user/IP within the window (behaviour-targeted, not a sweep).
-    - name: "Remote-access / RMM tooling on this host"
-      query: 'data_process_exec_process_binary:/.*(\/[Ss][Ss][Hh]|\/[Tt][Ee][Aa][Mm][Vv][Ii][Ee][Ww][Ee][Rr]|\/[Aa][Nn][Yy][Dd][Ee][Ss][Kk]|\/[Nn][Gg][Rr][Oo][Kk])/'
-      pivot_on: [host]
-      window: 1h
-    - name: "Other executions of this tool-set on this host (any arguments)"
-      query: 'data_process_exec_process_binary:/.*(\/[Aa][Mm][Aa][Zz][Oo][Nn]-[Ss][Ss][Mm]-[Aa][Gg][Ee][Nn][Tt])/'
-      pivot_on: [host]
-      window: 2h
-    - name: "Outbound-transfer / upload tooling on this host"
-      query: '((data_process_exec_process_binary:/.*(\/[Cc][Uu][Rr][Ll]|\/[Ww][Gg][Ee][Tt]|\/[Tt][Ff][Tt][Pp])/) OR (data_process_exec_process_binary:/.*(\/[Ss][Cc][Pp]|\/[Rr][Ss][Yy][Nn][Cc]|\/[Rr][Cc][Ll][Oo][Nn][Ee]|\/[Cc][Uu][Rr][Ll])/))'
-      pivot_on: [host]
-      window: 2h
-    - name: "Shell / interpreter execution on this host"
-      query: '((data_process_exec_process_binary:/.*(\/[Bb][Aa][Ss][Hh]|\/[Ss][Hh]|\/[Dd][Aa][Ss][Hh]|\/[Zz][Ss][Hh]|\/[Kk][Ss][Hh]|\/[Aa][Ss][Hh]|\/[Bb][Uu][Ss][Yy][Bb][Oo][Xx])/) OR (data_process_exec_process_binary:/.*(\/[Pp][Yy][Tt][Hh][Oo][Nn]|\/[Pp][Yy][Tt][Hh][Oo][Nn]3|\/[Pp][Ee][Rr][Ll]|\/[Rr][Uu][Bb][Yy]|\/[Pp][Hh][Pp]|\/[Nn][Oo][Dd][Ee]|\/[Ll][Uu][Aa]|\/[Aa][Ww][Kk])/))'
-      pivot_on: [host]
-      window: 1h
+  # Behaviour-targeted hunts the engine runs around the alert (not a sweep).
+  - name: SSM command-execution worker processes on this host (RAT in use)
+    query: (data_process_exec_process_binary:/.*\/[Ss][Ss][Mm]-[Ss][Ee][Ss][Ss][Ii][Oo][Nn]-[Ww][Oo][Rr][Kk][Ee][Rr]/ OR data_process_exec_process_binary:/.*\/[Ss][Ss][Mm]-[Aa][Gg][Ee][Nn][Tt]-[Ww][Oo][Rr][Kk][Ee][Rr]/ OR data_process_exec_process_binary:/.*\/[Ss][Ss][Mm]-[Dd][Oo][Cc][Uu][Mm][Ee][Nn][Tt]-[Ww][Oo][Rr][Kk][Ee][Rr]/)
+    pivot_on:
+    - host
+    window: 2h
+  - name: Processes spawned through the SSM agent channel (attacker commands via SSM)
+    query: (data_process_exec_parent_binary:/.*\/[Ss][Ss][Mm]-[Ss][Ee][Ss][Ss][Ii][Oo][Nn]-[Ww][Oo][Rr][Kk][Ee][Rr]/ OR data_process_exec_parent_binary:/.*\/[Ss][Ss][Mm]-[Aa][Gg][Ee][Nn][Tt]-[Ww][Oo][Rr][Kk][Ee][Rr]/ OR data_process_exec_parent_binary:/.*\/[Aa][Mm][Aa][Zz][Oo][Nn]-[Ss][Ss][Mm]-[Aa][Gg][Ee][Nn][Tt]/)
+    pivot_on:
+    - host
+    window: 2h
+  - name: Cloud instance metadata / IAM credential access (IMDS 169.254.169.254)
+    query: data_process_exec_process_arguments:/.*169\.254\.169\.254.*/
+    pivot_on:
+    - host
+    window: 4h
+  - name: Service-manager control of the amazon-ssm-agent unit (apply/persist hijack)
+    query: (data_process_exec_process_binary:/.*\/[Ss][Yy][Ss][Tt][Ee][Mm][Cc][Tt][Ll]/ OR data_process_exec_process_binary:/.*\/[Ss][Ee][Rr][Vv][Ii][Cc][Ee]/) AND data_process_exec_process_arguments:/.*[Aa][Mm][Aa][Zz][Oo][Nn]-[Ss][Ss][Mm]-[Aa][Gg][Ee][Nn][Tt].*/
+    pivot_on:
+    - host
+    window: 2h
+  - name: Access or tampering of the SSM registration/vault state directory
+    query: (data_process_exec_process_arguments:/.*\/[Vv][Aa][Rr]\/[Ll][Ii][Bb]\/[Aa][Mm][Aa][Zz][Oo][Nn]\/[Ss][Ss][Mm].*/ OR data_process_exec_process_arguments:/.*\/[Ee][Tt][Cc]\/[Aa][Mm][Aa][Zz][Oo][Nn]\/[Ss][Ss][Mm].*/)
+    pivot_on:
+    - host
+    window: 4h

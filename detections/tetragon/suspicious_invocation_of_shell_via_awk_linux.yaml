@@ -183,23 +183,58 @@ graylog:
   query: (data_process_exec_process_binary:/.*\/[Aa][Ww][Kk]/ OR data_process_exec_process_binary:/.*\/[Gg][Aa][Ww][Kk]/ OR data_process_exec_process_binary:/.*\/[Mm][Aa][Ww][Kk]/ OR data_process_exec_process_binary:/.*\/[Nn][Aa][Ww][Kk]/) AND data_process_exec_process_arguments:/.*[Bb][Ee][Gg][Ii][Nn] \{[Ss][Yy][Ss][Tt][Ee][Mm].*/ AND (data_process_exec_process_arguments:/.*\/[Bb][Ii][Nn]\/[Bb][Aa][Ss][Hh].*/ OR data_process_exec_process_arguments:/.*\/[Bb][Ii][Nn]\/[Dd][Aa][Ss][Hh].*/ OR data_process_exec_process_arguments:/.*\/[Bb][Ii][Nn]\/[Ff][Ii][Ss][Hh].*/ OR data_process_exec_process_arguments:/.*\/[Bb][Ii][Nn]\/[Ss][Hh].*/ OR data_process_exec_process_arguments:/.*\/[Bb][Ii][Nn]\/[Zz][Ss][Hh].*/)
 
 correlation:
-  # Authored by the correlation engine for review.
+  # Authored per-rule (behaviour-researched) for the correlation engine. Related CoPilot
+  # Searches + telemetry pivots to run around an alert, scoped to its host/user/ip/domain.
+  related_rules:
+  - id: 0f79c4d2-4e1f-4683-9c36-b5469a665e06
+    name: Access of Sudoers File Content
+    reason: Reading /etc/sudoers (or sudo -l) to learn which binary a low-priv user may run as root is the direct precursor to `sudo awk 'BEGIN{system("/bin/sh")}'`; on this host shortly before the AWK breakout it confirms a sudo-based privilege-escalation path.
+  - id: 0cf7a157-8879-41a2-8f55-388dd23746b7
+    name: Linux Recon Indicators
+    reason: Catches SUID-binary discovery (find -perm -4000) and credential-file hunting — the privilege-escalation enumeration an operator runs to pick an exploitable GTFOBins binary like awk before breaking out.
+  - id: 6adfbf8f-52be-4444-9bac-81b539624146
+    name: Shell Execution via Find - Linux
+    reason: Identical GTFOBins shell-breakout via a different allowed binary (find . -exec /bin/sh); an operator working the GTFOBins menu on this host for privesc or restricted-shell escape commonly trips both in one session.
+  - id: 7ab8f73a-fcff-428b-84aa-6a5ff7877dea
+    name: Vim GTFOBin Abuse - Linux
+    reason: Another GTFOBins breakout used specifically to escape restricted shells/environments — the same objective as `awk BEGIN{system}`; co-occurrence on one host points to a deliberate interactive breakout, not incidental tool use.
+  - id: ea3ecad2-db86-4a89-ad0b-132a10d2db55
+    name: Interactive Bash Suspicious Children
+    reason: The AWK system("/bin/bash") call yields an interactive `bash -i`; this rule fires on that shell spawning staging/recon children (base64, pty.spawn, inline -c import) — the attacker's very next actions after the breakout.
+  - id: 6b14bac8-3e3a-4324-8109-42f0546a347f
+    name: Scheduled Cron Task/Job - Linux
+    reason: Once the breakout yields an interactive (often root) shell, writing a cron job is the go-to persistence; cron activity on this host soon after the AWK shell is a strong follow-on signal.
+  - id: fa4aaed5-4fe0-498d-bbc0-08e3346387ba
+    name: Copy Passwd Or Shadow From TMP Path
+    reason: With the root shell obtained via the sudo-awk breakout, copying or reading /etc/passwd and /etc/shadow for offline cracking is a primary objective — a credential-access follow-on on the same host.
+  - id: 80915f59-9b56-4616-9de0-fd0dea6c12fe
+    name: Linux Logs Clearing Attempts
+    reason: After acting on objectives through the spawned shell, clearing system logs to cover the intrusion is the typical anti-forensics tail; on this host it corroborates hands-on-keyboard activity begun with the AWK breakout.
+  window: 2h
   enrichment_searches:
-  # Rule-specific telemetry pivots the engine runs around an alert from this rule,
-  # scoped to the alert's host/user/IP within the window (behaviour-targeted, not a sweep).
-    - name: "Shell / interpreter execution on this host"
-      query: '((data_process_exec_process_binary:/.*(\/[Bb][Aa][Ss][Hh]|\/[Ss][Hh]|\/[Dd][Aa][Ss][Hh]|\/[Zz][Ss][Hh]|\/[Kk][Ss][Hh]|\/[Aa][Ss][Hh]|\/[Bb][Uu][Ss][Yy][Bb][Oo][Xx])/) OR (data_process_exec_process_binary:/.*(\/[Pp][Yy][Tt][Hh][Oo][Nn]|\/[Pp][Yy][Tt][Hh][Oo][Nn]3|\/[Pp][Ee][Rr][Ll]|\/[Rr][Uu][Bb][Yy]|\/[Pp][Hh][Pp]|\/[Nn][Oo][Dd][Ee]|\/[Ll][Uu][Aa]|\/[Aa][Ww][Kk])/))'
-      pivot_on: [host]
-      window: 1h
-    - name: "Other executions of this tool-set on this host (any arguments)"
-      query: 'data_process_exec_process_binary:/.*(\/[Gg][Aa][Ww][Kk]|\/[Mm][Aa][Ww][Kk]|\/[Nn][Aa][Ww][Kk])/'
-      pivot_on: [host]
-      window: 2h
-    - name: "Persistence via cron / systemd / shell profiles on this host"
-      query: '((data_process_exec_process_binary:/.*(\/[Cc][Rr][Oo][Nn][Tt][Aa][Bb]|\/[Ss][Yy][Ss][Tt][Ee][Mm][Cc][Tt][Ll]|\/[Aa][Tt]|\/[Uu][Pp][Dd][Aa][Tt][Ee]-[Rr][Cc]\.[Dd])/) OR (data_process_exec_process_arguments:/.*\/[Ee][Tt][Cc]\/[Cc][Rr][Oo][Nn].*/) OR (data_process_exec_process_arguments:/.*\/[Ee][Tt][Cc]\/[Ss][Yy][Ss][Tt][Ee][Mm][Dd].*/) OR (data_process_exec_process_arguments:/.*[Rr][Cc]\.[Ll][Oo][Cc][Aa][Ll].*/) OR (data_process_exec_process_arguments:/.*\.[Bb][Aa][Ss][Hh][Rr][Cc].*/) OR (data_process_exec_process_arguments:/.*\.[Bb][Aa][Ss][Hh]_[Pp][Rr][Oo][Ff][Ii][Ll][Ee].*/) OR (data_process_exec_process_arguments:/.*\/[Ee][Tt][Cc]\/[Pp][Rr][Oo][Ff][Ii][Ll][Ee].*/) OR (data_process_exec_process_arguments:/.*[Aa][Uu][Tt][Hh][Oo][Rr][Ii][Zz][Ee][Dd]_[Kk][Ee][Yy][Ss].*/) OR (data_process_exec_process_arguments:/.*\/[Ee][Tt][Cc]\/[Ii][Nn][Ii][Tt]\.[Dd].*/))'
-      pivot_on: [host]
-      window: 4h
-    - name: "Reconnaissance commands on this host"
-      query: 'data_process_exec_process_binary:/.*(\/[Ww][Hh][Oo][Aa][Mm][Ii]|\/[Ii][Dd]|\/[Uu][Nn][Aa][Mm][Ee]|\/[Hh][Oo][Ss][Tt][Nn][Aa][Mm][Ee]|\/[Hh][Oo][Ss][Tt][Nn][Aa][Mm][Ee][Cc][Tt][Ll]|\/[Ss][Ss]|\/[Nn][Ee][Tt][Ss][Tt][Aa][Tt]|\/[Ii][Ff][Cc][Oo][Nn][Ff][Ii][Gg]|\/[Aa][Rr][Pp]|\/[Ww]|\/[Ww][Hh][Oo]|\/[Ll][Aa][Ss][Tt]|\/[Ll][Ss][Oo][Ff]|\/[Nn][Mm][Aa][Pp]|\/[Dd][Ii][Gg]|\/[Ff][Ii][Nn][Dd])/'
-      pivot_on: [host]
-      window: 1h
+  # Behaviour-targeted hunts the engine runs around the alert (not a sweep).
+  - name: GTFOBins shell-escape or interpreter launched under sudo (privilege escalation)
+    query: data_process_exec_parent_binary:/.*\/[Ss][Uu][Dd][Oo]/ AND (data_process_exec_process_binary:/.*\/[Gg]?[Aa][Ww][Kk]/ OR data_process_exec_process_binary:/.*\/[Mm][Aa][Ww][Kk]/ OR data_process_exec_process_binary:/.*\/[Nn][Aa][Ww][Kk]/ OR data_process_exec_process_binary:/.*\/[Ff][Ii][Nn][Dd]/ OR data_process_exec_process_binary:/.*\/[Vv][Ii][Mm]?/ OR data_process_exec_process_binary:/.*\/[Pp][Ee][Rr][Ll]/ OR data_process_exec_process_binary:/.*\/[Pp][Yy][Tt][Hh][Oo][Nn]3?/ OR data_process_exec_process_binary:/.*\/[Rr][Uu][Bb][Yy]/ OR data_process_exec_process_binary:/.*\/[Nn][Mm][Aa][Pp]/)
+    pivot_on:
+    - host
+    window: 1h
+  - name: Other GTFOBins LOLBin shell-breakouts on this host
+    query: (data_process_exec_process_binary:/.*\/[Ff][Ii][Nn][Dd]/ OR data_process_exec_process_binary:/.*\/[Vv][Ii][Mm]?/ OR data_process_exec_process_binary:/.*\/[Gg][Ii][Tt]/ OR data_process_exec_process_binary:/.*\/[Rr][Ss][Yy][Nn][Cc]/ OR data_process_exec_process_binary:/.*\/[Nn][Ii][Cc][Ee]/ OR data_process_exec_process_binary:/.*\/[Ff][Ll][Oo][Cc][Kk]/ OR data_process_exec_process_binary:/.*\/[Ee][Nn][Vv]/ OR data_process_exec_process_binary:/.*\/[Cc][Aa][Pp][Ss][Hh]/ OR data_process_exec_process_binary:/.*\/[Pp][Ee][Rr][Ll]/ OR data_process_exec_process_binary:/.*\/[Nn][Mm][Aa][Pp]/) AND (data_process_exec_process_arguments:/.*[Ss][Yy][Ss][Tt][Ee][Mm]\(.*/ OR data_process_exec_process_arguments:/.*-[Ee][Xx][Ee][Cc].*/ OR data_process_exec_process_arguments:/.*\/[Bb][Ii][Nn]\/[Bb][Aa][Ss][Hh].*/ OR data_process_exec_process_arguments:/.*\/[Bb][Ii][Nn]\/[Ss][Hh].*/ OR data_process_exec_process_arguments:/.*\/[Bb][Ii][Nn]\/[Dd][Aa][Ss][Hh].*/ OR data_process_exec_process_arguments:/.*\/[Bb][Ii][Nn]\/[Zz][Ss][Hh].*/)
+    pivot_on:
+    - host
+    window: 2h
+  - name: Privilege-escalation enumeration on this host (sudo -l, /etc/sudoers, SUID discovery)
+    query: (data_process_exec_process_binary:/.*\/[Ss][Uu][Dd][Oo]/ AND data_process_exec_process_arguments:/.*-[Ll].*/) OR data_process_exec_process_arguments:/.*\/[Ee][Tt][Cc]\/[Ss][Uu][Dd][Oo][Ee][Rr][Ss].*/ OR (data_process_exec_process_arguments:/.*-[Pp][Ee][Rr][Mm].*/ AND data_process_exec_process_arguments:/.*4000.*/) OR (data_process_exec_process_arguments:/.*-[Pp][Ee][Rr][Mm].*/ AND data_process_exec_process_arguments:/.*-[Uu]=[Ss].*/)
+    pivot_on:
+    - host
+    window: 2h
+  - name: Post-breakout identity, system and network reconnaissance on this host
+    query: data_process_exec_process_binary:/.*(\/[Ww][Hh][Oo][Aa][Mm][Ii]|\/[Ii][Dd]|\/[Uu][Nn][Aa][Mm][Ee]|\/[Hh][Oo][Ss][Tt][Nn][Aa][Mm][Ee]|\/[Ii][Ff][Cc][Oo][Nn][Ff][Ii][Gg]|\/[Nn][Ee][Tt][Ss][Tt][Aa][Tt]|\/[Ss][Ss]|\/[Aa][Rr][Pp]|\/[Ll][Aa][Ss][Tt]|\/[Ll][Ss][Bb]_[Rr][Ee][Ll][Ee][Aa][Ss][Ee])/
+    pivot_on:
+    - host
+    window: 1h
+  - name: Persistence and credential-file access following the shell breakout
+    query: data_process_exec_process_arguments:/.*\/[Ee][Tt][Cc]\/[Cc][Rr][Oo][Nn].*/ OR data_process_exec_process_arguments:/.*[Aa][Uu][Tt][Hh][Oo][Rr][Ii][Zz][Ee][Dd]_[Kk][Ee][Yy][Ss].*/ OR data_process_exec_process_arguments:/.*\.[Bb][Aa][Ss][Hh][Rr][Cc].*/ OR data_process_exec_process_arguments:/.*\/[Ee][Tt][Cc]\/[Ss][Hh][Aa][Dd][Oo][Ww].*/ OR data_process_exec_process_arguments:/.*\/[Ee][Tt][Cc]\/[Pp][Aa][Ss][Ss][Ww][Dd].*/ OR (data_process_exec_process_binary:/.*\/[Ss][Yy][Ss][Tt][Ee][Mm][Cc][Tt][Ll]/ AND data_process_exec_process_arguments:/.*[Ee][Nn][Aa][Bb][Ll][Ee].*/)
+    pivot_on:
+    - host
+    window: 4h

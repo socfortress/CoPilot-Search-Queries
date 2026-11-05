@@ -145,19 +145,58 @@ graylog:
   query: data_process_exec_process_binary:/\/[Tt][Mm][Pp]\/.*/ AND _exists_:data_process_exec_process_binary AND NOT (data_process_exec_process_binary:/.*\/[Uu][Ss][Rr]\/[Bb][Ii][Nn]\/[Nn][Ee][Xx][Tt][Cc][Ll][Oo][Uu][Dd]/)
 
 correlation:
-  # Authored by the correlation engine for review.
+  # Authored per-rule (behaviour-researched) for the correlation engine. Related CoPilot
+  # Searches + telemetry pivots to run around an alert, scoped to its host/user/ip/domain.
+  related_rules:
+  - id: cf610c15-ed71-46e1-bdf8-2bd1a99de6c4
+    name: Download File To Potentially Suspicious Directory Via Wget
+    reason: 'Direct precursor: wget writing output into /tmp is exactly how the binary this rule later sees executing got staged there. If this fired on the same host minutes earlier, it names the C2/download source and the dropped filename.'
+  - id: a2d9e2f3-0f43-4c7a-bcd9-9acfc0d723aa
+    name: Suspicious Download and Execute Pattern via Curl/Wget
+    reason: 'Direct precursor and dropper: curl/wget fetching into /tmp or /dev/shm followed by sh -c execution. It is the single-command version of the chain this rule detects the tail of (the actual run from /tmp).'
+  - id: 6419afd1-3742-47a5-a7e6-b50386cd15f8
+    name: Chmod Targeting Sensitive Directories
+    reason: 'Weaponization step immediately before this event: a dropped file in /tmp is not executable until chmod +x is run on it. This rule''s query explicitly covers chmod against /tmp, so a hit is the missing link between download and execution.'
+  - id: 2fade0b6-7423-4835-9d4f-335b39b83867
+    name: Shell Execution Of Process Located In Tmp Directory
+    reason: 'Same process lineage, opposite end: this rule flags the /tmp binary executing, that rule flags the shell it spawns (parent_binary in /tmp). The two fire on the same parent/child exec pair and together prove the /tmp binary is interactively driving the host.'
+  - id: 5cd16c8f-44a6-4654-81e7-a84d6db507d4
+    name: Process Execution From Shared Memory Directory
+    reason: 'Adjacent staging location: /dev/shm is the RAM-backed world-writable sibling of /tmp used for the same fileless payload drop. Attackers who run from /tmp routinely use /dev/shm too, so a co-occurring hit widens one drop into a staging footprint.'
+  - id: 7f734ed0-4f47-46c0-837f-6ee62505abd9
+    name: Potential Netcat Reverse Shell Execution
+    reason: 'Canonical follow-on: a payload run from /tmp commonly establishes C2 via netcat -e <shell>. A hit on the same host shortly after confirms the dropped binary is a backdoor/stager rather than a benign temp file.'
+  - id: 9069ea3c-b213-4c52-be13-86506a227ab1
+    name: Linux Crypto Mining Indicators
+    reason: 'Most common real-world payload identity: opportunistic Linux intrusions overwhelmingly drop a cryptominer into /tmp and launch it. Miner command-line args (stratum+tcp, --donate-level, -o pool.) on the same host identify what the /tmp binary actually is.'
+  - id: e34cfa0c-0a50-4210-9cb3-5632d08eb041
+    name: Potential GobRAT File Discovery Via Grep
+    reason: 'Campaign-specific follow-on: this rule''s own references are GobRAT analyses, and GobRAT drops/runs from tmp-like paths. Grep for GobRAT artifacts (apached, frpc, sshd.sh, zone.arm) on the same host is strong corroboration of a GobRAT infection behind the /tmp execution.'
+  window: 4h
   enrichment_searches:
-  # Rule-specific telemetry pivots the engine runs around an alert from this rule,
-  # scoped to the alert's host/user/IP within the window (behaviour-targeted, not a sweep).
-    - name: "Other executions of this tool-set on this host (any arguments)"
-      query: 'data_process_exec_process_binary:/.*(\/[Nn][Ee][Xx][Tt][Cc][Ll][Oo][Uu][Dd])/'
-      pivot_on: [host]
-      window: 2h
-    - name: "Shell / interpreter execution on this host"
-      query: '((data_process_exec_process_binary:/.*(\/[Bb][Aa][Ss][Hh]|\/[Ss][Hh]|\/[Dd][Aa][Ss][Hh]|\/[Zz][Ss][Hh]|\/[Kk][Ss][Hh]|\/[Aa][Ss][Hh]|\/[Bb][Uu][Ss][Yy][Bb][Oo][Xx])/) OR (data_process_exec_process_binary:/.*(\/[Pp][Yy][Tt][Hh][Oo][Nn]|\/[Pp][Yy][Tt][Hh][Oo][Nn]3|\/[Pp][Ee][Rr][Ll]|\/[Rr][Uu][Bb][Yy]|\/[Pp][Hh][Pp]|\/[Nn][Oo][Dd][Ee]|\/[Ll][Uu][Aa]|\/[Aa][Ww][Kk])/))'
-      pivot_on: [host]
-      window: 1h
-    - name: "Reconnaissance commands on this host"
-      query: 'data_process_exec_process_binary:/.*(\/[Ww][Hh][Oo][Aa][Mm][Ii]|\/[Ii][Dd]|\/[Uu][Nn][Aa][Mm][Ee]|\/[Hh][Oo][Ss][Tt][Nn][Aa][Mm][Ee]|\/[Hh][Oo][Ss][Tt][Nn][Aa][Mm][Ee][Cc][Tt][Ll]|\/[Ss][Ss]|\/[Nn][Ee][Tt][Ss][Tt][Aa][Tt]|\/[Ii][Ff][Cc][Oo][Nn][Ff][Ii][Gg]|\/[Aa][Rr][Pp]|\/[Ww]|\/[Ww][Hh][Oo]|\/[Ll][Aa][Ss][Tt]|\/[Ll][Ss][Oo][Ff]|\/[Nn][Mm][Aa][Pp]|\/[Dd][Ii][Gg]|\/[Ff][Ii][Nn][Dd])/'
-      pivot_on: [host]
-      window: 1h
+  # Behaviour-targeted hunts the engine runs around the alert (not a sweep).
+  - name: Ingress tool transfer (downloader binaries) on this host
+    query: data_process_exec_process_binary:/.*\/([Ww][Gg][Ee][Tt]|[Cc][Uu][Rr][Ll]|[Tt][Ff][Tt][Pp]|[Ss][Cc][Pp]|[Ss][Ff][Tt][Pp]|[Ff][Tt][Pp]|[Nn][Cc]|[Nn][Cc][Aa][Tt])/
+    pivot_on:
+    - host
+    window: 6h
+  - name: Chmod/chown making a file in a world-writable staging dir executable
+    query: (data_process_exec_process_binary:/.*\/([Cc][Hh][Mm][Oo][Dd]|[Cc][Hh][Oo][Ww][Nn])/) AND (data_process_exec_process_arguments:/.*\/([Tt][Mm][Pp]|[Dd][Ee][Vv]\/[Ss][Hh][Mm]|[Vv][Aa][Rr]\/[Tt][Mm][Pp])\/.*/)
+    pivot_on:
+    - host
+    window: 2h
+  - name: Other executions from world-writable staging directories on this host
+    query: data_process_exec_process_binary:/\/([Tt][Mm][Pp]|[Dd][Ee][Vv]\/[Ss][Hh][Mm]|[Vv][Aa][Rr]\/[Tt][Mm][Pp]|[Rr][Uu][Nn]\/[Ss][Hh][Mm])\/.*/
+    pivot_on:
+    - host
+    window: 6h
+  - name: Reverse shell / C2 indicators spawned around the drop
+    query: (data_process_exec_process_arguments:/.*\/[Dd][Ee][Vv]\/[Tt][Cc][Pp]\/.*/ OR data_process_exec_process_arguments:/.*[Mm][Kk][Ff][Ii][Ff][Oo].*/ OR (data_process_exec_process_binary:/.*\/([Nn][Cc]|[Nn][Cc][Aa][Tt])/ AND data_process_exec_process_arguments:/.* -[Ee] .*/))
+    pivot_on:
+    - host
+    window: 1h
+  - name: Persistence or privilege-escalation setup after the drop
+    query: ((data_process_exec_process_binary:/.*\/[Cc][Rr][Oo][Nn][Tt][Aa][Bb]/ AND data_process_exec_process_arguments:/.* -[Ee].*/) OR data_process_exec_process_arguments:/.*\/[Ee][Tt][Cc]\/([Cc][Rr][Oo][Nn]|[Ss][Yy][Ss][Tt][Ee][Mm][Dd]|[Ll][Dd]\.[Ss][Oo]\.[Pp][Rr][Ee][Ll][Oo][Aa][Dd]).*/ OR data_process_exec_process_arguments:/.*\.[Ss][Ss][Hh]\/[Aa][Uu][Tt][Hh][Oo][Rr][Ii][Zz][Ee][Dd]_[Kk][Ee][Yy][Ss].*/ OR data_process_exec_process_arguments:/.* -[Pp][Ee][Rr][Mm] -4000 .*/)
+    pivot_on:
+    - host
+    window: 6h

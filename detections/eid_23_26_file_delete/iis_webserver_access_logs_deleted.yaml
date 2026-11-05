@@ -144,19 +144,58 @@ graylog:
   query: (data_win_system_eventID:"23" OR data_win_system_eventID:"26") AND data_win_eventdata_targetFilename:/.*\\[Ii][Nn][Ee][Tt][Pp][Uu][Bb]\\[Ll][Oo][Gg][Ss]\\[Ll][Oo][Gg][Ff][Ii][Ll][Ee][Ss]\\.*/ AND data_win_eventdata_targetFilename:/.*\.[Ll][Oo][Gg]/
 
 correlation:
-  # Authored by the correlation engine for review.
+  # Authored per-rule (behaviour-researched) for the correlation engine. Related CoPilot
+  # Searches + telemetry pivots to run around an alert, scoped to its host/user/ip/domain.
+  related_rules:
+  - id: 0649be4a-aeb0-45b0-b89e-7f1668f6d9c0
+    name: IIS WebServer Log Deletion via CommandLine Utilities
+    reason: 'The process-creation twin of this file-delete alert: the cmd/powershell/del command that actually performed the IIS log wipe. Its own description names the exact kill chain (web-app exploit on IIS, then delete IIS logs), so it very often fires in the same session as this event.'
+  - id: e4ed6030-ffe5-4e6a-8a8a-ab3c1ab9d94e
+    name: Disable Windows IIS HTTP Logging
+    reason: 'Complementary anti-forensic action on the same IIS logging subsystem (appcmd set config /section:httplogging): after wiping existing access logs the actor stops IIS from recording new HTTP requests. Seen in Bronze Union/TG-3390 web-server intrusions.'
+  - id: fa3c117a-bc0d-416e-a31b-0c0e80653efb
+    name: Chopper Webshell Process Pattern
+    reason: 'The precursor foothold being erased: a China-Chopper-style web shell shows as w3wp.exe (IIS worker) running recon one-liners (whoami&echo, ipconfig&echo). The deleted IIS access log is precisely the record of that web shell''s HTTP requests.'
+  - id: 4ebc877f-4612-45cb-b3a5-8e3834db36c9
+    name: Webshell Hacking Activity Patterns
+    reason: 'Post-exploitation driven through the web shell: the IIS worker (w3wp.exe) spawning credential dumping, recon or exfil (reg save, net user /add, procdump, sekurlsa). This is the activity the attacker is covering by deleting the access logs, and a preview of the escalation to expect.'
+  - id: 2d3cdeec-c0db-45b4-aa86-082f7eb75701
+    name: Microsoft IIS Service Account Password Dumped
+    reason: IIS-specific credential theft (appcmd list /config exposing application-pool/service-account passwords). An actor who owns the IIS box and is cleaning its logs commonly harvests the IIS config secrets in the same session to move laterally.
+  - id: 043c4b8b-3a54-4780-9682-081cb6b8185c
+    name: Suspicious IIS Module Registration
+    reason: IIS-native persistence (w3wp.exe spawning appcmd add module / gacutil). Installing a malicious IIS backdoor module is a frequent next step once the attacker owns the web server and has erased the forensic trail.
+  - id: 63c779ba-f638-40a0-a593-ddd45e8b1ddc
+    name: EventLog EVTX File Deleted
+    reason: Co-occurring broader evidence destruction using the exact same technique (Sysmon EID 23/26 file delete) against Windows event logs (winevt\Logs\*.evtx). An actor wiping IIS access logs typically wipes host event logs in the same cleanup burst.
+  - id: ff301988-c231-4bd0-834c-ac9d73b86586
+    name: PowerShell Console History Logs Deleted
+    reason: 'Another same-technique anti-forensic cleanup (EID 23/26 delete of ConsoleHost_history.txt): removes the PowerShell command history the operator typed through the web shell, pairing with the IIS log wipe to erase both the HTTP trail and the on-host command trail.'
+  window: 2h
   enrichment_searches:
-  # Rule-specific telemetry pivots the engine runs around an alert from this rule,
-  # scoped to the alert's host/user/IP within the window (behaviour-targeted, not a sweep).
-    - name: "Log-clearing / anti-forensic activity on this host"
-      query: '(((data_win_eventdata_commandLine:/.*[Ww][Ee][Vv][Tt][Uu][Tt][Ii][Ll] [Cc][Ll].*/ OR data_win_eventdata_commandLine:/.*[Cc][Ll][Ee][Aa][Rr]-[Ee][Vv][Ee][Nn][Tt][Ll][Oo][Gg].*/ OR data_win_eventdata_commandLine:/.*[Ff][Ss][Uu][Tt][Ii][Ll] [Uu][Ss][Nn] [Dd][Ee][Ll][Ee][Tt][Ee][Jj][Oo][Uu][Rr][Nn][Aa][Ll].*/ OR data_win_eventdata_commandLine:/.*[Vv][Ss][Ss][Aa][Dd][Mm][Ii][Nn] [Dd][Ee][Ll][Ee][Tt][Ee].*/ OR data_win_eventdata_commandLine:/.*[Ww][Ee][Vv][Tt][Uu][Tt][Ii][Ll] [Cc][Ll][Ee][Aa][Rr]-[Ll][Oo][Gg].*/)) OR ((data_win_system_eventID:"1102" OR data_win_system_eventID:"104")))'
-      pivot_on: [host]
-      window: 2h
-    - name: "Execution of programs from user-writable paths on this host"
-      query: 'data_win_system_eventID:"1" AND (data_win_eventdata_image:/.*\\[Uu][Ss][Ee][Rr][Ss]\\.*/ OR data_win_eventdata_image:/.*\\[Pp][Rr][Oo][Gg][Rr][Aa][Mm][Dd][Aa][Tt][Aa]\\.*/ OR data_win_eventdata_image:/.*\\[Ww][Ii][Nn][Dd][Oo][Ww][Ss]\\[Tt][Ee][Mm][Pp]\\.*/ OR data_win_eventdata_image:/.*\\[Aa][Pp][Pp][Dd][Aa][Tt][Aa]\\.*/ OR data_win_eventdata_image:/.*\\[Pp][Uu][Bb][Ll][Ii][Cc]\\.*/ OR data_win_eventdata_image:/.*\\\$[Rr][Ee][Cc][Yy][Cc][Ll][Ee].*/)'
-      pivot_on: [host]
-      window: 1h
-    - name: "Autostart persistence written on this host"
-      query: '(data_win_system_eventID:"12" OR data_win_system_eventID:"13") AND (data_win_eventdata_targetObject:/.*[Cc][Uu][Rr][Rr][Ee][Nn][Tt][Vv][Ee][Rr][Ss][Ii][Oo][Nn]\\[Rr][Uu][Nn].*/ OR data_win_eventdata_targetObject:/.*[Cc][Uu][Rr][Rr][Ee][Nn][Tt][Vv][Ee][Rr][Ss][Ii][Oo][Nn]\\[Rr][Uu][Nn][Oo][Nn][Cc][Ee].*/ OR data_win_eventdata_targetObject:/.*[Cc][Uu][Rr][Rr][Ee][Nn][Tt][Cc][Oo][Nn][Tt][Rr][Oo][Ll][Ss][Ee][Tt]\\[Ss][Ee][Rr][Vv][Ii][Cc][Ee][Ss]\\.*/ OR data_win_eventdata_targetObject:/.*[Ii][Mm][Aa][Gg][Ee] [Ff][Ii][Ll][Ee] [Ee][Xx][Ee][Cc][Uu][Tt][Ii][Oo][Nn] [Oo][Pp][Tt][Ii][Oo][Nn][Ss]\\.*/ OR data_win_eventdata_targetObject:/.*[Ww][Ii][Nn][Ll][Oo][Gg][Oo][Nn]\\[Ss][Hh][Ee][Ll][Ll].*/ OR data_win_eventdata_targetObject:/.*[Ww][Ii][Nn][Ll][Oo][Gg][Oo][Nn]\\[Uu][Ss][Ee][Rr][Ii][Nn][Ii][Tt].*/ OR data_win_eventdata_targetObject:/.*[Cc][Uu][Rr][Rr][Ee][Nn][Tt][Vv][Ee][Rr][Ss][Ii][Oo][Nn]\\[Ee][Xx][Pp][Ll][Oo][Rr][Ee][Rr]\\[Rr][Uu][Nn].*/ OR data_win_eventdata_targetObject:/.*[Pp][Oo][Ll][Ii][Cc][Ii][Ee][Ss]\\[Ee][Xx][Pp][Ll][Oo][Rr][Ee][Rr]\\[Rr][Uu][Nn].*/ OR data_win_eventdata_targetObject:/.*[Cc][Uu][Rr][Rr][Ee][Nn][Tt][Vv][Ee][Rr][Ss][Ii][Oo][Nn]\\[Ww][Ii][Nn][Dd][Oo][Ww][Ss]\\[Ll][Oo][Aa][Dd].*/)'
-      pivot_on: [host]
-      window: 2h
+  # Behaviour-targeted hunts the engine runs around the alert (not a sweep).
+  - name: IIS worker (w3wp.exe) spawning shells or recon on this host
+    query: data_win_system_eventID:"1" AND data_win_eventdata_parentImage:/.*\\[Ww]3[Ww][Pp]\.[Ee][Xx][Ee]/ AND (data_win_eventdata_image:/.*\\[Cc][Mm][Dd]\.[Ee][Xx][Ee]/ OR data_win_eventdata_image:/.*\\[Pp][Oo][Ww][Ee][Rr][Ss][Hh][Ee][Ll][Ll]\.[Ee][Xx][Ee]/ OR data_win_eventdata_image:/.*\\[Pp][Ww][Ss][Hh]\.[Ee][Xx][Ee]/ OR data_win_eventdata_image:/.*\\[Cc][Ss][Cc][Rr][Ii][Pp][Tt]\.[Ee][Xx][Ee]/ OR data_win_eventdata_image:/.*\\[Ww][Ss][Cc][Rr][Ii][Pp][Tt]\.[Ee][Xx][Ee]/ OR data_win_eventdata_image:/.*\\[Nn][Ee][Tt]1?\.[Ee][Xx][Ee]/ OR data_win_eventdata_image:/.*\\[Ww][Hh][Oo][Aa][Mm][Ii]\.[Ee][Xx][Ee]/ OR data_win_eventdata_image:/.*\\[Ii][Pp][Cc][Oo][Nn][Ff][Ii][Gg]\.[Ee][Xx][Ee]/ OR data_win_eventdata_image:/.*\\[Ss][Yy][Ss][Tt][Ee][Mm][Ii][Nn][Ff][Oo]\.[Ee][Xx][Ee]/ OR data_win_eventdata_image:/.*\\[Tt][Aa][Ss][Kk][Ll][Ii][Ss][Tt]\.[Ee][Xx][Ee]/ OR data_win_eventdata_image:/.*\\[Nn][Ll][Tt][Ee][Ss][Tt]\.[Ee][Xx][Ee]/)
+    pivot_on:
+    - host
+    window: 2h
+  - name: Log clearing, IIS HTTP-logging disable, or secure-delete on this host
+    query: (data_win_system_eventID:"1" AND (data_win_eventdata_commandLine:/.*[Ww][Ee][Vv][Tt][Uu][Tt][Ii][Ll] [Cc][Ll].*/ OR data_win_eventdata_commandLine:/.*[Cc][Ll][Ee][Aa][Rr]-[Ee][Vv][Ee][Nn][Tt][Ll][Oo][Gg].*/ OR data_win_eventdata_commandLine:/.*[Cc][Ll][Ee][Aa][Rr]-[Ww][Ii][Nn][Ee][Vv][Ee][Nn][Tt][Ll][Oo][Gg].*/ OR (data_win_eventdata_commandLine:/.*[Aa][Pp][Pp][Cc][Mm][Dd].*/ AND data_win_eventdata_commandLine:/.*[Hh][Tt][Tt][Pp][Ll][Oo][Gg][Gg][Ii][Nn][Gg].*/) OR data_win_eventdata_commandLine:/.*[Ss][Dd][Ee][Ll][Ee][Tt][Ee].*/ OR data_win_eventdata_commandLine:/.*[Ff][Ss][Uu][Tt][Ii][Ll] [Uu][Ss][Nn] [Dd][Ee][Ll][Ee][Tt][Ee][Jj][Oo][Uu][Rr][Nn][Aa][Ll].*/)) OR data_win_system_eventID:"1102" OR data_win_system_eventID:"104"
+    pivot_on:
+    - host
+    window: 2h
+  - name: Credential access (LSASS / SAM hives / IIS config) on this host
+    query: (data_win_system_eventID:"1" AND (data_win_eventdata_commandLine:/.*[Rr][Ee][Gg].* [Ss][Aa][Vv][Ee] .*(([Ss][Aa][Mm])|([Ss][Yy][Ss][Tt][Ee][Mm])|([Ss][Ee][Cc][Uu][Rr][Ii][Tt][Yy])).*/ OR data_win_eventdata_commandLine:/.*[Cc][Oo][Mm][Ss][Vv][Cc][Ss]\.[Dd][Ll][Ll].*[Mm][Ii][Nn][Ii][Dd][Uu][Mm][Pp].*/ OR data_win_eventdata_commandLine:/.*[Pp][Rr][Oo][Cc][Dd][Uu][Mm][Pp].*[Ll][Ss][Aa][Ss][Ss].*/ OR data_win_eventdata_commandLine:/.*[Nn][Tt][Dd][Ss][Uu][Tt][Ii][Ll].*/ OR data_win_eventdata_commandLine:/.*[Aa][Pp][Pp][Cc][Mm][Dd].* [Ll][Ii][Ss][Tt] .*[Pp][Aa][Ss][Ss][Ww][Oo][Rr][Dd].*/)) OR (data_win_system_eventID:"10" AND data_win_eventdata_targetImage:/.*\\[Ll][Ss][Aa][Ss][Ss]\.[Ee][Xx][Ee]/)
+    pivot_on:
+    - host
+    window: 4h
+  - name: Processes executing from the IIS web root (inetpub) on this host
+    query: data_win_system_eventID:"1" AND (data_win_eventdata_image:/.*\\[Ii][Nn][Ee][Tt][Pp][Uu][Bb]\\.*/ OR data_win_eventdata_parentImage:/.*\\[Ii][Nn][Ee][Tt][Pp][Uu][Bb]\\.*/ OR data_win_eventdata_currentDirectory:/.*\\[Ii][Nn][Ee][Tt][Pp][Uu][Bb]\\.*/)
+    pivot_on:
+    - host
+    window: 4h
+  - name: IIS backdoor module registration on this host
+    query: data_win_system_eventID:"1" AND (data_win_eventdata_commandLine:/.*[Aa][Pp][Pp][Cc][Mm][Dd].* [Aa][Dd][Dd] [Mm][Oo][Dd][Uu][Ll][Ee].*/ OR (data_win_eventdata_parentImage:/.*\\[Ww]3[Ww][Pp]\.[Ee][Xx][Ee]/ AND (data_win_eventdata_image:/.*\\[Gg][Aa][Cc][Uu][Tt][Ii][Ll]\.[Ee][Xx][Ee]/ OR data_win_eventdata_commandLine:/.*[Ee][Nn][Tt][Ee][Rr][Pp][Rr][Ii][Ss][Ee][Ss][Ee][Rr][Vv][Ii][Cc][Ee][Ss]\.[Ii][Nn][Tt][Ee][Rr][Nn][Aa][Ll]\.[Pp][Uu][Bb][Ll][Ii][Ss][Hh].*/)))
+    pivot_on:
+    - host
+    window: 6h

@@ -173,19 +173,58 @@ graylog:
   query: data_process_exec_process_arguments:/.*[Bb][Aa][Ss][Ee]64 .*/ AND (data_process_exec_process_arguments:/.*\| [Bb][Aa][Ss][Hh] .*/ OR data_process_exec_process_arguments:/.*\| [Ss][Hh] .*/ OR data_process_exec_process_arguments:/.*\|[Bb][Aa][Ss][Hh] .*/ OR data_process_exec_process_arguments:/.*\|[Ss][Hh] .*/ OR data_process_exec_process_arguments:/.* \|[Ss][Hh]/ OR data_process_exec_process_arguments:/.*\| [Bb][Aa][Ss][Hh]/ OR data_process_exec_process_arguments:/.*\| [Ss][Hh]/ OR data_process_exec_process_arguments:/.*\|[Bb][Aa][Ss][Hh]/)
 
 correlation:
-  # Authored by the correlation engine for review.
+  # Authored per-rule (behaviour-researched) for the correlation engine. Related CoPilot
+  # Searches + telemetry pivots to run around an alert, scoped to its host/user/ip/domain.
+  related_rules:
+  - id: b7c4d8e1-5f2a-4c9b-8d3e-4f5a6b7c8d9e
+    name: Linux Suspicious Base64 Execution
+    reason: 'Complementary half of the same technique: this rule matches ''base64 ... | sh'', that one matches the decode flag ''base64 -d/--decode | bash''. The two fire on the same decode-and-pipe-to-shell command, so a co-hit is near-certain and confirms obfuscated payload execution.'
+  - id: 880973f3-9708-491c-a77b-2a35a1921158
+    name: Linux Shell Pipe to Shell
+    reason: Same inline-into-shell execution family ('sh -c ... | sh') without the base64 wrapper. Automated droppers often emit both the plain curl|bash and the base64|bash variants in one burst, so a co-hit on the same host places this in a single staged-execution event.
+  - id: fe2f9663-41cb-47e2-b954-8a228f3b9dff
+    name: Linux Base64 Encoded Shebang In CLI
+    reason: 'Sibling obfuscation form: a base64-encoded ''#!/bin/bash'' shebang on the command line is an encoded script about to be decoded and run. Seeing it alongside base64|bash on the same host indicates the same actor delivering an obfuscated script payload.'
+  - id: a2d9e2f3-0f43-4c7a-bcd9-9acfc0d723aa
+    name: Suspicious Download and Execute Pattern via Curl/Wget
+    reason: 'Delivery precursor: curl/wget pulling a file into /tmp or /dev/shm then ''sh -c'' is how the base64 blob or its second stage is commonly staged. A download-and-execute hit on the same host in the window is the fetch that fed this decode-to-shell.'
+  - id: 818f7b24-0fba-4c49-a073-8b755573b9c7
+    name: Linux Webshell Indicators
+    reason: 'Web-exploitation origin: this rule''s own Barracuda ESG reference is an internet-facing appliance exploited into base64-piped shell commands. A web-server parent (nginx/apache/php/tomcat) spawning recon on the same host dates the initial access that led to this execution.'
+  - id: 9069ea3c-b213-4c52-be13-86506a227ab1
+    name: Linux Crypto Mining Indicators
+    reason: 'Most common payload objective: base64-pipe droppers overwhelmingly deliver XMRig-style miners (the decoded content is hidden from this event). Miner arguments or stratum URLs on the same host reveal what the hidden payload actually was and raise the incident to Impact.'
+  - id: 6b14bac8-3e3a-4324-8109-42f0546a347f
+    name: Scheduled Cron Task/Job - Linux
+    reason: 'Typical follow-on persistence: once the decoded payload runs, it installs a crontab job (often from /tmp) for recurring re-execution. A cron-persistence hit on the same host shortly after confirms the foothold is being made durable.'
+  - id: 80915f59-9b56-4616-9de0-fd0dea6c12fe
+    name: Linux Logs Clearing Attempts
+    reason: 'Anti-forensic follow-on: the whole point of piping base64 into a shell is stealth, so cleanup (rm/shred of logs and history) frequently follows the payload. A log-clearing hit on the same host corroborates deliberate track-covering around this execution.'
+  window: 2h
   enrichment_searches:
-  # Rule-specific telemetry pivots the engine runs around an alert from this rule,
-  # scoped to the alert's host/user/IP within the window (behaviour-targeted, not a sweep).
-    - name: "Shell / interpreter execution on this host"
-      query: '((data_process_exec_process_binary:/.*(\/[Bb][Aa][Ss][Hh]|\/[Ss][Hh]|\/[Dd][Aa][Ss][Hh]|\/[Zz][Ss][Hh]|\/[Kk][Ss][Hh]|\/[Aa][Ss][Hh]|\/[Bb][Uu][Ss][Yy][Bb][Oo][Xx])/) OR (data_process_exec_process_binary:/.*(\/[Pp][Yy][Tt][Hh][Oo][Nn]|\/[Pp][Yy][Tt][Hh][Oo][Nn]3|\/[Pp][Ee][Rr][Ll]|\/[Rr][Uu][Bb][Yy]|\/[Pp][Hh][Pp]|\/[Nn][Oo][Dd][Ee]|\/[Ll][Uu][Aa]|\/[Aa][Ww][Kk])/))'
-      pivot_on: [host]
-      window: 1h
-    - name: "Reconnaissance commands on this host"
-      query: 'data_process_exec_process_binary:/.*(\/[Ww][Hh][Oo][Aa][Mm][Ii]|\/[Ii][Dd]|\/[Uu][Nn][Aa][Mm][Ee]|\/[Hh][Oo][Ss][Tt][Nn][Aa][Mm][Ee]|\/[Hh][Oo][Ss][Tt][Nn][Aa][Mm][Ee][Cc][Tt][Ll]|\/[Ss][Ss]|\/[Nn][Ee][Tt][Ss][Tt][Aa][Tt]|\/[Ii][Ff][Cc][Oo][Nn][Ff][Ii][Gg]|\/[Aa][Rr][Pp]|\/[Ww]|\/[Ww][Hh][Oo]|\/[Ll][Aa][Ss][Tt]|\/[Ll][Ss][Oo][Ff]|\/[Nn][Mm][Aa][Pp]|\/[Dd][Ii][Gg]|\/[Ff][Ii][Nn][Dd])/'
-      pivot_on: [host]
-      window: 1h
-    - name: "Privilege-escalation tooling executed on this host"
-      query: 'data_process_exec_process_binary:/.*(\/[Ss][Uu][Dd][Oo]|\/[Ss][Uu]|\/[Pp][Kk][Ee][Xx][Ee][Cc]|\/[Dd][Oo][Aa][Ss]|\/[Ss][Ee][Tt][Cc][Aa][Pp]|\/[Cc][Hh][Ss][Hh]|\/[Nn][Ee][Ww][Gg][Rr][Pp])/'
-      pivot_on: [host]
-      window: 2h
+  # Behaviour-targeted hunts the engine runs around the alert (not a sweep).
+  - name: Remote download / payload retrieval on this host
+    query: ((data_process_exec_process_binary:/.*(\/[Cc][Uu][Rr][Ll]|\/[Ww][Gg][Ee][Tt]|\/[Tt][Ff][Tt][Pp]|\/[Ff][Tt][Pp]|\/[Ss][Cc][Pp]|\/[Aa][Rr][Ii][Aa]2[Cc])/) OR (data_process_exec_process_arguments:/.*(\/[Cc][Uu][Rr][Ll] |\/[Ww][Gg][Ee][Tt] | [Cc][Uu][Rr][Ll] | [Ww][Gg][Ee][Tt] ).*/))
+    pivot_on:
+    - host
+    window: 2h
+  - name: Reverse shell / C2 egress primitives on this host
+    query: ((data_process_exec_process_binary:/.*(\/[Nn][Cc]|\/[Nn][Cc][Aa][Tt]|\/[Nn][Ee][Tt][Cc][Aa][Tt]|\/[Ss][Oo][Cc][Aa][Tt])/) OR (data_process_exec_process_arguments:/.*(\/[Dd][Ee][Vv]\/[Tt][Cc][Pp]|\/[Dd][Ee][Vv]\/[Uu][Dd][Pp]|[Mm][Kk][Ff][Ii][Ff][Oo]|[Pp][Tt][Yy]\.[Ss][Pp][Aa][Ww][Nn]|[Ss][Oo][Cc][Kk][Ee][Tt]\.[Ss][Oo][Cc][Kk][Ee][Tt]).*/))
+    pivot_on:
+    - host
+    window: 1h
+  - name: Second-stage binary executed from world-writable directory on this host
+    query: data_process_exec_process_binary:/.*(\/[Tt][Mm][Pp]\/|\/[Vv][Aa][Rr]\/[Tt][Mm][Pp]\/|\/[Dd][Ee][Vv]\/[Ss][Hh][Mm]\/|\/[Rr][Uu][Nn]\/[Ss][Hh][Mm]\/|\/[Dd][Ee][Vv]\/[Mm][Qq][Uu][Ee][Uu][Ee]\/).*/
+    pivot_on:
+    - host
+    window: 2h
+  - name: Persistence via cron / systemd / shell profiles on this host
+    query: ((data_process_exec_process_binary:/.*(\/[Cc][Rr][Oo][Nn][Tt][Aa][Bb]|\/[Ss][Yy][Ss][Tt][Ee][Mm][Cc][Tt][Ll]|\/[Aa][Tt]|\/[Uu][Pp][Dd][Aa][Tt][Ee]-[Rr][Cc]\.[Dd])/) OR (data_process_exec_process_arguments:/.*(\/[Ee][Tt][Cc]\/[Cc][Rr][Oo][Nn]|\/[Ee][Tt][Cc]\/[Ss][Yy][Ss][Tt][Ee][Mm][Dd]|[Rr][Cc]\.[Ll][Oo][Cc][Aa][Ll]|\.[Bb][Aa][Ss][Hh][Rr][Cc]|\.[Bb][Aa][Ss][Hh]_[Pp][Rr][Oo][Ff][Ii][Ll][Ee]|\/[Ee][Tt][Cc]\/[Pp][Rr][Oo][Ff][Ii][Ll][Ee]|[Aa][Uu][Tt][Hh][Oo][Rr][Ii][Zz][Ee][Dd]_[Kk][Ee][Yy][Ss]|\/[Ee][Tt][Cc]\/[Ii][Nn][Ii][Tt]\.[Dd]).*/))
+    pivot_on:
+    - host
+    window: 4h
+  - name: Log / history clearing and tampering on this host
+    query: ((data_process_exec_process_binary:/.*(\/[Ss][Hh][Rr][Ee][Dd]|\/[Tt][Rr][Uu][Nn][Cc][Aa][Tt][Ee]|\/[Cc][Hh][Aa][Tt][Tt][Rr])/) OR (data_process_exec_process_arguments:/.*(\/[Vv][Aa][Rr]\/[Ll][Oo][Gg]|\.[Bb][Aa][Ss][Hh]_[Hh][Ii][Ss][Tt][Oo][Rr][Yy]|[Hh][Ii][Ss][Tt][Ff][Ii][Ll][Ee]|[Hh][Ii][Ss][Tt][Oo][Rr][Yy] -[Cc]|[Ww][Tt][Mm][Pp]|[Bb][Tt][Mm][Pp]|[Ll][Aa][Ss][Tt][Ll][Oo][Gg]|[Aa][Uu][Dd][Ii][Tt]\.[Ll][Oo][Gg]).*/))
+    pivot_on:
+    - host
+    window: 4h

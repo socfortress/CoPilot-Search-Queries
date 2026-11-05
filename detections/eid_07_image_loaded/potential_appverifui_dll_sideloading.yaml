@@ -172,44 +172,58 @@ graylog:
   query: data_win_system_eventID:"7" AND data_win_eventdata_imageLoaded:/.*\\[Aa][Pp][Pp][Vv][Ee][Rr][Ii][Ff][Uu][Ii]\.[Dd][Ll][Ll]/ AND _exists_:data_win_eventdata_image AND _exists_:data_win_eventdata_imageLoaded AND NOT ((data_win_eventdata_image:/[Cc]:\\[Ww][Ii][Nn][Dd][Oo][Ww][Ss]\\[Ss][Yy][Ss][Ww][Oo][Ww]64\\[Aa][Pp][Pp][Vv][Ee][Rr][Ii][Ff]\.[Ee][Xx][Ee]/ OR data_win_eventdata_image:/[Cc]:\\[Ww][Ii][Nn][Dd][Oo][Ww][Ss]\\[Ss][Yy][Ss][Tt][Ee][Mm]32\\[Aa][Pp][Pp][Vv][Ee][Rr][Ii][Ff]\.[Ee][Xx][Ee]/) AND (data_win_eventdata_imageLoaded:/[Cc]:\\[Ww][Ii][Nn][Dd][Oo][Ww][Ss]\\[Ss][Yy][Ss][Tt][Ee][Mm]32\\.*/ OR data_win_eventdata_imageLoaded:/[Cc]:\\[Ww][Ii][Nn][Dd][Oo][Ww][Ss]\\[Ss][Yy][Ss][Ww][Oo][Ww]64\\.*/ OR data_win_eventdata_imageLoaded:/[Cc]:\\[Ww][Ii][Nn][Dd][Oo][Ww][Ss]\\[Ww][Ii][Nn][Ss][Xx][Ss]\\.*/))
 
 correlation:
-  # Authored by the correlation engine for review. Related CoPilot Searches to run
-  # around an alert from this rule, scoped to the same host/user/IP within the window.
+  # Authored per-rule (behaviour-researched) for the correlation engine. Related CoPilot
+  # Searches + telemetry pivots to run around an alert, scoped to its host/user/ip/domain.
   related_rules:
-    - id: ec570e53-4c76-45a9-804d-dc3f355ff7a7
-      name: "7Zip Compressing Dump Files"
-      reason: "next kill-chain tactic: Collection"
-    - id: 0a1255c5-d732-4b62-ac02-b5152d34fb83
-      name: "ADExplorer Writing Complete AD Snapshot Into .dat File"
-      reason: "next kill-chain tactic: Discovery"
-    - id: 1ea13e8c-03ea-409b-877d-ce5c3d2c1cb3
-      name: "ADFS Database Named Pipe Connection By Uncommon Tool"
-      reason: "next kill-chain tactic: Collection"
-    - id: 75bf09fa-1dd7-4d18-9af9-dd9e492562eb
-      name: "ADSI-Cache File Creation By Uncommon Tool"
-      reason: "next kill-chain tactic: Command and Control"
-    - id: 33a2d1dd-f3b0-40bd-8baf-7974468927cc
-      name: "APT PRIVATELOG Image Load Pattern"
-      reason: "next kill-chain tactic: Privilege Escalation"
-    - id: 9aa01d62-7667-4d3b-acb8-8cb5103e2014
-      name: "APT27 - Emissary Panda Activity"
-      reason: "next kill-chain tactic: Execution"
-  window: 1h
+  - id: dbbd9f66-2ed3-4ca2-98a4-6ea985dd1a1c
+    name: Potential Initial Access via DLL Search Order Hijacking
+    reason: 'The file-write precursor to this load: an unusual process dropping a .dll into a user-writable app-dependency folder to be sideloaded. Same staging step that plants a copy of appverif.exe + a malicious appverifUI.dll before it is executed.'
+  - id: 602a1f13-c640-4d73-b053-be9a2fa58b96
+    name: HackTool - Powerup Write Hijack DLL
+    reason: Powerup's Write-HijackDll privilege-escalation primitive, which stages exactly this kind of DLL-hijack. Its presence on the host in the window indicates the appverif sideload is operator-driven privesc tradecraft, not a benign load.
+  - id: b6f91281-20aa-446a-b986-38a92813a18f
+    name: DLL Search Order Hijackig Via Additional Space in Path
+    reason: 'Another file-write precursor: crafting spoofed ''C:\Windows \'' / ''Program Files \'' folders with a planted .dll to win the loader search order. Same plant-a-DLL-where-it-loads-first step that precedes this image-load sideload.'
+  - id: 79c7d1fc-64c7-91be-a616-ccda752efe81
+    name: Windows DLL Search Order Hijacking Hunt with Sysmon
+    reason: 'The generalised form of this detection: any DLL loaded from outside system32/syswow64/winsxs/wbem. An appverifUI.dll loaded from a non-system directory also trips this hunt, confirming the search-order hijack and exposing sibling hijacked loads on the same host.'
+  - id: 799a5f48-0ac1-4e0f-9152-71d137d48c2a
+    name: Abusable DLL Potential Sideloading From Suspicious Location
+    reason: Same EID 7 image-load lens for known-abusable DLLs loaded from suspicious/user-writable paths (PerfLogs, Users\Public, Windows\Temp). If the malicious appverifUI.dll was planted in such a path it co-fires, and it surfaces any other abusable-DLL sideload in the same actor kit.
+  - id: 6b98b92b-4f00-4f62-b4fe-4d1920215771
+    name: Potential DLL Sideloading Of Non-Existent DLLs From System Folders
+    reason: Sibling T1574.001 technique (phantom/search-order hijacking of unsigned, non-Microsoft DLLs) judged on the same signed/signatureStatus fields this rule exports. On a host running one sideload, check for phantom-DLL loads of the actor's other targets.
+  - id: f39ee679-3b1e-4f47-841c-5c3c580acda2
+    name: Windows DLL Search Order Hijacking with iscsicpl
+    reason: 'Sibling trusted-binary DLL-hijack: the auto-elevating iscsicpl.exe loading a planted iscsi.dll to spawn a shell with UAC bypass. Same ''signed binary + planted DLL in its own directory'' pattern as the appverif sideload, and a likely privilege-escalation variant to look for on this host.'
+  - id: f9df325d-d7bc-4a32-8a1a-2cc61dcefc63
+    name: Third Party Software DLL Sideloading
+    reason: Sibling image-load sideload detection targeting third-party-application DLLs. Identical technique and telemetry; on a host with a confirmed sideload it surfaces additional third-party-software sideload targets in the actor's kit.
+  window: 2h
   enrichment_searches:
-  # Rule-specific telemetry pivots the engine runs around an alert from this rule,
-  # scoped to the alert's host/user/IP within the window (behaviour-targeted, not a sweep).
-    - name: "DLL sideloading / execution from user-writable paths on this host"
-      query: '((data_win_system_eventID:"7" AND (data_win_eventdata_imageLoaded:/.*\\[Uu][Ss][Ee][Rr][Ss]\\.*/ OR data_win_eventdata_imageLoaded:/.*\\[Pp][Rr][Oo][Gg][Rr][Aa][Mm][Dd][Aa][Tt][Aa]\\.*/ OR data_win_eventdata_imageLoaded:/.*\\[Ww][Ii][Nn][Dd][Oo][Ww][Ss]\\[Tt][Ee][Mm][Pp]\\.*/ OR data_win_eventdata_imageLoaded:/.*\\[Aa][Pp][Pp][Dd][Aa][Tt][Aa]\\.*/ OR data_win_eventdata_imageLoaded:/.*\\[Pp][Uu][Bb][Ll][Ii][Cc]\\.*/ OR data_win_eventdata_imageLoaded:/.*\\\$[Rr][Ee][Cc][Yy][Cc][Ll][Ee].*/)) OR (data_win_system_eventID:"1" AND (data_win_eventdata_image:/.*\\[Uu][Ss][Ee][Rr][Ss]\\.*/ OR data_win_eventdata_image:/.*\\[Pp][Rr][Oo][Gg][Rr][Aa][Mm][Dd][Aa][Tt][Aa]\\.*/ OR data_win_eventdata_image:/.*\\[Ww][Ii][Nn][Dd][Oo][Ww][Ss]\\[Tt][Ee][Mm][Pp]\\.*/ OR data_win_eventdata_image:/.*\\[Aa][Pp][Pp][Dd][Aa][Tt][Aa]\\.*/ OR data_win_eventdata_image:/.*\\[Pp][Uu][Bb][Ll][Ii][Cc]\\.*/ OR data_win_eventdata_image:/.*\\\$[Rr][Ee][Cc][Yy][Cc][Ll][Ee].*/)))'
-      pivot_on: [host]
-      window: 2h
-    - name: "Other executions of this tool-set on this host (any arguments)"
-      query: 'data_win_system_eventID:"1" AND data_win_eventdata_image:/.*(\\[Aa][Pp][Pp][Vv][Ee][Rr][Ii][Ff]\.[Ee][Xx][Ee])/'
-      pivot_on: [host]
-      window: 2h
-    - name: "Memory/credential-dump creation & LSASS access on this host"
-      query: '((data_win_system_eventID:"1" AND data_win_eventdata_image:/.*(\\[Pp][Rr][Oo][Cc][Dd][Uu][Mm][Pp]\.[Ee][Xx][Ee]|\\[Pp][Rr][Oo][Cc][Dd][Uu][Mm][Pp]64\.[Ee][Xx][Ee]|\\[Ss][Qq][Ll][Dd][Uu][Mm][Pp][Ee][Rr]\.[Ee][Xx][Ee]|\\[Cc][Rr][Ee][Aa][Tt][Ee][Dd][Uu][Mm][Pp]\.[Ee][Xx][Ee]|\\[Rr][Dd][Rr][Ll][Ee][Aa][Kk][Dd][Ii][Aa][Gg]\.[Ee][Xx][Ee]|\\[Dd][Uu][Mm][Pp][Ee][Rr][Tt]\.[Ee][Xx][Ee]|\\[Nn][Aa][Nn][Oo][Dd][Uu][Mm][Pp]\.[Ee][Xx][Ee]|\\[Aa][Vv][Dd][Uu][Mm][Pp]\.[Ee][Xx][Ee])/) OR (data_win_system_eventID:"1" AND (data_win_eventdata_commandLine:/.*[Cc][Oo][Mm][Ss][Vv][Cc][Ss]\.[Dd][Ll][Ll].*/ OR data_win_eventdata_commandLine:/.*[Mm][Ii][Nn][Ii][Dd][Uu][Mm][Pp].*/ OR data_win_eventdata_commandLine:/.*[Dd][Uu][Mm][Pp][Ee][Rr][Tt].*/ OR data_win_eventdata_commandLine:/.*[Nn][Aa][Nn][Oo][Dd][Uu][Mm][Pp].*/ OR data_win_eventdata_commandLine:/.*[Ll][Ss][Aa][Ss][Ss].*/ OR data_win_eventdata_commandLine:/.*[Ss][Ee][Kk][Uu][Rr][Ll][Ss][Aa].*/ OR data_win_eventdata_commandLine:/.*[Nn][Tt][Dd][Ss]\.[Dd][Ii][Tt].*/ OR data_win_eventdata_commandLine:/.*[Nn][Tt][Dd][Ss][Uu][Tt][Ii][Ll].*/)) OR (data_win_system_eventID:"10" AND data_win_eventdata_targetImage:/.*(\\[Ll][Ss][Aa][Ss][Ss]\.[Ee][Xx][Ee])/))'
-      pivot_on: [host]
-      window: 1h
-    - name: "Follow-on LOLBin / signed-binary-proxy execution on this host"
-      query: 'data_win_system_eventID:"1" AND data_win_eventdata_image:/.*(\\[Rr][Uu][Nn][Dd][Ll][Ll]32\.[Ee][Xx][Ee]|\\[Rr][Ee][Gg][Ss][Vv][Rr]32\.[Ee][Xx][Ee]|\\[Mm][Ss][Hh][Tt][Aa]\.[Ee][Xx][Ee]|\\[Ii][Nn][Ss][Tt][Aa][Ll][Ll][Uu][Tt][Ii][Ll]\.[Ee][Xx][Ee]|\\[Rr][Ee][Gg][Aa][Ss][Mm]\.[Ee][Xx][Ee]|\\[Rr][Ee][Gg][Ss][Vv][Cc][Ss]\.[Ee][Xx][Ee]|\\[Mm][Ss][Bb][Uu][Ii][Ll][Dd]\.[Ee][Xx][Ee]|\\[Cc][Ee][Rr][Tt][Uu][Tt][Ii][Ll]\.[Ee][Xx][Ee]|\\[Bb][Ii][Tt][Ss][Aa][Dd][Mm][Ii][Nn]\.[Ee][Xx][Ee]|\\[Ww][Mm][Ii][Cc]\.[Ee][Xx][Ee]|\\[Cc][Mm][Ss][Tt][Pp]\.[Ee][Xx][Ee]|\\[Oo][Dd][Bb][Cc][Cc][Oo][Nn][Ff]\.[Ee][Xx][Ee]|\\[Ff][Oo][Rr][Ff][Ii][Ll][Ee][Ss]\.[Ee][Xx][Ee]|\\[Pp][Cc][Aa][Ll][Uu][Aa]\.[Ee][Xx][Ee]|\\[Mm][Aa][Vv][Ii][Nn][Jj][Ee][Cc][Tt]\.[Ee][Xx][Ee]|\\[Ss][Cc][Rr][Ii][Pp][Tt][Rr][Uu][Nn][Nn][Ee][Rr]\.[Ee][Xx][Ee])/'
-      pivot_on: [host]
-      window: 1h
+  # Behaviour-targeted hunts the engine runs around the alert (not a sweep).
+  - name: AppVerif sideload kit written to disk (appverifUI.dll / appverif.exe plant)
+    query: data_win_system_eventID:"11" AND (data_win_eventdata_targetFilename:/.*\\[Aa][Pp][Pp][Vv][Ee][Rr][Ii][Ff][Uu][Ii]\.[Dd][Ll][Ll]/ OR data_win_eventdata_targetFilename:/.*\\[Aa][Pp][Pp][Vv][Ee][Rr][Ii][Ff]\.[Ee][Xx][Ee]/)
+    pivot_on:
+    - host
+    window: 24h
+  - name: Child processes spawned by appverif.exe (sideloaded payload execution)
+    query: data_win_system_eventID:"1" AND data_win_eventdata_parentImage:/.*\\[Aa][Pp][Pp][Vv][Ee][Rr][Ii][Ff]\.[Ee][Xx][Ee]/
+    pivot_on:
+    - host
+    window: 2h
+  - name: Outbound network connections by appverif.exe (sideloaded DLL C2 beacon)
+    query: data_win_system_eventID:"3" AND data_win_eventdata_image:/.*\\[Aa][Pp][Pp][Vv][Ee][Rr][Ii][Ff]\.[Ee][Xx][Ee]/
+    pivot_on:
+    - host
+    window: 2h
+  - name: Other abusable-DLL loads from user-writable paths on this host (sideload kit)
+    query: data_win_system_eventID:"7" AND (data_win_eventdata_imageLoaded:/.*\\[Uu][Ss][Ee][Rr][Ss]\\.*/ OR data_win_eventdata_imageLoaded:/.*\\[Pp][Rr][Oo][Gg][Rr][Aa][Mm][Dd][Aa][Tt][Aa]\\.*/ OR data_win_eventdata_imageLoaded:/.*\\[Aa][Pp][Pp][Dd][Aa][Tt][Aa]\\.*/ OR data_win_eventdata_imageLoaded:/.*\\[Tt][Ee][Mm][Pp]\\.*/ OR data_win_eventdata_imageLoaded:/.*\\[Pp][Uu][Bb][Ll][Ii][Cc]\\.*/ OR data_win_eventdata_imageLoaded:/.*\\[Pp][Ee][Rr][Ff][Ll][Oo][Gg][Ss]\\.*/) AND NOT (data_win_eventdata_imageLoaded:/.*\\[Ss][Yy][Ss][Tt][Ee][Mm]32\\.*/ OR data_win_eventdata_imageLoaded:/.*\\[Ss][Yy][Ss][Ww][Oo][Ww]64\\.*/ OR data_win_eventdata_imageLoaded:/.*\\[Ww][Ii][Nn][Ss][Xx][Ss]\\.*/)
+    pivot_on:
+    - host
+    window: 6h
+  - name: Persistence established after the sideload (Run keys / scheduled tasks / services)
+    query: (data_win_system_eventID:"13" AND data_win_eventdata_targetObject:/.*\\[Cc][Uu][Rr][Rr][Ee][Nn][Tt][Vv][Ee][Rr][Ss][Ii][Oo][Nn]\\[Rr][Uu][Nn].*/) OR (data_win_system_eventID:"1" AND (data_win_eventdata_image:/.*\\[Ss][Cc][Hh][Tt][Aa][Ss][Kk][Ss]\.[Ee][Xx][Ee]/ OR data_win_eventdata_image:/.*\\[Aa][Tt]\.[Ee][Xx][Ee]/ OR (data_win_eventdata_image:/.*\\[Ss][Cc]\.[Ee][Xx][Ee]/ AND data_win_eventdata_commandLine:/.*[Cc][Rr][Ee][Aa][Tt][Ee].*/)))
+    pivot_on:
+    - host
+    window: 2h

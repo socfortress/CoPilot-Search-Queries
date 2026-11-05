@@ -151,19 +151,58 @@ graylog:
   query: data_process_exec_parent_binary:/.*\\[Bb][Aa][Ss][Hh]/ AND (data_process_exec_process_arguments:/.*[Ii][Dd] -[Gg][Nn] `.*/ OR data_process_exec_process_arguments:/.*[Ii][Dd] -[Gg][Nn] '.*/)
 
 correlation:
-  # Authored by the correlation engine for review.
+  # Authored per-rule (behaviour-researched) for the correlation engine. Related CoPilot
+  # Searches + telemetry pivots to run around an alert, scoped to its host/user/ip/domain.
+  related_rules:
+  - id: d292e0af-9a18-420c-9525-ec0ac3936892
+    name: Suspicious Java Children Processes
+    reason: 'Same exploitation from the parent side: Apache Spark is a JVM (java) process, and CVE-2022-33891 makes that java process shell out to ''bash -c id -Gn <doAs>''. This rule fires on java spawning a shell/curl/wget/python, corroborating the Spark RCE on the same host independently of the exact ''id -Gn'' injection string.'
+  - id: 0cf7a157-8879-41a2-8f55-388dd23746b7
+    name: Linux Recon Indicators
+    reason: 'Immediate post-exploitation step: once the injected command runs as the Spark service user, the attacker enumerates the host (whoami/id/uname/network). A recon burst on the same host right after the injection confirms hands-on triage of the foothold.'
+  - id: a2d9e2f3-0f43-4c7a-bcd9-9acfc0d723aa
+    name: Suspicious Download and Execute Pattern via Curl/Wget
+    reason: 'The textbook next action after a one-shot Spark injection: use curl/wget to pull a second-stage script into /tmp or /dev/shm and run it immediately. A hit on the same host within the window is the attacker staging their payload through the new foothold.'
+  - id: 880973f3-9708-491c-a77b-2a35a1921158
+    name: Linux Shell Pipe to Shell
+    reason: '''curl http://.../x.sh | bash'' one-liners are the signature delivery method of the cryptojacking crews that mass-exploit Spark/Hadoop. The injected doAs command is very likely to be exactly such a pipe-to-shell loader, so this fires on the same host as the payload fetch.'
+  - id: 7f734ed0-4f47-46c0-837f-6ee62505abd9
+    name: Potential Netcat Reverse Shell Execution
+    reason: CVE-2022-33891 gives only blind, one-shot command execution, so attackers immediately upgrade to interactive access. A netcat '-e' reverse shell from the compromised Spark host is hands-on-keyboard C2 following the injection.
+  - id: 312b42b1-bded-4441-8b58-163a3af58775
+    name: Potentially Suspicious Execution From Tmp Folder
+    reason: The Spark service account is unprivileged and can only write to world-writable directories, so dropped tooling and miners run from /tmp. An execution whose binary lives under /tmp/ on this host after the injection is the staged payload actually running.
+  - id: 9069ea3c-b213-4c52-be13-86506a227ab1
+    name: Linux Crypto Mining Indicators
+    reason: Spark/Hadoop compute clusters are the prime cryptojacking target and XMRig deployment is the overwhelming end-goal of CVE-2022-33891 exploitation. Miner command-line indicators (stratum pools, --donate-level) on this host are the Impact stage that closes out this incident.
+  - id: 0f79c4d2-4e1f-4683-9c36-b5469a665e06
+    name: Access of Sudoers File Content
+    reason: The Spark service user is unprivileged, so the attacker's first privilege-escalation move is reading /etc/sudoers for a path to root. This access on the same host after the injection signals escalation attempts from the service-user foothold.
+  window: 1h
   enrichment_searches:
-  # Rule-specific telemetry pivots the engine runs around an alert from this rule,
-  # scoped to the alert's host/user/IP within the window (behaviour-targeted, not a sweep).
-    - name: "Shell / interpreter execution on this host"
-      query: '((data_process_exec_process_binary:/.*(\/[Bb][Aa][Ss][Hh]|\/[Ss][Hh]|\/[Dd][Aa][Ss][Hh]|\/[Zz][Ss][Hh]|\/[Kk][Ss][Hh]|\/[Aa][Ss][Hh]|\/[Bb][Uu][Ss][Yy][Bb][Oo][Xx])/) OR (data_process_exec_process_binary:/.*(\/[Pp][Yy][Tt][Hh][Oo][Nn]|\/[Pp][Yy][Tt][Hh][Oo][Nn]3|\/[Pp][Ee][Rr][Ll]|\/[Rr][Uu][Bb][Yy]|\/[Pp][Hh][Pp]|\/[Nn][Oo][Dd][Ee]|\/[Ll][Uu][Aa]|\/[Aa][Ww][Kk])/))'
-      pivot_on: [host]
-      window: 1h
-    - name: "Reconnaissance commands on this host"
-      query: 'data_process_exec_process_binary:/.*(\/[Ww][Hh][Oo][Aa][Mm][Ii]|\/[Ii][Dd]|\/[Uu][Nn][Aa][Mm][Ee]|\/[Hh][Oo][Ss][Tt][Nn][Aa][Mm][Ee]|\/[Hh][Oo][Ss][Tt][Nn][Aa][Mm][Ee][Cc][Tt][Ll]|\/[Ss][Ss]|\/[Nn][Ee][Tt][Ss][Tt][Aa][Tt]|\/[Ii][Ff][Cc][Oo][Nn][Ff][Ii][Gg]|\/[Aa][Rr][Pp]|\/[Ww]|\/[Ww][Hh][Oo]|\/[Ll][Aa][Ss][Tt]|\/[Ll][Ss][Oo][Ff]|\/[Nn][Mm][Aa][Pp]|\/[Dd][Ii][Gg]|\/[Ff][Ii][Nn][Dd])/'
-      pivot_on: [host]
-      window: 1h
-    - name: "Privilege-escalation tooling executed on this host"
-      query: 'data_process_exec_process_binary:/.*(\/[Ss][Uu][Dd][Oo]|\/[Ss][Uu]|\/[Pp][Kk][Ee][Xx][Ee][Cc]|\/[Dd][Oo][Aa][Ss]|\/[Ss][Ee][Tt][Cc][Aa][Pp]|\/[Cc][Hh][Ss][Hh]|\/[Nn][Ee][Ww][Gg][Rr][Pp])/'
-      pivot_on: [host]
-      window: 2h
+  # Behaviour-targeted hunts the engine runs around the alert (not a sweep).
+  - name: Remote payload retrieval tooling on this host
+    query: data_process_exec_process_binary:/.*(\/[Cc][Uu][Rr][Ll]|\/[Ww][Gg][Ee][Tt]|\/[Tt][Ff][Tt][Pp]|\/[Ss][Cc][Pp]|\/[Ss][Ff][Tt][Pp]|\/[Ff][Tt][Pp])/
+    pivot_on:
+    - host
+    window: 2h
+  - name: Reverse-shell / backconnect patterns on this host
+    query: (data_process_exec_process_arguments:/.*\/[Dd][Ee][Vv]\/[Tt][Cc][Pp]\/.*/ OR data_process_exec_process_arguments:/.*\/[Dd][Ee][Vv]\/[Uu][Dd][Pp]\/.*/ OR data_process_exec_process_arguments:/.*[Mm][Kk][Ff][Ii][Ff][Oo].*/ OR data_process_exec_process_arguments:/.*[Pp][Tt][Yy]\.[Ss][Pp][Aa][Ww][Nn].*/ OR data_process_exec_process_binary:/.*(\/[Nn][Cc]|\/[Nn][Cc][Aa][Tt]|\/[Nn][Ee][Tt][Cc][Aa][Tt]|\/[Ss][Oo][Cc][Aa][Tt])/)
+    pivot_on:
+    - host
+    window: 2h
+  - name: Java / Spark service process spawning a shell or interpreter on this host
+    query: data_process_exec_parent_binary:/.*\/[Jj][Aa][Vv][Aa]/ AND data_process_exec_process_binary:/.*(\/[Bb][Aa][Ss][Hh]|\/[Ss][Hh]|\/[Dd][Aa][Ss][Hh]|\/[Zz][Ss][Hh]|\/[Kk][Ss][Hh]|\/[Pp][Yy][Tt][Hh][Oo][Nn]|\/[Pp][Ee][Rr][Ll]|\/[Rr][Uu][Bb][Yy])/
+    pivot_on:
+    - host
+    window: 1h
+  - name: Privilege escalation and sensitive credential access on this host
+    query: (data_process_exec_process_binary:/.*(\/[Ss][Uu][Dd][Oo]|\/[Ss][Uu]|\/[Pp][Kk][Ee][Xx][Ee][Cc]|\/[Dd][Oo][Aa][Ss]|\/[Ss][Ee][Tt][Cc][Aa][Pp]|\/[Gg][Ee][Tt][Cc][Aa][Pp])/ OR data_process_exec_process_arguments:/.*\/[Ee][Tt][Cc]\/[Ss][Hh][Aa][Dd][Oo][Ww].*/ OR data_process_exec_process_arguments:/.*\/[Ee][Tt][Cc]\/[Ss][Uu][Dd][Oo][Ee][Rr][Ss].*/)
+    pivot_on:
+    - host
+    window: 2h
+  - name: Persistence via cron, systemd and SSH authorized_keys on this host
+    query: ((data_process_exec_process_binary:/.*(\/[Cc][Rr][Oo][Nn][Tt][Aa][Bb]|\/[Aa][Tt]|\/[Ss][Yy][Ss][Tt][Ee][Mm][Cc][Tt][Ll])/) OR (data_process_exec_process_arguments:/.*\/[Ee][Tt][Cc]\/[Cc][Rr][Oo][Nn].*/) OR (data_process_exec_process_arguments:/.*[Aa][Uu][Tt][Hh][Oo][Rr][Ii][Zz][Ee][Dd]_[Kk][Ee][Yy][Ss].*/) OR (data_process_exec_process_arguments:/.*\/[Ee][Tt][Cc]\/[Ss][Yy][Ss][Tt][Ee][Mm][Dd].*/) OR (data_process_exec_process_arguments:/.*\.[Ss][Ee][Rr][Vv][Ii][Cc][Ee].*/))
+    pivot_on:
+    - host
+    window: 4h

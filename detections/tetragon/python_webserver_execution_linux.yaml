@@ -172,29 +172,58 @@ graylog:
   query: (data_process_exec_process_binary:/.*\/[Pp][Yy][Tt][Hh][Oo][Nn]/ OR data_process_exec_process_binary:/.*\/[Pp][Yy][Tt][Hh][Oo][Nn]2/ OR data_process_exec_process_binary:/.*\/[Pp][Yy][Tt][Hh][Oo][Nn]3/ OR data_process_exec_process_binary:/.*\/[Pp][Yy][Tt][Hh][Oo][Nn]2\..*/ OR data_process_exec_process_binary:/.*\/[Pp][Yy][Tt][Hh][Oo][Nn]3\..*/) AND (data_process_exec_process_arguments:/.*[Hh][Tt][Tt][Pp]\.[Ss][Ee][Rr][Vv][Ee][Rr].*/ OR data_process_exec_process_arguments:/.*[Ss][Ii][Mm][Pp][Ll][Ee][Hh][Tt][Tt][Pp][Ss][Ee][Rr][Vv][Ee][Rr].*/)
 
 correlation:
-  # Authored by the correlation engine for review. Related CoPilot Searches to run
-  # around an alert from this rule, scoped to the same host/user/IP within the window.
+  # Authored per-rule (behaviour-researched) for the correlation engine. Related CoPilot
+  # Searches + telemetry pivots to run around an alert, scoped to its host/user/ip/domain.
   related_rules:
-    - id: cb39d16b-b3b6-4a7a-8222-1cf24b686ffc
-      name: "Data Exfiltration with Wget"
-      reason: "next kill-chain tactic: Exfiltration"
-  window: 1h
+  - id: a2d9e2f3-0f43-4c7a-bcd9-9acfc0d723aa
+    name: Suspicious Download and Execute Pattern via Curl/Wget
+    reason: 'Precursor ingress-tool-transfer: the operator pulled a stager/payload into /tmp or /dev/shm and ran it before standing up this ad-hoc server; both are the same file-movement motive, so a curl/wget download-and-exec on the host minutes earlier is the foothold that led to the Python relay.'
+  - id: cf610c15-ed71-46e1-bdf8-2bd1a99de6c4
+    name: Download File To Potentially Suspicious Directory Via Wget
+    reason: 'Precursor/co-occurring: wget dropping content into a suspicious directory is often the exact material the attacker then redistributes over http.server; the download step populates the directory the Python server exposes.'
+  - id: 32e62bc7-3de0-4bb1-90af-532978fe42c0
+    name: Python Reverse Shell Execution Via PTY And Socket Modules
+    reason: 'Precursor interactive foothold, and the same interpreter abused twice: a python socket/pty reverse shell is the hands-on-keyboard session from which an operator typically launches ''python -m http.server'' to move files, so seeing it first on the host confirms an active intrusion rather than a developer.'
+  - id: 818f7b24-0fba-4c49-a073-8b755573b9c7
+    name: Linux Webshell Indicators
+    reason: 'Co-occurring access vector: a web-server process spawning child processes (webshell) is a common way the box was reached, and a webshell pivoting to python http.server for file transfer is the same event seen from the parent side; confirms how command execution was obtained.'
+  - id: 0cf7a157-8879-41a2-8f55-388dd23746b7
+    name: Linux Recon Indicators
+    reason: 'Precursor: host/credential survey (find with -perm -4000, .htpasswd, key material) is what the attacker runs to decide which files to collect; recon on the same host shortly before this fires selects the data the http.server is about to serve or exfil.'
+  - id: 5cd16c8f-44a6-4654-81e7-a84d6db507d4
+    name: Process Execution From Shared Memory Directory
+    reason: 'Co-occurring fileless staging ground: /dev/shm is a RAM-backed tmpfs used to stage payloads/data without touching disk, and that staging directory is frequently the very path served by the Python HTTP server; execution from it on the same host ties the two together.'
+  - id: 00b90cc1-17ec-402c-96ad-3a8117d7a582
+    name: Suspicious Curl File Upload - Linux
+    reason: 'Follow-on exfiltration: once files are collected, the push half of the transfer is curl adding a file to a web request (T1567/T1105); a curl upload on the same host around this alert is the data actually leaving the box.'
+  - id: c3d9e7f1-6a2b-4d8f-9c2b-5e6f7a8b9c0d
+    name: Linux Suspicious Curl Data Exfiltration
+    reason: 'Follow-on exfiltration: curl with form/upload flags or targeting cloud credential files is the completed exfil action the staging server leads to; its presence on the same host upgrades the staging alert into a confirmed data-theft incident.'
+  window: 2h
   enrichment_searches:
-  # Rule-specific telemetry pivots the engine runs around an alert from this rule,
-  # scoped to the alert's host/user/IP within the window (behaviour-targeted, not a sweep).
-    - name: "Other executions of this tool-set on this host (any arguments)"
-      query: 'data_process_exec_process_binary:/.*(\/[Pp][Yy][Tt][Hh][Oo][Nn]2)/'
-      pivot_on: [host]
-      window: 2h
-    - name: "Shell / interpreter execution on this host"
-      query: '((data_process_exec_process_binary:/.*(\/[Bb][Aa][Ss][Hh]|\/[Ss][Hh]|\/[Dd][Aa][Ss][Hh]|\/[Zz][Ss][Hh]|\/[Kk][Ss][Hh]|\/[Aa][Ss][Hh]|\/[Bb][Uu][Ss][Yy][Bb][Oo][Xx])/) OR (data_process_exec_process_binary:/.*(\/[Pp][Yy][Tt][Hh][Oo][Nn]|\/[Pp][Yy][Tt][Hh][Oo][Nn]3|\/[Pp][Ee][Rr][Ll]|\/[Rr][Uu][Bb][Yy]|\/[Pp][Hh][Pp]|\/[Nn][Oo][Dd][Ee]|\/[Ll][Uu][Aa]|\/[Aa][Ww][Kk])/))'
-      pivot_on: [host]
-      window: 1h
-    - name: "Reconnaissance commands on this host"
-      query: 'data_process_exec_process_binary:/.*(\/[Ww][Hh][Oo][Aa][Mm][Ii]|\/[Ii][Dd]|\/[Uu][Nn][Aa][Mm][Ee]|\/[Hh][Oo][Ss][Tt][Nn][Aa][Mm][Ee]|\/[Hh][Oo][Ss][Tt][Nn][Aa][Mm][Ee][Cc][Tt][Ll]|\/[Ss][Ss]|\/[Nn][Ee][Tt][Ss][Tt][Aa][Tt]|\/[Ii][Ff][Cc][Oo][Nn][Ff][Ii][Gg]|\/[Aa][Rr][Pp]|\/[Ww]|\/[Ww][Hh][Oo]|\/[Ll][Aa][Ss][Tt]|\/[Ll][Ss][Oo][Ff]|\/[Nn][Mm][Aa][Pp]|\/[Dd][Ii][Gg]|\/[Ff][Ii][Nn][Dd])/'
-      pivot_on: [host]
-      window: 1h
-    - name: "Outbound-transfer / upload tooling on this host"
-      query: '((data_process_exec_process_binary:/.*(\/[Cc][Uu][Rr][Ll]|\/[Ww][Gg][Ee][Tt]|\/[Tt][Ff][Tt][Pp])/) OR (data_process_exec_process_binary:/.*(\/[Ss][Cc][Pp]|\/[Rr][Ss][Yy][Nn][Cc]|\/[Rr][Cc][Ll][Oo][Nn][Ee]|\/[Cc][Uu][Rr][Ll])/))'
-      pivot_on: [host]
-      window: 2h
+  # Behaviour-targeted hunts the engine runs around the alert (not a sweep).
+  - name: Outbound file-transfer tooling on this host
+    query: (data_process_exec_process_binary:/.*\/([Cc][Uu][Rr][Ll]|[Ww][Gg][Ee][Tt]|[Ss][Cc][Pp]|[Ss][Ff][Tt][Pp]|[Rr][Ss][Yy][Nn][Cc]|[Tt][Ff][Tt][Pp]|[Ff][Tt][Pp]|[Nn][Cc]|[Nn][Cc][Aa][Tt]|[Nn][Ee][Tt][Cc][Aa][Tt]|[Ss][Oo][Cc][Aa][Tt])/)
+    pivot_on:
+    - host
+    window: 2h
+  - name: Archive / compression staging on this host
+    query: (data_process_exec_process_binary:/.*\/([Tt][Aa][Rr]|[Zz][Ii][Pp]|[Gg][Zz][Ii][Pp]|[Bb][Zz][Ii][Pp]2|[Xx][Zz]|7[Zz]|7[Zz][Aa]|[Gg][Pp][Gg])/)
+    pivot_on:
+    - host
+    window: 2h
+  - name: Interactive shell session on this host
+    query: (data_process_exec_process_binary:/.*\/([Bb][Aa][Ss][Hh]|[Ss][Hh]|[Dd][Aa][Ss][Hh]|[Zz][Ss][Hh]|[Aa][Ss][Hh]|[Kk][Ss][Hh])/)
+    pivot_on:
+    - host
+    window: 1h
+  - name: Access to credential or key material on this host
+    query: (data_process_exec_process_arguments:/.*(\/etc\/shadow|\/etc\/passwd|id_rsa|id_ed25519|\.ssh\/|\.aws\/|\.htpasswd|[Cc][Rr][Ee][Dd][Ee][Nn][Tt][Ii][Aa][Ll][Ss]).*/)
+    pivot_on:
+    - host
+    window: 4h
+  - name: Reconnaissance / host survey on this host
+    query: (data_process_exec_process_binary:/.*\/([Ww][Hh][Oo][Aa][Mm][Ii]|[Ii][Dd]|[Uu][Nn][Aa][Mm][Ee]|[Hh][Oo][Ss][Tt][Nn][Aa][Mm][Ee]|[Ii][Pp]|[Ss][Ss]|[Nn][Ee][Tt][Ss][Tt][Aa][Tt]|[Ii][Ff][Cc][Oo][Nn][Ff][Ii][Gg]|[Aa][Rr][Pp])/)
+    pivot_on:
+    - host
+    window: 1h

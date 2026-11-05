@@ -213,23 +213,49 @@ graylog:
   query: "((data_process_exec_process_binary:/.*\\/[Pp][Yy][Tt][Hh][Oo][Nn]3.*/ AND data_process_exec_process_arguments:/.*[Ee][Xx][Ee][Cc]\\([Bb][Aa][Ss][Ee]64\\.[Bb]64[Dd][Ee][Cc][Oo][Dd][Ee]\\('[Aa][Ww]1[Ww][Bb]3[Jj]0.*/ AND data_process_exec_process_arguments:/.*[Kk][Ii]2[Nn][Ff]9[Tt][Qq]1[Jj][Jj][Uu][Ff][Qq][Gg][Pp][Ss][Aa][Ii][Yy][Vv].*/) OR (data_process_exec_process_binary:/.*\\/[Tt][Aa][Rr]/ AND data_process_exec_process_arguments:/.*[Tt][Pp][Cc][Pp]\\.[Tt][Aa][Rr]\\.[Gg][Zz].*/ AND data_process_exec_process_arguments:/.*[Pp][Aa][Yy][Ll][Oo][Aa][Dd]\\.[Ee][Nn][Cc].*/ AND data_process_exec_process_arguments:/.*[Ss][Ee][Ss][Ss][Ii][Oo][Nn]\\.[Kk][Ee][Yy]\\.[Ee][Nn][Cc].*/) OR (data_process_exec_process_binary:/.*\\/[Cc][Uu][Rr][Ll]/ AND data_process_exec_process_arguments:/.*[Mm][Oo][Dd][Ee][Ll][Ss]\\.[Ll][Ii][Tt][Ee][Ll][Ll][Mm]\\.[Cc][Ll][Oo][Uu][Dd].*/ AND data_process_exec_process_arguments:/.*[Xx]-[Ff][Ii][Ll][Ee][Nn][Aa][Mm][Ee]: [Tt][Pp][Cc][Pp]\\.[Tt][Aa][Rr]\\.[Gg][Zz].*/) OR (data_process_exec_parent_binary:/.*\\/[Pp][Yy][Tt][Hh][Oo][Nn]3.*/ AND data_process_exec_process_arguments:/.*[Ss][Yy][Ss][Tt][Ee][Mm][Cc][Tt][Ll].*/ AND data_process_exec_process_arguments:/.*--[Uu][Ss][Ee][Rr].*/ AND data_process_exec_process_arguments:/.*[Ss][Yy][Ss][Mm][Oo][Nn].*/))"
 
 correlation:
-  # Authored by the correlation engine for review.
+  # Authored per-rule (behaviour-researched) for the correlation engine. Related CoPilot
+  # Searches + telemetry pivots to run around an alert, scoped to its host/user/ip/domain.
+  related_rules:
+  - id: 55e862a8-dd9c-4651-807a-f21fcad56716
+    name: Python One-Liners with Base64 Decoding - Linux
+    reason: Same obfuscated python3 base64-decode-and-exec loader technique as this malware's first stage (exec(base64.b64decode(...))); this broader rule catches the sibling and secondary base64 loader stages the TeamPCP payload runs on the same host, even when the exact IOC strings differ.
+  - id: 00b90cc1-17ec-402c-96ad-3a8117d7a582
+    name: Suspicious Curl File Upload - Linux
+    reason: Generic curl file-upload/exfil detector that independently flags the curl POST shipping the tpcp.tar.gz / payload.enc archive off-box; corroborates and widens this malware's exfiltration step beyond the hard-coded models.litellm.cloud destination.
+  - id: 31545105-3444-4584-bebf-c466353230d2
+    name: Touch Suspicious Service File
+    reason: Timestomping (touch -t) of a .service unit is the anti-forensic step that accompanies dropping the malicious 'sysmon' systemd --user service this rule's persistence branch detects - same host, same persistence stage, backdating the unit so it blends with legitimate ones.
+  - id: d7a650c4-226c-451e-948f-cc490db506aa
+    name: PUA - TruffleHog Execution - Linux
+    reason: TeamPCP's payload harvests every credential on the host; a dedicated secret-scanner (trufflehog) running on the same host within the window independently corroborates active credential/secret harvesting - the collection objective this backdoor is built for.
+  - id: 3c6f5e4a-8d0b-6abc-d9e2-4f7a6b8c9d0e
+    name: TanStack Supply-Chain Attack Execution Indicators - Linux
+    reason: Sibling trojanized-package execution from the same 2026 wave of supply-chain package-poisoning campaigns; its python3-runs-a-staged-payload branch mirrors this loader, so both firing on one host points at a developer or build host pulling from a poisoned package registry.
+  window: 2h
   enrichment_searches:
-  # Rule-specific telemetry pivots the engine runs around an alert from this rule,
-  # scoped to the alert's host/user/IP within the window (behaviour-targeted, not a sweep).
-    - name: "Service / daemon persistence on this host"
-      query: '((data_process_exec_process_binary:/.*(\/[Ss][Yy][Ss][Tt][Ee][Mm][Cc][Tt][Ll])/) OR (data_process_exec_process_arguments:/.*\/[Ee][Tt][Cc]\/[Ss][Yy][Ss][Tt][Ee][Mm][Dd].*/) OR (data_process_exec_process_arguments:/.*\/[Ee][Tt][Cc]\/[Ii][Nn][Ii][Tt]\.[Dd].*/) OR (data_process_exec_process_arguments:/.*[Rr][Cc]\.[Ll][Oo][Cc][Aa][Ll].*/))'
-      pivot_on: [host]
-      window: 4h
-    - name: "Other executions of this tool-set on this host (any arguments)"
-      query: 'data_process_exec_process_binary:/.*(\/[Tt][Aa][Rr])/'
-      pivot_on: [host]
-      window: 2h
-    - name: "Outbound-transfer / upload tooling on this host"
-      query: '((data_process_exec_process_binary:/.*(\/[Cc][Uu][Rr][Ll]|\/[Ww][Gg][Ee][Tt]|\/[Tt][Ff][Tt][Pp])/) OR (data_process_exec_process_binary:/.*(\/[Ss][Cc][Pp]|\/[Rr][Ss][Yy][Nn][Cc]|\/[Rr][Cc][Ll][Oo][Nn][Ee]|\/[Cc][Uu][Rr][Ll])/))'
-      pivot_on: [host]
-      window: 2h
-    - name: "Shell / interpreter execution on this host"
-      query: '((data_process_exec_process_binary:/.*(\/[Bb][Aa][Ss][Hh]|\/[Ss][Hh]|\/[Dd][Aa][Ss][Hh]|\/[Zz][Ss][Hh]|\/[Kk][Ss][Hh]|\/[Aa][Ss][Hh]|\/[Bb][Uu][Ss][Yy][Bb][Oo][Xx])/) OR (data_process_exec_process_binary:/.*(\/[Pp][Yy][Tt][Hh][Oo][Nn]|\/[Pp][Yy][Tt][Hh][Oo][Nn]3|\/[Pp][Ee][Rr][Ll]|\/[Rr][Uu][Bb][Yy]|\/[Pp][Hh][Pp]|\/[Nn][Oo][Dd][Ee]|\/[Ll][Uu][Aa]|\/[Aa][Ww][Kk])/))'
-      pivot_on: [host]
-      window: 1h
+  # Behaviour-targeted hunts the engine runs around the alert (not a sweep).
+  - name: Credential-store / secrets file access on this host (harvesting)
+    query: ((data_process_exec_process_arguments:/.*\/[Ee][Tt][Cc]\/[Ss][Hh][Aa][Dd][Oo][Ww].*/) OR (data_process_exec_process_arguments:/.*[Ii][Dd]_[Rr][Ss][Aa].*/) OR (data_process_exec_process_arguments:/.*\.[Ss][Ss][Hh]\/.*/) OR (data_process_exec_process_arguments:/.*\.[Aa][Ww][Ss]\/[Cc][Rr][Ee][Dd][Ee][Nn][Tt][Ii][Aa][Ll][Ss].*/) OR (data_process_exec_process_arguments:/.*\.[Cc][Oo][Nn][Ff][Ii][Gg]\/[Gg][Cc][Ll][Oo][Uu][Dd].*/) OR (data_process_exec_process_arguments:/.*\.[Kk][Uu][Bb][Ee]\/[Cc][Oo][Nn][Ff][Ii][Gg].*/) OR (data_process_exec_process_arguments:/.*\.[Nn][Ee][Tt][Rr][Cc].*/))
+    pivot_on:
+    - host
+    window: 2h
+  - name: Archive / encryption staging of the exfil bundle on this host
+    query: ((data_process_exec_process_binary:/.*\/[Tt][Aa][Rr]/) OR (data_process_exec_process_binary:/.*\/[Gg][Zz][Ii][Pp]/) OR (data_process_exec_process_binary:/.*\/[Zz][Ii][Pp]/) OR (data_process_exec_process_binary:/.*\/[Oo][Pp][Ee][Nn][Ss][Ss][Ll]/) OR (data_process_exec_process_binary:/.*\/[Gg][Pp][Gg]/) OR (data_process_exec_process_arguments:/.*[Tt][Pp][Cc][Pp]\.[Tt][Aa][Rr]\.[Gg][Zz].*/) OR (data_process_exec_process_arguments:/.*\.[Ee][Nn][Cc].*/))
+    pivot_on:
+    - host
+    window: 2h
+  - name: Outbound exfiltration tooling / C2 contact on this host
+    query: ((data_process_exec_process_binary:/.*\/[Cc][Uu][Rr][Ll]/ AND (data_process_exec_process_arguments:/.* --[Uu][Pp][Ll][Oo][Aa][Dd]-[Ff][Ii][Ll][Ee] .*/ OR data_process_exec_process_arguments:/.* -[Tt] .*/ OR data_process_exec_process_arguments:/.* --[Dd][Aa][Tt][Aa].*/ OR data_process_exec_process_arguments:/.* -[Dd] .*/ OR data_process_exec_process_arguments:/.* -[Ff] .*/)) OR (data_process_exec_process_arguments:/.*[Mm][Oo][Dd][Ee][Ll][Ss]\.[Ll][Ii][Tt][Ee][Ll][Ll][Mm]\.[Cc][Ll][Oo][Uu][Dd].*/) OR (data_process_exec_process_arguments:/.*[Xx]-[Ff][Ii][Ll][Ee][Nn][Aa][Mm][Ee].*/))
+    pivot_on:
+    - host
+    window: 2h
+  - name: Systemd user-service persistence on this host
+    query: ((data_process_exec_process_binary:/.*\/[Ss][Yy][Ss][Tt][Ee][Mm][Cc][Tt][Ll]/) OR (data_process_exec_process_arguments:/.*--[Uu][Ss][Ee][Rr].*[Ss][Yy][Ss][Mm][Oo][Nn].*/) OR (data_process_exec_process_arguments:/.*\.[Cc][Oo][Nn][Ff][Ii][Gg]\/[Ss][Yy][Ss][Tt][Ee][Mm][Dd]\/[Uu][Ss][Ee][Rr].*/) OR (data_process_exec_process_arguments:/.*\/[Ee][Tt][Cc]\/[Ss][Yy][Ss][Tt][Ee][Mm][Dd]\/.*\.[Ss][Ee][Rr][Vv][Ii][Cc][Ee].*/))
+    pivot_on:
+    - host
+    window: 4h
+  - name: Obfuscated python interpreter payload execution on this host
+    query: ((data_process_exec_process_binary:/.*\/[Pp][Yy][Tt][Hh][Oo][Nn]3?/) AND (data_process_exec_process_arguments:/.*[Bb]64[Dd][Ee][Cc][Oo][Dd][Ee].*/ OR data_process_exec_process_arguments:/.*[Bb][Aa][Ss][Ee]64.*/ OR data_process_exec_process_arguments:/.*[Ee][Xx][Ee][Cc].*/))
+    pivot_on:
+    - host
+    window: 1h

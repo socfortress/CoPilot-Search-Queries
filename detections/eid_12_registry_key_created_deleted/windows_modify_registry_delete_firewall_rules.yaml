@@ -120,62 +120,58 @@ graylog:
   query: data_win_system_eventID:"12" AND data_win_eventdata_targetObject:/.*SharedAccess.*Parameters.*FirewallPolicy.*FirewallRules.*/ AND data_win_eventdata_eventType:"DeleteValue"
 
 correlation:
-  # Authored by the correlation engine for review. Related CoPilot Searches to run
-  # around an alert from this rule, scoped to the same host/user/IP within the window.
+  # Authored per-rule (behaviour-researched) for the correlation engine. Related CoPilot
+  # Searches + telemetry pivots to run around an alert, scoped to its host/user/ip/domain.
   related_rules:
-    - id: a5d85486-b89c-11eb-8267-acde48001122
-      name: "Allow Inbound Traffic In Firewall Rule"
-      reason: "same analytic story: NetSupport RMM Tool Abuse"
-    - id: 2452e632-9e0d-11eb-bacd-acde48001122
-      name: "DNS Exfiltration Using Nslookup App"
-      reason: "same analytic story: Compromised Windows Host"
-    - id: cc316032-924a-11eb-91a2-acde48001122
-      name: "DSQuery Domain Discovery"
-      reason: "same analytic story: Compromised Windows Host"
-    - id: 9b3af1e6-5b68-11eb-ae93-0242ac130002
-      name: "Detect MSHTA Url in Command Line"
-      reason: "same analytic story: Compromised Windows Host"
-    - id: 72170ec5-f7d2-42f5-aefb-2b8be6aad15f
-      name: "Detect Regasm Spawning a Process"
-      reason: "same analytic story: Compromised Windows Host"
-    - id: bc477b57-5c21-4ab6-9c33-668772e7f114
-      name: "Detect Regsvcs Spawning a Process"
-      reason: "same analytic story: Compromised Windows Host"
-    - id: 070e9b80-6252-11eb-ae93-0242ac130002
-      name: "Detect Regsvr32 Application Control Bypass"
-      reason: "same analytic story: Compromised Windows Host"
-    - id: a0873b32-5b68-11eb-ae93-0242ac130002
-      name: "Detect mshta inline hta execution"
-      reason: "same analytic story: Compromised Windows Host"
-    - id: 41243735-89a7-4c83-bcdd-570aa78f00a1
-      name: "Domain Controller Discovery with Nltest"
-      reason: "same analytic story: NetSupport RMM Tool Abuse"
-    - id: 8943b567-f14d-4ee8-a0bb-2121d4ce3184
-      name: "Dump LSASS via comsvcs DLL"
-      reason: "same analytic story: Compromised Windows Host"
-    - id: 26f86252-1549-45e1-a212-eb26840e86bc
-      name: "File Download or Read to Pipe Execution"
-      reason: "same analytic story: Compromised Windows Host"
-    - id: 909f8fd8-7ac8-11eb-a1f3-acde48001122
-      name: "FodHelper UAC Bypass"
-      reason: "same analytic story: Compromised Windows Host"
-  window: 1h
+  - id: 1a5fefe6-734f-452e-a07d-fc1c35bce4b2
+    name: Firewall Rule Deleted Via Netsh.EXE
+    reason: 'Direct cause: ''netsh advfirewall firewall delete rule'' is what writes the EID12 DeleteValue events on FirewallPolicy\FirewallRules that fire this alert; this EID1 detection names the actor process and command line behind the registry telemetry.'
+  - id: 57c4bf16-227f-4394-8ec7-1b745ee061c3
+    name: Firewall Disabled via Netsh.EXE
+    reason: 'Escalation of the same impair-firewall action: after stripping individual rules the actor typically turns the whole firewall off (''netsh advfirewall set allprofiles state off'' / ''set opmode disable''); same host, same intent to expose the network.'
+  - id: 974515da-6cc5-4c95-ae65-f97f9150ec7f
+    name: Disable Microsoft Defender Firewall via Registry
+    reason: 'Registry sibling: SetValue EnableFirewall=0 under the very same Services\SharedAccess\Parameters\FirewallPolicy hive this rule watches for DeleteValue - the registry-value form of disabling the firewall, same Sysmon EID12/13 source.'
+  - id: a5d85486-b89c-11eb-8267-acde48001122
+    name: Allow Inbound Traffic In Firewall Rule
+    reason: 'Hole-punch complement: deleting restrictive rules is usually paired with adding a New-NetFirewallRule -Inbound -Allow -LocalPort to expose a listening service for C2/RDP/lateral movement; the two together open the host to the attacker.'
+  - id: 0eb46774-f1ab-4a74-8238-1155855f2263
+    name: Disable Windows Defender Functionalities Via Registry Keys
+    reason: 'Co-occurring impair-defenses via the registry: stripping firewall rules and setting DisableAntiSpyware/DisableRealtimeMonitoring are the same host-protection-teardown pass, both landing as Sysmon registry writes on the same host.'
+  - id: b28e58e4-2a72-4fae-bdee-0fbe904db642
+    name: Windows Defender Real-time Protection Disabled
+    reason: 'Independent confirmation of the AV teardown: Defender''s own operational log (EID 5001) shows real-time protection is actually off, corroborating the firewall-plus-Defender impair-defenses campaign from a data source separate from Sysmon.'
+  - id: c947b146-0abc-4c87-9c64-b17e9d7274a2
+    name: Shadow Copies Deletion Using Operating Systems Utilities
+    reason: 'Ransomware recovery-destruction follow-on: ShrinkLocker (named in this rule) strips firewall/defenses then eliminates backups (vssadmin/wmic/wbadmin delete) before encrypting; deleting shadows on the same host turns defense evasion into an imminent ransomware incident.'
+  - id: windows-modify-registry-configure-bitlocker-001
+    name: Windows Modify Registry Configure BitLocker
+    reason: 'ShrinkLocker encryption step: registry FVE changes (EnableBDEWithNoTPM / UseAdvancedStartup) to force BitLocker without TPM - the exact threat named in this rule, and registry-based like the firewall-rule deletion, so the same actor''s next move on the host.'
+  window: 2h
   enrichment_searches:
-  # Rule-specific telemetry pivots the engine runs around an alert from this rule,
-  # scoped to the alert's host/user/IP within the window (behaviour-targeted, not a sweep).
-    - name: "Autostart / security-setting registry changes on this host"
-      query: '(((data_win_system_eventID:"12" OR data_win_system_eventID:"13") AND (data_win_eventdata_targetObject:/.*[Cc][Uu][Rr][Rr][Ee][Nn][Tt][Vv][Ee][Rr][Ss][Ii][Oo][Nn]\\[Rr][Uu][Nn].*/ OR data_win_eventdata_targetObject:/.*[Cc][Uu][Rr][Rr][Ee][Nn][Tt][Vv][Ee][Rr][Ss][Ii][Oo][Nn]\\[Rr][Uu][Nn][Oo][Nn][Cc][Ee].*/ OR data_win_eventdata_targetObject:/.*[Cc][Uu][Rr][Rr][Ee][Nn][Tt][Cc][Oo][Nn][Tt][Rr][Oo][Ll][Ss][Ee][Tt]\\[Ss][Ee][Rr][Vv][Ii][Cc][Ee][Ss]\\.*/ OR data_win_eventdata_targetObject:/.*[Ii][Mm][Aa][Gg][Ee] [Ff][Ii][Ll][Ee] [Ee][Xx][Ee][Cc][Uu][Tt][Ii][Oo][Nn] [Oo][Pp][Tt][Ii][Oo][Nn][Ss]\\.*/ OR data_win_eventdata_targetObject:/.*[Ww][Ii][Nn][Ll][Oo][Gg][Oo][Nn]\\[Ss][Hh][Ee][Ll][Ll].*/ OR data_win_eventdata_targetObject:/.*[Ww][Ii][Nn][Ll][Oo][Gg][Oo][Nn]\\[Uu][Ss][Ee][Rr][Ii][Nn][Ii][Tt].*/ OR data_win_eventdata_targetObject:/.*[Cc][Uu][Rr][Rr][Ee][Nn][Tt][Vv][Ee][Rr][Ss][Ii][Oo][Nn]\\[Ee][Xx][Pp][Ll][Oo][Rr][Ee][Rr]\\[Rr][Uu][Nn].*/ OR data_win_eventdata_targetObject:/.*[Pp][Oo][Ll][Ii][Cc][Ii][Ee][Ss]\\[Ee][Xx][Pp][Ll][Oo][Rr][Ee][Rr]\\[Rr][Uu][Nn].*/ OR data_win_eventdata_targetObject:/.*[Cc][Uu][Rr][Rr][Ee][Nn][Tt][Vv][Ee][Rr][Ss][Ii][Oo][Nn]\\[Ww][Ii][Nn][Dd][Oo][Ww][Ss]\\[Ll][Oo][Aa][Dd].*/)) OR (data_win_system_eventID:"1" AND (data_win_eventdata_commandLine:/.*[Ss][Ee][Tt]-[Mm][Pp][Pp][Rr][Ee][Ff][Ee][Rr][Ee][Nn][Cc][Ee].*/ OR data_win_eventdata_commandLine:/.*[Dd][Ii][Ss][Aa][Bb][Ll][Ee][Rr][Ee][Aa][Ll][Tt][Ii][Mm][Ee][Mm][Oo][Nn][Ii][Tt][Oo][Rr][Ii][Nn][Gg].*/ OR data_win_eventdata_commandLine:/.*[Dd][Ii][Ss][Aa][Bb][Ll][Ee][Aa][Nn][Tt][Ii][Ss][Pp][Yy][Ww][Aa][Rr][Ee].*/ OR data_win_eventdata_commandLine:/.*[Aa][Dd][Dd]-[Mm][Pp][Pp][Rr][Ee][Ff][Ee][Rr][Ee][Nn][Cc][Ee] -[Ee][Xx][Cc][Ll][Uu][Ss][Ii][Oo][Nn][Pp][Aa][Tt][Hh].*/ OR data_win_eventdata_commandLine:/.*[Ww][Ee][Vv][Tt][Uu][Tt][Ii][Ll].*/ OR data_win_eventdata_commandLine:/.*[Cc][Ll][Ee][Aa][Rr]-[Ee][Vv][Ee][Nn][Tt][Ll][Oo][Gg].*/ OR data_win_eventdata_commandLine:/.*[Ff][Ss][Uu][Tt][Ii][Ll] [Uu][Ss][Nn] [Dd][Ee][Ll][Ee][Tt][Ee][Jj][Oo][Uu][Rr][Nn][Aa][Ll].*/ OR data_win_eventdata_commandLine:/.*[Vv][Ss][Ss][Aa][Dd][Mm][Ii][Nn].*/ OR data_win_eventdata_commandLine:/.*[Ss][Tt][Oo][Pp]-[Ss][Ee][Rr][Vv][Ii][Cc][Ee].*/ OR data_win_eventdata_commandLine:/.*[Ss][Cc] [Ss][Tt][Oo][Pp].*/ OR data_win_eventdata_commandLine:/.*[Ss][Cc] [Cc][Oo][Nn][Ff][Ii][Gg].*/)))'
-      pivot_on: [host]
-      window: 2h
-    - name: "Downloader / C2 tooling executed on this host"
-      query: '(data_win_system_eventID:"1" AND data_win_eventdata_image:/.*(\\[Cc][Ee][Rr][Tt][Uu][Tt][Ii][Ll]\.[Ee][Xx][Ee]|\\[Bb][Ii][Tt][Ss][Aa][Dd][Mm][Ii][Nn]\.[Ee][Xx][Ee]|\\[Cc][Uu][Rr][Ll]\.[Ee][Xx][Ee]|\\[Ww][Gg][Ee][Tt]\.[Ee][Xx][Ee])/) OR (data_win_eventdata_commandLine:/.*[Dd][Oo][Ww][Nn][Ll][Oo][Aa][Dd][Ss][Tt][Rr][Ii][Nn][Gg].*/ OR data_win_eventdata_commandLine:/.*[Dd][Oo][Ww][Nn][Ll][Oo][Aa][Dd][Ff][Ii][Ll][Ee].*/ OR data_win_eventdata_commandLine:/.*[Ii][Nn][Vv][Oo][Kk][Ee]-[Ww][Ee][Bb][Rr][Ee][Qq][Uu][Ee][Ss][Tt].*/ OR data_win_eventdata_commandLine:/.*[Nn][Ee][Tt]\.[Ww][Ee][Bb][Cc][Ll][Ii][Ee][Nn][Tt].*/ OR data_win_eventdata_commandLine:/.*[Ss][Tt][Aa][Rr][Tt]-[Bb][Ii][Tt][Ss][Tt][Rr][Aa][Nn][Ss][Ff][Ee][Rr].*/ OR data_win_eventdata_commandLine:/.*[Ii][Ww][Rr] .*/ OR data_win_eventdata_commandLine:/.*[Cc][Uu][Rr][Ll] .*/ OR data_win_eventdata_commandLine:/.*[Ww][Gg][Ee][Tt] .*/)'
-      pivot_on: [host]
-      window: 1h
-    - name: "Autostart persistence written on this host"
-      query: '(data_win_system_eventID:"12" OR data_win_system_eventID:"13") AND (data_win_eventdata_targetObject:/.*[Cc][Uu][Rr][Rr][Ee][Nn][Tt][Vv][Ee][Rr][Ss][Ii][Oo][Nn]\\[Rr][Uu][Nn].*/ OR data_win_eventdata_targetObject:/.*[Cc][Uu][Rr][Rr][Ee][Nn][Tt][Vv][Ee][Rr][Ss][Ii][Oo][Nn]\\[Rr][Uu][Nn][Oo][Nn][Cc][Ee].*/ OR data_win_eventdata_targetObject:/.*[Cc][Uu][Rr][Rr][Ee][Nn][Tt][Cc][Oo][Nn][Tt][Rr][Oo][Ll][Ss][Ee][Tt]\\[Ss][Ee][Rr][Vv][Ii][Cc][Ee][Ss]\\.*/ OR data_win_eventdata_targetObject:/.*[Ii][Mm][Aa][Gg][Ee] [Ff][Ii][Ll][Ee] [Ee][Xx][Ee][Cc][Uu][Tt][Ii][Oo][Nn] [Oo][Pp][Tt][Ii][Oo][Nn][Ss]\\.*/ OR data_win_eventdata_targetObject:/.*[Ww][Ii][Nn][Ll][Oo][Gg][Oo][Nn]\\[Ss][Hh][Ee][Ll][Ll].*/ OR data_win_eventdata_targetObject:/.*[Ww][Ii][Nn][Ll][Oo][Gg][Oo][Nn]\\[Uu][Ss][Ee][Rr][Ii][Nn][Ii][Tt].*/ OR data_win_eventdata_targetObject:/.*[Cc][Uu][Rr][Rr][Ee][Nn][Tt][Vv][Ee][Rr][Ss][Ii][Oo][Nn]\\[Ee][Xx][Pp][Ll][Oo][Rr][Ee][Rr]\\[Rr][Uu][Nn].*/ OR data_win_eventdata_targetObject:/.*[Pp][Oo][Ll][Ii][Cc][Ii][Ee][Ss]\\[Ee][Xx][Pp][Ll][Oo][Rr][Ee][Rr]\\[Rr][Uu][Nn].*/ OR data_win_eventdata_targetObject:/.*[Cc][Uu][Rr][Rr][Ee][Nn][Tt][Vv][Ee][Rr][Ss][Ii][Oo][Nn]\\[Ww][Ii][Nn][Dd][Oo][Ww][Ss]\\[Ll][Oo][Aa][Dd].*/)'
-      pivot_on: [host]
-      window: 2h
-    - name: "Security-tool / Defender tampering on this host"
-      query: 'data_win_system_eventID:"1" AND (data_win_eventdata_commandLine:/.*[Ss][Ee][Tt]-[Mm][Pp][Pp][Rr][Ee][Ff][Ee][Rr][Ee][Nn][Cc][Ee].*/ OR data_win_eventdata_commandLine:/.*[Dd][Ii][Ss][Aa][Bb][Ll][Ee][Rr][Ee][Aa][Ll][Tt][Ii][Mm][Ee][Mm][Oo][Nn][Ii][Tt][Oo][Rr][Ii][Nn][Gg].*/ OR data_win_eventdata_commandLine:/.*[Dd][Ii][Ss][Aa][Bb][Ll][Ee][Aa][Nn][Tt][Ii][Ss][Pp][Yy][Ww][Aa][Rr][Ee].*/ OR data_win_eventdata_commandLine:/.*[Aa][Dd][Dd]-[Mm][Pp][Pp][Rr][Ee][Ff][Ee][Rr][Ee][Nn][Cc][Ee] -[Ee][Xx][Cc][Ll][Uu][Ss][Ii][Oo][Nn][Pp][Aa][Tt][Hh].*/ OR data_win_eventdata_commandLine:/.*[Ww][Ee][Vv][Tt][Uu][Tt][Ii][Ll].*/ OR data_win_eventdata_commandLine:/.*[Cc][Ll][Ee][Aa][Rr]-[Ee][Vv][Ee][Nn][Tt][Ll][Oo][Gg].*/ OR data_win_eventdata_commandLine:/.*[Ff][Ss][Uu][Tt][Ii][Ll] [Uu][Ss][Nn] [Dd][Ee][Ll][Ee][Tt][Ee][Jj][Oo][Uu][Rr][Nn][Aa][Ll].*/ OR data_win_eventdata_commandLine:/.*[Vv][Ss][Ss][Aa][Dd][Mm][Ii][Nn].*/ OR data_win_eventdata_commandLine:/.*[Ss][Tt][Oo][Pp]-[Ss][Ee][Rr][Vv][Ii][Cc][Ee].*/ OR data_win_eventdata_commandLine:/.*[Ss][Cc] [Ss][Tt][Oo][Pp].*/ OR data_win_eventdata_commandLine:/.*[Ss][Cc] [Cc][Oo][Nn][Ff][Ii][Gg].*/)'
-      pivot_on: [host]
-      window: 2h
+  # Behaviour-targeted hunts the engine runs around the alert (not a sweep).
+  - name: Windows Firewall turned off entirely on this host (netsh / PowerShell / registry)
+    query: (data_win_system_eventID:"1" AND (data_win_eventdata_image:/.*\\[Nn][Ee][Tt][Ss][Hh]\.[Ee][Xx][Ee]/ OR data_win_eventdata_originalFileName:/[Nn][Ee][Tt][Ss][Hh]\.[Ee][Xx][Ee]/) AND data_win_eventdata_commandLine:/.*[Ff][Ii][Rr][Ee][Ww][Aa][Ll][Ll].*/ AND ((data_win_eventdata_commandLine:/.*[Ss][Tt][Aa][Tt][Ee].*/ AND data_win_eventdata_commandLine:/.*[Oo][Ff][Ff].*/) OR (data_win_eventdata_commandLine:/.*[Oo][Pp][Mm][Oo][Dd][Ee].*/ AND data_win_eventdata_commandLine:/.*[Dd][Ii][Ss][Aa][Bb][Ll][Ee].*/))) OR (data_win_system_eventID:"4104" AND data_win_eventdata_scriptBlockText:/.*[Ss][Ee][Tt]-[Nn][Ee][Tt][Ff][Ii][Rr][Ee][Ww][Aa][Ll][Ll][Pp][Rr][Oo][Ff][Ii][Ll][Ee].*/ AND data_win_eventdata_scriptBlockText:/.*[Ee][Nn][Aa][Bb][Ll][Ee][Dd].*/ AND data_win_eventdata_scriptBlockText:/.*[Ff][Aa][Ll][Ss][Ee].*/) OR (data_win_system_eventID:"13" AND data_win_eventdata_targetObject:/.*[Ff][Ii][Rr][Ee][Ww][Aa][Ll][Ll][Pp][Oo][Ll][Ii][Cc][Yy].*/ AND data_win_eventdata_targetObject:/.*[Ee][Nn][Aa][Bb][Ll][Ee][Ff][Ii][Rr][Ee][Ww][Aa][Ll][Ll]/ AND data_win_eventdata_details:/.*0[Xx]00000000.*/)
+    pivot_on:
+    - host
+    window: 2h
+  - name: Process that deleted or removed firewall rules on this host (netsh / NetFirewallRule cmdlets)
+    query: data_win_system_eventID:"1" AND (((data_win_eventdata_image:/.*\\[Nn][Ee][Tt][Ss][Hh]\.[Ee][Xx][Ee]/ OR data_win_eventdata_originalFileName:/[Nn][Ee][Tt][Ss][Hh]\.[Ee][Xx][Ee]/) AND data_win_eventdata_commandLine:/.*[Ff][Ii][Rr][Ee][Ww][Aa][Ll][Ll].*/ AND (data_win_eventdata_commandLine:/.*[Dd][Ee][Ll][Ee][Tt][Ee].*/ OR data_win_eventdata_commandLine:/.*[Rr][Ee][Ss][Ee][Tt].*/)) OR data_win_eventdata_commandLine:/.*[Rr][Ee][Mm][Oo][Vv][Ee]-[Nn][Ee][Tt][Ff][Ii][Rr][Ee][Ww][Aa][Ll][Ll][Rr][Uu][Ll][Ee].*/ OR data_win_eventdata_commandLine:/.*[Dd][Ii][Ss][Aa][Bb][Ll][Ee]-[Nn][Ee][Tt][Ff][Ii][Rr][Ee][Ww][Aa][Ll][Ll][Rr][Uu][Ll][Ee].*/)
+    pivot_on:
+    - host
+    window: 2h
+  - name: Microsoft Defender tampering on this host (registry disable or Set/Add-MpPreference)
+    query: (data_win_system_eventID:"13" AND data_win_eventdata_targetObject:/.*[Ww][Ii][Nn][Dd][Oo][Ww][Ss] [Dd][Ee][Ff][Ee][Nn][Dd][Ee][Rr].*/ AND (data_win_eventdata_targetObject:/.*[Dd][Ii][Ss][Aa][Bb][Ll][Ee][Aa][Nn][Tt][Ii][Ss][Pp][Yy][Ww][Aa][Rr][Ee]/ OR data_win_eventdata_targetObject:/.*[Dd][Ii][Ss][Aa][Bb][Ll][Ee][Rr][Ee][Aa][Ll][Tt][Ii][Mm][Ee][Mm][Oo][Nn][Ii][Tt][Oo][Rr][Ii][Nn][Gg]/ OR data_win_eventdata_targetObject:/.*[Tt][Aa][Mm][Pp][Ee][Rr][Pp][Rr][Oo][Tt][Ee][Cc][Tt][Ii][Oo][Nn]/)) OR (data_win_system_eventID:"1" AND (data_win_eventdata_commandLine:/.*[Ss][Ee][Tt]-[Mm][Pp][Pp][Rr][Ee][Ff][Ee][Rr][Ee][Nn][Cc][Ee].*/ OR data_win_eventdata_commandLine:/.*[Dd][Ii][Ss][Aa][Bb][Ll][Ee][Rr][Ee][Aa][Ll][Tt][Ii][Mm][Ee][Mm][Oo][Nn][Ii][Tt][Oo][Rr][Ii][Nn][Gg].*/ OR data_win_eventdata_commandLine:/.*[Aa][Dd][Dd]-[Mm][Pp][Pp][Rr][Ee][Ff][Ee][Rr][Ee][Nn][Cc][Ee].*[Ee][Xx][Cc][Ll][Uu][Ss][Ii][Oo][Nn].*/))
+    pivot_on:
+    - host
+    window: 2h
+  - name: System recovery destruction on this host (shadow copy / backup / recovery disable)
+    query: data_win_system_eventID:"1" AND (((data_win_eventdata_image:/.*\\[Vv][Ss][Ss][Aa][Dd][Mm][Ii][Nn]\.[Ee][Xx][Ee]/ OR data_win_eventdata_image:/.*\\[Ww][Mm][Ii][Cc]\.[Ee][Xx][Ee]/ OR data_win_eventdata_image:/.*\\[Pp][Oo][Ww][Ee][Rr][Ss][Hh][Ee][Ll][Ll]\.[Ee][Xx][Ee]/) AND data_win_eventdata_commandLine:/.*[Ss][Hh][Aa][Dd][Oo][Ww].*/ AND data_win_eventdata_commandLine:/.*[Dd][Ee][Ll][Ee][Tt][Ee].*/) OR (data_win_eventdata_image:/.*\\[Ww][Bb][Aa][Dd][Mm][Ii][Nn]\.[Ee][Xx][Ee]/ AND data_win_eventdata_commandLine:/.*[Dd][Ee][Ll][Ee][Tt][Ee].*/ AND data_win_eventdata_commandLine:/.*[Cc][Aa][Tt][Aa][Ll][Oo][Gg].*/) OR (data_win_eventdata_image:/.*\\[Bb][Cc][Dd][Ee][Dd][Ii][Tt]\.[Ee][Xx][Ee]/ AND data_win_eventdata_commandLine:/.*[Rr][Ee][Cc][Oo][Vv][Ee][Rr][Yy][Ee][Nn][Aa][Bb][Ll][Ee][Dd].*/ AND data_win_eventdata_commandLine:/.*[Nn][Oo].*/))
+    pivot_on:
+    - host
+    window: 4h
+  - name: BitLocker forced / no-TPM encryption setup on this host (ShrinkLocker)
+    query: (data_win_system_eventID:"13" AND data_win_eventdata_targetObject:/.*[Ff][Vv][Ee].*/ AND (data_win_eventdata_targetObject:/.*[Ee][Nn][Aa][Bb][Ll][Ee][Nn][Oo][Nn][Tt][Pp][Mm].*/ OR data_win_eventdata_targetObject:/.*[Ee][Nn][Aa][Bb][Ll][Ee][Bb][Dd][Ee][Ww][Ii][Tt][Hh][Nn][Oo][Tt][Pp][Mm].*/ OR data_win_eventdata_targetObject:/.*[Uu][Ss][Ee][Aa][Dd][Vv][Aa][Nn][Cc][Ee][Dd][Ss][Tt][Aa][Rr][Tt][Uu][Pp].*/)) OR (data_win_system_eventID:"1" AND (data_win_eventdata_image:/.*\\[Mm][Aa][Nn][Aa][Gg][Ee]-[Bb][Dd][Ee]\.[Ee][Xx][Ee]/ OR data_win_eventdata_commandLine:/.*[Mm][Aa][Nn][Aa][Gg][Ee]-[Bb][Dd][Ee].*/ OR data_win_eventdata_commandLine:/.*[Ee][Nn][Aa][Bb][Ll][Ee]-[Bb][Ii][Tt][Ll][Oo][Cc][Kk][Ee][Rr].*/))
+    pivot_on:
+    - host
+    window: 4h

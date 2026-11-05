@@ -160,23 +160,58 @@ graylog:
   query: data_process_exec_process_binary:/.*\/[Nn][Ii][Cc][Ee]/ AND (data_process_exec_process_arguments:/.*\/[Bb][Ii][Nn]\/[Bb][Aa][Ss][Hh]/ OR data_process_exec_process_arguments:/.*\/[Bb][Ii][Nn]\/[Dd][Aa][Ss][Hh]/ OR data_process_exec_process_arguments:/.*\/[Bb][Ii][Nn]\/[Ff][Ii][Ss][Hh]/ OR data_process_exec_process_arguments:/.*\/[Bb][Ii][Nn]\/[Ss][Hh]/ OR data_process_exec_process_arguments:/.*\/[Bb][Ii][Nn]\/[Zz][Ss][Hh]/)
 
 correlation:
-  # Authored by the correlation engine for review.
+  # Authored per-rule (behaviour-researched) for the correlation engine. Related CoPilot
+  # Searches + telemetry pivots to run around an alert, scoped to its host/user/ip/domain.
+  related_rules:
+  - id: 6adfbf8f-52be-4444-9bac-81b539624146
+    name: Shell Execution via Find - Linux
+    reason: Same GTFOBins restricted-shell-breakout family (find . -exec /bin/sh) as nice; an attacker probing a host for an escape usually tries several such binaries, so a find breakout on the same host turns a lone nice hit into a deliberate escape campaign.
+  - id: 7ab8f73a-fcff-428b-84aa-6a5ff7877dea
+    name: Vim GTFOBin Abuse - Linux
+    reason: Vim's :!sh / :set shell is the canonical restricted-shell escape; co-occurring on the same host with the nice breakout strongly indicates the attacker is hunting a working GTFOBins route out of a jailed or limited environment.
+  - id: bed978f8-7f3a-432b-82c5-9286a9b3031a
+    name: Shell Invocation via Env Command - Linux
+    reason: env /bin/sh is another GTFOBins breakout that, like nice, launches a shell through an unexpected parent binary; seeing both on one host confirms repeated LOLBin shell-spawn attempts rather than benign nice usage.
+  - id: 8c1a5675-cb85-452f-a298-b01b22a51856
+    name: Suspicious Invocation of Shell via AWK - Linux
+    reason: awk BEGIN{system("/bin/sh")} is a classic GTFOBins breakout; its presence alongside the nice shell on the same host is the attacker enumerating which installed utility yields an interactive shell.
+  - id: ea3ecad2-db86-4a89-ad0b-132a10d2db55
+    name: Interactive Bash Suspicious Children
+    reason: 'Directly downstream: nice spawns /bin/bash -i, and this rule fires on the suspicious children (whoami, base64, pty.spawn, nc) that the interactive bash then runs, so it captures what the breakout shell actually did next.'
+  - id: 0cf7a157-8879-41a2-8f55-388dd23746b7
+    name: Linux Recon Indicators
+    reason: The first thing an operator does in a fresh breakout shell is situational-awareness recon; a recon burst on the same host right after the nice shell confirms hands-on-keyboard activity rather than an automation artifact.
+  - id: 0f79c4d2-4e1f-4683-9c36-b5469a665e06
+    name: Access of Sudoers File Content
+    reason: Immediately after obtaining a shell, attackers enumerate privilege-escalation paths; reading /etc/sudoers on the same host is the natural next step to find a route from the breakout shell to root.
+  - id: 6b14bac8-3e3a-4324-8109-42f0546a347f
+    name: Scheduled Cron Task/Job - Linux
+    reason: Persistence is the payoff of a breakout shell; a new cron job on the same host shortly after the nice escape shows the attacker converting interactive access into a durable foothold and escalates the incident.
+  window: 2h
   enrichment_searches:
-  # Rule-specific telemetry pivots the engine runs around an alert from this rule,
-  # scoped to the alert's host/user/IP within the window (behaviour-targeted, not a sweep).
-    - name: "File / directory discovery commands on this host"
-      query: '((data_process_exec_process_binary:/.*(\/[Ff][Ii][Nn][Dd]|\/[Ll][Oo][Cc][Aa][Tt][Ee]|\/[Ll][Ss])/) OR (data_process_exec_process_binary:/.*(\/[Ww][Hh][Oo][Aa][Mm][Ii]|\/[Ii][Dd]|\/[Uu][Nn][Aa][Mm][Ee]|\/[Hh][Oo][Ss][Tt][Nn][Aa][Mm][Ee]|\/[Hh][Oo][Ss][Tt][Nn][Aa][Mm][Ee][Cc][Tt][Ll]|\/[Ss][Ss]|\/[Nn][Ee][Tt][Ss][Tt][Aa][Tt]|\/[Ii][Ff][Cc][Oo][Nn][Ff][Ii][Gg]|\/[Aa][Rr][Pp]|\/[Ww]|\/[Ww][Hh][Oo]|\/[Ll][Aa][Ss][Tt]|\/[Ll][Ss][Oo][Ff]|\/[Nn][Mm][Aa][Pp]|\/[Dd][Ii][Gg]|\/[Ff][Ii][Nn][Dd])/))'
-      pivot_on: [host]
-      window: 1h
-    - name: "Other executions of this tool-set on this host (any arguments)"
-      query: 'data_process_exec_process_binary:/.*(\/[Nn][Ii][Cc][Ee])/'
-      pivot_on: [host]
-      window: 2h
-    - name: "Privilege-escalation tooling executed on this host"
-      query: 'data_process_exec_process_binary:/.*(\/[Ss][Uu][Dd][Oo]|\/[Ss][Uu]|\/[Pp][Kk][Ee][Xx][Ee][Cc]|\/[Dd][Oo][Aa][Ss]|\/[Ss][Ee][Tt][Cc][Aa][Pp]|\/[Cc][Hh][Ss][Hh]|\/[Nn][Ee][Ww][Gg][Rr][Pp])/'
-      pivot_on: [host]
-      window: 2h
-    - name: "Shell / interpreter execution on this host"
-      query: '((data_process_exec_process_binary:/.*(\/[Bb][Aa][Ss][Hh]|\/[Ss][Hh]|\/[Dd][Aa][Ss][Hh]|\/[Zz][Ss][Hh]|\/[Kk][Ss][Hh]|\/[Aa][Ss][Hh]|\/[Bb][Uu][Ss][Yy][Bb][Oo][Xx])/) OR (data_process_exec_process_binary:/.*(\/[Pp][Yy][Tt][Hh][Oo][Nn]|\/[Pp][Yy][Tt][Hh][Oo][Nn]3|\/[Pp][Ee][Rr][Ll]|\/[Rr][Uu][Bb][Yy]|\/[Pp][Hh][Pp]|\/[Nn][Oo][Dd][Ee]|\/[Ll][Uu][Aa]|\/[Aa][Ww][Kk])/))'
-      pivot_on: [host]
-      window: 1h
+  # Behaviour-targeted hunts the engine runs around the alert (not a sweep).
+  - name: Other GTFOBins LOLBin shell-breakouts on this host
+    query: (data_process_exec_process_binary:/.*(\/[Ff][Ii][Nn][Dd]|\/[Vv][Ii][Mm]|\/[Aa][Ww][Kk]|\/[Gg][Aa][Ww][Kk]|\/[Ee][Nn][Vv]|\/[Ff][Ll][Oo][Cc][Kk]|\/[Gg][Ii][Tt]|\/[Rr][Ss][Yy][Nn][Cc]|\/[Gg][Cc][Cc]|\/[Cc][Aa][Pp][Ss][Hh]|\/[Gg][Dd][Bb]|\/[Mm][Aa][Kk][Ee]|\/[Tt][Aa][Rr])/) AND (data_process_exec_process_arguments:/.*\/[Bb][Ii][Nn]\/([Bb][Aa][Ss][Hh]|[Dd][Aa][Ss][Hh]|[Ff][Ii][Ss][Hh]|[Ss][Hh]|[Zz][Ss][Hh]).*/)
+    pivot_on:
+    - host
+    window: 2h
+  - name: Situational-awareness recon burst on this host
+    query: data_process_exec_process_binary:/.*(\/[Ww][Hh][Oo][Aa][Mm][Ii]|\/[Ii][Dd]|\/[Uu][Nn][Aa][Mm][Ee]|\/[Hh][Oo][Ss][Tt][Nn][Aa][Mm][Ee]|\/[Gg][Rr][Oo][Uu][Pp][Ss]|\/[Ww]|\/[Ll][Aa][Ss][Tt]|\/[Ll][Ss][Bb]_[Rr][Ee][Ll][Ee][Aa][Ss][Ee]|\/[Uu][Pp][Tt][Ii][Mm][Ee])/
+    pivot_on:
+    - host
+    window: 1h
+  - name: Privilege-escalation enumeration and tooling on this host
+    query: (data_process_exec_process_binary:/.*(\/[Ss][Uu][Dd][Oo]|\/[Ss][Uu]|\/[Pp][Kk][Ee][Xx][Ee][Cc]|\/[Dd][Oo][Aa][Ss]|\/[Ss][Ee][Tt][Cc][Aa][Pp]|\/[Gg][Ee][Tt][Cc][Aa][Pp]|\/[Nn][Ee][Ww][Gg][Rr][Pp]|\/[Cc][Hh][Ss][Hh])/) OR (data_process_exec_process_arguments:/.*(\/[Ee][Tt][Cc]\/[Ss][Uu][Dd][Oo][Ee][Rr][Ss]|-[Pp][Ee][Rr][Mm] -).*/)
+    pivot_on:
+    - host
+    window: 4h
+  - name: Credential-file access on this host (shadow/passwd/sudoers/SSH keys)
+    query: data_process_exec_process_arguments:/.*(\/[Ee][Tt][Cc]\/[Ss][Hh][Aa][Dd][Oo][Ww]|\/[Ee][Tt][Cc]\/[Gg][Ss][Hh][Aa][Dd][Oo][Ww]|\/[Ee][Tt][Cc]\/[Pp][Aa][Ss][Ss][Ww][Dd]|\/[Ee][Tt][Cc]\/[Ss][Uu][Dd][Oo][Ee][Rr][Ss]|[Ii][Dd]_[Rr][Ss][Aa]|[Ii][Dd]_[Ee][Dd]25519|\.[Ss][Ss][Hh]\/|[Bb][Aa][Ss][Hh]_[Hh][Ii][Ss][Tt][Oo][Rr][Yy]).*/
+    pivot_on:
+    - host
+    window: 4h
+  - name: Tool staging and egress on this host (wget/curl, exec from tmp or shm)
+    query: (data_process_exec_process_binary:/.*(\/[Ww][Gg][Ee][Tt]|\/[Cc][Uu][Rr][Ll])/) OR (data_process_exec_process_binary:/.*(\/[Tt][Mm][Pp]\/|\/[Dd][Ee][Vv]\/[Ss][Hh][Mm]\/|\/[Rr][Uu][Nn]\/[Ss][Hh][Mm]\/).*/)
+    pivot_on:
+    - host
+    window: 6h

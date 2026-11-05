@@ -202,19 +202,58 @@ graylog:
   query: data_audit_type:/[Ss][Yy][Ss][Cc][Aa][Ll][Ll]/ AND (data_audit_exe:/\/[Tt][Mm][Pp]\/.*/ OR data_audit_exe:/\/[Vv][Aa][Rr]\/[Ww][Ww][Ww]\/.*/ OR data_audit_exe:/\/[Hh][Oo][Mm][Ee]\/.*\/[Pp][Uu][Bb][Ll][Ii][Cc]_[Hh][Tt][Mm][Ll]\/.*/ OR data_audit_exe:/\/[Uu][Ss][Rr]\/[Ll][Oo][Cc][Aa][Ll]\/[Aa][Pp][Aa][Cc][Hh][Ee]2\/.*/ OR data_audit_exe:/\/[Uu][Ss][Rr]\/[Ll][Oo][Cc][Aa][Ll]\/[Hh][Tt][Tt][Pp][Dd]\/.*/ OR data_audit_exe:/\/[Vv][Aa][Rr]\/[Aa][Pp][Aa][Cc][Hh][Ee]\/.*/ OR data_audit_exe:/\/[Ss][Rr][Vv]\/[Ww][Ww][Ww]\/.*/ OR data_audit_exe:/\/[Hh][Oo][Mm][Ee]\/[Hh][Tt][Tt][Pp][Dd]\/[Hh][Tt][Mm][Ll]\/.*/ OR data_audit_exe:/\/[Ss][Rr][Vv]\/[Hh][Tt][Tt][Pp]\/.*/ OR data_audit_exe:/\/[Uu][Ss][Rr]\/[Ss][Hh][Aa][Rr][Ee]\/[Nn][Gg][Ii][Nn][Xx]\/[Hh][Tt][Mm][Ll]\/.*/ OR data_audit_exe:/\/[Vv][Aa][Rr]\/[Ll][Ii][Bb]\/[Pp][Gg][Ss][Qq][Ll]\/[Dd][Aa][Tt][Aa]\/.*/ OR data_audit_exe:/\/[Uu][Ss][Rr]\/[Ll][Oo][Cc][Aa][Ll]\/[Mm][Yy][Ss][Qq][Ll]\/[Dd][Aa][Tt][Aa]\/.*/ OR data_audit_exe:/\/[Vv][Aa][Rr]\/[Ll][Ii][Bb]\/[Mm][Yy][Ss][Qq][Ll]\/.*/ OR data_audit_exe:/\/[Vv][Aa][Rr]\/[Vv][Ss][Ff][Tt][Pp][Dd]\/.*/ OR data_audit_exe:/\/[Ee][Tt][Cc]\/[Bb][Ii][Nn][Dd]\/.*/ OR data_audit_exe:/\/[Vv][Aa][Rr]\/[Nn][Aa][Mm][Ee][Dd]\/.*/)
 
 correlation:
-  # Authored by the correlation engine for review.
+  # Authored per-rule (behaviour-researched) for the correlation engine. Related CoPilot
+  # Searches + telemetry pivots to run around an alert, scoped to its host/user/ip/domain.
+  related_rules:
+  - id: a2d9e2f3-0f43-4c7a-bcd9-9acfc0d723aa
+    name: Suspicious Download and Execute Pattern via Curl/Wget
+    reason: 'Direct staging precursor for the /tmp and /dev/shm branch: curl/wget fetching a payload into /tmp then running it via ''sh -c'' is exactly how a binary comes to execute from /tmp that this rule flags. Firing on the same host just before identifies the download source and confirms the suspicious-folder execution is an attacker-staged dropper, not admin activity.'
+  - id: cf610c15-ed71-46e1-bdf8-2bd1a99de6c4
+    name: Download File To Potentially Suspicious Directory Via Wget
+    reason: 'The download half of the staging chain on its own: ''wget -O / --output-document'' writing into /tmp places the very file this rule later catches executing. If it fired minutes earlier on the host it names the remote URL and the dropped filename behind the suspicious-folder execution.'
+  - id: 6419afd1-3742-47a5-a7e6-b50386cd15f8
+    name: Chmod Targeting Sensitive Directories
+    reason: 'The missing link between drop and run: a file written into /tmp is not runnable until ''chmod +x'', and this rule explicitly covers chmod against /tmp (and /etc, /opt). A chmod on the staged file immediately precedes its execution from the suspicious folder, so a co-firing hit weaponizes the drop.'
+  - id: 312b42b1-bded-4441-8b58-163a3af58775
+    name: Potentially Suspicious Execution From Tmp Folder
+    reason: 'Second-sensor corroboration of the same event: this is the Tetragon process_exec view of a binary whose path is under /tmp, where the alerting rule is the auditd SYSCALL view. Both firing on the host for the same execution turns a single-sensor hit into high-confidence /tmp malware execution.'
+  - id: 818f7b24-0fba-4c49-a073-8b755573b9c7
+    name: Linux Webshell Indicators
+    reason: 'Explains the web-root branch: when the suspicious folder is /var/www, /srv/www or an nginx/apache docroot, the binary running there is a webshell''s payload. This rule catches a web-server parent (nginx/apache2/httpd/php-fpm/node) spawning recon children - the same compromise seen as the webshell rather than the execution.'
+  - id: 9069ea3c-b213-4c52-be13-86506a227ab1
+    name: Linux Crypto Mining Indicators
+    reason: 'Identifies what the dropped binary is: opportunistic Linux intrusions overwhelmingly stage an XMRig-style miner in /tmp and launch it. Miner command lines (stratum+tcp, --donate-level, -o pool.) on the same host name the suspicious-folder execution as a cryptomining payload (T1496 impact).'
+  - id: f7158a64-6204-4d6d-868a-6e6378b467e0
+    name: Suspicious C2 Activities
+    reason: 'Same auditd sensor, the egress/C2 half of the story: Florian Roth''s ''susp_activity'' auditd key flags nc/ncat/socat/curl/wget/ssh. After a binary runs from a data-only folder it beacons out or pulls a later stage; a susp_activity hit on the host ties the execution to command-and-control.'
+  - id: c6714a24-d7d5-4283-a36b-3ffd091d5f7e
+    name: Potential PHP Reverse Shell
+    reason: 'The web-root escalation payoff: a PHP webshell (dominant under the Apache/nginx docroots this rule covers) upgrading from one-shot commands to an interactive reverse shell via ''php -r fsockopen''. Confirms the operator moving to hands-on-keyboard control after executing from the web directory.'
+  window: 2h
   enrichment_searches:
-  # Rule-specific telemetry pivots the engine runs around an alert from this rule,
-  # scoped to the alert's host/user/IP within the window (behaviour-targeted, not a sweep).
-    - name: "Shell / interpreter execution on this host"
-      query: '((data_process_exec_process_binary:/.*(\/[Bb][Aa][Ss][Hh]|\/[Ss][Hh]|\/[Dd][Aa][Ss][Hh]|\/[Zz][Ss][Hh]|\/[Kk][Ss][Hh]|\/[Aa][Ss][Hh]|\/[Bb][Uu][Ss][Yy][Bb][Oo][Xx])/) OR (data_process_exec_process_binary:/.*(\/[Pp][Yy][Tt][Hh][Oo][Nn]|\/[Pp][Yy][Tt][Hh][Oo][Nn]3|\/[Pp][Ee][Rr][Ll]|\/[Rr][Uu][Bb][Yy]|\/[Pp][Hh][Pp]|\/[Nn][Oo][Dd][Ee]|\/[Ll][Uu][Aa]|\/[Aa][Ww][Kk])/))'
-      pivot_on: [host]
-      window: 1h
-    - name: "Reconnaissance commands on this host"
-      query: 'data_process_exec_process_binary:/.*(\/[Ww][Hh][Oo][Aa][Mm][Ii]|\/[Ii][Dd]|\/[Uu][Nn][Aa][Mm][Ee]|\/[Hh][Oo][Ss][Tt][Nn][Aa][Mm][Ee]|\/[Hh][Oo][Ss][Tt][Nn][Aa][Mm][Ee][Cc][Tt][Ll]|\/[Ss][Ss]|\/[Nn][Ee][Tt][Ss][Tt][Aa][Tt]|\/[Ii][Ff][Cc][Oo][Nn][Ff][Ii][Gg]|\/[Aa][Rr][Pp]|\/[Ww]|\/[Ww][Hh][Oo]|\/[Ll][Aa][Ss][Tt]|\/[Ll][Ss][Oo][Ff]|\/[Nn][Mm][Aa][Pp]|\/[Dd][Ii][Gg]|\/[Ff][Ii][Nn][Dd])/'
-      pivot_on: [host]
-      window: 1h
-    - name: "Privilege-escalation tooling executed on this host"
-      query: 'data_process_exec_process_binary:/.*(\/[Ss][Uu][Dd][Oo]|\/[Ss][Uu]|\/[Pp][Kk][Ee][Xx][Ee][Cc]|\/[Dd][Oo][Aa][Ss]|\/[Ss][Ee][Tt][Cc][Aa][Pp]|\/[Cc][Hh][Ss][Hh]|\/[Nn][Ee][Ww][Gg][Rr][Pp])/'
-      pivot_on: [host]
-      window: 2h
+  # Behaviour-targeted hunts the engine runs around the alert (not a sweep).
+  - name: Ingress tool transfer that staged the payload (wget/curl/tftp/ftp/scp)
+    query: data_audit_exe:/.*\/([Ww][Gg][Ee][Tt]|[Cc][Uu][Rr][Ll]|[Tt][Ff][Tt][Pp]|[Ff][Tt][Pp]|[Ss][Cc][Pp])/ OR data_audit_command:/([Ww][Gg][Ee][Tt]|[Cc][Uu][Rr][Ll]|[Tt][Ff][Tt][Pp]|[Ff][Tt][Pp]|[Ss][Cc][Pp])/ OR data_process_exec_process_binary:/.*\/([Ww][Gg][Ee][Tt]|[Cc][Uu][Rr][Ll]|[Tt][Ff][Tt][Pp]|[Ff][Tt][Pp]|[Ss][Cc][Pp])/
+    pivot_on:
+    - host
+    window: 2h
+  - name: chmod making the dropped file in a web root or world-writable dir executable
+    query: data_process_exec_process_binary:/.*\/[Cc][Hh][Mm][Oo][Dd]/ AND (data_process_exec_process_arguments:/.*\/[Tt][Mm][Pp]\/.*/ OR data_process_exec_process_arguments:/.*\/[Dd][Ee][Vv]\/[Ss][Hh][Mm]\/.*/ OR data_process_exec_process_arguments:/.*\/[Vv][Aa][Rr]\/[Ww][Ww][Ww]\/.*/ OR data_process_exec_process_arguments:/.*\/[Ss][Rr][Vv]\/[Ww][Ww][Ww]\/.*/ OR data_process_exec_process_arguments:/.*\/[Vv][Aa][Rr]\/[Tt][Mm][Pp]\/.*/)
+    pivot_on:
+    - host
+    window: 1h
+  - name: Web/app-server process spawning a shell or interpreter (webshell)
+    query: (data_process_exec_parent_binary:/.*\/([Hh][Tt][Tt][Pp][Dd]|[Nn][Gg][Ii][Nn][Xx]|[Aa][Pp][Aa][Cc][Hh][Ee]2|[Ll][Ii][Gg][Hh][Tt][Tt][Pp][Dd]|[Cc][Aa][Dd][Dd][Yy]|[Pp][Hh][Pp]-[Ff][Pp][Mm]|[Nn][Oo][Dd][Ee])/) AND (data_process_exec_process_binary:/.*\/([Bb][Aa][Ss][Hh]|[Ss][Hh]|[Dd][Aa][Ss][Hh]|[Zz][Ss][Hh]|[Pp][Yy][Tt][Hh][Oo][Nn]3?|[Pp][Ee][Rr][Ll]|[Rr][Uu][Bb][Yy]|[Pp][Hh][Pp]|[Nn][Cc]|[Nn][Cc][Aa][Tt])/)
+    pivot_on:
+    - host
+    window: 2h
+  - name: Reverse shell / interactive C2 spawned on this host
+    query: data_audit_exe:/.*\/([Nn][Cc]|[Nn][Cc][Aa][Tt]|[Nn][Ee][Tt][Cc][Aa][Tt]|[Ss][Oo][Cc][Aa][Tt])/ OR data_audit_command:/([Nn][Cc]|[Nn][Cc][Aa][Tt]|[Nn][Ee][Tt][Cc][Aa][Tt]|[Ss][Oo][Cc][Aa][Tt])/ OR data_process_exec_process_binary:/.*\/([Nn][Cc]|[Nn][Cc][Aa][Tt]|[Nn][Ee][Tt][Cc][Aa][Tt]|[Ss][Oo][Cc][Aa][Tt])/ OR data_process_exec_process_arguments:/.*\/[Dd][Ee][Vv]\/([Tt][Cc][Pp]|[Uu][Dd][Pp])\/.*/ OR data_process_exec_process_arguments:/.*[Mm][Kk][Ff][Ii][Ff][Oo].*/ OR data_process_exec_process_arguments:/.*[Pp][Tt][Yy]\.[Ss][Pp][Aa][Ww][Nn].*/ OR data_process_exec_process_arguments:/.*[Ff][Ss][Oo][Cc][Kk][Oo][Pp][Ee][Nn].*/
+    pivot_on:
+    - host
+    window: 2h
+  - name: Cryptominer command-line / payload indicators on this host
+    query: data_process_exec_process_arguments:/.*--[Dd][Oo][Nn][Aa][Tt][Ee]-[Ll][Ee][Vv][Ee][Ll].*/ OR data_process_exec_process_arguments:/.*--[Cc][Pp][Uu]-[Pp][Rr][Ii][Oo][Rr][Ii][Tt][Yy].*/ OR data_process_exec_process_arguments:/.*[Ss][Tt][Rr][Aa][Tt][Uu][Mm]\+[Tt][Cc][Pp].*/ OR data_process_exec_process_arguments:/.* -[Oo] [Pp][Oo][Oo][Ll]\..*/ OR data_process_exec_process_arguments:/.*--[Aa][Ll][Gg][Oo]=[Rr][Xx].*/ OR data_audit_exe:/.*\/[Xx][Mm][Rr][Ii][Gg]/ OR data_audit_command:/[Xx][Mm][Rr][Ii][Gg]/ OR data_process_exec_process_binary:/.*\/[Xx][Mm][Rr][Ii][Gg]/
+    pivot_on:
+    - host
+    window: 4h

@@ -153,29 +153,58 @@ graylog:
   query: data_process_exec_process_binary:/.*\/[Ww][Gg][Ee][Tt]/ AND (data_process_exec_process_arguments:/.*([ ]-O[ ]).*/ OR data_process_exec_process_arguments:/.*--[Oo][Uu][Tt][Pp][Uu][Tt]-[Dd][Oo][Cc][Uu][Mm][Ee][Nn][Tt].*/) AND data_process_exec_process_arguments:/.*\/[Tt][Mm][Pp]\/.*/
 
 correlation:
-  # Authored by the correlation engine for review. Related CoPilot Searches to run
-  # around an alert from this rule, scoped to the same host/user/IP within the window.
+  # Authored per-rule (behaviour-researched) for the correlation engine. Related CoPilot
+  # Searches + telemetry pivots to run around an alert, scoped to its host/user/ip/domain.
   related_rules:
-    - id: 0a23a62d-c5b3-468b-a072-25064a9a8c87
-      name: "Axios NPM Compromise Indicators - Linux"
-      reason: "next kill-chain tactic: Command and Control"
+  - id: 818f7b24-0fba-4c49-a073-8b755573b9c7
+    name: Linux Webshell Indicators
+    reason: 'Precursor/foothold: a web-server process (nginx/apache/php-fpm) spawning a shell is the classic parent that launches this wget. If it fired on the same host shortly before, the /tmp download is attacker-driven ingress tooling, not admin activity - check data_process_exec_parent_binary of the wget event against it.'
+  - id: a2d9e2f3-0f43-4c7a-bcd9-9acfc0d723aa
+    name: Suspicious Download and Execute Pattern via Curl/Wget
+    reason: 'Same ingress-tool-transfer TTP at higher confidence: curl/wget writing into /tmp or /dev/shm immediately followed by ''sh -c'' execution. Co-firing on this host confirms the wget-to-/tmp drop is a stager/downloader, not a benign fetch.'
+  - id: 60d050c4-e253-4d9a-b673-5ac100cfddfb
+    name: UNC4841 - Download Compressed Files From Temp.sh Using Wget
+    reason: Named-actor variant of the exact wget-to-temp behavior (UNC4841 Barracuda ESG exploitation, downloading .zip/.rar from temp.sh). If it co-fires, the drop is almost certainly a malicious archived payload staged for unpacking.
+  - id: 6419afd1-3742-47a5-a7e6-b50386cd15f8
+    name: Chmod Targeting Sensitive Directories
+    reason: 'Immediate next step after a /tmp drop: chmod on a file under /tmp (or /etc,/opt) to set the execute bit so the just-downloaded payload can be run. chmod +x /tmp/<file> directly follows wget -O /tmp/<file>.'
+  - id: 312b42b1-bded-4441-8b58-163a3af58775
+    name: Potentially Suspicious Execution From Tmp Folder
+    reason: 'The payoff: a binary whose path is under /tmp/ is executed. Turns ''a file was fetched into /tmp'' into ''the downloaded payload actually ran'' - the single most important follow-on to confirm compromise.'
+  - id: 30bcce26-51c5-49f2-99c8-7b59e3af36c7
+    name: Execution Of Script Located In Potentially Suspicious Directory
+    reason: 'Script-payload variant of the payoff: bash/sh invoked to run a script located in /tmp. Many wget drops are shell/stager scripts rather than ELF binaries, so this catches the execution the /tmp-binary rule would miss.'
+  - id: 5cd16c8f-44a6-4654-81e7-a84d6db507d4
+    name: Process Execution From Shared Memory Directory
+    reason: 'Fileless-evasion sibling: payload moved/re-staged to /dev/shm (RAM-backed tmpfs) and executed so it never touches disk. A frequent evasion follow-on to a /tmp download on the same host.'
+  - id: e34cfa0c-0a50-4210-9cb3-5632d08eb041
+    name: Potential GobRAT File Discovery Via Grep
+    reason: 'Named-malware continuation: this detection''s own references are the GobRAT research, and GobRAT''s loader delivers the RAT via a wget drop. GobRAT-specific grep file-discovery on the same host is the expected next-stage activity if this is a GobRAT infection.'
   window: 1h
   enrichment_searches:
-  # Rule-specific telemetry pivots the engine runs around an alert from this rule,
-  # scoped to the alert's host/user/IP within the window (behaviour-targeted, not a sweep).
-    - name: "Downloader / ingress-tool-transfer on this host"
-      query: 'data_process_exec_process_binary:/.*(\/[Cc][Uu][Rr][Ll]|\/[Ww][Gg][Ee][Tt]|\/[Tt][Ff][Tt][Pp])/'
-      pivot_on: [host]
-      window: 1h
-    - name: "Outbound-transfer / upload tooling on this host"
-      query: '((data_process_exec_process_binary:/.*(\/[Cc][Uu][Rr][Ll]|\/[Ww][Gg][Ee][Tt]|\/[Tt][Ff][Tt][Pp])/) OR (data_process_exec_process_binary:/.*(\/[Ss][Cc][Pp]|\/[Rr][Ss][Yy][Nn][Cc]|\/[Rr][Cc][Ll][Oo][Nn][Ee]|\/[Cc][Uu][Rr][Ll])/))'
-      pivot_on: [host]
-      window: 2h
-    - name: "Shell / interpreter execution on this host"
-      query: '((data_process_exec_process_binary:/.*(\/[Bb][Aa][Ss][Hh]|\/[Ss][Hh]|\/[Dd][Aa][Ss][Hh]|\/[Zz][Ss][Hh]|\/[Kk][Ss][Hh]|\/[Aa][Ss][Hh]|\/[Bb][Uu][Ss][Yy][Bb][Oo][Xx])/) OR (data_process_exec_process_binary:/.*(\/[Pp][Yy][Tt][Hh][Oo][Nn]|\/[Pp][Yy][Tt][Hh][Oo][Nn]3|\/[Pp][Ee][Rr][Ll]|\/[Rr][Uu][Bb][Yy]|\/[Pp][Hh][Pp]|\/[Nn][Oo][Dd][Ee]|\/[Ll][Uu][Aa]|\/[Aa][Ww][Kk])/))'
-      pivot_on: [host]
-      window: 1h
-    - name: "Reconnaissance commands on this host"
-      query: 'data_process_exec_process_binary:/.*(\/[Ww][Hh][Oo][Aa][Mm][Ii]|\/[Ii][Dd]|\/[Uu][Nn][Aa][Mm][Ee]|\/[Hh][Oo][Ss][Tt][Nn][Aa][Mm][Ee]|\/[Hh][Oo][Ss][Tt][Nn][Aa][Mm][Ee][Cc][Tt][Ll]|\/[Ss][Ss]|\/[Nn][Ee][Tt][Ss][Tt][Aa][Tt]|\/[Ii][Ff][Cc][Oo][Nn][Ff][Ii][Gg]|\/[Aa][Rr][Pp]|\/[Ww]|\/[Ww][Hh][Oo]|\/[Ll][Aa][Ss][Tt]|\/[Ll][Ss][Oo][Ff]|\/[Nn][Mm][Aa][Pp]|\/[Dd][Ii][Gg]|\/[Ff][Ii][Nn][Dd])/'
-      pivot_on: [host]
-      window: 1h
+  # Behaviour-targeted hunts the engine runs around the alert (not a sweep).
+  - name: chmod making the dropped /tmp or /dev/shm payload executable
+    query: data_process_exec_process_binary:/.*\/[Cc][Hh][Mm][Oo][Dd]/ AND (data_process_exec_process_arguments:/.*\/[Tt][Mm][Pp]\/.*/ OR data_process_exec_process_arguments:/.*\/[Dd][Ee][Vv]\/[Ss][Hh][Mm]\/.*/)
+    pivot_on:
+    - host
+    window: 1h
+  - name: Execution of a binary or script from /tmp or /dev/shm
+    query: (data_process_exec_process_binary:/\/[Tt][Mm][Pp]\/.*/ OR data_process_exec_process_binary:/\/[Dd][Ee][Vv]\/[Ss][Hh][Mm]\/.*/) OR ((data_process_exec_process_binary:/.*(\/[Bb][Aa][Ss][Hh]|\/[Ss][Hh]|\/[Dd][Aa][Ss][Hh]|\/[Pp][Yy][Tt][Hh][Oo][Nn]|\/[Pp][Yy][Tt][Hh][Oo][Nn]3|\/[Pp][Ee][Rr][Ll])/) AND (data_process_exec_process_arguments:/.*\/[Tt][Mm][Pp]\/.*/ OR data_process_exec_process_arguments:/.*\/[Dd][Ee][Vv]\/[Ss][Hh][Mm]\/.*/))
+    pivot_on:
+    - host
+    window: 1h
+  - name: Additional ingress-tool-transfer (more downloaders) on this host
+    query: data_process_exec_process_binary:/.*(\/[Ww][Gg][Ee][Tt]|\/[Cc][Uu][Rr][Ll]|\/[Tt][Ff][Tt][Pp]|\/[Ff][Tt][Pp])/
+    pivot_on:
+    - host
+    window: 2h
+  - name: Persistence established on this host (cron / systemd / rc.local / profile / authorized_keys)
+    query: (data_process_exec_process_binary:/.*(\/[Cc][Rr][Oo][Nn][Tt][Aa][Bb]|\/[Ss][Yy][Ss][Tt][Ee][Mm][Cc][Tt][Ll]|\/[Aa][Tt])/) OR data_process_exec_process_arguments:/.*\/[Ee][Tt][Cc]\/[Cc][Rr][Oo][Nn].*/ OR data_process_exec_process_arguments:/.*\/[Ee][Tt][Cc]\/[Ss][Yy][Ss][Tt][Ee][Mm][Dd]\/.*/ OR data_process_exec_process_arguments:/.*\/[Ee][Tt][Cc]\/[Ii][Nn][Ii][Tt]\.[Dd]\/.*/ OR data_process_exec_process_arguments:/.*[Rr][Cc]\.[Ll][Oo][Cc][Aa][Ll].*/ OR data_process_exec_process_arguments:/.*\.[Bb][Aa][Ss][Hh][Rr][Cc].*/ OR data_process_exec_process_arguments:/.*[Aa][Uu][Tt][Hh][Oo][Rr][Ii][Zz][Ee][Dd]_[Kk][Ee][Yy][Ss].*/
+    pivot_on:
+    - host
+    window: 4h
+  - name: C2 / reverse-shell indicators on this host (nc/ncat/socat, /dev/tcp, pty.spawn)
+    query: data_process_exec_process_binary:/.*(\/[Nn][Cc]|\/[Nn][Cc][Aa][Tt]|\/[Nn][Ee][Tt][Cc][Aa][Tt]|\/[Ss][Oo][Cc][Aa][Tt])/ OR data_process_exec_process_arguments:/.*\/[Dd][Ee][Vv]\/[Tt][Cc][Pp]\/.*/ OR data_process_exec_process_arguments:/.*[Pp][Tt][Yy]\.[Ss][Pp][Aa][Ww][Nn].*/
+    pivot_on:
+    - host
+    window: 2h

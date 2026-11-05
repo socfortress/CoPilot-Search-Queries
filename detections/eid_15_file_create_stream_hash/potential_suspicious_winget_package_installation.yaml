@@ -162,23 +162,58 @@ graylog:
   query: data_win_system_eventID:"15" AND data_win_eventdata_contents:/\[[Zz][Oo][Nn][Ee][Tt][Rr][Aa][Nn][Ss][Ff][Ee][Rr]\]  [Zz][Oo][Nn][Ee][Ii][Dd]=3.*/ AND (data_win_eventdata_contents:/.*:\/\/1.*/ OR data_win_eventdata_contents:/.*:\/\/2.*/ OR data_win_eventdata_contents:/.*:\/\/3.*/ OR data_win_eventdata_contents:/.*:\/\/4.*/ OR data_win_eventdata_contents:/.*:\/\/5.*/ OR data_win_eventdata_contents:/.*:\/\/6.*/ OR data_win_eventdata_contents:/.*:\/\/7.*/ OR data_win_eventdata_contents:/.*:\/\/8.*/ OR data_win_eventdata_contents:/.*:\/\/9.*/) AND data_win_eventdata_targetFilename:/.*:[Zz][Oo][Nn][Ee]\.[Ii][Dd][Ee][Nn][Tt][Ii][Ff][Ii][Ee][Rr]/ AND data_win_eventdata_targetFilename:/.*\\[Aa][Pp][Pp][Dd][Aa][Tt][Aa]\\[Ll][Oo][Cc][Aa][Ll]\\[Tt][Ee][Mm][Pp]\\[Ww][Ii][Nn][Gg][Ee][Tt]\\.*/
 
 correlation:
-  # Authored by the correlation engine for review.
+  # Authored per-rule (behaviour-researched) for the correlation engine. Related CoPilot
+  # Searches + telemetry pivots to run around an alert, scoped to its host/user/ip/domain.
+  related_rules:
+  - id: 313d6012-51a0-4d93-8dfc-de8553239e25
+    name: Install New Package Via Winget Local Manifest
+    reason: 'Co-occurring cause (process side of this exact file event): ''winget install -m/--manifest'' is the command that makes winget download the installer into %LOCALAPPDATA%\Temp\WinGet, which is the file this EID 15 rule sees land with mark-of-the-web. Finding this winget.exe command line on the same host names the package and source behind the download.'
+  - id: fa277e82-9b78-42dd-b05c-05555c7b6015
+    name: Enable Local Manifest Installation With Winget
+    reason: 'Enabling precursor: the AppInstaller policy flip EnableLocalManifestFiles=1 (EID 13) must be set before an attacker can install an arbitrary local YAML manifest that pulls a remote exe/msi/msix. A recent flip on this host explains why an unvetted manifest was allowed to stage the package this rule caught.'
+  - id: 81a0ecb5-0a41-4ba1-b2ba-c944eb92bfa2
+    name: Add Insecure Download Source To Winget
+    reason: 'Config-tampering precursor: ''winget source add http://...'' points winget at attacker-controlled infrastructure, so the subsequent install pulls the internet-sourced (ZoneId=3) package this rule records. Directly explains the non-Microsoft download URL baked into the file''s Zone.Identifier stream.'
+  - id: c15a46a0-07d4-4c87-b4b6-89207835a83b
+    name: Add Potential Suspicious New Download Source To Winget
+    reason: 'Precursor that defines the ''suspicious source'' in this rule''s name: a winget source whose URL is a raw IP address. If this fired on the host just before, the suspicious URL now written into the downloaded file''s MOTW stream is the very source that was added.'
+  - id: 05ebafc8-7aa2-4bcd-a269-2aec93f9e842
+    name: Add New Download Source To Winget
+    reason: 'Precursor: ''winget source add'' of any non-default source. The package that landed here came from a repository other than the official winget community source, so a recent source-add on this host is the setup step for this install.'
+  - id: 180c7c5c-d64b-4a63-86e9-68910451bc8b
+    name: Potential File Download Via MS-AppInstaller Protocol Handler
+    reason: 'Sibling download vector in the same Microsoft.DesktopAppInstaller component: ''ms-appinstaller://?source=http...'' fetches a package via AppInstaller.EXE just as a winget source install does. The two are interchangeable delivery paths for the internet-sourced package this rule sees on disk.'
+  - id: 7cff77e1-9663-46a3-8260-17f2e1aa9d0a
+    name: AppX Package Installation Attempts Via AppInstaller.EXE
+    reason: 'Co-occurring network side of this download: the DNS query AppInstaller.EXE makes to resolve the package host is the on-the-wire counterpart of the file this rule records landing on disk. Seeing both on one host confirms a real fetch, and surfaces the download domain the file event cannot parse.'
+  - id: windows-advanced-installer-msix-ai-stubs-001
+    name: Windows Advanced Installer MSIX with AI_STUBS Execution
+    reason: 'Follow-on payload execution: when the downloaded package is a weaponized MSIX (FakeBat/EugenLoader families), its payload launches via the AI_STUBS popupwrapper.exe stub right after install. Confirms the suspicious package was not just staged but detonated.'
+  window: 2h
   enrichment_searches:
-  # Rule-specific telemetry pivots the engine runs around an alert from this rule,
-  # scoped to the alert's host/user/IP within the window (behaviour-targeted, not a sweep).
-    - name: "Follow-on LOLBin / signed-binary-proxy execution on this host"
-      query: 'data_win_system_eventID:"1" AND data_win_eventdata_image:/.*(\\[Rr][Uu][Nn][Dd][Ll][Ll]32\.[Ee][Xx][Ee]|\\[Rr][Ee][Gg][Ss][Vv][Rr]32\.[Ee][Xx][Ee]|\\[Mm][Ss][Hh][Tt][Aa]\.[Ee][Xx][Ee]|\\[Ii][Nn][Ss][Tt][Aa][Ll][Ll][Uu][Tt][Ii][Ll]\.[Ee][Xx][Ee]|\\[Rr][Ee][Gg][Aa][Ss][Mm]\.[Ee][Xx][Ee]|\\[Rr][Ee][Gg][Ss][Vv][Cc][Ss]\.[Ee][Xx][Ee]|\\[Mm][Ss][Bb][Uu][Ii][Ll][Dd]\.[Ee][Xx][Ee]|\\[Cc][Ee][Rr][Tt][Uu][Tt][Ii][Ll]\.[Ee][Xx][Ee]|\\[Bb][Ii][Tt][Ss][Aa][Dd][Mm][Ii][Nn]\.[Ee][Xx][Ee]|\\[Ww][Mm][Ii][Cc]\.[Ee][Xx][Ee]|\\[Cc][Mm][Ss][Tt][Pp]\.[Ee][Xx][Ee]|\\[Oo][Dd][Bb][Cc][Cc][Oo][Nn][Ff]\.[Ee][Xx][Ee]|\\[Ff][Oo][Rr][Ff][Ii][Ll][Ee][Ss]\.[Ee][Xx][Ee]|\\[Pp][Cc][Aa][Ll][Uu][Aa]\.[Ee][Xx][Ee]|\\[Mm][Aa][Vv][Ii][Nn][Jj][Ee][Cc][Tt]\.[Ee][Xx][Ee]|\\[Ss][Cc][Rr][Ii][Pp][Tt][Rr][Uu][Nn][Nn][Ee][Rr]\.[Ee][Xx][Ee])/'
-      pivot_on: [host]
-      window: 1h
-    - name: "Execution of programs from user-writable paths on this host"
-      query: 'data_win_system_eventID:"1" AND (data_win_eventdata_image:/.*\\[Uu][Ss][Ee][Rr][Ss]\\.*/ OR data_win_eventdata_image:/.*\\[Pp][Rr][Oo][Gg][Rr][Aa][Mm][Dd][Aa][Tt][Aa]\\.*/ OR data_win_eventdata_image:/.*\\[Ww][Ii][Nn][Dd][Oo][Ww][Ss]\\[Tt][Ee][Mm][Pp]\\.*/ OR data_win_eventdata_image:/.*\\[Aa][Pp][Pp][Dd][Aa][Tt][Aa]\\.*/ OR data_win_eventdata_image:/.*\\[Pp][Uu][Bb][Ll][Ii][Cc]\\.*/ OR data_win_eventdata_image:/.*\\\$[Rr][Ee][Cc][Yy][Cc][Ll][Ee].*/)'
-      pivot_on: [host]
-      window: 1h
-    - name: "Autostart persistence written on this host"
-      query: '(data_win_system_eventID:"12" OR data_win_system_eventID:"13") AND (data_win_eventdata_targetObject:/.*[Cc][Uu][Rr][Rr][Ee][Nn][Tt][Vv][Ee][Rr][Ss][Ii][Oo][Nn]\\[Rr][Uu][Nn].*/ OR data_win_eventdata_targetObject:/.*[Cc][Uu][Rr][Rr][Ee][Nn][Tt][Vv][Ee][Rr][Ss][Ii][Oo][Nn]\\[Rr][Uu][Nn][Oo][Nn][Cc][Ee].*/ OR data_win_eventdata_targetObject:/.*[Cc][Uu][Rr][Rr][Ee][Nn][Tt][Cc][Oo][Nn][Tt][Rr][Oo][Ll][Ss][Ee][Tt]\\[Ss][Ee][Rr][Vv][Ii][Cc][Ee][Ss]\\.*/ OR data_win_eventdata_targetObject:/.*[Ii][Mm][Aa][Gg][Ee] [Ff][Ii][Ll][Ee] [Ee][Xx][Ee][Cc][Uu][Tt][Ii][Oo][Nn] [Oo][Pp][Tt][Ii][Oo][Nn][Ss]\\.*/ OR data_win_eventdata_targetObject:/.*[Ww][Ii][Nn][Ll][Oo][Gg][Oo][Nn]\\[Ss][Hh][Ee][Ll][Ll].*/ OR data_win_eventdata_targetObject:/.*[Ww][Ii][Nn][Ll][Oo][Gg][Oo][Nn]\\[Uu][Ss][Ee][Rr][Ii][Nn][Ii][Tt].*/ OR data_win_eventdata_targetObject:/.*[Cc][Uu][Rr][Rr][Ee][Nn][Tt][Vv][Ee][Rr][Ss][Ii][Oo][Nn]\\[Ee][Xx][Pp][Ll][Oo][Rr][Ee][Rr]\\[Rr][Uu][Nn].*/ OR data_win_eventdata_targetObject:/.*[Pp][Oo][Ll][Ii][Cc][Ii][Ee][Ss]\\[Ee][Xx][Pp][Ll][Oo][Rr][Ee][Rr]\\[Rr][Uu][Nn].*/ OR data_win_eventdata_targetObject:/.*[Cc][Uu][Rr][Rr][Ee][Nn][Tt][Vv][Ee][Rr][Ss][Ii][Oo][Nn]\\[Ww][Ii][Nn][Dd][Oo][Ww][Ss]\\[Ll][Oo][Aa][Dd].*/)'
-      pivot_on: [host]
-      window: 2h
-    - name: "Autostart persistence written on this host (Run keys, services, IFEO)"
-      query: '(data_win_system_eventID:"12" OR data_win_system_eventID:"13") AND (data_win_eventdata_targetObject:/.*[Cc][Uu][Rr][Rr][Ee][Nn][Tt][Vv][Ee][Rr][Ss][Ii][Oo][Nn]\\[Rr][Uu][Nn].*/ OR data_win_eventdata_targetObject:/.*[Cc][Uu][Rr][Rr][Ee][Nn][Tt][Vv][Ee][Rr][Ss][Ii][Oo][Nn]\\[Rr][Uu][Nn][Oo][Nn][Cc][Ee].*/ OR data_win_eventdata_targetObject:/.*[Cc][Uu][Rr][Rr][Ee][Nn][Tt][Cc][Oo][Nn][Tt][Rr][Oo][Ll][Ss][Ee][Tt]\\[Ss][Ee][Rr][Vv][Ii][Cc][Ee][Ss]\\.*/ OR data_win_eventdata_targetObject:/.*[Ii][Mm][Aa][Gg][Ee] [Ff][Ii][Ll][Ee] [Ee][Xx][Ee][Cc][Uu][Tt][Ii][Oo][Nn] [Oo][Pp][Tt][Ii][Oo][Nn][Ss]\\.*/ OR data_win_eventdata_targetObject:/.*[Ww][Ii][Nn][Ll][Oo][Gg][Oo][Nn]\\[Ss][Hh][Ee][Ll][Ll].*/ OR data_win_eventdata_targetObject:/.*[Ww][Ii][Nn][Ll][Oo][Gg][Oo][Nn]\\[Uu][Ss][Ee][Rr][Ii][Nn][Ii][Tt].*/ OR data_win_eventdata_targetObject:/.*[Cc][Uu][Rr][Rr][Ee][Nn][Tt][Vv][Ee][Rr][Ss][Ii][Oo][Nn]\\[Ee][Xx][Pp][Ll][Oo][Rr][Ee][Rr]\\[Rr][Uu][Nn].*/ OR data_win_eventdata_targetObject:/.*[Pp][Oo][Ll][Ii][Cc][Ii][Ee][Ss]\\[Ee][Xx][Pp][Ll][Oo][Rr][Ee][Rr]\\[Rr][Uu][Nn].*/ OR data_win_eventdata_targetObject:/.*[Cc][Uu][Rr][Rr][Ee][Nn][Tt][Vv][Ee][Rr][Ss][Ii][Oo][Nn]\\[Ww][Ii][Nn][Dd][Oo][Ww][Ss]\\[Ll][Oo][Aa][Dd].*/)'
-      pivot_on: [host]
-      window: 4h
+  # Behaviour-targeted hunts the engine runs around the alert (not a sweep).
+  - name: Winget / AppInstaller install command that staged this download
+    query: data_win_system_eventID:"1" AND (data_win_eventdata_image:/.*\\[Ww][Ii][Nn][Gg][Ee][Tt]\.[Ee][Xx][Ee]/ OR data_win_eventdata_originalFileName:/[Ww][Ii][Nn][Gg][Ee][Tt]\.[Ee][Xx][Ee]/ OR data_win_eventdata_image:/.*\\[Aa][Pp][Pp][Ii][Nn][Ss][Tt][Aa][Ll][Ll][Ee][Rr]\.[Ee][Xx][Ee]/)
+    pivot_on:
+    - host
+    window: 1h
+  - name: Download source contacted by winget / AppInstaller (network + DNS)
+    query: (data_win_system_eventID:"3" OR data_win_system_eventID:"22") AND (data_win_eventdata_image:/.*\\[Ww][Ii][Nn][Gg][Ee][Tt]\.[Ee][Xx][Ee]/ OR data_win_eventdata_image:/.*\\[Aa][Pp][Pp][Ii][Nn][Ss][Tt][Aa][Ll][Ll][Ee][Rr]\.[Ee][Xx][Ee]/ OR data_win_eventdata_image:/[Cc]:\\[Pp][Rr][Oo][Gg][Rr][Aa][Mm] [Ff][Ii][Ll][Ee][Ss]\\[Ww][Ii][Nn][Dd][Oo][Ww][Ss][Aa][Pp][Pp][Ss]\\[Mm][Ii][Cc][Rr][Oo][Ss][Oo][Ff][Tt]\.[Dd][Ee][Ss][Kk][Tt][Oo][Pp][Aa][Pp][Pp][Ii][Nn][Ss][Tt][Aa][Ll][Ll][Ee][Rr]_.*/)
+    pivot_on:
+    - host
+    window: 1h
+  - name: Downloaded installer executing (WinGet temp path, or child of winget/AppInstaller)
+    query: data_win_system_eventID:"1" AND (data_win_eventdata_image:/.*\\[Aa][Pp][Pp][Dd][Aa][Tt][Aa]\\[Ll][Oo][Cc][Aa][Ll]\\[Tt][Ee][Mm][Pp]\\[Ww][Ii][Nn][Gg][Ee][Tt]\\.*/ OR data_win_eventdata_commandLine:/.*\\[Aa][Pp][Pp][Dd][Aa][Tt][Aa]\\[Ll][Oo][Cc][Aa][Ll]\\[Tt][Ee][Mm][Pp]\\[Ww][Ii][Nn][Gg][Ee][Tt]\\.*/ OR data_win_eventdata_parentImage:/.*\\[Ww][Ii][Nn][Gg][Ee][Tt]\.[Ee][Xx][Ee]/ OR data_win_eventdata_parentImage:/.*\\[Aa][Pp][Pp][Ii][Nn][Ss][Tt][Aa][Ll][Ll][Ee][Rr]\.[Ee][Xx][Ee]/)
+    pivot_on:
+    - host
+    window: 2h
+  - name: Autostart persistence written after install (Run / RunOnce / Services / IFEO / Winlogon)
+    query: (data_win_system_eventID:"12" OR data_win_system_eventID:"13") AND (data_win_eventdata_targetObject:/.*[Cc][Uu][Rr][Rr][Ee][Nn][Tt][Vv][Ee][Rr][Ss][Ii][Oo][Nn]\\[Rr][Uu][Nn].*/ OR data_win_eventdata_targetObject:/.*[Cc][Uu][Rr][Rr][Ee][Nn][Tt][Vv][Ee][Rr][Ss][Ii][Oo][Nn]\\[Rr][Uu][Nn][Oo][Nn][Cc][Ee].*/ OR data_win_eventdata_targetObject:/.*[Cc][Uu][Rr][Rr][Ee][Nn][Tt][Cc][Oo][Nn][Tt][Rr][Oo][Ll][Ss][Ee][Tt]\\[Ss][Ee][Rr][Vv][Ii][Cc][Ee][Ss]\\.*/ OR data_win_eventdata_targetObject:/.*[Ii][Mm][Aa][Gg][Ee] [Ff][Ii][Ll][Ee] [Ee][Xx][Ee][Cc][Uu][Tt][Ii][Oo][Nn] [Oo][Pp][Tt][Ii][Oo][Nn][Ss]\\.*/ OR data_win_eventdata_targetObject:/.*[Ww][Ii][Nn][Ll][Oo][Gg][Oo][Nn]\\[Ss][Hh][Ee][Ll][Ll].*/ OR data_win_eventdata_targetObject:/.*[Ww][Ii][Nn][Ll][Oo][Gg][Oo][Nn]\\[Uu][Ss][Ee][Rr][Ii][Nn][Ii][Tt].*/)
+    pivot_on:
+    - host
+    window: 4h
+  - name: Second-stage ingress tool transfer on this host (certutil/bitsadmin/curl/wget/PowerShell downloaders)
+    query: (data_win_system_eventID:"1" AND data_win_eventdata_image:/.*(\\[Cc][Ee][Rr][Tt][Uu][Tt][Ii][Ll]\.[Ee][Xx][Ee]|\\[Bb][Ii][Tt][Ss][Aa][Dd][Mm][Ii][Nn]\.[Ee][Xx][Ee]|\\[Cc][Uu][Rr][Ll]\.[Ee][Xx][Ee]|\\[Ww][Gg][Ee][Tt]\.[Ee][Xx][Ee])/) OR data_win_eventdata_commandLine:/.*([Dd][Oo][Ww][Nn][Ll][Oo][Aa][Dd][Ss][Tt][Rr][Ii][Nn][Gg]|[Dd][Oo][Ww][Nn][Ll][Oo][Aa][Dd][Ff][Ii][Ll][Ee]|[Ii][Nn][Vv][Oo][Kk][Ee]-[Ww][Ee][Bb][Rr][Ee][Qq][Uu][Ee][Ss][Tt]|[Nn][Ee][Tt]\.[Ww][Ee][Bb][Cc][Ll][Ii][Ee][Nn][Tt]|[Ss][Tt][Aa][Rr][Tt]-[Bb][Ii][Tt][Ss][Tt][Rr][Aa][Nn][Ss][Ff][Ee][Rr]).*/
+    pivot_on:
+    - host
+    window: 2h

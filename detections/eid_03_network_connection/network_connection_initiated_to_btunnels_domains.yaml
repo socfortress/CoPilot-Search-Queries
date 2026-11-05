@@ -147,48 +147,58 @@ graylog:
   query: data_win_system_eventID:"3" AND data_win_eventdata_initiated:/[Tt][Rr][Uu][Ee]/ AND data_win_eventdata_destinationHostname:/.*\.[Bb][Tt][Uu][Nn][Nn][Ee][Ll]\.[Cc][Oo]\.[Ii][Nn]/
 
 correlation:
-  # Authored by the correlation engine for review. Related CoPilot Searches to run
-  # around an alert from this rule, scoped to the same host/user/IP within the window.
+  # Authored per-rule (behaviour-researched) for the correlation engine. Related CoPilot
+  # Searches + telemetry pivots to run around an alert, scoped to its host/user/ip/domain.
   related_rules:
-    - id: 75bf09fa-1dd7-4d18-9af9-dd9e492562eb
-      name: "ADSI-Cache File Creation By Uncommon Tool"
-      reason: "next kill-chain tactic: Command and Control"
-    - id: 639c9081-f482-47d3-a0bd-ddee3d4ecd76
-      name: "All Backups Deleted Via Wbadmin.EXE"
-      reason: "next kill-chain tactic: Impact"
-    - id: 0b9ad457-2554-44c1-82c2-d56a99c42377
-      name: "Anydesk Temporary Artefact"
-      reason: "next kill-chain tactic: Command and Control"
-    - id: 7cff77e1-9663-46a3-8260-17f2e1aa9d0a
-      name: "AppX Package Installation Attempts Via AppInstaller.EXE"
-      reason: "next kill-chain tactic: Command and Control"
-    - id: 1f0f6176-6482-4027-b151-00071af39d7e
-      name: "Arbitrary File Download Via ConfigSecurityPolicy.EXE"
-      reason: "next kill-chain tactic: Exfiltration"
-    - id: eee00933-a761-4cd0-be70-c42fe91731e7
-      name: "Arbitrary File Download Via GfxDownloadWrapper.EXE"
-      reason: "next kill-chain tactic: Command and Control"
-  window: 1h
+  - id: 1d08ac94-400d-4469-a82f-daee9a908849
+    name: Communication To Ngrok Tunneling Service Initiated
+    reason: Same Sysmon EID 3 'process initiated a connection to a tunnelling service' behaviour, ngrok instead of BTunnel; a host beaconing to two different anonymizing-tunnel providers in one window is deliberate tunnelling infrastructure, not one user's legitimate tool.
+  - id: 7cd1dcdc-6edf-4896-86dc-d1f19ad64903
+    name: Network Connection Initiated To Cloudflared Tunnels Domains
+    reason: Another tunnel-service beacon (cloudflared) from the same host corroborates a deliberate egress/backup-C2 channel; operators routinely stand up a second tunnel provider so losing one does not cut their access.
+  - id: 327f48c1-a6db-4eb8-875a-f6981f1b0183
+    name: Port Forwarding Activity Via SSH.EXE
+    reason: 'Same protocol-tunnelling outcome by a native mechanism: ssh.exe -R/-L forwards a local port out exactly as the BTunnel client does, so SSH forwarding on this host points to the operator exposing an internal service or layering a second tunnel.'
+  - id: edc2f8ae-2412-4dfd-b9d5-0c57727e70be
+    name: Potential Powershell ReverseShell Connection
+    reason: The TcpClient reverse shell that a BTunnel reverse tunnel is frequently built to carry; if it fires on the same host the tunnel is almost certainly a live C2 shell rather than benign port exposure.
+  - id: 98a96a5a-64a0-4c42-92c5-489da3866cb0
+    name: DNS Exfiltration and Tunneling Tools Execution
+    reason: A second covert channel (iodine/dnscat2 DNS tunnelling) launched on the same host; two independent exfil/tunnel tools together is strong evidence of intentional data-smuggling, not stray software.
+  - id: 2daa93a0-a5fb-41c5-8cd8-3c11294bfd1f
+    name: Potential SSH Tunnel Persistence Install Using A Scheduled Task
+    reason: 'The persistence follow-on: a schtasks job that re-launches a reverse SSH tunnel on boot, turning the one-off BTunnel connection into durable remote access the operator keeps across reboot/logoff.'
+  - id: 7d1aaf3d-4304-425c-b7c3-162055e0b3ab
+    name: Potential Data Exfiltration Activity Via CommandLine Tools
+    reason: 'The documented BTunnel abuse (data exfiltration): recon output POSTed out with curl/Invoke-RestMethod/wget on the same host indicates the tunnel is being used to push collected data off the box.'
+  - id: windows-curl-upload-remote-destination-001
+    name: Windows Curl Upload to Remote Destination
+    reason: A concrete file-upload exfiltration (curl -T/--upload-file/-F) close in time to the tunnel connection is the data-theft action the BTunnel reference describes, pairing with the tunnel as the staging-then-exfil endgame.
+  window: 2h
   enrichment_searches:
-  # Rule-specific telemetry pivots the engine runs around an alert from this rule,
-  # scoped to the alert's host/user/IP within the window (behaviour-targeted, not a sweep).
-    - name: "Protocol-tunnelling tooling on this host"
-      query: '((data_win_system_eventID:"1" AND data_win_eventdata_image:/.*(\\[Nn][Gg][Rr][Oo][Kk]\.[Ee][Xx][Ee]|\\[Pp][Ll][Ii][Nn][Kk]\.[Ee][Xx][Ee]|\\[Ss][Ss][Hh]\.[Ee][Xx][Ee]|\\[Ff][Rr][Pp][Cc]\.[Ee][Xx][Ee]|\\[Cc][Hh][Ii][Ss][Ee][Ll]\.[Ee][Xx][Ee]|\\[Cc][Ll][Oo][Uu][Dd][Ff][Ll][Aa][Rr][Ee][Dd]\.[Ee][Xx][Ee])/) OR (data_win_system_eventID:"3" AND data_win_eventdata_image:/.*(\\[Nn][Gg][Rr][Oo][Kk]\.[Ee][Xx][Ee]|\\[Pp][Ll][Ii][Nn][Kk]\.[Ee][Xx][Ee]|\\[Ss][Ss][Hh]\.[Ee][Xx][Ee]|\\[Ff][Rr][Pp][Cc]\.[Ee][Xx][Ee]|\\[Cc][Hh][Ii][Ss][Ee][Ll]\.[Ee][Xx][Ee]|\\[Cc][Ll][Oo][Uu][Dd][Ff][Ll][Aa][Rr][Ee][Dd]\.[Ee][Xx][Ee])/) OR ((data_win_eventdata_commandLine:/.*-[Rr] 127\.0\.0\.1.*/ OR data_win_eventdata_commandLine:/.*[Ss][Ss][Hh] -[Rr].*/ OR data_win_eventdata_commandLine:/.*[Pp][Oo][Rr][Tt][Ff][Ww][Dd].*/ OR data_win_eventdata_commandLine:/.*[Ss][Oo][Cc][Kk][Ss].*/)))'
-      pivot_on: [host]
-      window: 1h
-    - name: "Outbound transfer / cloud-storage egress on this host"
-      query: '((data_win_system_eventID:"1" AND data_win_eventdata_image:/.*(\\[Rr][Cc][Ll][Oo][Nn][Ee]\.[Ee][Xx][Ee]|\\[Cc][Uu][Rr][Ll]\.[Ee][Xx][Ee]|\\[Ww][Gg][Ee][Tt]\.[Ee][Xx][Ee]|\\[Ww][Ii][Nn][Ss][Cc][Pp]\.[Ee][Xx][Ee]|\\[Pp][Ss][Cc][Pp]\.[Ee][Xx][Ee]|\\[Mm][Ee][Gg][Aa][Cc][Mm][Dd]\.[Ee][Xx][Ee]|\\[Mm][Ee][Gg][Aa][Ss][Yy][Nn][Cc]\.[Ee][Xx][Ee])/) OR ((data_win_eventdata_commandLine:/.*[Ii][Nn][Vv][Oo][Kk][Ee]-[Rr][Ee][Ss][Tt][Mm][Ee][Tt][Hh][Oo][Dd].*/ OR data_win_eventdata_commandLine:/.*[Ss][Tt][Aa][Rr][Tt]-[Bb][Ii][Tt][Ss][Tt][Rr][Aa][Nn][Ss][Ff][Ee][Rr].*/ OR data_win_eventdata_commandLine:/.*[Rr][Cc][Ll][Oo][Nn][Ee].*/ OR data_win_eventdata_commandLine:/.*[Tt][Rr][Aa][Nn][Ss][Ff][Ee][Rr]\.[Ss][Hh].*/ OR data_win_eventdata_commandLine:/.*[Aa][Nn][Oo][Nn][Ff][Ii][Ll][Ee][Ss].*/ OR data_win_eventdata_commandLine:/.*[Pp][Aa][Ss][Tt][Ee][Bb][Ii][Nn].*/ OR data_win_eventdata_commandLine:/.*[Mm][Ee][Gg][Aa]\.[Nn][Zz].*/ OR data_win_eventdata_commandLine:/.*-[Oo][Uu][Tt][Ff][Ii][Ll][Ee].*/ OR data_win_eventdata_commandLine:/.*[Uu][Pp][Ll][Oo][Aa][Dd][Ff][Ii][Ll][Ee].*/)))'
-      pivot_on: [host]
-      window: 2h
-    - name: "Archive / staging & outbound-transfer tooling on this host"
-      query: '(((data_win_system_eventID:"1" AND data_win_eventdata_image:/.*(\\7[Zz]\.[Ee][Xx][Ee]|\\7[Zz][Aa]\.[Ee][Xx][Ee]|\\7[Zz][Rr]\.[Ee][Xx][Ee]|\\[Rr][Aa][Rr]\.[Ee][Xx][Ee]|\\[Ww][Ii][Nn][Rr][Aa][Rr]\.[Ee][Xx][Ee]|\\[Ww][Zz][Zz][Ii][Pp]\.[Ee][Xx][Ee]|\\[Mm][Aa][Kk][Ee][Cc][Aa][Bb]\.[Ee][Xx][Ee])/) OR (data_win_eventdata_commandLine:/.*[Cc][Oo][Mm][Pp][Rr][Ee][Ss][Ss]-[Aa][Rr][Cc][Hh][Ii][Vv][Ee].*/ OR data_win_eventdata_commandLine:/.*\.7[Zz].*/ OR data_win_eventdata_commandLine:/.*\.[Rr][Aa][Rr].*/ OR data_win_eventdata_commandLine:/.* -[Hh][Pp].*/)) OR (((data_win_system_eventID:"1" AND data_win_eventdata_image:/.*(\\[Rr][Cc][Ll][Oo][Nn][Ee]\.[Ee][Xx][Ee]|\\[Cc][Uu][Rr][Ll]\.[Ee][Xx][Ee]|\\[Ww][Gg][Ee][Tt]\.[Ee][Xx][Ee]|\\[Ww][Ii][Nn][Ss][Cc][Pp]\.[Ee][Xx][Ee]|\\[Pp][Ss][Cc][Pp]\.[Ee][Xx][Ee]|\\[Mm][Ee][Gg][Aa][Cc][Mm][Dd]\.[Ee][Xx][Ee]|\\[Mm][Ee][Gg][Aa][Ss][Yy][Nn][Cc]\.[Ee][Xx][Ee])/) OR ((data_win_eventdata_commandLine:/.*[Ii][Nn][Vv][Oo][Kk][Ee]-[Rr][Ee][Ss][Tt][Mm][Ee][Tt][Hh][Oo][Dd].*/ OR data_win_eventdata_commandLine:/.*[Ss][Tt][Aa][Rr][Tt]-[Bb][Ii][Tt][Ss][Tt][Rr][Aa][Nn][Ss][Ff][Ee][Rr].*/ OR data_win_eventdata_commandLine:/.*[Rr][Cc][Ll][Oo][Nn][Ee].*/ OR data_win_eventdata_commandLine:/.*[Tt][Rr][Aa][Nn][Ss][Ff][Ee][Rr]\.[Ss][Hh].*/ OR data_win_eventdata_commandLine:/.*[Aa][Nn][Oo][Nn][Ff][Ii][Ll][Ee][Ss].*/ OR data_win_eventdata_commandLine:/.*[Pp][Aa][Ss][Tt][Ee][Bb][Ii][Nn].*/ OR data_win_eventdata_commandLine:/.*[Mm][Ee][Gg][Aa]\.[Nn][Zz].*/ OR data_win_eventdata_commandLine:/.*-[Oo][Uu][Tt][Ff][Ii][Ll][Ee].*/ OR data_win_eventdata_commandLine:/.*[Uu][Pp][Ll][Oo][Aa][Dd][Ff][Ii][Ll][Ee].*/)))))'
-      pivot_on: [host]
-      window: 2h
-    - name: "Other hosts connecting to the same destination address (campaign)"
-      query: '(data_win_system_eventID:"22" OR data_win_system_eventID:"3")'
-      pivot_on: [ip]
-      window: 24h
-    - name: "Downloader / C2 tooling executed on this host"
-      query: '(data_win_system_eventID:"1" AND data_win_eventdata_image:/.*(\\[Cc][Ee][Rr][Tt][Uu][Tt][Ii][Ll]\.[Ee][Xx][Ee]|\\[Bb][Ii][Tt][Ss][Aa][Dd][Mm][Ii][Nn]\.[Ee][Xx][Ee]|\\[Cc][Uu][Rr][Ll]\.[Ee][Xx][Ee]|\\[Ww][Gg][Ee][Tt]\.[Ee][Xx][Ee])/) OR (data_win_eventdata_commandLine:/.*[Dd][Oo][Ww][Nn][Ll][Oo][Aa][Dd][Ss][Tt][Rr][Ii][Nn][Gg].*/ OR data_win_eventdata_commandLine:/.*[Dd][Oo][Ww][Nn][Ll][Oo][Aa][Dd][Ff][Ii][Ll][Ee].*/ OR data_win_eventdata_commandLine:/.*[Ii][Nn][Vv][Oo][Kk][Ee]-[Ww][Ee][Bb][Rr][Ee][Qq][Uu][Ee][Ss][Tt].*/ OR data_win_eventdata_commandLine:/.*[Nn][Ee][Tt]\.[Ww][Ee][Bb][Cc][Ll][Ii][Ee][Nn][Tt].*/ OR data_win_eventdata_commandLine:/.*[Ss][Tt][Aa][Rr][Tt]-[Bb][Ii][Tt][Ss][Tt][Rr][Aa][Nn][Ss][Ff][Ee][Rr].*/ OR data_win_eventdata_commandLine:/.*[Ii][Ww][Rr] .*/ OR data_win_eventdata_commandLine:/.*[Cc][Uu][Rr][Ll] .*/ OR data_win_eventdata_commandLine:/.*[Ww][Gg][Ee][Tt] .*/)'
-      pivot_on: [host]
-      window: 1h
+  # Behaviour-targeted hunts the engine runs around the alert (not a sweep).
+  - name: Anonymizing tunnel / reverse-proxy client launched on this host
+    query: data_win_system_eventID:"1" AND data_win_eventdata_image:/.*\\([Nn][Gg][Rr][Oo][Kk]|[Cc][Ll][Oo][Uu][Dd][Ff][Ll][Aa][Rr][Ee][Dd]|[Ff][Rr][Pp][Cc]|[Ff][Rr][Pp][Ss]|[Cc][Hh][Ii][Ss][Ee][Ll]|[Bb][Tt][Uu][Nn][Nn][Ee][Ll]|[Ll][Oo][Cc][Aa][Ll][Tt][Oo][Nn][Ee][Tt]|[Ii][Oo][Xx]|[Nn][Pp][Ss])\.[Ee][Xx][Ee]/
+    pivot_on:
+    - host
+    window: 2h
+  - name: DNS resolution of tunnelling / ephemeral-exposure services on this host
+    query: data_win_system_eventID:"22" AND (data_win_eventdata_queryName:/.*[Bb][Tt][Uu][Nn][Nn][Ee][Ll]\.[Cc][Oo]\.[Ii][Nn]/ OR data_win_eventdata_queryName:/.*[Nn][Gg][Rr][Oo][Kk]\.[Ii][Oo]/ OR data_win_eventdata_queryName:/.*[Nn][Gg][Rr][Oo][Kk]-[Ff][Rr][Ee][Ee]\.[Aa][Pp][Pp]/ OR data_win_eventdata_queryName:/.*[Tt][Rr][Yy][Cc][Ll][Oo][Uu][Dd][Ff][Ll][Aa][Rr][Ee]\.[Cc][Oo][Mm]/ OR data_win_eventdata_queryName:/.*[Dd][Ee][Vv][Tt][Uu][Nn][Nn][Ee][Ll][Ss]\.[Mm][Ss]/ OR data_win_eventdata_queryName:/.*[Ll][Oo][Cc][Aa][Ll][Tt][Oo][Nn][Ee][Tt]\.[Cc][Oo][Mm]/ OR data_win_eventdata_queryName:/.*[Ss][Ee][Rr][Vv][Ee][Oo]\.[Nn][Ee][Tt]/ OR data_win_eventdata_queryName:/.*[Ll][Oo][Cc][Aa]\.[Ll][Tt]/ OR data_win_eventdata_queryName:/.*[Pp][Aa][Gg][Ee][Kk][Ii][Tt][Ee]\.[Mm][Ee]/)
+    pivot_on:
+    - host
+    window: 2h
+  - name: Local port-forwarding / SOCKS proxy configuration on this host
+    query: data_win_system_eventID:"1" AND (data_win_eventdata_commandLine:/.*[Ss][Ss][Hh].*[ ]-[RLD][ ].*/ OR data_win_eventdata_commandLine:/.*[Pp][Ll][Ii][Nn][Kk].*[ ]-[RL][ ].*/ OR data_win_eventdata_commandLine:/.*[Nn][Ee][Tt][Ss][Hh].*[Pp][Oo][Rr][Tt][Pp][Rr][Oo][Xx][Yy].*/ OR data_win_eventdata_commandLine:/.*[Dd][Yy][Nn][Aa][Mm][Ii][Cc][Ff][Oo][Rr][Ww][Aa][Rr][Dd].*/ OR data_win_eventdata_commandLine:/.*-[Rr][ ]+127\.0\.0\.1.*/ OR data_win_eventdata_commandLine:/.*[Ss][Oo][Cc][Kk][Ss]5.*/)
+    pivot_on:
+    - host
+    window: 2h
+  - name: Data staging and outbound file-transfer tooling on this host
+    query: data_win_system_eventID:"1" AND (data_win_eventdata_image:/.*\\(7[Zz]|7[Zz][Aa]|[Rr][Aa][Rr]|[Ww][Ii][Nn][Rr][Aa][Rr]|[Mm][Aa][Kk][Ee][Cc][Aa][Bb]|[Rr][Cc][Ll][Oo][Nn][Ee]|[Ww][Ii][Nn][Ss][Cc][Pp]|[Pp][Ss][Cc][Pp]|[Mm][Ee][Gg][Aa][Cc][Mm][Dd])\.[Ee][Xx][Ee]/ OR data_win_eventdata_commandLine:/.*[Cc][Oo][Mm][Pp][Rr][Ee][Ss][Ss]-[Aa][Rr][Cc][Hh][Ii][Vv][Ee].*/ OR data_win_eventdata_commandLine:/.*[Ii][Nn][Vv][Oo][Kk][Ee]-[Rr][Ee][Ss][Tt][Mm][Ee][Tt][Hh][Oo][Dd].*/ OR data_win_eventdata_commandLine:/.*--[Uu][Pp][Ll][Oo][Aa][Dd]-[Ff][Ii][Ll][Ee].*/ OR data_win_eventdata_commandLine:/.*--[Pp][Oo][Ss][Tt]-[Ff][Ii][Ll][Ee].*/ OR data_win_eventdata_commandLine:/.*[ ]-[Hh][Pp].*/)
+    pivot_on:
+    - host
+    window: 4h
+  - name: Other hosts beaconing to the same tunnel endpoint (campaign)
+    query: data_win_system_eventID:"3" AND data_win_eventdata_initiated:/[Tt][Rr][Uu][Ee]/
+    pivot_on:
+    - ip
+    window: 24h

@@ -192,19 +192,55 @@ graylog:
   query: (data_process_exec_process_binary:/.*\/[Rr][Mm]/ OR data_process_exec_process_binary:/.*\/[Rr][Mm][Dd][Ii][Rr]/ OR data_process_exec_process_binary:/.*\/[Ss][Hh][Rr][Ee][Dd]/ OR data_process_exec_process_binary:/.*\/[Uu][Nn][Ll][Ii][Nn][Kk]/) AND (data_process_exec_process_arguments:/.*\/[Vv][Aa][Rr]\/[Ll][Oo][Gg].*/ OR data_process_exec_process_arguments:/.*\/[Vv][Aa][Rr]\/[Ss][Pp][Oo][Oo][Ll]\/[Mm][Aa][Ii][Ll].*/) AND _exists_:data_process_exec_process_binary AND _exists_:data_process_exec_process_arguments AND NOT ((data_process_exec_process_binary:/.*\/[Rr][Mm]/ AND data_process_exec_process_arguments:/[Rr][Mm] -[Ff] \/[Vv][Aa][Rr]\/[Ll][Oo][Gg]\/[Ss][Yy][Ss][Ss][Tt][Aa][Tt]\/.*/) OR (data_process_exec_process_binary:/.*\/[Rr][Mm]/ AND data_process_exec_process_arguments:/[Rr][Mm] -[Ff] -- \/[Vv][Aa][Rr]\/[Ll][Oo][Gg]\/\/[Dd][Mm][Ee][Ss][Gg].*/))
 
 correlation:
-  # Authored by the correlation engine for review.
+  # Authored per-rule (behaviour-researched) for the correlation engine. Related CoPilot
+  # Searches + telemetry pivots to run around an alert, scoped to its host/user/ip/domain.
+  related_rules:
+  - id: 3fcc9b35-39e4-44c0-a2ad-9e82b6902b31
+    name: Syslog Clearing or Removal Via System Utilities
+    reason: Same anti-forensic goal reached by a different method set (emptying/removing syslog with cat/echo/mv/truncate rather than rm/shred/unlink). If this fires on the host alongside the log-clearing alert, the actor is destroying logs through every available avenue - treat the two as one log-destruction event, not separate incidents.
+  - id: 34979410-e4b5-4e5d-8cfb-389fdff05c12
+    name: Remove Immutable File Attribute
+    reason: 'Direct enabling precursor: hardened hosts protect /var/log (or auth.log) with chattr +i, so rm/shred/unlink return ''Operation not permitted'' until the immutable bit is cleared. A chattr -i on the same host immediately before this alert is the step that made the deletion succeed.'
+  - id: bed26dea-4525-47f4-b24a-76e30e44ffb0
+    name: Audit Rules Deleted Via Auditctl
+    reason: 'Co-occurring defense evasion in the same cleanup phase: auditctl -D wipes the entire audit ruleset so the deletion itself - and whatever the actor does next - is no longer recorded. Destroying existing logs and disabling the auditing that would capture new ones are two halves of the same cover-tracks action.'
+  - id: c830f15d-6f6e-430f-8074-6f73d6807841
+    name: Logging Configuration Changes on Linux Host
+    reason: 'Co-occurring: tampering with the syslog daemon config (rsyslog.conf, syslog-ng.conf) stops new events from being written, complementing the physical deletion of the logs already on disk - silence the producer, then destroy the output.'
+  - id: 977ef627-4539-4875-adf4-ed8f780c4922
+    name: Auditing Configuration Changes on Linux Host
+    reason: 'Co-occurring and the config-level sibling of auditctl -D: edits to auditd.conf or audit.rules disable or gut auditing on the same host the logs are being deleted from, so neither the cleanup nor subsequent activity is audited.'
+  - id: 08f26069-6f80-474b-8d1f-d971c6fedea0
+    name: User Has Been Deleted Via Userdel
+    reason: 'Co-occurring track-covering: userdel -r removes a rogue account together with its home directory and /var/spool/mail spool - the very mail-spool path this detection also watches - erasing evidence of the account used in the intrusion as part of the same cleanup.'
+  - id: 36388120-b3f1-4ce9-b50b-280d9a7f4c04
+    name: Kaspersky Endpoint Security Stopped Via CommandLine - Linux
+    reason: 'Co-occurring defense impairment: stopping the endpoint AV during the cleanup keeps the log-destruction and any follow-on actions from being flagged. Same cover-tracks intent, aimed at the security tooling rather than the logs.'
+  window: 2h
   enrichment_searches:
-  # Rule-specific telemetry pivots the engine runs around an alert from this rule,
-  # scoped to the alert's host/user/IP within the window (behaviour-targeted, not a sweep).
-    - name: "Other executions of this tool-set on this host (any arguments)"
-      query: 'data_process_exec_process_binary:/.*(\/[Rr][Mm][Dd][Ii][Rr]|\/[Ss][Hh][Rr][Ee][Dd]|\/[Uu][Nn][Ll][Ii][Nn][Kk])/'
-      pivot_on: [host]
-      window: 2h
-    - name: "Shell / interpreter execution on this host"
-      query: '((data_process_exec_process_binary:/.*(\/[Bb][Aa][Ss][Hh]|\/[Ss][Hh]|\/[Dd][Aa][Ss][Hh]|\/[Zz][Ss][Hh]|\/[Kk][Ss][Hh]|\/[Aa][Ss][Hh]|\/[Bb][Uu][Ss][Yy][Bb][Oo][Xx])/) OR (data_process_exec_process_binary:/.*(\/[Pp][Yy][Tt][Hh][Oo][Nn]|\/[Pp][Yy][Tt][Hh][Oo][Nn]3|\/[Pp][Ee][Rr][Ll]|\/[Rr][Uu][Bb][Yy]|\/[Pp][Hh][Pp]|\/[Nn][Oo][Dd][Ee]|\/[Ll][Uu][Aa]|\/[Aa][Ww][Kk])/))'
-      pivot_on: [host]
-      window: 1h
-    - name: "Reconnaissance commands on this host"
-      query: 'data_process_exec_process_binary:/.*(\/[Ww][Hh][Oo][Aa][Mm][Ii]|\/[Ii][Dd]|\/[Uu][Nn][Aa][Mm][Ee]|\/[Hh][Oo][Ss][Tt][Nn][Aa][Mm][Ee]|\/[Hh][Oo][Ss][Tt][Nn][Aa][Mm][Ee][Cc][Tt][Ll]|\/[Ss][Ss]|\/[Nn][Ee][Tt][Ss][Tt][Aa][Tt]|\/[Ii][Ff][Cc][Oo][Nn][Ff][Ii][Gg]|\/[Aa][Rr][Pp]|\/[Ww]|\/[Ww][Hh][Oo]|\/[Ll][Aa][Ss][Tt]|\/[Ll][Ss][Oo][Ff]|\/[Nn][Mm][Aa][Pp]|\/[Dd][Ii][Gg]|\/[Ff][Ii][Nn][Dd])/'
-      pivot_on: [host]
-      window: 1h
+  # Behaviour-targeted hunts the engine runs around the alert (not a sweep).
+  - name: Shell history files being cleared or tampered on this host
+    query: (data_process_exec_process_arguments:/.*[Bb][Aa][Ss][Hh]_[Hh][Ii][Ss][Tt][Oo][Rr][Yy].*/ OR data_process_exec_process_arguments:/.*[Zz][Ss][Hh]_[Hh][Ii][Ss][Tt][Oo][Rr][Yy].*/ OR data_process_exec_process_arguments:/.*\.[Hh][Ii][Ss][Tt][Oo][Rr][Yy].*/ OR data_process_exec_process_arguments:/.*[Hh][Ii][Ss][Tt][Ff][Ii][Ll][Ee].*/)
+    pivot_on:
+    - host
+    window: 2h
+  - name: Logging or auditing daemons stopped, masked, or killed on this host
+    query: (((data_process_exec_process_binary:/.*\/[Ss][Yy][Ss][Tt][Ee][Mm][Cc][Tt][Ll]/ OR data_process_exec_process_binary:/.*\/[Ss][Ee][Rr][Vv][Ii][Cc][Ee]/ OR data_process_exec_process_binary:/.*\/[Pp][Kk][Ii][Ll][Ll]/ OR data_process_exec_process_binary:/.*\/[Kk][Ii][Ll][Ll][Aa][Ll][Ll]/) AND (data_process_exec_process_arguments:/.*[Rr][Ss][Yy][Ss][Ll][Oo][Gg].*/ OR data_process_exec_process_arguments:/.*[Ss][Yy][Ss][Ll][Oo][Gg].*/ OR data_process_exec_process_arguments:/.*[Aa][Uu][Dd][Ii][Tt][Dd].*/ OR data_process_exec_process_arguments:/.*[Jj][Oo][Uu][Rr][Nn][Aa][Ll][Dd].*/)) OR (data_process_exec_process_binary:/.*\/[Aa][Uu][Dd][Ii][Tt][Cc][Tt][Ll]/ AND data_process_exec_process_arguments:/.*-[Dd].*/))
+    pivot_on:
+    - host
+    window: 2h
+  - name: Logs cleared by overwrite or truncation instead of rm on this host
+    query: ((data_process_exec_process_binary:/.*\/[Tt][Rr][Uu][Nn][Cc][Aa][Tt][Ee]/ OR data_process_exec_process_binary:/.*\/[Dd][Dd]/ OR data_process_exec_process_binary:/.*\/[Tt][Ee][Ee]/ OR data_process_exec_process_binary:/.*\/[Cc][Pp]/ OR data_process_exec_process_binary:/.*\/[Mm][Vv]/) AND data_process_exec_process_arguments:/.*\/[Vv][Aa][Rr]\/[Ll][Oo][Gg].*/)
+    pivot_on:
+    - host
+    window: 2h
+  - name: Immutable attribute changes via chattr on this host
+    query: data_process_exec_process_binary:/.*\/[Cc][Hh][Aa][Tt][Tt][Rr]/
+    pivot_on:
+    - host
+    window: 2h
+  - name: Execution from world-writable staging directories on this host
+    query: (data_process_exec_process_binary:/\/[Tt][Mm][Pp]\/.*/ OR data_process_exec_process_binary:/\/[Dd][Ee][Vv]\/[Ss][Hh][Mm]\/.*/ OR data_process_exec_process_binary:/\/[Vv][Aa][Rr]\/[Tt][Mm][Pp]\/.*/)
+    pivot_on:
+    - host
+    window: 6h

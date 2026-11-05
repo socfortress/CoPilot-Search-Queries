@@ -73,44 +73,53 @@ graylog:
   query: data_office365_eventSource:/[Ee][Xx][Cc][Hh][Aa][Nn][Gg][Ee]/ AND data_office365_eventName:/[Aa][Dd][Dd]-[Ff][Ee][Dd][Ee][Rr][Aa][Tt][Ee][Dd][Dd][Oo][Mm][Aa][Ii][Nn]/ AND data_office365_status:/[Ss][Uu][Cc][Cc][Ee][Ss][Ss]/
 
 correlation:
-  # Authored by the correlation engine for review. Related CoPilot Searches to run
-  # around an alert from this rule, scoped to the same host/user/IP within the window.
+  # Authored per-rule (behaviour-researched) for the correlation engine. Related CoPilot
+  # Searches + telemetry pivots to run around an alert, scoped to its host/user/ip/domain.
   related_rules:
-    - id: d8b0a4fe-07a8-41be-bd39-b14afa025d95
-      name: "Activity from Anonymous IP Addresses"
-      reason: "next kill-chain tactic: Command and Control"
-    - id: 0f2468a2-5055-4212-a368-7321198ee706
-      name: "Activity from Infrequent Country"
-      reason: "next kill-chain tactic: Command and Control"
-    - id: 13f2d3f5-6497-44a7-bf5f-dc13ffafe5dc
-      name: "Azure Login Bypassing Conditional Access Policies"
-      reason: "next kill-chain tactic: Persistence"
-    - id: 2b669496-d215-47d8-bd9a-f4a45bf07cda
-      name: "Data Exfiltration to Unsanctioned Apps"
-      reason: "next kill-chain tactic: Exfiltration"
-    - id: 60de9b57-dc4d-48b9-a6a0-b39e0469f876
-      name: "Disabling Multi Factor Authentication"
-      reason: "next kill-chain tactic: Persistence"
-    - id: c191e2fa-f9d6-4ccf-82af-4f2aba08359f
-      name: "Logon from a Risky IP Address"
-      reason: "next kill-chain tactic: Persistence"
-  window: 1h
+  - id: 58f88172-a73d-442b-94c9-95eaed3cbb36
+    name: New Federated Domain Added
+    reason: Same Add-FederatedDomain action logged from the AzureActiveDirectory audit workload instead of Exchange; firing together on the same admin confirms a genuine federation-trust change (the Golden-SAML / AAD-backdoor setup) rather than a single-workload parsing artifact.
+  - id: 60de9b57-dc4d-48b9-a6a0-b39e0469f876
+    name: Disabling Multi Factor Authentication
+    reason: 'Same AAD-backdoor playbook on the same compromised admin: the actor disables Strong Authentication to cement the federation persistence, usually within the same operator session as the domain change.'
+  - id: 13f2d3f5-6497-44a7-bf5f-dc13ffafe5dc
+    name: Azure Login Bypassing Conditional Access Policies
+    reason: The federation backdoor exists to forge/steal tokens that bypass Conditional Access and MFA; a CA-bypassing login by the same admin is the forged-token session that issues or immediately follows the Add-FederatedDomain change.
+  - id: c191e2fa-f9d6-4ccf-82af-4f2aba08359f
+    name: Logon from a Risky IP Address
+    reason: Defender flags the acting admin's sign-in as risky — direct evidence the Global-Admin account that ran Add-FederatedDomain is taken over, which is the prerequisite for this federation-management action.
+  - id: d7eab125-5f94-43df-8710-795b80fa1189
+    name: Microsoft 365 - Impossible Travel Activity
+    reason: An impossible-travel sign-in on the same admin around the change is the account-takeover signal that explains who actually issued the federation cmdlet, separating a hijacked session from legitimate administration.
+  - id: d8b0a4fe-07a8-41be-bd39-b14afa025d95
+    name: Activity from Anonymous IP Addresses
+    reason: The admin operated from a Tor/anonymizer proxy on the same user, consistent with a remote operator establishing the federation backdoor rather than in-tenant administration from a known location.
+  - id: ee111937-1fe7-40f0-962a-0eb44d57d174
+    name: Suspicious OAuth App File Download Activities
+    reason: 'Companion persistence+exfil vector the same actors plant alongside federation trust (UNC2452 pattern): a rogue OAuth app pulling SharePoint/OneDrive files from the tenant the forged tokens now let them impersonate into.'
+  - id: 6897cd82-6664-11ed-9022-0242ac120002
+    name: PST Export Alert Using New-ComplianceSearchAction
+    reason: Classic data-theft follow-on once Golden SAML grants impersonation of any mailbox — tenant-wide mail export via compliance search is the payoff of the federation backdoor and often runs hours after the trust is added.
+  window: 2h
   enrichment_searches:
-  # Rule-specific telemetry pivots the engine runs around an alert from this rule,
-  # scoped to the alert's host/user/IP within the window (behaviour-targeted, not a sweep).
-    - name: "Account / service-principal creation by this user"
-      query: '(data_office365_Operation:/.*[Aa][Dd][Dd] [Uu][Ss][Ee][Rr].*/ OR data_office365_Operation:/.*[Aa][Dd][Dd] [Ss][Ee][Rr][Vv][Ii][Cc][Ee] [Pp][Rr][Ii][Nn][Cc][Ii][Pp][Aa][Ll].*/ OR data_office365_Operation:/.*[Aa][Dd][Dd] [Aa][Pp][Pp][Ll][Ii][Cc][Aa][Tt][Ii][Oo][Nn].*/)'
-      pivot_on: [user]
-      window: 24h
-    - name: "Mass download / forwarding by this user"
-      query: '(((data_office365_Operation:/.*[Ff][Ii][Ll][Ee][Dd][Oo][Ww][Nn][Ll][Oo][Aa][Dd][Ee][Dd].*/ OR data_office365_Operation:/.*[Ff][Ii][Ll][Ee][Aa][Cc][Cc][Ee][Ss][Ss][Ee][Dd].*/ OR data_office365_Operation:/.*[Ff][Ii][Ll][Ee][Ss][Yy][Nn][Cc][Dd][Oo][Ww][Nn][Ll][Oo][Aa][Dd][Ee][Dd][Ff][Uu][Ll][Ll].*/ OR data_office365_Operation:/.*[Ff][Ii][Ll][Ee][Aa][Cc][Cc][Ee][Ss][Ss][Ee][Dd][Ee][Xx][Tt][Ee][Nn][Dd][Ee][Dd].*/)) OR ((data_office365_Operation:/.*[Nn][Ee][Ww]-[Ii][Nn][Bb][Oo][Xx][Rr][Uu][Ll][Ee].*/ OR data_office365_Operation:/.*[Ss][Ee][Tt]-[Ii][Nn][Bb][Oo][Xx][Rr][Uu][Ll][Ee].*/ OR data_office365_Operation:/.*[Ss][Ee][Tt]-[Mm][Aa][Ii][Ll][Bb][Oo][Xx].*/ OR data_office365_Operation:/.*[Nn][Ee][Ww]-[Tt][Rr][Aa][Nn][Ss][Pp][Oo][Rr][Tt][Rr][Uu][Ll][Ee].*/ OR data_office365_Operation:/.*[Ss][Ee][Tt]-[Tt][Rr][Aa][Nn][Ss][Pp][Oo][Rr][Tt][Rr][Uu][Ll][Ee].*/ OR data_office365_Operation:/.*[Aa][Dd][Dd]-[Mm][Aa][Ii][Ll][Bb][Oo][Xx][Pp][Ee][Rr][Mm][Ii][Ss][Ss][Ii][Oo][Nn].*/ OR data_office365_Operation:/.*[Aa][Dd][Dd]-[Rr][Ee][Cc][Ii][Pp][Ii][Ee][Nn][Tt][Pp][Ee][Rr][Mm][Ii][Ss][Ss][Ii][Oo][Nn].*/)))'
-      pivot_on: [user]
-      window: 24h
-    - name: "Mailbox rule / forwarding / permission changes by this user"
-      query: '(data_office365_Operation:/.*[Nn][Ee][Ww]-[Ii][Nn][Bb][Oo][Xx][Rr][Uu][Ll][Ee].*/ OR data_office365_Operation:/.*[Ss][Ee][Tt]-[Ii][Nn][Bb][Oo][Xx][Rr][Uu][Ll][Ee].*/ OR data_office365_Operation:/.*[Ss][Ee][Tt]-[Mm][Aa][Ii][Ll][Bb][Oo][Xx].*/ OR data_office365_Operation:/.*[Nn][Ee][Ww]-[Tt][Rr][Aa][Nn][Ss][Pp][Oo][Rr][Tt][Rr][Uu][Ll][Ee].*/ OR data_office365_Operation:/.*[Ss][Ee][Tt]-[Tt][Rr][Aa][Nn][Ss][Pp][Oo][Rr][Tt][Rr][Uu][Ll][Ee].*/ OR data_office365_Operation:/.*[Aa][Dd][Dd]-[Mm][Aa][Ii][Ll][Bb][Oo][Xx][Pp][Ee][Rr][Mm][Ii][Ss][Ss][Ii][Oo][Nn].*/ OR data_office365_Operation:/.*[Aa][Dd][Dd]-[Rr][Ee][Cc][Ii][Pp][Ii][Ee][Nn][Tt][Pp][Ee][Rr][Mm][Ii][Ss][Ss][Ii][Oo][Nn].*/)'
-      pivot_on: [user]
-      window: 24h
-    - name: "Mail access / send operations by this user"
-      query: '(data_office365_Operation:/.*[Mm][Aa][Ii][Ll][Ii][Tt][Ee][Mm][Ss][Aa][Cc][Cc][Ee][Ss][Ss][Ee][Dd].*/ OR data_office365_Operation:/.*[Ss][Ee][Nn][Dd].*/ OR data_office365_Operation:/.*[Ss][Ee][Nn][Dd][Aa][Ss].*/ OR data_office365_Operation:/.*[Ss][Ee][Nn][Dd][Oo][Nn][Bb][Ee][Hh][Aa][Ll][Ff].*/ OR data_office365_Operation:/.*[Mm][Aa][Ii][Ll][Bb][Oo][Xx][Ll][Oo][Gg][Ii][Nn].*/)'
-      pivot_on: [user]
-      window: 6h
+  # Behaviour-targeted hunts the engine runs around the alert (not a sweep).
+  - name: Federation / domain-trust modifications by this admin
+    query: (data_office365_Operation:/.*[Ff][Ee][Dd][Ee][Rr][Aa][Tt].*/ OR data_office365_eventName:/.*[Ff][Ee][Dd][Ee][Rr][Aa][Tt].*/ OR data_office365_Operation:/.*[Dd][Oo][Mm][Aa][Ii][Nn] [Aa][Uu][Tt][Hh][Ee][Nn][Tt][Ii][Cc][Aa][Tt][Ii][Oo][Nn].*/ OR data_office365_Operation:/.*[Uu][Pp][Dd][Aa][Tt][Ee] [Dd][Oo][Mm][Aa][Ii][Nn].*/)
+    pivot_on:
+    - user
+    window: 24h
+  - name: Privileged role, service-principal and app-consent backdoors by this admin
+    query: (data_office365_Operation:/.*[Aa][Dd][Dd] [Mm][Ee][Mm][Bb][Ee][Rr] [Tt][Oo] [Rr][Oo][Ll][Ee].*/ OR data_office365_Operation:/.*[Aa][Dd][Dd] [Ss][Ee][Rr][Vv][Ii][Cc][Ee] [Pp][Rr][Ii][Nn][Cc][Ii][Pp][Aa][Ll] [Cc][Rr][Ee][Dd][Ee][Nn][Tt][Ii][Aa][Ll][Ss].*/ OR data_office365_Operation:/.*[Aa][Dd][Dd] [Ss][Ee][Rr][Vv][Ii][Cc][Ee] [Pp][Rr][Ii][Nn][Cc][Ii][Pp][Aa][Ll].*/ OR data_office365_Operation:/.*[Aa][Dd][Dd] [Aa][Pp][Pp][Ll][Ii][Cc][Aa][Tt][Ii][Oo][Nn].*/ OR data_office365_Operation:/.*[Cc][Oo][Nn][Ss][Ee][Nn][Tt] [Tt][Oo] [Aa][Pp][Pp][Ll][Ii][Cc][Aa][Tt][Ii][Oo][Nn].*/ OR data_office365_Operation:/.*[Aa][Dd][Dd] [Dd][Ee][Ll][Ee][Gg][Aa][Tt][Ee][Dd] [Pp][Ee][Rr][Mm][Ii][Ss][Ss][Ii][Oo][Nn] [Gg][Rr][Aa][Nn][Tt].*/)
+    pivot_on:
+    - user
+    window: 24h
+  - name: Risky sign-in telemetry for the acting admin (account-takeover check)
+    query: (data_office365_eventName:/.*[Rr][Ii][Ss][Kk][Yy] [Ii][Pp].*/ OR data_office365_eventName:/.*[Ii][Mm][Pp][Oo][Ss][Ss][Ii][Bb][Ll][Ee] [Tt][Rr][Aa][Vv][Ee][Ll].*/ OR data_office365_eventName:/.*[Aa][Nn][Oo][Nn][Yy][Mm][Oo][Uu][Ss] [Ii][Pp].*/ OR data_office365_eventName:/.*[Ii][Nn][Ff][Rr][Ee][Qq][Uu][Ee][Nn][Tt] [Cc][Oo][Uu][Nn][Tt][Rr][Yy].*/)
+    pivot_on:
+    - user
+    window: 6h
+  - name: Mailbox export / compliance-search mail collection by this admin
+    query: (data_office365_Operation:/.*[Nn][Ee][Ww]-[Cc][Oo][Mm][Pp][Ll][Ii][Aa][Nn][Cc][Ee][Ss][Ee][Aa][Rr][Cc][Hh].*/ OR data_office365_Payload:/.*[Nn][Ee][Ww]-[Cc][Oo][Mm][Pp][Ll][Ii][Aa][Nn][Cc][Ee][Ss][Ee][Aa][Rr][Cc][Hh][Aa][Cc][Tt][Ii][Oo][Nn].*/ OR data_office365_Operation:/.*[Nn][Ee][Ww]-[Mm][Aa][Ii][Ll][Bb][Oo][Xx][Ee][Xx][Pp][Oo][Rr][Tt][Rr][Ee][Qq][Uu][Ee][Ss][Tt].*/ OR data_office365_Operation:/.*[Mm][Aa][Ii][Ll][Ii][Tt][Ee][Mm][Ss][Aa][Cc][Cc][Ee][Ss][Ss][Ee][Dd].*/)
+    pivot_on:
+    - user
+    window: 24h

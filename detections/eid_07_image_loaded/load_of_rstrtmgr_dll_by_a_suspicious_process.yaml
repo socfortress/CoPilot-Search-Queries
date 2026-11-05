@@ -197,40 +197,58 @@ graylog:
   query: data_win_system_eventID:"7" AND (data_win_eventdata_imageLoaded:/.*\\[Rr][Ss][Tt][Rr][Tt][Mm][Gg][Rr]\.[Dd][Ll][Ll]/ OR data_win_eventdata_originalFileName:/[Rr][Ss][Tt][Rr][Tt][Mm][Gg][Rr]\.[Dd][Ll][Ll]/) AND (data_win_eventdata_image:/.*:\\[Pp][Ee][Rr][Ff][Ll][Oo][Gg][Ss]\\.*/ OR data_win_eventdata_image:/.*:\\[Uu][Ss][Ee][Rr][Ss]\\[Pp][Uu][Bb][Ll][Ii][Cc]\\.*/ OR data_win_eventdata_image:/.*\\[Tt][Ee][Mm][Pp][Oo][Rr][Aa][Rr][Yy] [Ii][Nn][Tt][Ee][Rr][Nn][Ee][Tt].*/ OR (data_win_eventdata_image:/.*:\\[Uu][Ss][Ee][Rr][Ss]\\.*/ AND data_win_eventdata_image:/.*\\[Ff][Aa][Vv][Oo][Rr][Ii][Tt][Ee][Ss]\\.*/) OR (data_win_eventdata_image:/.*:\\[Uu][Ss][Ee][Rr][Ss]\\.*/ AND data_win_eventdata_image:/.*\\[Ff][Aa][Vv][Oo][Uu][Rr][Ii][Tt][Ee][Ss]\\.*/) OR (data_win_eventdata_image:/.*:\\[Uu][Ss][Ee][Rr][Ss]\\.*/ AND data_win_eventdata_image:/.*\\[Cc][Oo][Nn][Tt][Aa][Cc][Tt][Ss]\\.*/))
 
 correlation:
-  # Authored by the correlation engine for review. Related CoPilot Searches to run
-  # around an alert from this rule, scoped to the same host/user/IP within the window.
+  # Authored per-rule (behaviour-researched) for the correlation engine. Related CoPilot
+  # Searches + telemetry pivots to run around an alert, scoped to its host/user/ip/domain.
   related_rules:
-    - id: 639c9081-f482-47d3-a0bd-ddee3d4ecd76
-      name: "All Backups Deleted Via Wbadmin.EXE"
-      reason: "next kill-chain tactic: Impact"
-    - id: 06125661-3814-4e03-bfa2-1e4411c60ac3
-      name: "Backup Files Deleted"
-      reason: "next kill-chain tactic: Impact"
-    - id: 1444443e-6757-43e4-9ea4-c8fc705f79a2
-      name: "Boot Configuration Tampering Via Bcdedit.EXE"
-      reason: "next kill-chain tactic: Impact"
-    - id: c73124a7-3e89-44a3-bdc1-25fe4df754b1
-      name: "Copy From VolumeShadowCopy Via Cmd.EXE"
-      reason: "next kill-chain tactic: Impact"
-    - id: 220457c1-1c9f-4c2e-afe6-9598926222c1
-      name: "Delete All Scheduled Tasks"
-      reason: "next kill-chain tactic: Impact"
-    - id: dbc1f800-0fe0-4bc0-9c66-292c2abe3f78
-      name: "Delete Important Scheduled Task"
-      reason: "next kill-chain tactic: Impact"
-  window: 1h
+  - id: c947b146-0abc-4c87-9c64-b17e9d7274a2
+    name: Shadow Copies Deletion Using Operating Systems Utilities
+    reason: Restart Manager releases file locks so files can be encrypted; destroying Volume Shadow Copies (vssadmin/wmic/wbadmin/diskshadow delete) so victims cannot roll back is the single most common ransomware co-action, usually within minutes on the same host.
+  - id: 639c9081-f482-47d3-a0bd-ddee3d4ecd76
+    name: All Backups Deleted Via Wbadmin.EXE
+    reason: 'Recovery inhibition that pairs with encryption: wbadmin delete ... keepVersions:0 wipes Windows Backup so the data this process just unlocked for encryption cannot be restored; frequently runs in the same impact burst.'
+  - id: c9fbe8e9-119d-40a6-9b59-dd58a5d84429
+    name: Potential Ransomware or Unauthorized MBR Tampering Via Bcdedit.EXE
+    reason: 'Covers both threats named in this rule: ransomware disabling boot recovery (recoveryenabled/bootstatuspolicy/safeboot) and BiBi-style boot/MBR tampering - the destructive follow-on a suspicious process runs right after freeing file locks.'
+  - id: 8f3a614f-6b98-4f7d-82dd-d0df38452a8b
+    name: Windows Excessive Service Stop Attempt
+    reason: 'Same objective as the RstrtMgr load by a different mechanism: Restart Manager kills lock-holding processes while net/sc stop|delete halts DB/backup/AV services so their open files can be encrypted; the two typically fire together pre-encryption.'
+  - id: 689308fc-cfba-4f72-9897-796c1dc61487
+    name: Potential Conti Ransomware Activity
+    reason: Conti is named in this detection as an RstrtMgr abuser; its distinctive command line (-m -net -size -nomutex -p \\host) on the same host attributes the activity to the exact family and confirms mass encryption is underway.
+  - id: 2c76a22b-702d-48fd-8fa9-e41e2fe203b3
+    name: FunkLocker Ransomware File Creation
+    reason: 'The payoff this load prepares for: .funksec encrypted-file writes (EID 11) are the encryption actually running after lock-holders were released - turns this precursor into confirmed impact on the host.'
+  - id: bbb7e38c-0b41-4a11-b306-d2a457b7ac2b
+    name: Suspicious File Created In PerfLogs
+    reason: 'Explains how the loader reached a flagged path: this rule fires on a process running from C:\PerfLogs (among others), and a prior drop of an .exe/.dll/.ps1 into PerfLogs is the precursor that staged the ransomware binary there.'
+  - id: windows-eventlog-cleared-wevtutil-001
+    name: Windows Eventlog Cleared Via Wevtutil
+    reason: 'Anti-forensics that clusters with ransomware impact (Rhysida/Clop/ShrinkLocker): wevtutil cl on the same host near the encryption burst is deliberate evidence destruction, distinguishing real ransomware from an installer''s benign RstrtMgr use.'
+  window: 2h
   enrichment_searches:
-  # Rule-specific telemetry pivots the engine runs around an alert from this rule,
-  # scoped to the alert's host/user/IP within the window (behaviour-targeted, not a sweep).
-    - name: "Ransomware / recovery-inhibition behaviour on this host"
-      query: '(data_win_eventdata_commandLine:/.*[Vv][Ss][Ss][Aa][Dd][Mm][Ii][Nn].*/ OR data_win_eventdata_commandLine:/.*[Ss][Hh][Aa][Dd][Oo][Ww][Cc][Oo][Pp][Yy].*/ OR data_win_eventdata_commandLine:/.*[Bb][Cc][Dd][Ee][Dd][Ii][Tt].*/ OR data_win_eventdata_commandLine:/.*[Ww][Bb][Aa][Dd][Mm][Ii][Nn].*/ OR data_win_eventdata_commandLine:/.*[Cc][Ii][Pp][Hh][Ee][Rr] \/[Ww].*/ OR data_win_eventdata_commandLine:/.*[Ww][Mm][Ii][Cc] [Ss][Hh][Aa][Dd][Oo][Ww][Cc][Oo][Pp][Yy] [Dd][Ee][Ll][Ee][Tt][Ee].*/) OR (data_win_system_eventID:"1" AND data_win_eventdata_image:/.*(\\[Vv][Ss][Ss][Aa][Dd][Mm][Ii][Nn]\.[Ee][Xx][Ee]|\\[Ww][Bb][Aa][Dd][Mm][Ii][Nn]\.[Ee][Xx][Ee])/)'
-      pivot_on: [host]
-      window: 2h
-    - name: "DLL sideloading / execution from user-writable paths on this host"
-      query: '((data_win_system_eventID:"7" AND (data_win_eventdata_imageLoaded:/.*\\[Uu][Ss][Ee][Rr][Ss]\\.*/ OR data_win_eventdata_imageLoaded:/.*\\[Pp][Rr][Oo][Gg][Rr][Aa][Mm][Dd][Aa][Tt][Aa]\\.*/ OR data_win_eventdata_imageLoaded:/.*\\[Ww][Ii][Nn][Dd][Oo][Ww][Ss]\\[Tt][Ee][Mm][Pp]\\.*/ OR data_win_eventdata_imageLoaded:/.*\\[Aa][Pp][Pp][Dd][Aa][Tt][Aa]\\.*/ OR data_win_eventdata_imageLoaded:/.*\\[Pp][Uu][Bb][Ll][Ii][Cc]\\.*/ OR data_win_eventdata_imageLoaded:/.*\\\$[Rr][Ee][Cc][Yy][Cc][Ll][Ee].*/)) OR (data_win_system_eventID:"1" AND (data_win_eventdata_image:/.*\\[Uu][Ss][Ee][Rr][Ss]\\.*/ OR data_win_eventdata_image:/.*\\[Pp][Rr][Oo][Gg][Rr][Aa][Mm][Dd][Aa][Tt][Aa]\\.*/ OR data_win_eventdata_image:/.*\\[Ww][Ii][Nn][Dd][Oo][Ww][Ss]\\[Tt][Ee][Mm][Pp]\\.*/ OR data_win_eventdata_image:/.*\\[Aa][Pp][Pp][Dd][Aa][Tt][Aa]\\.*/ OR data_win_eventdata_image:/.*\\[Pp][Uu][Bb][Ll][Ii][Cc]\\.*/ OR data_win_eventdata_image:/.*\\\$[Rr][Ee][Cc][Yy][Cc][Ll][Ee].*/)))'
-      pivot_on: [host]
-      window: 2h
-    - name: "Follow-on LOLBin / signed-binary-proxy execution on this host"
-      query: 'data_win_system_eventID:"1" AND data_win_eventdata_image:/.*(\\[Rr][Uu][Nn][Dd][Ll][Ll]32\.[Ee][Xx][Ee]|\\[Rr][Ee][Gg][Ss][Vv][Rr]32\.[Ee][Xx][Ee]|\\[Mm][Ss][Hh][Tt][Aa]\.[Ee][Xx][Ee]|\\[Ii][Nn][Ss][Tt][Aa][Ll][Ll][Uu][Tt][Ii][Ll]\.[Ee][Xx][Ee]|\\[Rr][Ee][Gg][Aa][Ss][Mm]\.[Ee][Xx][Ee]|\\[Rr][Ee][Gg][Ss][Vv][Cc][Ss]\.[Ee][Xx][Ee]|\\[Mm][Ss][Bb][Uu][Ii][Ll][Dd]\.[Ee][Xx][Ee]|\\[Cc][Ee][Rr][Tt][Uu][Tt][Ii][Ll]\.[Ee][Xx][Ee]|\\[Bb][Ii][Tt][Ss][Aa][Dd][Mm][Ii][Nn]\.[Ee][Xx][Ee]|\\[Ww][Mm][Ii][Cc]\.[Ee][Xx][Ee]|\\[Cc][Mm][Ss][Tt][Pp]\.[Ee][Xx][Ee]|\\[Oo][Dd][Bb][Cc][Cc][Oo][Nn][Ff]\.[Ee][Xx][Ee]|\\[Ff][Oo][Rr][Ff][Ii][Ll][Ee][Ss]\.[Ee][Xx][Ee]|\\[Pp][Cc][Aa][Ll][Uu][Aa]\.[Ee][Xx][Ee]|\\[Mm][Aa][Vv][Ii][Nn][Jj][Ee][Cc][Tt]\.[Ee][Xx][Ee]|\\[Ss][Cc][Rr][Ii][Pp][Tt][Rr][Uu][Nn][Nn][Ee][Rr]\.[Ee][Xx][Ee])/'
-      pivot_on: [host]
-      window: 1h
+  # Behaviour-targeted hunts the engine runs around the alert (not a sweep).
+  - name: Recovery destruction / anti-recovery commands on this host
+    query: data_win_system_eventID:"1" AND (data_win_eventdata_commandLine:/.*[Vv][Ss][Ss][Aa][Dd][Mm][Ii][Nn].*[Dd][Ee][Ll][Ee][Tt][Ee].*/ OR data_win_eventdata_commandLine:/.*[Ss][Hh][Aa][Dd][Oo][Ww][Cc][Oo][Pp][Yy].*[Dd][Ee][Ll][Ee][Tt][Ee].*/ OR data_win_eventdata_commandLine:/.*[Ww][Bb][Aa][Dd][Mm][Ii][Nn].*[Dd][Ee][Ll][Ee][Tt][Ee].*/ OR data_win_eventdata_commandLine:/.*[Bb][Cc][Dd][Ee][Dd][Ii][Tt].*([Rr][Ee][Cc][Oo][Vv][Ee][Rr][Yy][Ee][Nn][Aa][Bb][Ll][Ee][Dd]|[Bb][Oo][Oo][Tt][Ss][Tt][Aa][Tt][Uu][Ss][Pp][Oo][Ll][Ii][Cc][Yy]|[Ss][Aa][Ff][Ee][Bb][Oo][Oo][Tt]).*/ OR data_win_eventdata_commandLine:/.*[Rr][Ee][Aa][Gg][Ee][Nn][Tt][Cc].*\/[Dd][Ii][Ss][Aa][Bb][Ll][Ee].*/ OR data_win_eventdata_commandLine:/.*[Cc][Ii][Pp][Hh][Ee][Rr] \/[Ww].*/ OR data_win_eventdata_commandLine:/.*[Ff][Ss][Uu][Tt][Ii][Ll].*[Uu][Ss][Nn].*[Dd][Ee][Ll][Ee][Tt][Ee][Jj][Oo][Uu][Rr][Nn][Aa][Ll].*/)
+    pivot_on:
+    - host
+    window: 2h
+  - name: Ransom-note and encrypted-file creation on this host
+    query: data_win_system_eventID:"11" AND (data_win_eventdata_targetFilename:/.*([Rr][Ee][Aa][Dd][Mm][Ee]|[Hh][Oo][Ww].?[Tt][Oo].?[Dd][Ee][Cc][Rr][Yy][Pp][Tt]|[Dd][Ee][Cc][Rr][Yy][Pp][Tt].?[Ff][Ii][Ll][Ee][Ss]|[Rr][Ee][Ss][Tt][Oo][Rr][Ee].?[Ff][Ii][Ll][Ee][Ss]|[Rr][Ee][Cc][Oo][Vv][Ee][Rr].?[Ff][Ii][Ll][Ee][Ss]|[Hh][Ee][Ll][Pp].?[Dd][Ee][Cc][Rr][Yy][Pp][Tt]).*\.([Tt][Xx][Tt]|[Hh][Tt][Aa]|[Hh][Tt][Mm][Ll]?)/ OR data_win_eventdata_targetFilename:/.*\.([Ff][Uu][Nn][Kk][Ss][Ee][Cc]|[Ll][Oo][Cc][Kk][Bb][Ii][Tt]|[Ll][Oo][Cc][Kk][Ee][Dd]|[Ee][Nn][Cc][Rr][Yy][Pp][Tt][Ee][Dd])/)
+    pivot_on:
+    - host
+    window: 2h
+  - name: Service / process termination to unlock files on this host
+    query: data_win_system_eventID:"1" AND ((data_win_eventdata_image:/.*\\([Nn][Ee][Tt]1?|[Ss][Cc]|[Tt][Aa][Ss][Kk][Kk][Ii][Ll][Ll])\.[Ee][Xx][Ee]/ AND data_win_eventdata_commandLine:/.*([Ss][Tt][Oo][Pp]|[Dd][Ee][Ll][Ee][Tt][Ee]|\/[Ff]|\/[Ii][Mm]).*/) OR data_win_eventdata_commandLine:/.*[Ss][Tt][Oo][Pp]-[Ss][Ee][Rr][Vv][Ii][Cc][Ee].*/ OR data_win_eventdata_commandLine:/.*[Ss][Tt][Oo][Pp]-[Pp][Rr][Oo][Cc][Ee][Ss][Ss].*/ OR data_win_eventdata_commandLine:/.*[Pp][Rr][Oo][Cc][Ee][Ss][Ss].*[Cc][Aa][Ll][Ll].*[Tt][Ee][Rr][Mm][Ii][Nn][Aa][Tt][Ee].*/)
+    pivot_on:
+    - host
+    window: 2h
+  - name: Security-tool / Defender tampering and log clearing on this host
+    query: data_win_system_eventID:"1" AND (data_win_eventdata_commandLine:/.*[Ss][Ee][Tt]-[Mm][Pp][Pp][Rr][Ee][Ff][Ee][Rr][Ee][Nn][Cc][Ee].*[Dd][Ii][Ss][Aa][Bb][Ll][Ee].*/ OR data_win_eventdata_commandLine:/.*-[Ee][Xx][Cc][Ll][Uu][Ss][Ii][Oo][Nn][Pp][Aa][Tt][Hh].*/ OR data_win_eventdata_commandLine:/.*-[Ee][Xx][Cc][Ll][Uu][Ss][Ii][Oo][Nn][Ee][Xx][Tt][Ee][Nn][Ss][Ii][Oo][Nn].*/ OR data_win_eventdata_commandLine:/.*[Ww][Ee][Vv][Tt][Uu][Tt][Ii][Ll] [Cc][Ll].*/ OR data_win_eventdata_commandLine:/.*[Cc][Ll][Ee][Aa][Rr]-[Ee][Vv][Ee][Nn][Tt][Ll][Oo][Gg].*/ OR data_win_eventdata_commandLine:/.*[Nn][Ee][Tt][Ss][Hh].*[Aa][Dd][Vv][Ff][Ii][Rr][Ee][Ww][Aa][Ll][Ll].*[Oo][Ff][Ff].*/)
+    pivot_on:
+    - host
+    window: 2h
+  - name: Execution and network egress from user-writable / suspicious paths on this host
+    query: (data_win_system_eventID:"1" OR data_win_system_eventID:"3") AND (data_win_eventdata_image:/.*:\\[Pp][Ee][Rr][Ff][Ll][Oo][Gg][Ss]\\.*/ OR data_win_eventdata_image:/.*:\\[Uu][Ss][Ee][Rr][Ss]\\[Pp][Uu][Bb][Ll][Ii][Cc]\\.*/ OR data_win_eventdata_image:/.*\\[Aa][Pp][Pp][Dd][Aa][Tt][Aa]\\.*/ OR data_win_eventdata_image:/.*\\[Pp][Rr][Oo][Gg][Rr][Aa][Mm][Dd][Aa][Tt][Aa]\\.*/ OR data_win_eventdata_image:/.*\\[Ww][Ii][Nn][Dd][Oo][Ww][Ss]\\[Tt][Ee][Mm][Pp]\\.*/ OR data_win_eventdata_image:/.*\\\$[Rr][Ee][Cc][Yy][Cc][Ll][Ee].*/)
+    pivot_on:
+    - host
+    window: 4h

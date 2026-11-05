@@ -174,19 +174,58 @@ graylog:
   query: ((data_process_exec_process_binary:/.*\/[Bb][Uu][Nn]/ AND data_process_exec_process_arguments:/.*[Bb][Uu][Nn].*/ AND data_process_exec_process_arguments:/.*[Rr][Uu][Nn].*/ AND data_process_exec_process_arguments:/.*[Tt][Aa][Nn][Ss][Tt][Aa][Cc][Kk]_[Rr][Uu][Nn][Nn][Ee][Rr]\.[Jj][Ss].*/) OR (data_process_exec_process_binary:/.*\/[Pp][Yy][Tt][Hh][Oo][Nn]3.*/ AND data_process_exec_process_arguments:/.*\/[Tt][Mm][Pp]\/[Tt][Rr][Aa][Nn][Ss][Ff][Oo][Rr][Mm][Ee][Rr][Ss]\.[Pp][Yy][Zz].*/))
 
 correlation:
-  # Authored by the correlation engine for review.
+  # Authored per-rule (behaviour-researched) for the correlation engine. Related CoPilot
+  # Searches + telemetry pivots to run around an alert, scoped to its host/user/ip/domain.
+  related_rules:
+  - id: eb827bbd-670a-4d58-8446-c464d8ac2323
+    name: Shai-Hulud Malicious Bun Execution - Linux
+    reason: 'Same campaign family and same execution primitive: Mini Shai-Hulud/TanStack and Shai-Hulud ''Second Coming'' both run their bundled JS payload through node->bun after a preinstall/setup.mjs installs the Bun runtime. This rule''s ''bun run tanstack_runner.js'' branch is the same node->bun payload-execution step this sibling catches as ''bun run bun_environment.js'' (and the curl -fsSL bun.sh/install bootstrap), so one firing strongly implies the other stage is present on the host.'
+  - id: f0025a69-e1b7-4dda-a53c-db21fa2d4071
+    name: Script Interpreter Spawning Credential Scanner - Linux
+    reason: 'Immediate next step and the campaign''s actual objective: once ''bun run tanstack_runner.js'' (or transformers.pyz) executes, the payload spawns trufflehog/gitleaks under the node/bun parent to harvest secrets. This rule keys on exactly that node|bun -> trufflehog|gitleaks parent/child relationship, making it the direct credential-access follow-on (T1552).'
+  - id: efd2eb09-b72e-4a61-8dc7-b1382a1e8983
+    name: Shai-Hulud NPM Package Malicious Exfiltration via Curl
+    reason: 'Final-stage follow-on of the same worm: after secrets are collected it exfiltrates them with ''curl -d'' to an attacker webhook. This sibling detects that exact exfiltration (curl POST to the known webhook.site endpoint); its appearance on the same host after this execution alert confirms harvested data left the box (T1041).'
+  - id: d7a650c4-226c-451e-948f-cc490db506aa
+    name: PUA - TruffleHog Execution - Linux
+    reason: 'Credential-theft follow-on complementary to the interpreter->scanner rule: it catches TruffleHog run with secret-hunting arguments (Git/GitHub/s3/--results=verified) regardless of whether node/bun is the direct parent (e.g. launched via an intermediate shell). TruffleHog is the signature secret-harvesting tool of the Shai-Hulud npm worm, so confirming it ran pins the collection stage.'
+  - id: a2d9e2f3-0f43-4c7a-bcd9-9acfc0d723aa
+    name: Suspicious Download and Execute Pattern via Curl/Wget
+    reason: 'Precursor mechanism: setup.mjs fetches the platform-specific Bun runtime (and the transformers.pyz payload) into a temp directory and executes it. This rule fires on the generic curl/wget -> /tmp or /dev/shm -> ''sh -c'' download-and-run stager, i.e. the ingress-tool-transfer step (T1105) that stages the very Bun/python payload this TanStack rule then catches executing.'
+  - id: 11bb9b26-4179-4a06-afcb-1ec31fce1627
+    name: Shai-Hulud Malware Indicators - Linux
+    reason: 'Same-campaign IOC: matches the literal ''Shai-Hulud''/''SHA1HULUD'' strings the worm leaves in command lines (e.g. the exfil repo and branch names it creates on GitHub). A host running the TanStack payload is part of the Shai-Hulud wave, so these string indicators are expected to co-occur and corroborate attribution.'
+  - id: 0a23a62d-c5b3-468b-a072-25064a9a8c87
+    name: Axios NPM Compromise Indicators - Linux
+    reason: 'Co-occurring sibling in the same npm-supply-chain family: another malicious npm package whose postinstall runs under a node/bun parent to drop a RAT. A poisoned dev/CI install tree commonly pulls several compromised packages at once, so an axios-style dropper on the same host within the window points to a broader npm-supply-chain compromise rather than an isolated event.'
+  - id: 312b42b1-bded-4441-8b58-163a3af58775
+    name: Potentially Suspicious Execution From Tmp Folder
+    reason: 'Co-occurring staging signal tied to this rule''s own python branch: the campaign drops and runs artifacts from /tmp (this rule''s second branch is ''python3 /tmp/transformers.pyz'', and the downloaded Bun runtime is staged to a temp dir). A process executing directly out of /tmp on the same host confirms a staged payload ran and corroborates the execution chain.'
+  window: 2h
   enrichment_searches:
-  # Rule-specific telemetry pivots the engine runs around an alert from this rule,
-  # scoped to the alert's host/user/IP within the window (behaviour-targeted, not a sweep).
-    - name: "Shell / interpreter execution on this host"
-      query: '((data_process_exec_process_binary:/.*(\/[Bb][Aa][Ss][Hh]|\/[Ss][Hh]|\/[Dd][Aa][Ss][Hh]|\/[Zz][Ss][Hh]|\/[Kk][Ss][Hh]|\/[Aa][Ss][Hh]|\/[Bb][Uu][Ss][Yy][Bb][Oo][Xx])/) OR (data_process_exec_process_binary:/.*(\/[Pp][Yy][Tt][Hh][Oo][Nn]|\/[Pp][Yy][Tt][Hh][Oo][Nn]3|\/[Pp][Ee][Rr][Ll]|\/[Rr][Uu][Bb][Yy]|\/[Pp][Hh][Pp]|\/[Nn][Oo][Dd][Ee]|\/[Ll][Uu][Aa]|\/[Aa][Ww][Kk])/))'
-      pivot_on: [host]
-      window: 1h
-    - name: "Persistence via cron / systemd / shell profiles on this host"
-      query: '((data_process_exec_process_binary:/.*(\/[Cc][Rr][Oo][Nn][Tt][Aa][Bb]|\/[Ss][Yy][Ss][Tt][Ee][Mm][Cc][Tt][Ll]|\/[Aa][Tt]|\/[Uu][Pp][Dd][Aa][Tt][Ee]-[Rr][Cc]\.[Dd])/) OR (data_process_exec_process_arguments:/.*\/[Ee][Tt][Cc]\/[Cc][Rr][Oo][Nn].*/) OR (data_process_exec_process_arguments:/.*\/[Ee][Tt][Cc]\/[Ss][Yy][Ss][Tt][Ee][Mm][Dd].*/) OR (data_process_exec_process_arguments:/.*[Rr][Cc]\.[Ll][Oo][Cc][Aa][Ll].*/) OR (data_process_exec_process_arguments:/.*\.[Bb][Aa][Ss][Hh][Rr][Cc].*/) OR (data_process_exec_process_arguments:/.*\.[Bb][Aa][Ss][Hh]_[Pp][Rr][Oo][Ff][Ii][Ll][Ee].*/) OR (data_process_exec_process_arguments:/.*\/[Ee][Tt][Cc]\/[Pp][Rr][Oo][Ff][Ii][Ll][Ee].*/) OR (data_process_exec_process_arguments:/.*[Aa][Uu][Tt][Hh][Oo][Rr][Ii][Zz][Ee][Dd]_[Kk][Ee][Yy][Ss].*/) OR (data_process_exec_process_arguments:/.*\/[Ee][Tt][Cc]\/[Ii][Nn][Ii][Tt]\.[Dd].*/))'
-      pivot_on: [host]
-      window: 4h
-    - name: "Reconnaissance commands on this host"
-      query: 'data_process_exec_process_binary:/.*(\/[Ww][Hh][Oo][Aa][Mm][Ii]|\/[Ii][Dd]|\/[Uu][Nn][Aa][Mm][Ee]|\/[Hh][Oo][Ss][Tt][Nn][Aa][Mm][Ee]|\/[Hh][Oo][Ss][Tt][Nn][Aa][Mm][Ee][Cc][Tt][Ll]|\/[Ss][Ss]|\/[Nn][Ee][Tt][Ss][Tt][Aa][Tt]|\/[Ii][Ff][Cc][Oo][Nn][Ff][Ii][Gg]|\/[Aa][Rr][Pp]|\/[Ww]|\/[Ww][Hh][Oo]|\/[Ll][Aa][Ss][Tt]|\/[Ll][Ss][Oo][Ff]|\/[Nn][Mm][Aa][Pp]|\/[Dd][Ii][Gg]|\/[Ff][Ii][Nn][Dd])/'
-      pivot_on: [host]
-      window: 1h
+  # Behaviour-targeted hunts the engine runs around the alert (not a sweep).
+  - name: Developer and cloud secret harvesting (npmrc, git/aws/gcloud creds, SSH keys, /proc environ, trufflehog/gitleaks) on this host
+    query: ((data_process_exec_process_arguments:/.*\.[Nn][Pp][Mm][Rr][Cc].*/ OR data_process_exec_process_arguments:/.*\.[Gg][Ii][Tt]-[Cc][Rr][Ee][Dd][Ee][Nn][Tt][Ii][Aa][Ll][Ss].*/ OR data_process_exec_process_arguments:/.*\/\.[Ss][Ss][Hh]\/.*/ OR data_process_exec_process_arguments:/.*[Ii][Dd]_[Rr][Ss][Aa].*/ OR data_process_exec_process_arguments:/.*\/\.[Aa][Ww][Ss]\/[Cc][Rr][Ee][Dd][Ee][Nn][Tt][Ii][Aa][Ll][Ss].*/ OR data_process_exec_process_arguments:/.*\/\.[Cc][Oo][Nn][Ff][Ii][Gg]\/[Gg][Cc][Ll][Oo][Uu][Dd].*/ OR data_process_exec_process_arguments:/.*\/[Pp][Rr][Oo][Cc]\/.*\/[Ee][Nn][Vv][Ii][Rr][Oo][Nn].*/ OR data_process_exec_process_arguments:/.*[Gg][Ii][Tt][Hh][Uu][Bb]_[Tt][Oo][Kk][Ee][Nn].*/ OR data_process_exec_process_arguments:/.*[Nn][Pp][Mm]_[Tt][Oo][Kk][Ee][Nn].*/) OR (data_process_exec_process_binary:/.*\/[Tt][Rr][Uu][Ff][Ff][Ll][Ee][Hh][Oo][Gg]/ OR data_process_exec_process_binary:/.*\/[Gg][Ii][Tt][Ll][Ee][Aa][Kk][Ss]/))
+    pivot_on:
+    - host
+    window: 6h
+  - name: Harvested-secret exfiltration via curl/wget POST or upload to a webhook / GitHub API / paste site on this host
+    query: ((data_process_exec_process_binary:/.*\/[Cc][Uu][Rr][Ll]/ OR data_process_exec_process_binary:/.*\/[Ww][Gg][Ee][Tt]/) AND (data_process_exec_process_arguments:/.* -[Dd] .*/ OR data_process_exec_process_arguments:/.*--[Dd][Aa][Tt][Aa].*/ OR data_process_exec_process_arguments:/.*-[Xx] [Pp][Oo][Ss][Tt].*/ OR data_process_exec_process_arguments:/.*--[Uu][Pp][Ll][Oo][Aa][Dd]-[Ff][Ii][Ll][Ee].*/ OR data_process_exec_process_arguments:/.*[Ww][Ee][Bb][Hh][Oo][Oo][Kk]\.[Ss][Ii][Tt][Ee].*/ OR data_process_exec_process_arguments:/.*[Aa][Pp][Ii]\.[Gg][Ii][Tt][Hh][Uu][Bb]\.[Cc][Oo][Mm].*/ OR data_process_exec_process_arguments:/.*[Tt][Rr][Aa][Nn][Ss][Ff][Ee][Rr]\.[Ss][Hh].*/ OR data_process_exec_process_arguments:/.*[Pp][Aa][Ss][Tt][Ee][Bb][Ii][Nn].*/))
+    pivot_on:
+    - host
+    window: 2h
+  - name: Bun runtime acquisition or Node/npm spawning the Bun installer (campaign bootstrap precursor) on this host
+    query: ((data_process_exec_process_arguments:/.*[Bb][Uu][Nn]\.[Ss][Hh]\/[Ii][Nn][Ss][Tt][Aa][Ll][Ll].*/ OR data_process_exec_process_arguments:/.*[Oo][Vv][Ee][Nn]-[Ss][Hh]\/[Bb][Uu][Nn].*/ OR data_process_exec_process_arguments:/.*[Ss][Ee][Tt][Uu][Pp]\.[Mm][Jj][Ss].*/ OR data_process_exec_process_arguments:/.*[Ss][Ee][Tt][Uu][Pp]_[Bb][Uu][Nn].*/ OR data_process_exec_process_arguments:/.*[Bb][Uu][Nn]_[Ee][Nn][Vv][Ii][Rr][Oo][Nn][Mm][Ee][Nn][Tt]\.[Jj][Ss].*/) OR ((data_process_exec_parent_binary:/.*\/[Nn][Oo][Dd][Ee]/ OR data_process_exec_parent_binary:/.*\/[Nn][Pp][Mm]/) AND data_process_exec_process_binary:/.*\/[Bb][Uu][Nn]/))
+    pivot_on:
+    - host
+    window: 2h
+  - name: 'NPM-token worm self-propagation: npm/npx publish or git push / gh repo creation (likely next worm spread) on this host'
+    query: ((data_process_exec_process_binary:/.*\/[Nn][Pp][Mm]/ OR data_process_exec_process_binary:/.*\/[Nn][Pp][Xx]/) AND data_process_exec_process_arguments:/.*[Pp][Uu][Bb][Ll][Ii][Ss][Hh].*/) OR (data_process_exec_process_binary:/.*\/[Gg][Ii][Tt]/ AND (data_process_exec_process_arguments:/.* [Pp][Uu][Ss][Hh].*/ OR data_process_exec_process_arguments:/.* [Rr][Ee][Mm][Oo][Tt][Ee] [Aa][Dd][Dd].*/ OR data_process_exec_process_arguments:/.* [Ii][Nn][Ii][Tt].*/)) OR data_process_exec_process_binary:/.*\/[Gg][Hh]/
+    pivot_on:
+    - host
+    window: 6h
+  - name: Detached or persistent payload execution (nohup/setsid of node/bun/python, or systemctl --user service) on this host
+    query: (((data_process_exec_process_binary:/.*\/[Nn][Oo][Hh][Uu][Pp]/ OR data_process_exec_process_binary:/.*\/[Ss][Ee][Tt][Ss][Ii][Dd]/) OR data_process_exec_process_arguments:/.*[Dd][Ii][Ss][Oo][Ww][Nn].*/) AND (data_process_exec_process_arguments:/.*[Nn][Oo][Dd][Ee].*/ OR data_process_exec_process_arguments:/.*[Bb][Uu][Nn].*/ OR data_process_exec_process_arguments:/.*[Pp][Yy][Tt][Hh][Oo][Nn].*/)) OR (data_process_exec_process_binary:/.*\/[Ss][Yy][Ss][Tt][Ee][Mm][Cc][Tt][Ll]/ AND data_process_exec_process_arguments:/.*--[Uu][Ss][Ee][Rr].*/)
+    pivot_on:
+    - host
+    window: 4h

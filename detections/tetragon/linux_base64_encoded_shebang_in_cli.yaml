@@ -159,19 +159,58 @@ graylog:
   query: (data_process_exec_process_arguments:/.*[Ii][Yy][Ee][Vv][Yy][Mm][Ll][Uu][Ll]2[Jj][Hh][Cc]2.*/ OR data_process_exec_process_arguments:/.*[Ii][Yy][Ee][Vv][Yy][Mm][Ll][Uu][Ll]2[Rr][Hh][Cc]2.*/ OR data_process_exec_process_arguments:/.*[Ii][Yy][Ee][Vv][Yy][Mm][Ll][Uu][Ll]3[Pp][Zz][Aa].*/ OR data_process_exec_process_arguments:/.*[Ii][Yy][Ee][Vv][Yy][Mm][Ll][Uu][Ll]2[Zz][Pp][Cc]2.*/ OR data_process_exec_process_arguments:/.*[Ii][Yy][Ee][Vv][Yy][Mm][Ll][Uu][Ll]3[Nn][Oo].*/)
 
 correlation:
-  # Authored by the correlation engine for review.
+  # Authored per-rule (behaviour-researched) for the correlation engine. Related CoPilot
+  # Searches + telemetry pivots to run around an alert, scoped to its host/user/ip/domain.
+  related_rules:
+  - id: b7c4d8e1-5f2a-4c9b-8d3e-4f5a6b7c8d9e
+    name: Linux Suspicious Base64 Execution
+    reason: 'Closest sibling: detects `base64 -d|--decode` piped into bash/sh, which is exactly how a base64-encoded shebang script is decoded and run. Expect it to fire on the same or the adjacent exec event that this alert''s encoded blob is handed to.'
+  - id: ba592c6d-6888-43c3-b8c6-689b8fe47337
+    name: Linux Base64 Encoded Pipe to Shell
+    reason: Same T1140 obfuscated one-liner from a different angle (base64-encoded input piped to a shell). A shebang-in-base64 payload is a specific case of this, so the two commonly co-fire on one command line.
+  - id: 55e862a8-dd9c-4651-807a-f21fcad56716
+    name: Python One-Liners with Base64 Decoding - Linux
+    reason: 'Alternate decoder for the same technique: attackers rotate between `base64 -d|sh` and `python -c ''import base64; ...decode()''`. If the shebang path is noticed, the Python decode path is the obvious same-host variant to check for.'
+  - id: linux-auditd-base64-decode-001
+    name: Linux Auditd Base64 Decode
+    reason: 'Cross-sensor confirmation of the very decode action: auditd independently records the `base64 -d/--decode` execve on the same host. Two sensors agreeing on the decode strongly raises confidence over a lone Tetragon hit.'
+  - id: a2d9e2f3-0f43-4c7a-bcd9-9acfc0d723aa
+    name: Suspicious Download and Execute Pattern via Curl/Wget
+    reason: 'Delivery precursor: the encoded blob (or the script it decodes to) is typically fetched by curl/wget into /tmp or /dev/shm and piped to a shell just before this decode fires.'
+  - id: 0cf7a157-8879-41a2-8f55-388dd23746b7
+    name: Linux Recon Indicators
+    reason: 'Primary follow-on: the rule''s own reference is linPEAS, and decoded shell scripts are overwhelmingly enumeration/privesc scripts (SUID find, .htpasswd hunt). A recon burst on the host right after the decode confirms the payload''s intent.'
+  - id: 7f734ed0-4f47-46c0-837f-6ee62505abd9
+    name: Potential Netcat Reverse Shell Execution
+    reason: 'Follow-on C2: when the decoded script is a dropper rather than a recon tool, it frequently spawns a netcat `-e` reverse shell on the same host within the same burst, escalating this to active compromise.'
+  - id: 30bcce26-51c5-49f2-99c8-7b59e3af36c7
+    name: Execution Of Script Located In Potentially Suspicious Directory
+    reason: 'Follow-on for the write-then-run variant: instead of piping, the decoded script is written to /tmp and executed via `bash -c /tmp/...`. Pairs with this alert to show the decoded content actually ran.'
+  window: 2h
   enrichment_searches:
-  # Rule-specific telemetry pivots the engine runs around an alert from this rule,
-  # scoped to the alert's host/user/IP within the window (behaviour-targeted, not a sweep).
-    - name: "Shell / interpreter execution on this host"
-      query: '((data_process_exec_process_binary:/.*(\/[Bb][Aa][Ss][Hh]|\/[Ss][Hh]|\/[Dd][Aa][Ss][Hh]|\/[Zz][Ss][Hh]|\/[Kk][Ss][Hh]|\/[Aa][Ss][Hh]|\/[Bb][Uu][Ss][Yy][Bb][Oo][Xx])/) OR (data_process_exec_process_binary:/.*(\/[Pp][Yy][Tt][Hh][Oo][Nn]|\/[Pp][Yy][Tt][Hh][Oo][Nn]3|\/[Pp][Ee][Rr][Ll]|\/[Rr][Uu][Bb][Yy]|\/[Pp][Hh][Pp]|\/[Nn][Oo][Dd][Ee]|\/[Ll][Uu][Aa]|\/[Aa][Ww][Kk])/))'
-      pivot_on: [host]
-      window: 1h
-    - name: "Reconnaissance commands on this host"
-      query: 'data_process_exec_process_binary:/.*(\/[Ww][Hh][Oo][Aa][Mm][Ii]|\/[Ii][Dd]|\/[Uu][Nn][Aa][Mm][Ee]|\/[Hh][Oo][Ss][Tt][Nn][Aa][Mm][Ee]|\/[Hh][Oo][Ss][Tt][Nn][Aa][Mm][Ee][Cc][Tt][Ll]|\/[Ss][Ss]|\/[Nn][Ee][Tt][Ss][Tt][Aa][Tt]|\/[Ii][Ff][Cc][Oo][Nn][Ff][Ii][Gg]|\/[Aa][Rr][Pp]|\/[Ww]|\/[Ww][Hh][Oo]|\/[Ll][Aa][Ss][Tt]|\/[Ll][Ss][Oo][Ff]|\/[Nn][Mm][Aa][Pp]|\/[Dd][Ii][Gg]|\/[Ff][Ii][Nn][Dd])/'
-      pivot_on: [host]
-      window: 1h
-    - name: "Privilege-escalation tooling executed on this host"
-      query: 'data_process_exec_process_binary:/.*(\/[Ss][Uu][Dd][Oo]|\/[Ss][Uu]|\/[Pp][Kk][Ee][Xx][Ee][Cc]|\/[Dd][Oo][Aa][Ss]|\/[Ss][Ee][Tt][Cc][Aa][Pp]|\/[Cc][Hh][Ss][Hh]|\/[Nn][Ee][Ww][Gg][Rr][Pp])/'
-      pivot_on: [host]
-      window: 2h
+  # Behaviour-targeted hunts the engine runs around the alert (not a sweep).
+  - name: Base64 decoder output piped into a shell or interpreter
+    query: (data_process_exec_process_arguments:/.*[Bb][Aa][Ss][Ee]64 -[Dd].*/ OR data_process_exec_process_arguments:/.*[Bb][Aa][Ss][Ee]64 --[Dd][Ee][Cc][Oo][Dd][Ee].*/ OR data_process_exec_process_arguments:/.*[Oo][Pp][Ee][Nn][Ss][Ss][Ll] [Bb][Aa][Ss][Ee]64.*/ OR data_process_exec_process_binary:/.*\/[Bb][Aa][Ss][Ee]64/) AND (data_process_exec_process_arguments:/.*\|.*[Bb][Aa][Ss][Hh].*/ OR data_process_exec_process_arguments:/.*\|.*[Ss][Hh].*/ OR data_process_exec_process_arguments:/.*\|.*[Pp][Yy][Tt][Hh][Oo][Nn].*/)
+    pivot_on:
+    - host
+    window: 1h
+  - name: Remote payload fetched or staged into a temp directory
+    query: (data_process_exec_process_binary:/.*\/[Cc][Uu][Rr][Ll]/ OR data_process_exec_process_binary:/.*\/[Ww][Gg][Ee][Tt]/ OR data_process_exec_process_binary:/.*\/[Ff][Ee][Tt][Cc][Hh]/ OR data_process_exec_process_binary:/.*\/[Tt][Ff][Tt][Pp]/) AND (data_process_exec_process_arguments:/.*[Hh][Tt][Tt][Pp].*/ OR data_process_exec_process_arguments:/.*\/[Tt][Mm][Pp]\/.*/ OR data_process_exec_process_arguments:/.*\/[Dd][Ee][Vv]\/[Ss][Hh][Mm]\/.*/)
+    pivot_on:
+    - host
+    window: 2h
+  - name: Host and privilege-escalation reconnaissance burst
+    query: (data_process_exec_process_binary:/.*\/[Ww][Hh][Oo][Aa][Mm][Ii]/ OR data_process_exec_process_binary:/.*\/[Ii][Dd]/ OR data_process_exec_process_binary:/.*\/[Uu][Nn][Aa][Mm][Ee]/ OR data_process_exec_process_binary:/.*\/[Hh][Oo][Ss][Tt][Nn][Aa][Mm][Ee]/ OR data_process_exec_process_arguments:/.*[Ss][Uu][Dd][Oo] -[Ll].*/ OR data_process_exec_process_arguments:/.*-[Pp][Ee][Rr][Mm] .*4000.*/ OR data_process_exec_process_arguments:/.*\/[Ee][Tt][Cc]\/[Ss][Hh][Aa][Dd][Oo][Ww].*/)
+    pivot_on:
+    - host
+    window: 1h
+  - name: Interpreter-based reverse shell primitives on this host
+    query: (data_process_exec_process_arguments:/.*\/[Dd][Ee][Vv]\/[Tt][Cc][Pp]\/.*/ OR data_process_exec_process_arguments:/.*\/[Dd][Ee][Vv]\/[Uu][Dd][Pp]\/.*/ OR data_process_exec_process_arguments:/.*[Pp][Tt][Yy]\.[Ss][Pp][Aa][Ww][Nn].*/ OR data_process_exec_process_arguments:/.*[Ss][Oo][Cc][Kk][Ee][Tt]\.[Ss][Oo][Cc][Kk][Ee][Tt].*/ OR data_process_exec_process_binary:/.*\/[Mm][Kk][Ff][Ii][Ff][Oo]/)
+    pivot_on:
+    - host
+    window: 1h
+  - name: Persistence mechanism created after decode
+    query: (data_process_exec_process_binary:/.*\/[Cc][Rr][Oo][Nn][Tt][Aa][Bb]/ OR data_process_exec_process_binary:/.*\/[Aa][Tt]/ OR data_process_exec_process_arguments:/.*[Cc][Rr][Oo][Nn]\.[Dd].*/ OR data_process_exec_process_arguments:/.*[Aa][Uu][Tt][Hh][Oo][Rr][Ii][Zz][Ee][Dd]_[Kk][Ee][Yy][Ss].*/ OR data_process_exec_process_arguments:/.*\.[Bb][Aa][Ss][Hh][Rr][Cc].*/ OR data_process_exec_process_arguments:/.*\/[Ee][Tt][Cc]\/[Ss][Yy][Ss][Tt][Ee][Mm][Dd]\/.*/)
+    pivot_on:
+    - host
+    window: 4h

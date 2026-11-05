@@ -138,44 +138,58 @@ graylog:
   query: data_win_system_eventID:"7" AND data_win_eventdata_image:/.*\\[Ll][Ss][Aa][Ss][Ss]\.[Ee][Xx][Ee]/ AND data_win_eventdata_signed:/[Ff][Aa][Ll][Ss][Ee]/
 
 correlation:
-  # Authored by the correlation engine for review. Related CoPilot Searches to run
-  # around an alert from this rule, scoped to the same host/user/IP within the window.
+  # Authored per-rule (behaviour-researched) for the correlation engine. Related CoPilot
+  # Searches + telemetry pivots to run around an alert, scoped to its host/user/ip/domain.
   related_rules:
-    - id: ec570e53-4c76-45a9-804d-dc3f355ff7a7
-      name: "7Zip Compressing Dump Files"
-      reason: "next kill-chain tactic: Collection"
-    - id: 0a1255c5-d732-4b62-ac02-b5152d34fb83
-      name: "ADExplorer Writing Complete AD Snapshot Into .dat File"
-      reason: "next kill-chain tactic: Discovery"
-    - id: 1ea13e8c-03ea-409b-877d-ce5c3d2c1cb3
-      name: "ADFS Database Named Pipe Connection By Uncommon Tool"
-      reason: "next kill-chain tactic: Collection"
-    - id: 75bf09fa-1dd7-4d18-9af9-dd9e492562eb
-      name: "ADSI-Cache File Creation By Uncommon Tool"
-      reason: "next kill-chain tactic: Command and Control"
-    - id: 03e2746e-2b31-42f1-ab7a-eb39365b2422
-      name: "APT31 Judgement Panda Activity"
-      reason: "next kill-chain tactic: Credential Access"
-    - id: fc028194-969d-4122-8abe-0470d5b8f12f
-      name: "Access to Browser Login Data"
-      reason: "next kill-chain tactic: Credential Access"
-  window: 1h
+  - id: 8c0eca51-0f88-4db2-9183-fdfb10c703f9
+    name: LSA PPL Protection Setting Modification via CommandLine
+    reason: 'Enabling precondition on the same host: RunAsPPL/IsPplAutoEnabled is the LSASS Protected-Process-Light guard that blocks unsigned DLLs from loading into lsass.exe. This rule catches reg.exe/PowerShell flipping that value off - the step an attacker must take just before an unsigned module can map into LSASS, so hunt it immediately preceding this alert.'
+  - id: eeb30123-9fbd-4ee8-aaa0-2e545bbed6dc
+    name: Security Support Provider (SSP) Added to LSA Configuration
+    reason: 'Root-cause precursor: writing an SSP DLL path into HKLM\...\Control\Lsa\Security Packages makes lsass.exe auto-load that DLL on reboot or AddSecurityPackage (Mimikatz misc::memssp / Empire Install-SSP). The unsigned image this rule sees inside LSASS is frequently that registered SSP; this EID 12/13 rule names the DLL and the writing process.'
+  - id: 41f6531d-af6e-4c6e-918f-b946f2b85a36
+    name: Potential Persistence Via LSA Extensions
+    reason: 'Root-cause precursor: the LsaExtensionConfig\LsaSrv\Extensions REG_MULTI_SZ lists DLLs lsass.exe auto-loads and calls InitializeLsaExtension() on. A custom DLL added there is loaded straight into LSASS, so this registry write is a direct cause of an unsigned-module-in-LSASS event on the same host.'
+  - id: f239b326-2f41-4d6b-9dfa-c846a60ef505
+    name: Password Dumper Remote Thread in LSASS
+    reason: 'Sibling injection into the same process: EID 8 CreateRemoteThread into lsass.exe is the other principal way attacker code runs inside LSASS (WCE-style). Firing alongside this EID 7 unsigned-image load on the same host means the box is being actively injected for credential theft, not hitting a benign signed-module quirk.'
+  - id: a18dd26b-6450-46de-8c91-9659150cf088
+    name: Potentially Suspicious GrantedAccess Flags On LSASS
+    reason: 'Co-occurring access from the responsible process: the tool that maps a module into lsass (or reads its secrets) must open a handle to lsass.exe with inject/dump-grade GrantedAccess (e.g. 0x1010/0x1410/0x1fffff). This EID 10 rule catches that handle and names the sourceImage this image-load event cannot.'
+  - id: a642964e-bead-4bed-8910-1bb4d63e3b4d
+    name: HackTool - Mimikatz Execution
+    reason: 'Most likely root cause on the same host: Mimikatz misc::memssp injects an unsigned SSP (mimilib) into lsass.exe - producing exactly this alert - while sekurlsa::* injects/reads LSASS to harvest credentials. A mimikatz process creation on this host within the window is the prime suspect for the unsigned module.'
+  - id: a5a2d357-1ab8-4675-a967-ef9990a59391
+    name: LSASS Process Memory Dump Files
+    reason: 'Follow-on artifact of the same objective: if the actor also persists LSASS memory to disk (lsass.dmp, nanodump, procdump output) for offline cracking/exfil rather than reading it live, this EID 11 rule catches the dump file written on the same host shortly after.'
+  - id: 192a0330-c20b-4356-90b6-7b7049ae0b87
+    name: Successful Overpass the Hash Attempt
+    reason: 'Direct follow-on that consumes the stolen secrets: NTLM hashes / Kerberos keys harvested from LSASS are replayed via Mimikatz sekurlsa::pth, producing a logonType 9 (NewCredentials) seclogo logon on the same host. Hunt the host/account for it right after this alert.'
+  window: 2h
   enrichment_searches:
-  # Rule-specific telemetry pivots the engine runs around an alert from this rule,
-  # scoped to the alert's host/user/IP within the window (behaviour-targeted, not a sweep).
-    - name: "Memory/credential-dump creation & LSASS access on this host"
-      query: '((data_win_system_eventID:"1" AND data_win_eventdata_image:/.*(\\[Pp][Rr][Oo][Cc][Dd][Uu][Mm][Pp]\.[Ee][Xx][Ee]|\\[Pp][Rr][Oo][Cc][Dd][Uu][Mm][Pp]64\.[Ee][Xx][Ee]|\\[Ss][Qq][Ll][Dd][Uu][Mm][Pp][Ee][Rr]\.[Ee][Xx][Ee]|\\[Cc][Rr][Ee][Aa][Tt][Ee][Dd][Uu][Mm][Pp]\.[Ee][Xx][Ee]|\\[Rr][Dd][Rr][Ll][Ee][Aa][Kk][Dd][Ii][Aa][Gg]\.[Ee][Xx][Ee]|\\[Dd][Uu][Mm][Pp][Ee][Rr][Tt]\.[Ee][Xx][Ee]|\\[Nn][Aa][Nn][Oo][Dd][Uu][Mm][Pp]\.[Ee][Xx][Ee]|\\[Aa][Vv][Dd][Uu][Mm][Pp]\.[Ee][Xx][Ee])/) OR (data_win_system_eventID:"1" AND (data_win_eventdata_commandLine:/.*[Cc][Oo][Mm][Ss][Vv][Cc][Ss]\.[Dd][Ll][Ll].*/ OR data_win_eventdata_commandLine:/.*[Mm][Ii][Nn][Ii][Dd][Uu][Mm][Pp].*/ OR data_win_eventdata_commandLine:/.*[Dd][Uu][Mm][Pp][Ee][Rr][Tt].*/ OR data_win_eventdata_commandLine:/.*[Nn][Aa][Nn][Oo][Dd][Uu][Mm][Pp].*/ OR data_win_eventdata_commandLine:/.*[Ll][Ss][Aa][Ss][Ss].*/ OR data_win_eventdata_commandLine:/.*[Ss][Ee][Kk][Uu][Rr][Ll][Ss][Aa].*/ OR data_win_eventdata_commandLine:/.*[Nn][Tt][Dd][Ss]\.[Dd][Ii][Tt].*/ OR data_win_eventdata_commandLine:/.*[Nn][Tt][Dd][Ss][Uu][Tt][Ii][Ll].*/)) OR (data_win_system_eventID:"10" AND data_win_eventdata_targetImage:/.*(\\[Ll][Ss][Aa][Ss][Ss]\.[Ee][Xx][Ee])/))'
-      pivot_on: [host]
-      window: 1h
-    - name: "This account's logon activity across hosts (harvested-credential use)"
-      query: '(data_win_system_eventID:"4624" OR data_win_system_eventID:"4625")'
-      pivot_on: [user]
-      window: 6h
-    - name: "Other executions of this tool-set on this host (any arguments)"
-      query: 'data_win_system_eventID:"1" AND data_win_eventdata_image:/.*(\\[Ll][Ss][Aa][Ss][Ss]\.[Ee][Xx][Ee])/'
-      pivot_on: [host]
-      window: 2h
-    - name: "Remote-execution / lateral-movement tooling on this host"
-      query: '(data_win_system_eventID:"1" AND data_win_eventdata_image:/.*(\\[Pp][Ss][Ee][Xx][Ee][Cc]\.[Ee][Xx][Ee]|\\[Pp][Ss][Ee][Xx][Ee][Ss][Vv][Cc]\.[Ee][Xx][Ee]|\\[Pp][Aa][Ee][Xx][Ee][Cc]\.[Ee][Xx][Ee]|\\[Ww][Ii][Nn][Rr][Ss]\.[Ee][Xx][Ee]|\\[Mm][Ss][Tt][Ss][Cc]\.[Ee][Xx][Ee]|\\[Ww][Mm][Ii][Cc]\.[Ee][Xx][Ee])/) OR (data_win_system_eventID:"1" AND data_win_eventdata_image:/.*(\\[Pp][Oo][Ww][Ee][Rr][Ss][Hh][Ee][Ll][Ll]\.[Ee][Xx][Ee]|\\[Pp][Ww][Ss][Hh]\.[Ee][Xx][Ee])/ AND (data_win_eventdata_commandLine:/.*[Ii][Nn][Vv][Oo][Kk][Ee]-[Cc][Oo][Mm][Mm][Aa][Nn][Dd].*/ OR data_win_eventdata_commandLine:/.*[Nn][Ee][Ww]-[Pp][Ss][Ss][Ee][Ss][Ss][Ii][Oo][Nn].*/ OR data_win_eventdata_commandLine:/.*[Ee][Nn][Tt][Ee][Rr]-[Pp][Ss][Ss][Ee][Ss][Ss][Ii][Oo][Nn].*/ OR data_win_eventdata_commandLine:/.*-[Cc][Oo][Mm][Pp][Uu][Tt][Ee][Rr][Nn][Aa][Mm][Ee].*/))'
-      pivot_on: [host]
-      window: 2h
+  # Behaviour-targeted hunts the engine runs around the alert (not a sweep).
+  - name: Handle-open and remote-thread injection into LSASS on this host
+    query: (data_win_system_eventID:"10" AND data_win_eventdata_targetImage:/.*\\[Ll][Ss][Aa][Ss][Ss]\.[Ee][Xx][Ee]/) OR (data_win_system_eventID:"8" AND data_win_eventdata_targetImage:/.*\\[Ll][Ss][Aa][Ss][Ss]\.[Ee][Xx][Ee]/)
+    pivot_on:
+    - host
+    window: 1h
+  - name: LSASS extensibility and PPL-protection registry tampering on this host
+    query: (data_win_system_eventID:"12" OR data_win_system_eventID:"13") AND (data_win_eventdata_targetObject:/.*\\[Cc][Oo][Nn][Tt][Rr][Oo][Ll]\\[Ll][Ss][Aa]\\.*[Ss][Ee][Cc][Uu][Rr][Ii][Tt][Yy] [Pp][Aa][Cc][Kk][Aa][Gg][Ee][Ss].*/ OR data_win_eventdata_targetObject:/.*\\[Cc][Oo][Nn][Tt][Rr][Oo][Ll]\\[Ll][Ss][Aa]\\[Nn][Oo][Tt][Ii][Ff][Ii][Cc][Aa][Tt][Ii][Oo][Nn] [Pp][Aa][Cc][Kk][Aa][Gg][Ee][Ss].*/ OR data_win_eventdata_targetObject:/.*[Ll][Ss][Aa][Ee][Xx][Tt][Ee][Nn][Ss][Ii][Oo][Nn][Cc][Oo][Nn][Ff][Ii][Gg]\\[Ll][Ss][Aa][Ss][Rr][Vv]\\[Ee][Xx][Tt][Ee][Nn][Ss][Ii][Oo][Nn][Ss].*/ OR data_win_eventdata_targetObject:/.*\\[Cc][Oo][Nn][Tt][Rr][Oo][Ll]\\[Ll][Ss][Aa]\\[Rr][Uu][Nn][Aa][Ss][Pp][Pp][Ll].*/)
+    pivot_on:
+    - host
+    window: 4h
+  - name: Credential-dumper execution and LSASS-dump command lines on this host
+    query: (data_win_system_eventID:"1" AND (data_win_eventdata_image:/.*\\[Mm][Ii][Mm][Ii][Kk][Aa][Tt][Zz].*/ OR data_win_eventdata_image:/.*\\[Pp][Rr][Oo][Cc][Dd][Uu][Mm][Pp].*\.[Ee][Xx][Ee]/ OR data_win_eventdata_image:/.*\\[Nn][Aa][Nn][Oo][Dd][Uu][Mm][Pp].*\.[Ee][Xx][Ee]/ OR data_win_eventdata_image:/.*\\[Pp][Yy][Pp][Yy][Kk][Aa][Tt][Zz].*/ OR data_win_eventdata_image:/.*\\[Dd][Uu][Mm][Pp][Ee][Rr][Tt].*\.[Ee][Xx][Ee]/ OR data_win_eventdata_image:/.*\\[Hh][Aa][Nn][Dd][Ll][Ee][Kk][Aa][Tt][Zz].*/ OR data_win_eventdata_image:/.*\\[Ss][Aa][Ff][Ee][Tt][Yy][Kk][Aa][Tt][Zz].*/ OR data_win_eventdata_image:/.*\\[Cc][Rr][Ee][Aa][Tt][Ee][Dd][Uu][Mm][Pp].*\.[Ee][Xx][Ee]/)) OR (data_win_system_eventID:"1" AND (data_win_eventdata_commandLine:/.*[Ss][Ee][Kk][Uu][Rr][Ll][Ss][Aa].*/ OR data_win_eventdata_commandLine:/.*[Ll][Oo][Gg][Oo][Nn][Pp][Aa][Ss][Ss][Ww][Oo][Rr][Dd][Ss].*/ OR data_win_eventdata_commandLine:/.*[Mm][Ee][Mm][Ss][Ss][Pp].*/ OR (data_win_eventdata_commandLine:/.*[Cc][Oo][Mm][Ss][Vv][Cc][Ss].*/ AND data_win_eventdata_commandLine:/.*[Mm][Ii][Nn][Ii][Dd][Uu][Mm][Pp].*/) OR (data_win_eventdata_commandLine:/.*[Ll][Ss][Aa][Ss][Ss].*/ AND data_win_eventdata_commandLine:/.*[Dd][Uu][Mm][Pp].*/)))
+    pivot_on:
+    - host
+    window: 2h
+  - name: LSASS memory-dump and credential-dumper file artifacts written on this host
+    query: data_win_system_eventID:"11" AND ((data_win_eventdata_targetFilename:/.*[Ll][Ss][Aa][Ss][Ss].*/ AND data_win_eventdata_targetFilename:/.*\.[Dd][Mm][Pp]/) OR data_win_eventdata_targetFilename:/.*[Ll][Ss][Aa][Ss][Ss][Dd][Uu][Mm][Pp].*/ OR data_win_eventdata_targetFilename:/.*\\[Nn][Aa][Nn][Oo][Dd][Uu][Mm][Pp].*/ OR data_win_eventdata_targetFilename:/.*\\[Dd][Uu][Mm][Pp][Ee][Rr][Tt].*\.[Dd][Mm][Pp]/ OR data_win_eventdata_targetFilename:/.*[Pp][Rr][Oo][Cc][Dd][Uu][Mm][Pp].*\.[Dd][Mm][Pp]/ OR data_win_eventdata_targetFilename:/.*\.[Kk][Ii][Rr][Bb][Ii]/)
+    pivot_on:
+    - host
+    window: 2h
+  - name: 'Reuse of harvested credentials: overpass-the-hash and NTLM logons on this host'
+    query: (data_win_system_eventID:"4624" AND data_win_eventdata_logonType:"9" AND data_win_eventdata_logonProcessName:/[Ss][Ee][Cc][Ll][Oo][Gg][Oo]/) OR (data_win_system_eventID:"4624" AND data_win_eventdata_logonType:"3" AND data_win_eventdata_authenticationPackageName:/[Nn][Tt][Ll][Mm].*/) OR (data_win_system_eventID:"4625" AND data_win_eventdata_logonType:"3" AND data_win_eventdata_authenticationPackageName:/[Nn][Tt][Ll][Mm].*/)
+    pivot_on:
+    - host
+    window: 6h

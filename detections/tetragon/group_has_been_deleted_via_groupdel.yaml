@@ -139,35 +139,47 @@ graylog:
   query: data_process_exec_process_binary:/.*\/[Gg][Rr][Oo][Uu][Pp][Dd][Ee][Ll]/
 
 correlation:
-  # Authored by the correlation engine for review. Related CoPilot Searches to run
-  # around an alert from this rule, scoped to the same host/user/IP within the window.
+  # Authored per-rule (behaviour-researched) for the correlation engine. Related CoPilot
+  # Searches + telemetry pivots to run around an alert, scoped to its host/user/ip/domain.
   related_rules:
-    - id: de25eeb8-3655-4643-ac3a-b662d3f26b6b
-      name: "Disable Or Stop Services"
-      reason: "next kill-chain tactic: Impact"
-    - id: 2992ac4d-31e9-4325-99f2-b18a73221bb2
-      name: "ESXi VM Kill Via ESXCLI"
-      reason: "next kill-chain tactic: Impact"
-    - id: 1182f3b3-e716-4efa-99ab-d2685d04360f
-      name: "History File Deletion"
-      reason: "next kill-chain tactic: Impact"
-  window: 1h
+  - id: 08f26069-6f80-474b-8d1f-d971c6fedea0
+    name: User Has Been Deleted Via Userdel
+    reason: 'userdel on the same host is the twin of groupdel: deleting user accounts and their groups together is the signature of a deliberate Account Access Removal spree (both T1531) aimed at locking legitimate users and admins out of the box.'
+  - id: 6a50f16c-3b7b-42d1-b081-0fdd3ba70a73
+    name: User Added To Root/Sudoers Group Using Usermod
+    reason: Earlier root/sudoers group-membership tampering on this host points to the same account-manipulation actor; the groupdel often removes the very privileged group that was abused for escalation/persistence, or strips group-based access to deny it to others.
+  - id: bed26dea-4525-47f4-b24a-76e30e44ffb0
+    name: Audit Rules Deleted Via Auditctl
+    reason: auditctl -D wipes the Linux audit ruleset and is typically run just before destructive account changes so the groupdel leaves no auditd trail — a precursor on the same host that marks the activity as deliberate evasion rather than routine admin maintenance.
+  - id: 1182f3b3-e716-4efa-99ab-d2685d04360f
+    name: History File Deletion
+    reason: The groupdel rule itself flags the tool as used to 'cover tracks'; a ~/.bash_history wipe in the same root session is the matching anti-forensic step that turns an isolated group deletion into a cleanup operation.
+  - id: 80915f59-9b56-4616-9de0-fd0dea6c12fe
+    name: Linux Logs Clearing Attempts
+    reason: Clearing /var/log around the account deletion is the other half of covering tracks; log removal on the same host within the window reframes the groupdel as post-compromise anti-forensics, not maintenance.
+  - id: de25eeb8-3655-4643-ac3a-b662d3f26b6b
+    name: Disable Or Stop Services
+    reason: Stopping or disabling services with systemctl/service is the destructive-Impact companion to account removal — an actor denying access via groupdel commonly also disrupts operations (T1489) on the same host in the same session.
+  window: 2h
   enrichment_searches:
-  # Rule-specific telemetry pivots the engine runs around an alert from this rule,
-  # scoped to the alert's host/user/IP within the window (behaviour-targeted, not a sweep).
-    - name: "Other executions of this tool-set on this host (any arguments)"
-      query: 'data_process_exec_process_binary:/.*(\/[Gg][Rr][Oo][Uu][Pp][Dd][Ee][Ll])/'
-      pivot_on: [host]
-      window: 2h
-    - name: "Shell / interpreter execution on this host"
-      query: '((data_process_exec_process_binary:/.*(\/[Bb][Aa][Ss][Hh]|\/[Ss][Hh]|\/[Dd][Aa][Ss][Hh]|\/[Zz][Ss][Hh]|\/[Kk][Ss][Hh]|\/[Aa][Ss][Hh]|\/[Bb][Uu][Ss][Yy][Bb][Oo][Xx])/) OR (data_process_exec_process_binary:/.*(\/[Pp][Yy][Tt][Hh][Oo][Nn]|\/[Pp][Yy][Tt][Hh][Oo][Nn]3|\/[Pp][Ee][Rr][Ll]|\/[Rr][Uu][Bb][Yy]|\/[Pp][Hh][Pp]|\/[Nn][Oo][Dd][Ee]|\/[Ll][Uu][Aa]|\/[Aa][Ww][Kk])/))'
-      pivot_on: [host]
-      window: 1h
-    - name: "Reconnaissance commands on this host"
-      query: 'data_process_exec_process_binary:/.*(\/[Ww][Hh][Oo][Aa][Mm][Ii]|\/[Ii][Dd]|\/[Uu][Nn][Aa][Mm][Ee]|\/[Hh][Oo][Ss][Tt][Nn][Aa][Mm][Ee]|\/[Hh][Oo][Ss][Tt][Nn][Aa][Mm][Ee][Cc][Tt][Ll]|\/[Ss][Ss]|\/[Nn][Ee][Tt][Ss][Tt][Aa][Tt]|\/[Ii][Ff][Cc][Oo][Nn][Ff][Ii][Gg]|\/[Aa][Rr][Pp]|\/[Ww]|\/[Ww][Hh][Oo]|\/[Ll][Aa][Ss][Tt]|\/[Ll][Ss][Oo][Ff]|\/[Nn][Mm][Aa][Pp]|\/[Dd][Ii][Gg]|\/[Ff][Ii][Nn][Dd])/'
-      pivot_on: [host]
-      window: 1h
-    - name: "Destructive tooling on this host"
-      query: '((data_process_exec_process_binary:/.*(\/[Dd][Dd]|\/[Mm][Kk][Ff][Ss]|\/[Ww][Ii][Pp][Ee][Ff][Ss]|\/[Ss][Hh][Rr][Ee][Dd]|\/[Cc][Rr][Yy][Pp][Tt][Ss][Ee][Tt][Uu][Pp])/) OR (data_process_exec_process_arguments:/.*[Rr][Mm] -[Rr][Ff].*/) OR (data_process_exec_process_arguments:/.*--[Nn][Oo]-[Pp][Rr][Ee][Ss][Ee][Rr][Vv][Ee]-[Rr][Oo][Oo][Tt].*/))'
-      pivot_on: [host]
-      window: 2h
+  # Behaviour-targeted hunts the engine runs around the alert (not a sweep).
+  - name: Account and group management tooling on this host
+    query: data_process_exec_process_binary:/.*\/([Gg][Rr][Oo][Uu][Pp][Aa][Dd][Dd]|[Gg][Rr][Oo][Uu][Pp][Mm][Oo][Dd]|[Gg][Rr][Oo][Uu][Pp][Dd][Ee][Ll]|[Gg][Pp][Aa][Ss][Ss][Ww][Dd]|[Uu][Ss][Ee][Rr][Aa][Dd][Dd]|[Uu][Ss][Ee][Rr][Dd][Ee][Ll]|[Uu][Ss][Ee][Rr][Mm][Oo][Dd]|[Pp][Aa][Ss][Ss][Ww][Dd]|[Cc][Hh][Aa][Gg][Ee]|[Aa][Dd][Dd][Uu][Ss][Ee][Rr]|[Dd][Ee][Ll][Uu][Ss][Ee][Rr]|[Aa][Dd][Dd][Gg][Rr][Oo][Uu][Pp]|[Dd][Ee][Ll][Gg][Rr][Oo][Uu][Pp])/
+    pivot_on:
+    - host
+    window: 2h
+  - name: Direct access or modification of account and credential files
+    query: data_process_exec_process_arguments:/.*\/[Ee][Tt][Cc]\/([Pp][Aa][Ss][Ss][Ww][Dd]|[Ss][Hh][Aa][Dd][Oo][Ww]|[Gg][Rr][Oo][Uu][Pp]|[Gg][Ss][Hh][Aa][Dd][Oo][Ww]|[Ss][Uu][Dd][Oo][Ee][Rr][Ss]).*/
+    pivot_on:
+    - host
+    window: 2h
+  - name: 'Anti-forensic cleanup: history, log and audit destruction'
+    query: ((data_process_exec_process_binary:/.*\/([Ss][Hh][Rr][Ee][Dd]|[Tt][Rr][Uu][Nn][Cc][Aa][Tt][Ee])/) OR (data_process_exec_process_binary:/.*\/[Aa][Uu][Dd][Ii][Tt][Cc][Tt][Ll]/ AND data_process_exec_process_arguments:/.*-[Dd].*/) OR (data_process_exec_process_binary:/.*\/[Jj][Oo][Uu][Rr][Nn][Aa][Ll][Cc][Tt][Ll]/ AND data_process_exec_process_arguments:/.*[Vv][Aa][Cc][Uu][Uu][Mm].*/) OR (data_process_exec_process_arguments:/.*(\.[Bb][Aa][Ss][Hh]_[Hh][Ii][Ss][Tt][Oo][Rr][Yy]|\.[Zz][Ss][Hh]_[Hh][Ii][Ss][Tt][Oo][Rr][Yy]|\/[Vv][Aa][Rr]\/[Ll][Oo][Gg]).*/))
+    pivot_on:
+    - host
+    window: 4h
+  - name: Service stop, disable or mask on this host (destructive Impact)
+    query: ((data_process_exec_process_binary:/.*\/[Ss][Yy][Ss][Tt][Ee][Mm][Cc][Tt][Ll]/ AND data_process_exec_process_arguments:/.*([Ss][Tt][Oo][Pp]|[Dd][Ii][Ss][Aa][Bb][Ll][Ee]|[Mm][Aa][Ss][Kk]).*/) OR (data_process_exec_process_binary:/.*\/[Ss][Ee][Rr][Vv][Ii][Cc][Ee]/ AND data_process_exec_process_arguments:/.*[Ss][Tt][Oo][Pp].*/))
+    pivot_on:
+    - host
+    window: 2h

@@ -173,48 +173,55 @@ graylog:
   query: data_win_system_eventID:"3" AND data_win_eventdata_parentImage:/.*\\[Rr][Uu][Nn][Dd][Ll][Ll]32\.[Ee][Xx][Ee]/ AND (data_win_eventdata_image:/.*\\[Ss][Ee][Aa][Rr][Cc][Hh][Ff][Ii][Ll][Tt][Ee][Rr][Hh][Oo][Ss][Tt]\.[Ee][Xx][Ee]/ OR data_win_eventdata_image:/.*\\[Ss][Ee][Aa][Rr][Cc][Hh][Pp][Rr][Oo][Tt][Oo][Cc][Oo][Ll][Hh][Oo][Ss][Tt]\.[Ee][Xx][Ee]/ OR data_win_eventdata_image:/.*\\[Ss][Nn][Dd][Vv][Oo][Ll]\.[Ee][Xx][Ee]/ OR data_win_eventdata_image:/.*\\[Ww][Ee][Rr][Mm][Gg][Rr]\.[Ee][Xx][Ee]/ OR data_win_eventdata_image:/.*\\[Ww][Ww][Aa][Hh][Oo][Ss][Tt]\.[Ee][Xx][Ee]/) AND data_win_eventdata_protocol:/[Tt][Cc][Pp]/ AND data_win_eventdata_initiated:/[Tt][Rr][Uu][Ee]/
 
 correlation:
-  # Authored by the correlation engine for review. Related CoPilot Searches to run
-  # around an alert from this rule, scoped to the same host/user/IP within the window.
+  # Authored per-rule (behaviour-researched) for the correlation engine. Related CoPilot
+  # Searches + telemetry pivots to run around an alert, scoped to its host/user/ip/domain.
   related_rules:
-    - id: 75bf09fa-1dd7-4d18-9af9-dd9e492562eb
-      name: "ADSI-Cache File Creation By Uncommon Tool"
-      reason: "next kill-chain tactic: Command and Control"
-    - id: 639c9081-f482-47d3-a0bd-ddee3d4ecd76
-      name: "All Backups Deleted Via Wbadmin.EXE"
-      reason: "next kill-chain tactic: Impact"
-    - id: 0b9ad457-2554-44c1-82c2-d56a99c42377
-      name: "Anydesk Temporary Artefact"
-      reason: "next kill-chain tactic: Command and Control"
-    - id: 7cff77e1-9663-46a3-8260-17f2e1aa9d0a
-      name: "AppX Package Installation Attempts Via AppInstaller.EXE"
-      reason: "next kill-chain tactic: Command and Control"
-    - id: 1f0f6176-6482-4027-b151-00071af39d7e
-      name: "Arbitrary File Download Via ConfigSecurityPolicy.EXE"
-      reason: "next kill-chain tactic: Exfiltration"
-    - id: eee00933-a761-4cd0-be70-c42fe91731e7
-      name: "Arbitrary File Download Via GfxDownloadWrapper.EXE"
-      reason: "next kill-chain tactic: Command and Control"
+  - id: e5144106-8198-4f6e-bfc2-0a551cc8dd94
+    name: Potential Pikabot Infection - Suspicious Command Combinations Via Cmd.EXE
+    reason: 'Initial-access precursor on the same host: Pikabot''s chained `cmd /c ... & curl/wget/ping/timeout ... rundll32` delivery one-liner downloads the payload and launches the very rundll32 that becomes this alert''s parentImage.'
+  - id: 1bf0ba65-9a39-42a2-9271-31d31bf2f0bf
+    name: Pikabot Fake DLL Extension Execution Via Rundll32.EXE
+    reason: 'Direct precursor: a script host spawns rundll32 to load the Pikabot DLL (fake extension, from ProgramData/AppData/Users\Public) — that rundll32 loader process is exactly the parentImage=rundll32 seen beaconing here.'
+  - id: d8937fe7-42d5-4b4d-8178-e089c908f63f
+    name: Potential Pikabot Hollowing Activity
+    reason: 'Same mechanism, immediately prior: rundll32 process-hollows the identical five signed binaries (SearchFilterHost/SearchProtocolHost/sndvol/wermgr/wwahost); this C2 alert is that hollowed process making its outbound TCP beacon.'
+  - id: 698d4431-514f-4c82-af4d-cf573872a9f5
+    name: Potential Pikabot Discovery Activity
+    reason: 'Follow-on on the same host: once C2 is live the hollowed SearchHost/rundll32 chain runs ipconfig /all, netstat -aon and whoami /all — confirms hands-on recon after the beacon.'
+  - id: 396f6630-f3ac-44e3-bfc8-1b161bc00c4e
+    name: Suspicious Child Process Of Wermgr.EXE
+    reason: wermgr.exe is one of this rule's exact injection targets; a hollowed wermgr spawning cmd/powershell/net/whoami children is the same compromised beaconing process pivoting to execution and recon.
+  - id: ba42babc-0666-4393-a4f7-ceaf5a69191e
+    name: Uncommon Child Processes Of SndVol.exe
+    reason: sndvol.exe is another injection target in this rule; the Windows volume mixer spawning any non-benign child is only explained by Pikabot having hollowed it — same host, same incident.
+  - id: ae9c6a7c-9521-42a6-915e-5aaa8689d529
+    name: CobaltStrike Load by Rundll32
+    reason: 'Post-C2 escalation: Pikabot is a loader whose observed next-stage payload is a Cobalt Strike beacon loaded via rundll32 StartW; this firing on the same host signals progression from loader to a hands-on-keyboard implant.'
   window: 1h
   enrichment_searches:
-  # Rule-specific telemetry pivots the engine runs around an alert from this rule,
-  # scoped to the alert's host/user/IP within the window (behaviour-targeted, not a sweep).
-    - name: "Other executions of this tool-set on this host (any arguments)"
-      query: 'data_win_system_eventID:"1" AND data_win_eventdata_image:/.*(\\[Ss][Ee][Aa][Rr][Cc][Hh][Ff][Ii][Ll][Tt][Ee][Rr][Hh][Oo][Ss][Tt]\.[Ee][Xx][Ee]|\\[Ss][Ee][Aa][Rr][Cc][Hh][Pp][Rr][Oo][Tt][Oo][Cc][Oo][Ll][Hh][Oo][Ss][Tt]\.[Ee][Xx][Ee]|\\[Ss][Nn][Dd][Vv][Oo][Ll]\.[Ee][Xx][Ee]|\\[Ww][Ee][Rr][Mm][Gg][Rr]\.[Ee][Xx][Ee]|\\[Ww][Ww][Aa][Hh][Oo][Ss][Tt]\.[Ee][Xx][Ee])/'
-      pivot_on: [host]
-      window: 2h
-    - name: "Archive / staging & outbound-transfer tooling on this host"
-      query: '(((data_win_system_eventID:"1" AND data_win_eventdata_image:/.*(\\7[Zz]\.[Ee][Xx][Ee]|\\7[Zz][Aa]\.[Ee][Xx][Ee]|\\7[Zz][Rr]\.[Ee][Xx][Ee]|\\[Rr][Aa][Rr]\.[Ee][Xx][Ee]|\\[Ww][Ii][Nn][Rr][Aa][Rr]\.[Ee][Xx][Ee]|\\[Ww][Zz][Zz][Ii][Pp]\.[Ee][Xx][Ee]|\\[Mm][Aa][Kk][Ee][Cc][Aa][Bb]\.[Ee][Xx][Ee])/) OR (data_win_eventdata_commandLine:/.*[Cc][Oo][Mm][Pp][Rr][Ee][Ss][Ss]-[Aa][Rr][Cc][Hh][Ii][Vv][Ee].*/ OR data_win_eventdata_commandLine:/.*\.7[Zz].*/ OR data_win_eventdata_commandLine:/.*\.[Rr][Aa][Rr].*/ OR data_win_eventdata_commandLine:/.* -[Hh][Pp].*/)) OR (((data_win_system_eventID:"1" AND data_win_eventdata_image:/.*(\\[Rr][Cc][Ll][Oo][Nn][Ee]\.[Ee][Xx][Ee]|\\[Cc][Uu][Rr][Ll]\.[Ee][Xx][Ee]|\\[Ww][Gg][Ee][Tt]\.[Ee][Xx][Ee]|\\[Ww][Ii][Nn][Ss][Cc][Pp]\.[Ee][Xx][Ee]|\\[Pp][Ss][Cc][Pp]\.[Ee][Xx][Ee]|\\[Mm][Ee][Gg][Aa][Cc][Mm][Dd]\.[Ee][Xx][Ee]|\\[Mm][Ee][Gg][Aa][Ss][Yy][Nn][Cc]\.[Ee][Xx][Ee])/) OR ((data_win_eventdata_commandLine:/.*[Ii][Nn][Vv][Oo][Kk][Ee]-[Rr][Ee][Ss][Tt][Mm][Ee][Tt][Hh][Oo][Dd].*/ OR data_win_eventdata_commandLine:/.*[Ss][Tt][Aa][Rr][Tt]-[Bb][Ii][Tt][Ss][Tt][Rr][Aa][Nn][Ss][Ff][Ee][Rr].*/ OR data_win_eventdata_commandLine:/.*[Rr][Cc][Ll][Oo][Nn][Ee].*/ OR data_win_eventdata_commandLine:/.*[Tt][Rr][Aa][Nn][Ss][Ff][Ee][Rr]\.[Ss][Hh].*/ OR data_win_eventdata_commandLine:/.*[Aa][Nn][Oo][Nn][Ff][Ii][Ll][Ee][Ss].*/ OR data_win_eventdata_commandLine:/.*[Pp][Aa][Ss][Tt][Ee][Bb][Ii][Nn].*/ OR data_win_eventdata_commandLine:/.*[Mm][Ee][Gg][Aa]\.[Nn][Zz].*/ OR data_win_eventdata_commandLine:/.*-[Oo][Uu][Tt][Ff][Ii][Ll][Ee].*/ OR data_win_eventdata_commandLine:/.*[Uu][Pp][Ll][Oo][Aa][Dd][Ff][Ii][Ll][Ee].*/)))))'
-      pivot_on: [host]
-      window: 2h
-    - name: "Other hosts connecting to the same destination address (campaign)"
-      query: '(data_win_system_eventID:"22" OR data_win_system_eventID:"3")'
-      pivot_on: [ip]
-      window: 24h
-    - name: "Downloader / C2 tooling executed on this host"
-      query: '(data_win_system_eventID:"1" AND data_win_eventdata_image:/.*(\\[Cc][Ee][Rr][Tt][Uu][Tt][Ii][Ll]\.[Ee][Xx][Ee]|\\[Bb][Ii][Tt][Ss][Aa][Dd][Mm][Ii][Nn]\.[Ee][Xx][Ee]|\\[Cc][Uu][Rr][Ll]\.[Ee][Xx][Ee]|\\[Ww][Gg][Ee][Tt]\.[Ee][Xx][Ee])/) OR (data_win_eventdata_commandLine:/.*[Dd][Oo][Ww][Nn][Ll][Oo][Aa][Dd][Ss][Tt][Rr][Ii][Nn][Gg].*/ OR data_win_eventdata_commandLine:/.*[Dd][Oo][Ww][Nn][Ll][Oo][Aa][Dd][Ff][Ii][Ll][Ee].*/ OR data_win_eventdata_commandLine:/.*[Ii][Nn][Vv][Oo][Kk][Ee]-[Ww][Ee][Bb][Rr][Ee][Qq][Uu][Ee][Ss][Tt].*/ OR data_win_eventdata_commandLine:/.*[Nn][Ee][Tt]\.[Ww][Ee][Bb][Cc][Ll][Ii][Ee][Nn][Tt].*/ OR data_win_eventdata_commandLine:/.*[Ss][Tt][Aa][Rr][Tt]-[Bb][Ii][Tt][Ss][Tt][Rr][Aa][Nn][Ss][Ff][Ee][Rr].*/ OR data_win_eventdata_commandLine:/.*[Ii][Ww][Rr] .*/ OR data_win_eventdata_commandLine:/.*[Cc][Uu][Rr][Ll] .*/ OR data_win_eventdata_commandLine:/.*[Ww][Gg][Ee][Tt] .*/)'
-      pivot_on: [host]
-      window: 1h
-    - name: "DNS queries by script interpreters / LOLBins on this host"
-      query: 'data_win_system_eventID:"22" AND (data_win_eventdata_image:/.*(\\[Pp][Oo][Ww][Ee][Rr][Ss][Hh][Ee][Ll][Ll]\.[Ee][Xx][Ee]|\\[Pp][Ww][Ss][Hh]\.[Ee][Xx][Ee]|\\[Pp][Oo][Ww][Ee][Rr][Ss][Hh][Ee][Ll][Ll]_[Ii][Ss][Ee]\.[Ee][Xx][Ee]|\\[Cc][Mm][Dd]\.[Ee][Xx][Ee]|\\[Ww][Ss][Cc][Rr][Ii][Pp][Tt]\.[Ee][Xx][Ee]|\\[Cc][Ss][Cc][Rr][Ii][Pp][Tt]\.[Ee][Xx][Ee]|\\[Mm][Ss][Hh][Tt][Aa]\.[Ee][Xx][Ee]|\\[Rr][Uu][Nn][Dd][Ll][Ll]32\.[Ee][Xx][Ee]|\\[Rr][Ee][Gg][Ss][Vv][Rr]32\.[Ee][Xx][Ee]|\\[Mm][Ss][Hh][Tt][Aa]\.[Ee][Xx][Ee]|\\[Ii][Nn][Ss][Tt][Aa][Ll][Ll][Uu][Tt][Ii][Ll]\.[Ee][Xx][Ee]|\\[Rr][Ee][Gg][Aa][Ss][Mm]\.[Ee][Xx][Ee]|\\[Rr][Ee][Gg][Ss][Vv][Cc][Ss]\.[Ee][Xx][Ee]|\\[Mm][Ss][Bb][Uu][Ii][Ll][Dd]\.[Ee][Xx][Ee]|\\[Cc][Ee][Rr][Tt][Uu][Tt][Ii][Ll]\.[Ee][Xx][Ee]|\\[Bb][Ii][Tt][Ss][Aa][Dd][Mm][Ii][Nn]\.[Ee][Xx][Ee]|\\[Ww][Mm][Ii][Cc]\.[Ee][Xx][Ee]|\\[Cc][Mm][Ss][Tt][Pp]\.[Ee][Xx][Ee])/ OR data_win_eventdata_image:/.*(\\[Oo][Dd][Bb][Cc][Cc][Oo][Nn][Ff]\.[Ee][Xx][Ee]|\\[Ff][Oo][Rr][Ff][Ii][Ll][Ee][Ss]\.[Ee][Xx][Ee]|\\[Pp][Cc][Aa][Ll][Uu][Aa]\.[Ee][Xx][Ee]|\\[Mm][Aa][Vv][Ii][Nn][Jj][Ee][Cc][Tt]\.[Ee][Xx][Ee]|\\[Ss][Cc][Rr][Ii][Pp][Tt][Rr][Uu][Nn][Nn][Ee][Rr]\.[Ee][Xx][Ee])/)'
-      pivot_on: [host]
-      window: 1h
+  # Behaviour-targeted hunts the engine runs around the alert (not a sweep).
+  - name: Process injection (CreateRemoteThread / ProcessAccess) into the signed binaries that beacon
+    query: (data_win_system_eventID:"8" OR data_win_system_eventID:"10") AND data_win_eventdata_targetImage:/.*(\\[Ss][Ee][Aa][Rr][Cc][Hh][Ff][Ii][Ll][Tt][Ee][Rr][Hh][Oo][Ss][Tt]\.[Ee][Xx][Ee]|\\[Ss][Ee][Aa][Rr][Cc][Hh][Pp][Rr][Oo][Tt][Oo][Cc][Oo][Ll][Hh][Oo][Ss][Tt]\.[Ee][Xx][Ee]|\\[Ss][Nn][Dd][Vv][Oo][Ll]\.[Ee][Xx][Ee]|\\[Ww][Ee][Rr][Mm][Gg][Rr]\.[Ee][Xx][Ee]|\\[Ww][Ww][Aa][Hh][Oo][Ss][Tt]\.[Ee][Xx][Ee])/
+    pivot_on:
+    - host
+    window: 1h
+  - name: Rundll32 loading a DLL from a user-writable staging path (the Pikabot loader)
+    query: data_win_system_eventID:"1" AND data_win_eventdata_image:/.*\\[Rr][Uu][Nn][Dd][Ll][Ll]32\.[Ee][Xx][Ee]/ AND (data_win_eventdata_commandLine:/.*:\\[Pp][Rr][Oo][Gg][Rr][Aa][Mm][Dd][Aa][Tt][Aa]\\.*/ OR data_win_eventdata_commandLine:/.*\\[Aa][Pp][Pp][Dd][Aa][Tt][Aa]\\[Ll][Oo][Cc][Aa][Ll]\\[Tt][Ee][Mm][Pp]\\.*/ OR data_win_eventdata_commandLine:/.*\\[Aa][Pp][Pp][Dd][Aa][Tt][Aa]\\[Rr][Oo][Aa][Mm][Ii][Nn][Gg]\\.*/ OR data_win_eventdata_commandLine:/.*:\\[Uu][Ss][Ee][Rr][Ss]\\[Pp][Uu][Bb][Ll][Ii][Cc]\\.*/ OR data_win_eventdata_commandLine:/.*:\\[Ww][Ii][Nn][Dd][Oo][Ww][Ss]\\[Ii][Nn][Ss][Tt][Aa][Ll][Ll][Ee][Rr]\\.*/)
+    pivot_on:
+    - host
+    window: 2h
+  - name: Discovery / recon spawned by the hollowed signed binaries or the rundll32 chain
+    query: data_win_system_eventID:"1" AND (data_win_eventdata_parentImage:/.*(\\[Ss][Ee][Aa][Rr][Cc][Hh][Ff][Ii][Ll][Tt][Ee][Rr][Hh][Oo][Ss][Tt]\.[Ee][Xx][Ee]|\\[Ss][Ee][Aa][Rr][Cc][Hh][Pp][Rr][Oo][Tt][Oo][Cc][Oo][Ll][Hh][Oo][Ss][Tt]\.[Ee][Xx][Ee]|\\[Ss][Nn][Dd][Vv][Oo][Ll]\.[Ee][Xx][Ee]|\\[Ww][Ee][Rr][Mm][Gg][Rr]\.[Ee][Xx][Ee]|\\[Ww][Ww][Aa][Hh][Oo][Ss][Tt]\.[Ee][Xx][Ee])/ OR data_win_eventdata_grandParentImage:/.*\\[Rr][Uu][Nn][Dd][Ll][Ll]32\.[Ee][Xx][Ee]/) AND (data_win_eventdata_commandLine:/.*[Ww][Hh][Oo][Aa][Mm][Ii].*/ OR data_win_eventdata_commandLine:/.*[Ii][Pp][Cc][Oo][Nn][Ff][Ii][Gg].*/ OR data_win_eventdata_commandLine:/.*[Nn][Ee][Tt][Ss][Tt][Aa][Tt].*/ OR data_win_eventdata_commandLine:/.*[Nn][Ll][Tt][Ee][Ss][Tt].*/ OR data_win_eventdata_commandLine:/.*[Ss][Yy][Ss][Tt][Ee][Mm][Ii][Nn][Ff][Oo].*/ OR data_win_eventdata_commandLine:/.*[Aa][Rr][Pp] -[Aa].*/ OR data_win_eventdata_commandLine:/.*[Nn][Ee][Tt] [Vv][Ii][Ee][Ww].*/ OR data_win_eventdata_commandLine:/.*[Nn][Ee][Tt] [Gg][Rr][Oo][Uu][Pp].*/)
+    pivot_on:
+    - host
+    window: 2h
+  - name: DNS queries by the signed binaries used for injection (recovers the C2 domain)
+    query: data_win_system_eventID:"22" AND data_win_eventdata_image:/.*(\\[Ss][Ee][Aa][Rr][Cc][Hh][Ff][Ii][Ll][Tt][Ee][Rr][Hh][Oo][Ss][Tt]\.[Ee][Xx][Ee]|\\[Ss][Ee][Aa][Rr][Cc][Hh][Pp][Rr][Oo][Tt][Oo][Cc][Oo][Ll][Hh][Oo][Ss][Tt]\.[Ee][Xx][Ee]|\\[Ss][Nn][Dd][Vv][Oo][Ll]\.[Ee][Xx][Ee]|\\[Ww][Ee][Rr][Mm][Gg][Rr]\.[Ee][Xx][Ee]|\\[Ww][Ww][Aa][Hh][Oo][Ss][Tt]\.[Ee][Xx][Ee])/
+    pivot_on:
+    - host
+    window: 1h
+  - name: Other hosts beaconing to the same destination address (Pikabot campaign scope)
+    query: data_win_system_eventID:"3" AND data_win_eventdata_initiated:/[Tt][Rr][Uu][Ee]/ AND data_win_eventdata_protocol:/[Tt][Cc][Pp]/
+    pivot_on:
+    - ip
+    window: 24h

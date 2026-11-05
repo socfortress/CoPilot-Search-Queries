@@ -152,29 +152,58 @@ graylog:
   query: data_process_exec_process_binary:/.*\/[Cc][Uu][Rr][Ll]/ AND data_process_exec_process_arguments:/.*[Cc][Uu][Rr][Ll].*/ AND data_process_exec_process_arguments:/.*-[Dd].*/ AND data_process_exec_process_arguments:/.*[Ww][Ee][Bb][Hh][Oo][Oo][Kk]\.[Ss][Ii][Tt][Ee]\/[Bb][Bb]8[Cc][Aa]5[Ff]6-4175-45[Dd]2-[Bb]042-[Ff][Cc]9[Ee][Bb][Bb]8170[Bb]7.*/
 
 correlation:
-  # Authored by the correlation engine for review. Related CoPilot Searches to run
-  # around an alert from this rule, scoped to the same host/user/IP within the window.
+  # Authored per-rule (behaviour-researched) for the correlation engine. Related CoPilot
+  # Searches + telemetry pivots to run around an alert, scoped to its host/user/ip/domain.
   related_rules:
-    - id: 0a23a62d-c5b3-468b-a072-25064a9a8c87
-      name: "Axios NPM Compromise Indicators - Linux"
-      reason: "next kill-chain tactic: Command and Control"
-  window: 1h
+  - id: f0025a69-e1b7-4dda-a53c-db21fa2d4071
+    name: Script Interpreter Spawning Credential Scanner - Linux
+    reason: 'Immediate precursor and the reason this exfil exists: a node/bun interpreter spawning trufflehog/gitleaks to harvest npm, GitHub and cloud secrets - the exact data this ''curl -d'' POST ships to the webhook. Collection then exfiltration on the same host, usually minutes apart.'
+  - id: d7a650c4-226c-451e-948f-cc490db506aa
+    name: PUA - TruffleHog Execution - Linux
+    reason: 'The credential-scanning step explicitly attributed to the Shai-Hulud campaign: trufflehog enumerating verified secrets (Git/GitHub/Jira/Slack/S3/GCS). Its firing on the same host is the harvest that produced the payload POSTed here.'
+  - id: c3d9e7f1-6a2b-4d8f-9c2b-5e6f7a8b9c0d
+    name: Linux Suspicious Curl Data Exfiltration
+    reason: 'Same behaviour, broader net: generic curl data exfiltration not pinned to the single hard-coded webhook.site URL this rule matches. Catches the worm POSTing stolen secrets to any additional or rotated endpoint on the same host.'
+  - id: 11bb9b26-4179-4a06-afcb-1ec31fce1627
+    name: Shai-Hulud Malware Indicators - Linux
+    reason: Same-worm command-line marker ('Shai-Hulud'/'SHA1HULUD' in process arguments). Its presence corroborates that this curl exfil is the campaign's work on the host, not a benign webhook.site test.
+  - id: eb827bbd-670a-4d58-8446-c464d8ac2323
+    name: Shai-Hulud Malicious Bun Execution - Linux
+    reason: The worm's payload runtime (node -> bun running bun_environment.js, Shai-Hulud 'Second Coming') that drives the harvest-and-exfiltrate behaviour. Same worm lineage; a host exfiltrating via this curl should be checked for the bun payload behind it.
+  - id: c70834fa-fb9d-4aa0-9e7d-45ceed36f3f7
+    name: Linux Suspicious Child Process from Node.js - React2Shell
+    reason: 'Parent-process mechanism: a Node.js process spawning curl/downloader/shell children - exactly how a malicious npm postinstall launches the curl that performs this exfil. node -> curl on the same host is the execution context behind the POST.'
+  - id: 0a23a62d-c5b3-468b-a072-25064a9a8c87
+    name: Axios NPM Compromise Indicators - Linux
+    reason: Sibling npm supply-chain compromise (node/bun postinstall -> curl beacon to an attacker host). A dev/CI host hit by Shai-Hulud exfil is often hit by co-wave droppers; check for the axios RAT IOCs in the same install tree.
+  - id: a2d9e2f3-0f43-4c7a-bcd9-9acfc0d723aa
+    name: Suspicious Download and Execute Pattern via Curl/Wget
+    reason: 'The ingress-side curl of the same chain: Shai-Hulud pulls its tooling with ''curl -fsSL https://bun.sh/install | bash'' and downloads the GitHub runner into /tmp or /dev/shm. Curl download-and-run on the host corroborates the curl-driven stager activity surrounding this exfil.'
+  window: 2h
   enrichment_searches:
-  # Rule-specific telemetry pivots the engine runs around an alert from this rule,
-  # scoped to the alert's host/user/IP within the window (behaviour-targeted, not a sweep).
-    - name: "Outbound-transfer / upload tooling on this host"
-      query: '((data_process_exec_process_binary:/.*(\/[Cc][Uu][Rr][Ll]|\/[Ww][Gg][Ee][Tt]|\/[Tt][Ff][Tt][Pp])/) OR (data_process_exec_process_binary:/.*(\/[Ss][Cc][Pp]|\/[Rr][Ss][Yy][Nn][Cc]|\/[Rr][Cc][Ll][Oo][Nn][Ee]|\/[Cc][Uu][Rr][Ll])/))'
-      pivot_on: [host]
-      window: 2h
-    - name: "Shell / interpreter execution on this host"
-      query: '((data_process_exec_process_binary:/.*(\/[Bb][Aa][Ss][Hh]|\/[Ss][Hh]|\/[Dd][Aa][Ss][Hh]|\/[Zz][Ss][Hh]|\/[Kk][Ss][Hh]|\/[Aa][Ss][Hh]|\/[Bb][Uu][Ss][Yy][Bb][Oo][Xx])/) OR (data_process_exec_process_binary:/.*(\/[Pp][Yy][Tt][Hh][Oo][Nn]|\/[Pp][Yy][Tt][Hh][Oo][Nn]3|\/[Pp][Ee][Rr][Ll]|\/[Rr][Uu][Bb][Yy]|\/[Pp][Hh][Pp]|\/[Nn][Oo][Dd][Ee]|\/[Ll][Uu][Aa]|\/[Aa][Ww][Kk])/))'
-      pivot_on: [host]
-      window: 1h
-    - name: "Reconnaissance commands on this host"
-      query: 'data_process_exec_process_binary:/.*(\/[Ww][Hh][Oo][Aa][Mm][Ii]|\/[Ii][Dd]|\/[Uu][Nn][Aa][Mm][Ee]|\/[Hh][Oo][Ss][Tt][Nn][Aa][Mm][Ee]|\/[Hh][Oo][Ss][Tt][Nn][Aa][Mm][Ee][Cc][Tt][Ll]|\/[Ss][Ss]|\/[Nn][Ee][Tt][Ss][Tt][Aa][Tt]|\/[Ii][Ff][Cc][Oo][Nn][Ff][Ii][Gg]|\/[Aa][Rr][Pp]|\/[Ww]|\/[Ww][Hh][Oo]|\/[Ll][Aa][Ss][Tt]|\/[Ll][Ss][Oo][Ff]|\/[Nn][Mm][Aa][Pp]|\/[Dd][Ii][Gg]|\/[Ff][Ii][Nn][Dd])/'
-      pivot_on: [host]
-      window: 1h
-    - name: "Archive / staging tooling on this host"
-      query: 'data_process_exec_process_binary:/.*(\/[Tt][Aa][Rr]|\/[Zz][Ii][Pp]|\/[Gg][Zz][Ii][Pp]|\/7[Zz]|\/[Rr][Aa][Rr])/'
-      pivot_on: [host]
-      window: 2h
+  # Behaviour-targeted hunts the engine runs around the alert (not a sweep).
+  - name: Credential / secret harvesting that produced the exfiltrated data on this host
+    query: (data_process_exec_process_binary:/.*(\/[Tt][Rr][Uu][Ff][Ff][Ll][Ee][Hh][Oo][Gg]|\/[Gg][Ii][Tt][Ll][Ee][Aa][Kk][Ss])/ OR data_process_exec_process_arguments:/.*\.[Nn][Pp][Mm][Rr][Cc].*/ OR data_process_exec_process_arguments:/.*\.[Gg][Ii][Tt]-[Cc][Rr][Ee][Dd][Ee][Nn][Tt][Ii][Aa][Ll][Ss].*/ OR data_process_exec_process_arguments:/.*\/\.[Aa][Ww][Ss]\/[Cc][Rr][Ee][Dd][Ee][Nn][Tt][Ii][Aa][Ll][Ss].*/ OR data_process_exec_process_arguments:/.*\/\.[Ss][Ss][Hh]\/.*/ OR data_process_exec_process_arguments:/.*\/[Pp][Rr][Oo][Cc]\/.*\/[Ee][Nn][Vv][Ii][Rr][Oo][Nn].*/ OR data_process_exec_process_arguments:/.*[Nn][Pp][Mm]_[Tt][Oo][Kk][Ee][Nn].*/ OR data_process_exec_process_arguments:/.*[Gg][Ii][Tt][Hh][Uu][Bb]_[Tt][Oo][Kk][Ee][Nn].*/)
+    pivot_on:
+    - host
+    window: 2h
+  - name: JS runtime / package manager spawning a network or shell child (malicious postinstall) on this host
+    query: (data_process_exec_parent_binary:/.*(\/[Nn][Oo][Dd][Ee]|\/[Bb][Uu][Nn]|\/[Nn][Pp][Mm]|\/[Nn][Pp][Xx]|\/[Yy][Aa][Rr][Nn]|\/[Pp][Nn][Pp][Mm])/ AND data_process_exec_process_binary:/.*(\/[Cc][Uu][Rr][Ll]|\/[Ww][Gg][Ee][Tt]|\/[Bb][Aa][Ss][Hh]|\/[Ss][Hh]|\/[Dd][Aa][Ss][Hh])/)
+    pivot_on:
+    - host
+    window: 2h
+  - name: 'Wider exfil / C2 breadth: webhook.site infrastructure and curl/wget upload beacons on this host'
+    query: (data_process_exec_process_arguments:/.*[Ww][Ee][Bb][Hh][Oo][Oo][Kk]\.[Ss][Ii][Tt][Ee].*/ OR (data_process_exec_process_binary:/.*(\/[Cc][Uu][Rr][Ll]|\/[Ww][Gg][Ee][Tt])/ AND data_process_exec_process_arguments:/.*(--[Dd][Aa][Tt][Aa]|--[Ff][Oo][Rr][Mm]|--[Uu][Pp][Ll][Oo][Aa][Dd]-[Ff][Ii][Ll][Ee]|--[Dd][Aa][Tt][Aa]-[Bb][Ii][Nn][Aa][Rr][Yy]|--[Dd][Aa][Tt][Aa]-[Rr][Aa][Ww]).*/))
+    pivot_on:
+    - host
+    window: 2h
+  - name: 'Self-propagation and GitHub persistence: npm publish, git push/remote, workflows, shai-hulud on this host'
+    query: ((data_process_exec_process_binary:/.*(\/[Nn][Pp][Mm]|\/[Yy][Aa][Rr][Nn]|\/[Pp][Nn][Pp][Mm])/ AND data_process_exec_process_arguments:/.*[Pp][Uu][Bb][Ll][Ii][Ss][Hh].*/) OR (data_process_exec_process_binary:/.*\/[Gg][Ii][Tt]/ AND data_process_exec_process_arguments:/.*( [Pp][Uu][Ss][Hh]|[Rr][Ee][Mm][Oo][Tt][Ee] [Aa][Dd][Dd]).*/) OR data_process_exec_process_arguments:/.*\.[Gg][Ii][Tt][Hh][Uu][Bb]\/[Ww][Oo][Rr][Kk][Ff][Ll][Oo][Ww][Ss].*/ OR data_process_exec_process_arguments:/.*[Ss][Hh][Aa][Ii]-[Hh][Uu][Ll][Uu][Dd].*/)
+    pivot_on:
+    - host
+    window: 4h
+  - name: Data staging / encoding immediately before the POST (archive, base64, openssl) on this host
+    query: (data_process_exec_process_binary:/.*(\/[Tt][Aa][Rr]|\/[Gg][Zz][Ii][Pp]|\/[Zz][Ii][Pp]|\/[Bb][Zz][Ii][Pp]2|\/[Xx][Zz]|\/[Bb][Aa][Ss][Ee]64|\/[Oo][Pp][Ee][Nn][Ss][Ss][Ll]|\/[Xx][Xx][Dd])/ OR data_process_exec_process_arguments:/.*[Bb][Aa][Ss][Ee]64.*/)
+    pivot_on:
+    - host
+    window: 1h

@@ -133,23 +133,58 @@ graylog:
   query: (data_win_system_eventID:"17" OR data_win_system_eventID:"18") AND data_win_eventdata_pipeName:/.*[Tt][Hh][Ii][Ss][Ii][Ss][Pp][Ii][Pp][Ee].*/
 
 correlation:
-  # Authored by the correlation engine for review.
+  # Authored per-rule (behaviour-researched) for the correlation engine. Related CoPilot
+  # Searches + telemetry pivots to run around an alert, scoped to its host/user/ip/domain.
+  related_rules:
+  - id: 9bd04a79-dabe-4f1f-a5ff-92430265c96b
+    name: Privilege Escalation via Named Pipe Impersonation
+    reason: 'Process-creation twin of this alert: it fires when a shell runs ''echo > \\.\pipe\...'' to coerce a privileged service onto the attacker''s pipe — the exact SeImpersonate named-pipe coercion primitive DiagTrackEoP automates. Seeing it on the same host confirms a hands-on operator driving the same technique.'
+  - id: 16f5d8ca-44bd-47c8-acbe-6fc95a16c12f
+    name: RottenPotato Like Attack Pattern
+    reason: 'Security-log fingerprint of the token theft this tool performs: 4624 Type-3 ANONYMOUS LOGON from the loopback with a ''-'' workstation. Potato-family SeImpersonate coercion (including DiagTrack abuse) produces this local authentication, so a match confirms the SYSTEM-token impersonation succeeded.'
+  - id: 4d0083b3-580b-40da-9bba-626c19fe4033
+    name: HackTool - CoercedPotato Named Pipe Creation
+    reason: Sibling SeImpersonate privilege-escalation tool detected on the same Sysmon EID 17/18 named-pipe telemetry. Operators routinely cycle through several 'Potato' variants on one host until one wins, so its pipe appearing alongside '*thisispipe*' indicates repeated privesc attempts.
+  - id: 637f689e-b4a5-4a86-be0e-0100a0a33ba2
+    name: HackTool - EfsPotato Named Pipe Creation
+    reason: Another sibling 'Potato' pipe-creation signature (\pipe\srvsvc coercion) pursuing the identical SeImpersonate→SYSTEM goal via the same pipe-event source. Co-occurrence on the host points to the same escalation campaign trying multiple coercion paths.
+  - id: cf0c254b-22f1-4b2b-8221-e137b3c0af94
+    name: HackTool - Impersonate Execution
+    reason: Token-manipulation utility (T1134) an operator runs once SeImpersonate is held, to enumerate and apply the stolen SYSTEM/service tokens DiagTrackEoP yields. Directly adjacent abuse of the very privilege this pipe creation is exploiting.
+  - id: windows-access-token-winlogon-duplicate-handle-001
+    name: Windows Access Token Manipulation Winlogon Duplicate Token Handle
+    reason: Alternate route to the same objective — stealing a SYSTEM token — by opening winlogon.exe with GrantedAccess 0x1040 to duplicate its token. A privesc operator reaching for this on the host corroborates active SYSTEM-token theft co-occurring with the Potato coercion.
+  - id: 961d0ba2-3eea-4303-a930-2cf78bbfcc5e
+    name: HackTool - Credential Dumping Tools Named Pipe Created
+    reason: 'The most likely follow-on once SYSTEM is obtained: credential-dumping tools that announce themselves via their own named pipes (cachedump/lsadump/wceservicepipe), on the same EID 17/18 source. Its appearance shortly after turns a privesc into a credential-theft incident.'
+  - id: 8943b567-f14d-4ee8-a0bb-2121d4ce3184
+    name: Dump LSASS via comsvcs DLL
+    reason: 'The canonical post-escalation action SeImpersonate→SYSTEM unlocks: dumping LSASS memory via rundll32 comsvcs.dll MiniDump. Pairing this with the DiagTrackEoP pipe on one host establishes the full escalate-then-harvest-credentials objective.'
+  window: 2h
   enrichment_searches:
-  # Rule-specific telemetry pivots the engine runs around an alert from this rule,
-  # scoped to the alert's host/user/IP within the window (behaviour-targeted, not a sweep).
-    - name: "Memory/credential-dump creation & LSASS access on this host"
-      query: '((data_win_system_eventID:"1" AND data_win_eventdata_image:/.*(\\[Pp][Rr][Oo][Cc][Dd][Uu][Mm][Pp]\.[Ee][Xx][Ee]|\\[Pp][Rr][Oo][Cc][Dd][Uu][Mm][Pp]64\.[Ee][Xx][Ee]|\\[Ss][Qq][Ll][Dd][Uu][Mm][Pp][Ee][Rr]\.[Ee][Xx][Ee]|\\[Cc][Rr][Ee][Aa][Tt][Ee][Dd][Uu][Mm][Pp]\.[Ee][Xx][Ee]|\\[Rr][Dd][Rr][Ll][Ee][Aa][Kk][Dd][Ii][Aa][Gg]\.[Ee][Xx][Ee]|\\[Dd][Uu][Mm][Pp][Ee][Rr][Tt]\.[Ee][Xx][Ee]|\\[Nn][Aa][Nn][Oo][Dd][Uu][Mm][Pp]\.[Ee][Xx][Ee]|\\[Aa][Vv][Dd][Uu][Mm][Pp]\.[Ee][Xx][Ee])/) OR (data_win_system_eventID:"1" AND (data_win_eventdata_commandLine:/.*[Cc][Oo][Mm][Ss][Vv][Cc][Ss]\.[Dd][Ll][Ll].*/ OR data_win_eventdata_commandLine:/.*[Mm][Ii][Nn][Ii][Dd][Uu][Mm][Pp].*/ OR data_win_eventdata_commandLine:/.*[Dd][Uu][Mm][Pp][Ee][Rr][Tt].*/ OR data_win_eventdata_commandLine:/.*[Nn][Aa][Nn][Oo][Dd][Uu][Mm][Pp].*/ OR data_win_eventdata_commandLine:/.*[Ll][Ss][Aa][Ss][Ss].*/ OR data_win_eventdata_commandLine:/.*[Ss][Ee][Kk][Uu][Rr][Ll][Ss][Aa].*/ OR data_win_eventdata_commandLine:/.*[Nn][Tt][Dd][Ss]\.[Dd][Ii][Tt].*/ OR data_win_eventdata_commandLine:/.*[Nn][Tt][Dd][Ss][Uu][Tt][Ii][Ll].*/)) OR (data_win_system_eventID:"10" AND data_win_eventdata_targetImage:/.*(\\[Ll][Ss][Aa][Ss][Ss]\.[Ee][Xx][Ee])/))'
-      pivot_on: [host]
-      window: 1h
-    - name: "Remote-execution / lateral-movement tooling on this host"
-      query: '(data_win_system_eventID:"1" AND data_win_eventdata_image:/.*(\\[Pp][Ss][Ee][Xx][Ee][Cc]\.[Ee][Xx][Ee]|\\[Pp][Ss][Ee][Xx][Ee][Ss][Vv][Cc]\.[Ee][Xx][Ee]|\\[Pp][Aa][Ee][Xx][Ee][Cc]\.[Ee][Xx][Ee]|\\[Ww][Ii][Nn][Rr][Ss]\.[Ee][Xx][Ee]|\\[Mm][Ss][Tt][Ss][Cc]\.[Ee][Xx][Ee]|\\[Ww][Mm][Ii][Cc]\.[Ee][Xx][Ee])/) OR (data_win_system_eventID:"1" AND data_win_eventdata_image:/.*(\\[Pp][Oo][Ww][Ee][Rr][Ss][Hh][Ee][Ll][Ll]\.[Ee][Xx][Ee]|\\[Pp][Ww][Ss][Hh]\.[Ee][Xx][Ee])/ AND (data_win_eventdata_commandLine:/.*[Ii][Nn][Vv][Oo][Kk][Ee]-[Cc][Oo][Mm][Mm][Aa][Nn][Dd].*/ OR data_win_eventdata_commandLine:/.*[Nn][Ee][Ww]-[Pp][Ss][Ss][Ee][Ss][Ss][Ii][Oo][Nn].*/ OR data_win_eventdata_commandLine:/.*[Ee][Nn][Tt][Ee][Rr]-[Pp][Ss][Ss][Ee][Ss][Ss][Ii][Oo][Nn].*/ OR data_win_eventdata_commandLine:/.*-[Cc][Oo][Mm][Pp][Uu][Tt][Ee][Rr][Nn][Aa][Mm][Ee].*/))'
-      pivot_on: [host]
-      window: 2h
-    - name: "Process injection / LSASS access on this host"
-      query: '((data_win_system_eventID:"8") OR (data_win_system_eventID:"10" AND data_win_eventdata_targetImage:/.*(\\[Ll][Ss][Aa][Ss][Ss]\.[Ee][Xx][Ee])/) OR (data_win_system_eventID:"1" AND (data_win_eventdata_commandLine:/.*[Cc][Rr][Ee][Aa][Tt][Ee][Rr][Ee][Mm][Oo][Tt][Ee][Tt][Hh][Rr][Ee][Aa][Dd].*/ OR data_win_eventdata_commandLine:/.*[Vv][Ii][Rr][Tt][Uu][Aa][Ll][Aa][Ll][Ll][Oo][Cc][Ee][Xx].*/ OR data_win_eventdata_commandLine:/.*[Ww][Rr][Ii][Tt][Ee][Pp][Rr][Oo][Cc][Ee][Ss][Ss][Mm][Ee][Mm][Oo][Rr][Yy].*/)))'
-      pivot_on: [host]
-      window: 1h
-    - name: "UAC-bypass / privilege-escalation binaries on this host"
-      query: 'data_win_system_eventID:"1" AND (data_win_eventdata_image:/.*(\\[Ff][Oo][Dd][Hh][Ee][Ll][Pp][Ee][Rr]\.[Ee][Xx][Ee]|\\[Ee][Vv][Ee][Nn][Tt][Vv][Ww][Rr]\.[Ee][Xx][Ee]|\\[Ss][Dd][Cc][Ll][Tt]\.[Ee][Xx][Ee]|\\[Cc][Oo][Mm][Pp][Uu][Tt][Ee][Rr][Dd][Ee][Ff][Aa][Uu][Ll][Tt][Ss]\.[Ee][Xx][Ee]|\\[Ss][Ll][Uu][Ii]\.[Ee][Xx][Ee]|\\[Ww][Ss][Rr][Ee][Ss][Ee][Tt]\.[Ee][Xx][Ee])/ OR data_win_eventdata_parentImage:/.*(\\[Ff][Oo][Dd][Hh][Ee][Ll][Pp][Ee][Rr]\.[Ee][Xx][Ee]|\\[Ee][Vv][Ee][Nn][Tt][Vv][Ww][Rr]\.[Ee][Xx][Ee]|\\[Ss][Dd][Cc][Ll][Tt]\.[Ee][Xx][Ee]|\\[Cc][Oo][Mm][Pp][Uu][Tt][Ee][Rr][Dd][Ee][Ff][Aa][Uu][Ll][Tt][Ss]\.[Ee][Xx][Ee]|\\[Ss][Ll][Uu][Ii]\.[Ee][Xx][Ee]|\\[Ww][Ss][Rr][Ee][Ss][Ee][Tt]\.[Ee][Xx][Ee])/)'
-      pivot_on: [host]
-      window: 2h
+  # Behaviour-targeted hunts the engine runs around the alert (not a sweep).
+  - name: SeImpersonate-holding service process spawning a shell on this host (privesc foothold)
+    query: data_win_system_eventID:"1" AND (data_win_eventdata_parentImage:/.*\\[Ww]3[Ww][Pp]\.[Ee][Xx][Ee]/ OR data_win_eventdata_parentImage:/.*\\[Ss][Qq][Ll][Ss][Ee][Rr][Vv][Rr]\.[Ee][Xx][Ee]/ OR data_win_eventdata_parentImage:/.*\\[Pp][Hh][Pp]-[Cc][Gg][Ii]\.[Ee][Xx][Ee]/ OR data_win_eventdata_parentImage:/.*\\[Hh][Tt][Tt][Pp][Dd]\.[Ee][Xx][Ee]/ OR data_win_eventdata_parentImage:/.*\\[Tt][Oo][Mm][Cc][Aa][Tt].*\.[Ee][Xx][Ee]/) AND (data_win_eventdata_image:/.*\\[Cc][Mm][Dd]\.[Ee][Xx][Ee]/ OR data_win_eventdata_image:/.*\\[Pp][Oo][Ww][Ee][Rr][Ss][Hh][Ee][Ll][Ll]\.[Ee][Xx][Ee]/ OR data_win_eventdata_image:/.*\\[Pp][Ww][Ss][Hh]\.[Ee][Xx][Ee]/)
+    pivot_on:
+    - host
+    window: 2h
+  - name: Other Potato / RPC-coercion named pipes on this host
+    query: (data_win_system_eventID:"17" OR data_win_system_eventID:"18") AND (data_win_eventdata_pipeName:/.*[Pp][Oo][Tt][Aa][Tt][Oo].*/ OR data_win_eventdata_pipeName:/.*[Cc][Oo][Ee][Rr][Cc][Ee][Dd].*/ OR data_win_eventdata_pipeName:/.*[Rr][Oo][Gg][Uu][Ee].*/ OR data_win_eventdata_pipeName:/.*[Pp][Rr][Ii][Nn][Tt][Ss][Pp][Oo][Oo][Ff][Ee][Rr].*/ OR data_win_eventdata_pipeName:/.*\\[Ss][Pp][Oo][Oo][Ll][Ss][Ss]/ OR data_win_eventdata_pipeName:/.*\\[Ee][Pp][Mm][Aa][Pp][Pp][Ee][Rr]/ OR data_win_eventdata_pipeName:/.*\\[Ll][Ss][Aa][Rr][Pp][Cc]/ OR data_win_eventdata_pipeName:/.*\\[Ss][Rr][Vv][Ss][Vv][Cc]/)
+    pivot_on:
+    - host
+    window: 2h
+  - name: Manual named-pipe coercion primitive (echo into \\.\pipe\) on this host
+    query: data_win_system_eventID:"1" AND data_win_eventdata_commandLine:/.*[Ee][Cc][Hh][Oo].*/ AND data_win_eventdata_commandLine:/.*\\\\\.\\[Pp][Ii][Pp][Ee]\\.*/
+    pivot_on:
+    - host
+    window: 1h
+  - name: Post-SYSTEM credential access (LSASS dump / SAM-SYSTEM hive) on this host
+    query: ((data_win_system_eventID:"10" AND data_win_eventdata_targetImage:/.*\\[Ll][Ss][Aa][Ss][Ss]\.[Ee][Xx][Ee]/) OR (data_win_system_eventID:"1" AND (data_win_eventdata_commandLine:/.*[Cc][Oo][Mm][Ss][Vv][Cc][Ss]\.[Dd][Ll][Ll].*[Mm][Ii][Nn][Ii][Dd][Uu][Mm][Pp].*/ OR data_win_eventdata_commandLine:/.*[Mm][Ii][Nn][Ii][Dd][Uu][Mm][Pp].*[Ll][Ss][Aa][Ss][Ss].*/ OR data_win_eventdata_commandLine:/.*[Pp][Rr][Oo][Cc][Dd][Uu][Mm][Pp].*[Ll][Ss][Aa][Ss][Ss].*/ OR data_win_eventdata_commandLine:/.*[Rr][Ee][Gg].*[Ss][Aa][Vv][Ee].*[Hh][Kk][Ll][Mm]\\[Ss][Aa][Mm].*/ OR data_win_eventdata_commandLine:/.*[Rr][Ee][Gg].*[Ss][Aa][Vv][Ee].*[Hh][Kk][Ll][Mm]\\[Ss][Yy][Ss][Tt][Ee][Mm].*/)))
+    pivot_on:
+    - host
+    window: 2h
+  - name: Post-SYSTEM persistence (new service / scheduled task / Run key) on this host
+    query: data_win_system_eventID:"1" AND ((data_win_eventdata_image:/.*\\[Ss][Cc]\.[Ee][Xx][Ee]/ AND data_win_eventdata_commandLine:/.*[Cc][Rr][Ee][Aa][Tt][Ee].*/) OR (data_win_eventdata_image:/.*\\[Ss][Cc][Hh][Tt][Aa][Ss][Kk][Ss]\.[Ee][Xx][Ee]/ AND data_win_eventdata_commandLine:/.*[Cc][Rr][Ee][Aa][Tt][Ee].*/) OR data_win_eventdata_commandLine:/.*[Nn][Ee][Ww]-[Ss][Ee][Rr][Vv][Ii][Cc][Ee].*/ OR data_win_eventdata_commandLine:/.*[Nn][Ee][Ww]-[Ss][Cc][Hh][Ee][Dd][Uu][Ll][Ee][Dd][Tt][Aa][Ss][Kk].*/ OR (data_win_eventdata_image:/.*\\[Rr][Ee][Gg]\.[Ee][Xx][Ee]/ AND data_win_eventdata_commandLine:/.*[Cc][Uu][Rr][Rr][Ee][Nn][Tt][Vv][Ee][Rr][Ss][Ii][Oo][Nn]\\[Rr][Uu][Nn].*/))
+    pivot_on:
+    - host
+    window: 4h

@@ -204,35 +204,58 @@ graylog:
   query: data_win_system_eventID:"1121" AND data_win_eventdata_path:/.*\\[Ll][Ss][Aa][Ss][Ss]\.[Ee][Xx][Ee]/ AND _exists_:data_win_eventdata_processName AND NOT ((data_win_eventdata_processName:/[Cc]:\\[Ww][Ii][Nn][Dd][Oo][Ww][Ss]\\[Tt][Ee][Mm][Pp]\\[Aa][Ss][Gg][Aa][Rr][Dd]2-[Aa][Gg][Ee][Nn][Tt]\\.*/ AND (data_win_eventdata_processName:/.*\\[Tt][Hh][Oo][Rr]64\.[Ee][Xx][Ee]/ OR data_win_eventdata_processName:/.*\\[Tt][Hh][Oo][Rr]\.[Ee][Xx][Ee]/)) OR data_win_eventdata_processName:/[Cc]:\\[Ww][Ii][Nn][Dd][Oo][Ww][Ss]\\[Ss][Yy][Ss][Tt][Ee][Mm]32\\[Aa][Tt][Ii][Ee][Ss][Rr][Xx][Xx]\.[Ee][Xx][Ee]/ OR data_win_eventdata_processName:/[Cc]:\\[Ww][Ii][Nn][Dd][Oo][Ww][Ss]\\[Ss][Yy][Ss][Tt][Ee][Mm]32\\[Cc][Oo][Mm][Pp][Aa][Tt][Tt][Ee][Ll][Rr][Uu][Nn][Nn][Ee][Rr]\.[Ee][Xx][Ee]/ OR data_win_eventdata_processName:/[Cc]:\\[Ww][Ii][Nn][Dd][Oo][Ww][Ss]\\[Ss][Yy][Ss][Tt][Ee][Mm]32\\[Mm][Ss][Ii][Ee][Xx][Ee][Cc]\.[Ee][Xx][Ee]/ OR data_win_eventdata_processName:/[Cc]:\\[Ww][Ii][Nn][Dd][Oo][Ww][Ss]\\[Ss][Yy][Ss][Tt][Ee][Mm]32\\[Nn][Vv][Ww][Mm][Ii]64\.[Ee][Xx][Ee]/ OR data_win_eventdata_processName:/[Cc]:\\[Ww][Ii][Nn][Dd][Oo][Ww][Ss]\\[Ss][Yy][Ss][Tt][Ee][Mm]32\\[Ss][Vv][Cc][Hh][Oo][Ss][Tt]\.[Ee][Xx][Ee]/ OR data_win_eventdata_processName:/[Cc]:\\[Ww][Ii][Nn][Dd][Oo][Ww][Ss]\\[Ss][Yy][Ss][Tt][Ee][Mm]32\\[Tt][Aa][Ss][Kk][Mm][Gg][Rr]\.[Ee][Xx][Ee]/ OR data_win_eventdata_processName:/[Cc]:\\[Ww][Ii][Nn][Dd][Oo][Ww][Ss]\\[Ss][Yy][Ss][Tt][Ee][Mm]32\\[Ww][Bb][Ee][Mm]\\[Ww][Mm][Ii][Pp][Rr][Vv][Ss][Ee]\.[Ee][Xx][Ee]/ OR data_win_eventdata_processName:/[Cc]:\\[Ww][Ii][Nn][Dd][Oo][Ww][Ss]\\[Ss][Yy][Ss][Ww][Oo][Ww]64\\[Mm][Ss][Ii][Ee][Xx][Ee][Cc]\.[Ee][Xx][Ee]/ OR data_win_eventdata_processName:/[Cc]:\\[Ww][Ii][Nn][Dd][Oo][Ww][Ss]\\[Ss][Yy][Ss][Tt][Ee][Mm]32\\[Dd][Rr][Ii][Vv][Ee][Rr][Ss][Tt][Oo][Rr][Ee]\\.*/ OR data_win_eventdata_processName:/[Cc]:\\[Ww][Ii][Nn][Dd][Oo][Ww][Ss]\\[Ii][Nn][Ss][Tt][Aa][Ll][Ll][Ee][Rr]\\.*/ OR data_win_eventdata_processName:/[Cc]:\\[Pp][Rr][Oo][Gg][Rr][Aa][Mm] [Ff][Ii][Ll][Ee][Ss]\\.*/ OR data_win_eventdata_processName:/[Cc]:\\[Pp][Rr][Oo][Gg][Rr][Aa][Mm] [Ff][Ii][Ll][Ee][Ss] \([Xx]86\)\\.*/)
 
 correlation:
-  # Authored by the correlation engine for review. Related CoPilot Searches to run
-  # around an alert from this rule, scoped to the same host/user/IP within the window.
+  # Authored per-rule (behaviour-researched) for the correlation engine. Related CoPilot
+  # Searches + telemetry pivots to run around an alert, scoped to its host/user/ip/domain.
   related_rules:
-    - id: 35ba1d85-724d-42a3-889f-2e2362bcaf23
-      name: "AD Privileged Users or Groups Reconnaissance"
-      reason: "next kill-chain tactic: Discovery"
-    - id: 17d619c1-e020-4347-957e-1d1207455c93
-      name: "Active Directory Replication from Non Machine Account"
-      reason: "next kill-chain tactic: Credential Access"
-    - id: 87261fb2-69d0-42fe-b9de-88c6b5f65a43
-      name: "Atera Agent Installation"
-      reason: "next kill-chain tactic: Command and Control"
-  window: 1h
+  - id: 5ef9853e-4d0e-4a70-846f-a9ca37d876da
+    name: Potential Credential Dumping Activity Via LSASS
+    reason: 'Co-occurring corroboration: Sysmon EID 10''s view of the very LSASS handle this ASR rule blocked - an open with dump-grade access masks (0x1fffff/0x1438) and a dbgcore/dbghelp/ntdll call trace. ASR blocks at the Defender layer but Sysmon still records the attempt, so this firing on the same host confirms the 1121 was a genuine dump try, not an allowlist gap.'
+  - id: windows-defender-asr-threat-tamper-001
+    name: Windows Defender ASR or Threat Configuration Tamper
+    reason: 'Direct follow-on to being blocked: Set-/Add-MpPreference -AttackSurfaceReductionRules_Actions Disabled turns off the exact ASR rule that just stopped the dump, clearing the way for a retry. The most causally-tied next action after a 1121 block.'
+  - id: 8943b567-f14d-4ee8-a0bb-2121d4ce3184
+    name: Dump LSASS via comsvcs DLL
+    reason: 'ASR-evading retry: rundll32 comsvcs.dll MiniDump (#24) is precisely the LOLBin LSASS-dump this ASR rule is built to block (its own how_to_implement names this rule as the blocker). Seen after the block, it means the operator switched to the living-off-the-land variant to get around ASR.'
+  - id: 5afee48e-67dd-4e03-a783-f74259dcf998
+    name: Potential LSASS Process Dump Via Procdump
+    reason: 'ASR-evading retry with a signed tool: ProcDump -ma/-mm against ls*/samss/keyiso is the common fallback dumper once direct LSASS access is denied; its Microsoft signature makes it a frequent next attempt on the same host.'
+  - id: e5b33f7d-eb93-48b6-9851-09e1e610b6d7
+    name: Credential Dumping Attempt Via WerFault
+    reason: 'ASR/PPL-bypass retry: WerFault.exe opening lsass with 0x1FFFFF (the ''Shtinkering'' technique) abuses a trusted Windows process to dump LSASS - a known path around the credential-theft ASR rule.'
+  - id: d6a9b252-c666-4de6-8806-5561bbbd3bdc
+    name: Wdigest Enable UseLogonCredential
+    reason: 'Plaintext-harvest prep: flipping WDigest UseLogonCredential=1 forces LSASS to cache cleartext passwords so a retried dump yields plaintext, not just NTLM hashes - a classic companion to an LSASS theft attempt.'
+  - id: fd877b94-9bb5-4191-bb25-d79cbd93c167
+    name: Dumping of Sensitive Hives Via Reg.EXE
+    reason: 'Pivot to another credential store: with LSASS locked down by ASR, the attacker falls back to reg.exe save of the SAM/SYSTEM/SECURITY hives to recover local-account secrets offline (T1003.002/004/005).'
+  - id: 611eab06-a145-4dfa-a295-3ccc5c20f59a
+    name: Mimikatz DC Sync
+    reason: 'Escalation objective: if a dump that evades ASR yields a privileged/domain credential, DCSync (4662 ''Replicating Directory Changes'') pulls every account hash straight from the DC - the end goal this credential theft serves.'
+  window: 2h
   enrichment_searches:
-  # Rule-specific telemetry pivots the engine runs around an alert from this rule,
-  # scoped to the alert's host/user/IP within the window (behaviour-targeted, not a sweep).
-    - name: "Memory/credential-dump creation & LSASS access on this host"
-      query: '((data_win_system_eventID:"1" AND data_win_eventdata_image:/.*(\\[Pp][Rr][Oo][Cc][Dd][Uu][Mm][Pp]\.[Ee][Xx][Ee]|\\[Pp][Rr][Oo][Cc][Dd][Uu][Mm][Pp]64\.[Ee][Xx][Ee]|\\[Ss][Qq][Ll][Dd][Uu][Mm][Pp][Ee][Rr]\.[Ee][Xx][Ee]|\\[Cc][Rr][Ee][Aa][Tt][Ee][Dd][Uu][Mm][Pp]\.[Ee][Xx][Ee]|\\[Rr][Dd][Rr][Ll][Ee][Aa][Kk][Dd][Ii][Aa][Gg]\.[Ee][Xx][Ee]|\\[Dd][Uu][Mm][Pp][Ee][Rr][Tt]\.[Ee][Xx][Ee]|\\[Nn][Aa][Nn][Oo][Dd][Uu][Mm][Pp]\.[Ee][Xx][Ee]|\\[Aa][Vv][Dd][Uu][Mm][Pp]\.[Ee][Xx][Ee])/) OR (data_win_system_eventID:"1" AND (data_win_eventdata_commandLine:/.*[Cc][Oo][Mm][Ss][Vv][Cc][Ss]\.[Dd][Ll][Ll].*/ OR data_win_eventdata_commandLine:/.*[Mm][Ii][Nn][Ii][Dd][Uu][Mm][Pp].*/ OR data_win_eventdata_commandLine:/.*[Dd][Uu][Mm][Pp][Ee][Rr][Tt].*/ OR data_win_eventdata_commandLine:/.*[Nn][Aa][Nn][Oo][Dd][Uu][Mm][Pp].*/ OR data_win_eventdata_commandLine:/.*[Ll][Ss][Aa][Ss][Ss].*/ OR data_win_eventdata_commandLine:/.*[Ss][Ee][Kk][Uu][Rr][Ll][Ss][Aa].*/ OR data_win_eventdata_commandLine:/.*[Nn][Tt][Dd][Ss]\.[Dd][Ii][Tt].*/ OR data_win_eventdata_commandLine:/.*[Nn][Tt][Dd][Ss][Uu][Tt][Ii][Ll].*/)) OR (data_win_system_eventID:"10" AND data_win_eventdata_targetImage:/.*(\\[Ll][Ss][Aa][Ss][Ss]\.[Ee][Xx][Ee])/))'
-      pivot_on: [host]
-      window: 1h
-    - name: "This account's logon activity across hosts (harvested-credential use)"
-      query: '(data_win_system_eventID:"4624" OR data_win_system_eventID:"4625")'
-      pivot_on: [user]
-      window: 6h
-    - name: "Remote-execution / lateral-movement tooling on this host"
-      query: '(data_win_system_eventID:"1" AND data_win_eventdata_image:/.*(\\[Pp][Ss][Ee][Xx][Ee][Cc]\.[Ee][Xx][Ee]|\\[Pp][Ss][Ee][Xx][Ee][Ss][Vv][Cc]\.[Ee][Xx][Ee]|\\[Pp][Aa][Ee][Xx][Ee][Cc]\.[Ee][Xx][Ee]|\\[Ww][Ii][Nn][Rr][Ss]\.[Ee][Xx][Ee]|\\[Mm][Ss][Tt][Ss][Cc]\.[Ee][Xx][Ee]|\\[Ww][Mm][Ii][Cc]\.[Ee][Xx][Ee])/) OR (data_win_system_eventID:"1" AND data_win_eventdata_image:/.*(\\[Pp][Oo][Ww][Ee][Rr][Ss][Hh][Ee][Ll][Ll]\.[Ee][Xx][Ee]|\\[Pp][Ww][Ss][Hh]\.[Ee][Xx][Ee])/ AND (data_win_eventdata_commandLine:/.*[Ii][Nn][Vv][Oo][Kk][Ee]-[Cc][Oo][Mm][Mm][Aa][Nn][Dd].*/ OR data_win_eventdata_commandLine:/.*[Nn][Ee][Ww]-[Pp][Ss][Ss][Ee][Ss][Ss][Ii][Oo][Nn].*/ OR data_win_eventdata_commandLine:/.*[Ee][Nn][Tt][Ee][Rr]-[Pp][Ss][Ss][Ee][Ss][Ss][Ii][Oo][Nn].*/ OR data_win_eventdata_commandLine:/.*-[Cc][Oo][Mm][Pp][Uu][Tt][Ee][Rr][Nn][Aa][Mm][Ee].*/))'
-      pivot_on: [host]
-      window: 2h
-    - name: "Process injection / LSASS access on this host"
-      query: '((data_win_system_eventID:"8") OR (data_win_system_eventID:"10" AND data_win_eventdata_targetImage:/.*(\\[Ll][Ss][Aa][Ss][Ss]\.[Ee][Xx][Ee])/) OR (data_win_system_eventID:"1" AND (data_win_eventdata_commandLine:/.*[Cc][Rr][Ee][Aa][Tt][Ee][Rr][Ee][Mm][Oo][Tt][Ee][Tt][Hh][Rr][Ee][Aa][Dd].*/ OR data_win_eventdata_commandLine:/.*[Vv][Ii][Rr][Tt][Uu][Aa][Ll][Aa][Ll][Ll][Oo][Cc][Ee][Xx].*/ OR data_win_eventdata_commandLine:/.*[Ww][Rr][Ii][Tt][Ee][Pp][Rr][Oo][Cc][Ee][Ss][Ss][Mm][Ee][Mm][Oo][Rr][Yy].*/)))'
-      pivot_on: [host]
-      window: 1h
+  # Behaviour-targeted hunts the engine runs around the alert (not a sweep).
+  - name: Alternative LSASS memory-dump techniques on this host (ASR-bypass retries)
+    query: ((data_win_system_eventID:"10" AND data_win_eventdata_targetImage:/.*\\[Ll][Ss][Aa][Ss][Ss]\.[Ee][Xx][Ee]/) OR (data_win_system_eventID:"8" AND data_win_eventdata_targetImage:/.*\\[Ll][Ss][Aa][Ss][Ss]\.[Ee][Xx][Ee]/) OR (data_win_system_eventID:"1" AND (data_win_eventdata_commandLine:/.*[Cc][Oo][Mm][Ss][Vv][Cc][Ss]\.[Dd][Ll][Ll].*/ OR data_win_eventdata_commandLine:/.*[Mm][Ii][Nn][Ii][Dd][Uu][Mm][Pp].*/ OR data_win_eventdata_commandLine:/.*[Ss][Ee][Kk][Uu][Rr][Ll][Ss][Aa].*/ OR data_win_eventdata_image:/.*\\([Pp][Rr][Oo][Cc][Dd][Uu][Mm][Pp]|[Nn][Aa][Nn][Oo][Dd][Uu][Mm][Pp]|[Rr][Dd][Rr][Ll][Ee][Aa][Kk][Dd][Ii][Aa][Gg]|[Cc][Rr][Ee][Aa][Tt][Ee][Dd][Uu][Mm][Pp]|[Dd][Uu][Mm][Pp][Ee][Rr][Tt]|[Hh][Aa][Nn][Dd][Ll][Ee][Kk][Aa][Tt][Zz])\.[Ee][Xx][Ee]/)) OR (data_win_system_eventID:"11" AND data_win_eventdata_targetFilename:/.*[Ll][Ss][Aa][Ss][Ss].*\.[Dd][Mm][Pp].*/))
+    pivot_on:
+    - host
+    window: 2h
+  - name: Defender / ASR being disabled on this host (neutralising the control that just blocked them)
+    query: (data_win_system_eventID:"1" AND (data_win_eventdata_commandLine:/.*[Ss][Ee][Tt]-[Mm][Pp][Pp][Rr][Ee][Ff][Ee][Rr][Ee][Nn][Cc][Ee].*/ OR data_win_eventdata_commandLine:/.*[Aa][Dd][Dd]-[Mm][Pp][Pp][Rr][Ee][Ff][Ee][Rr][Ee][Nn][Cc][Ee].*/ OR data_win_eventdata_commandLine:/.*[Aa][Tt][Tt][Aa][Cc][Kk][Ss][Uu][Rr][Ff][Aa][Cc][Ee][Rr][Ee][Dd][Uu][Cc][Tt][Ii][Oo][Nn].*/ OR data_win_eventdata_commandLine:/.*[Dd][Ii][Ss][Aa][Bb][Ll][Ee][Rr][Ee][Aa][Ll][Tt][Ii][Mm][Ee][Mm][Oo][Nn][Ii][Tt][Oo][Rr][Ii][Nn][Gg].*/ OR data_win_eventdata_commandLine:/.*[Ee][Xx][Cc][Ll][Uu][Ss][Ii][Oo][Nn][Pp][Aa][Tt][Hh].*/ OR data_win_eventdata_commandLine:/.*[Mm][Pp][Cc][Mm][Dd][Rr][Uu][Nn].*/)) OR (data_win_system_eventID:"13" AND data_win_eventdata_targetObject:/.*[Ww][Ii][Nn][Dd][Oo][Ww][Ss] [Dd][Ee][Ff][Ee][Nn][Dd][Ee][Rr].*/)
+    pivot_on:
+    - host
+    window: 2h
+  - name: Pivot to other credential stores on this host (SAM/SYSTEM/SECURITY hives, NTDS.dit, shadow copies)
+    query: data_win_system_eventID:"1" AND ((data_win_eventdata_commandLine:/.*[Rr][Ee][Gg].*[Ss][Aa][Vv][Ee].*/ AND data_win_eventdata_commandLine:/.*[Hh][Kk][Ll][Mm].*/) OR data_win_eventdata_commandLine:/.*[Hh][Kk][Ll][Mm]\\[Ss][Aa][Mm].*/ OR (data_win_eventdata_commandLine:/.*[Vv][Ss][Ss][Aa][Dd][Mm][Ii][Nn].*/ AND data_win_eventdata_commandLine:/.*[Ss][Hh][Aa][Dd][Oo][Ww].*/) OR data_win_eventdata_commandLine:/.*[Nn][Tt][Dd][Ss]\.[Dd][Ii][Tt].*/ OR data_win_eventdata_commandLine:/.*[Nn][Tt][Dd][Ss][Uu][Tt][Ii][Ll].*/ OR data_win_eventdata_commandLine:/.*[Ee][Ss][Ee][Nn][Tt][Uu][Tt][Ll].*/)
+    pivot_on:
+    - host
+    window: 4h
+  - name: This account's remote/failed logons across the estate (harvested-credential reuse & lateral movement)
+    query: ((data_win_system_eventID:"4624" AND (data_win_eventdata_logonType:"3" OR data_win_eventdata_logonType:"9" OR data_win_eventdata_logonType:"10")) OR data_win_system_eventID:"4625" OR data_win_system_eventID:"4648")
+    pivot_on:
+    - user
+    window: 6h
+  - name: Remote-execution / lateral-movement tooling launched on this host (post-theft movement)
+    query: (data_win_system_eventID:"1" AND (data_win_eventdata_image:/.*\\([Pp][Ss][Ee][Xx][Ee][Cc]|[Pp][Ss][Ee][Xx][Ee][Ss][Vv][Cc]|[Pp][Aa][Ee][Xx][Ee][Cc]|[Ww][Ii][Nn][Rr][Ss]|[Mm][Ss][Tt][Ss][Cc])\.[Ee][Xx][Ee]/ OR (data_win_eventdata_image:/.*\\[Ww][Mm][Ii][Cc]\.[Ee][Xx][Ee]/ AND data_win_eventdata_commandLine:/.*[Pp][Rr][Oo][Cc][Ee][Ss][Ss].*[Cc][Aa][Ll][Ll].*[Cc][Rr][Ee][Aa][Tt][Ee].*/) OR (data_win_eventdata_image:/.*\\([Pp][Oo][Ww][Ee][Rr][Ss][Hh][Ee][Ll][Ll]|[Pp][Ww][Ss][Hh])\.[Ee][Xx][Ee]/ AND (data_win_eventdata_commandLine:/.*[Ii][Nn][Vv][Oo][Kk][Ee]-[Cc][Oo][Mm][Mm][Aa][Nn][Dd].*/ OR data_win_eventdata_commandLine:/.*[Nn][Ee][Ww]-[Pp][Ss][Ss][Ee][Ss][Ss][Ii][Oo][Nn].*/ OR data_win_eventdata_commandLine:/.*[Ee][Nn][Tt][Ee][Rr]-[Pp][Ss][Ss][Ee][Ss][Ss][Ii][Oo][Nn].*/)) OR (data_win_eventdata_image:/.*\\[Ss][Cc][Hh][Tt][Aa][Ss][Kk][Ss]\.[Ee][Xx][Ee]/ AND data_win_eventdata_commandLine:/.*\/[Ss] .*/)))
+    pivot_on:
+    - host
+    window: 4h

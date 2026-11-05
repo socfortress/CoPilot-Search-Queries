@@ -176,23 +176,58 @@ graylog:
   query: data_process_exec_parent_binary:/.*\/[Jj][Aa][Vv][Aa]/ AND (data_process_exec_process_arguments:/.*\/[Bb][Ii][Nn]\/[Ss][Hh].*/ OR data_process_exec_process_arguments:/.*[Bb][Aa][Ss][Hh].*/ OR data_process_exec_process_arguments:/.*[Dd][Aa][Ss][Hh].*/ OR data_process_exec_process_arguments:/.*[Kk][Ss][Hh].*/ OR data_process_exec_process_arguments:/.*[Zz][Ss][Hh].*/ OR data_process_exec_process_arguments:/.*[Cc][Ss][Hh].*/ OR data_process_exec_process_arguments:/.*[Ff][Ii][Ss][Hh].*/ OR data_process_exec_process_arguments:/.*[Cc][Uu][Rr][Ll].*/ OR data_process_exec_process_arguments:/.*[Ww][Gg][Ee][Tt].*/ OR data_process_exec_process_arguments:/.*[Pp][Yy][Tt][Hh][Oo][Nn].*/)
 
 correlation:
-  # Authored by the correlation engine for review.
+  # Authored per-rule (behaviour-researched) for the correlation engine. Related CoPilot
+  # Searches + telemetry pivots to run around an alert, scoped to its host/user/ip/domain.
+  related_rules:
+  - id: 7fb14105-530e-4e2e-8cfb-99f7d8700b66
+    name: Atlassian Confluence CVE-2022-26134
+    reason: 'Specialization of this exact detection scoped to Confluence''s /opt/atlassian/confluence install path: the same java parent spawning /bin/sh, curl, wget or python. If the exploited Java service is Confluence, both fire on the same process_exec event — this names the precursor exploit (OGNL injection RCE).'
+  - id: f8987c03-4290-4c96-870f-55e75ee377f4
+    name: CVE-2023-22518 Exploitation Attempt - Suspicious Confluence Child Process (Linux)
+    reason: 'Second Confluence RCE with the identical shape: java parent whose arguments contain ''confluence'' spawning bash/curl/wget/echo children. Confirms the generic java-spawns-shell alert is a specific Confluence exploitation attempt and pins down the precursor CVE.'
+  - id: 69dea60b-2deb-4c9e-a685-ad542f4367f9
+    name: Suspicious Child Process of SAP NetWeaver - Linux
+    reason: 'Product-specific sibling: the SAP NetWeaver J2EE (Java) servlet stack spawning shells, interpreters or netcat. Same causal pattern as this rule (web-facing Java app server executing OS commands); identifies the exploited application when the host runs SAP.'
+  - id: c8a5f584-cdc8-42cc-8cce-0398e4265de3
+    name: Apache Spark Shell Command Injection - ProcessCreation
+    reason: Spark is a JVM service; its command-injection chain is java -> bash -> 'id -Gn'. This rule catches the java->bash hop while that rule catches the Spark-specific id reconnaissance one process later, so the two fire back-to-back on the same host confirming Spark RCE.
+  - id: 818f7b24-0fba-4c49-a073-8b755573b9c7
+    name: Linux Webshell Indicators
+    reason: Detects a Java app server (Tomcat/WebSphere via java parent args) spawning recon binaries — a webshell dropped on the Java application is the delivery vector that makes java spawn shells. Frequently co-occurs on the same host/event and explains HOW the Java process gained command execution.
+  - id: a2d9e2f3-0f43-4c7a-bcd9-9acfc0d723aa
+    name: Suspicious Download and Execute Pattern via Curl/Wget
+    reason: 'Immediate follow-on: the shell this Java process spawned pulls a second-stage payload into /tmp or /dev/shm and executes it. This rule already flags curl/wget as a Java child argument; that rule catches the download+run that typically happens seconds later.'
+  - id: 7f734ed0-4f47-46c0-837f-6ee62505abd9
+    name: Potential Netcat Reverse Shell Execution
+    reason: 'Follow-on escalation: after blind command execution via the Java service, the attacker upgrades to an interactive foothold with ''nc -e <shell>''. A reverse shell on the same host minutes after this alert is strong evidence the RCE succeeded and is now hands-on-keyboard.'
+  - id: 9069ea3c-b213-4c52-be13-86506a227ab1
+    name: Linux Crypto Mining Indicators
+    reason: 'Terminal objective: internet-facing Java RCE (Log4Shell, Confluence) is the single most common entry point for commodity miners (Kinsing, XMRig). A crypto-mining process on the same host after this alert marks the intrusion''s payload stage.'
+  window: 2h
   enrichment_searches:
-  # Rule-specific telemetry pivots the engine runs around an alert from this rule,
-  # scoped to the alert's host/user/IP within the window (behaviour-targeted, not a sweep).
-    - name: "Shell / interpreter execution on this host"
-      query: '((data_process_exec_process_binary:/.*(\/[Bb][Aa][Ss][Hh]|\/[Ss][Hh]|\/[Dd][Aa][Ss][Hh]|\/[Zz][Ss][Hh]|\/[Kk][Ss][Hh]|\/[Aa][Ss][Hh]|\/[Bb][Uu][Ss][Yy][Bb][Oo][Xx])/) OR (data_process_exec_process_binary:/.*(\/[Pp][Yy][Tt][Hh][Oo][Nn]|\/[Pp][Yy][Tt][Hh][Oo][Nn]3|\/[Pp][Ee][Rr][Ll]|\/[Rr][Uu][Bb][Yy]|\/[Pp][Hh][Pp]|\/[Nn][Oo][Dd][Ee]|\/[Ll][Uu][Aa]|\/[Aa][Ww][Kk])/))'
-      pivot_on: [host]
-      window: 1h
-    - name: "Other executions of this tool-set on this host (any arguments)"
-      query: 'data_process_exec_process_binary:/.*(\/[Jj][Aa][Vv][Aa])/'
-      pivot_on: [host]
-      window: 2h
-    - name: "Persistence via cron / systemd / shell profiles on this host"
-      query: '((data_process_exec_process_binary:/.*(\/[Cc][Rr][Oo][Nn][Tt][Aa][Bb]|\/[Ss][Yy][Ss][Tt][Ee][Mm][Cc][Tt][Ll]|\/[Aa][Tt]|\/[Uu][Pp][Dd][Aa][Tt][Ee]-[Rr][Cc]\.[Dd])/) OR (data_process_exec_process_arguments:/.*\/[Ee][Tt][Cc]\/[Cc][Rr][Oo][Nn].*/) OR (data_process_exec_process_arguments:/.*\/[Ee][Tt][Cc]\/[Ss][Yy][Ss][Tt][Ee][Mm][Dd].*/) OR (data_process_exec_process_arguments:/.*[Rr][Cc]\.[Ll][Oo][Cc][Aa][Ll].*/) OR (data_process_exec_process_arguments:/.*\.[Bb][Aa][Ss][Hh][Rr][Cc].*/) OR (data_process_exec_process_arguments:/.*\.[Bb][Aa][Ss][Hh]_[Pp][Rr][Oo][Ff][Ii][Ll][Ee].*/) OR (data_process_exec_process_arguments:/.*\/[Ee][Tt][Cc]\/[Pp][Rr][Oo][Ff][Ii][Ll][Ee].*/) OR (data_process_exec_process_arguments:/.*[Aa][Uu][Tt][Hh][Oo][Rr][Ii][Zz][Ee][Dd]_[Kk][Ee][Yy][Ss].*/) OR (data_process_exec_process_arguments:/.*\/[Ee][Tt][Cc]\/[Ii][Nn][Ii][Tt]\.[Dd].*/))'
-      pivot_on: [host]
-      window: 4h
-    - name: "Reconnaissance commands on this host"
-      query: 'data_process_exec_process_binary:/.*(\/[Ww][Hh][Oo][Aa][Mm][Ii]|\/[Ii][Dd]|\/[Uu][Nn][Aa][Mm][Ee]|\/[Hh][Oo][Ss][Tt][Nn][Aa][Mm][Ee]|\/[Hh][Oo][Ss][Tt][Nn][Aa][Mm][Ee][Cc][Tt][Ll]|\/[Ss][Ss]|\/[Nn][Ee][Tt][Ss][Tt][Aa][Tt]|\/[Ii][Ff][Cc][Oo][Nn][Ff][Ii][Gg]|\/[Aa][Rr][Pp]|\/[Ww]|\/[Ww][Hh][Oo]|\/[Ll][Aa][Ss][Tt]|\/[Ll][Ss][Oo][Ff]|\/[Nn][Mm][Aa][Pp]|\/[Dd][Ii][Gg]|\/[Ff][Ii][Nn][Dd])/'
-      pivot_on: [host]
-      window: 1h
+  # Behaviour-targeted hunts the engine runs around the alert (not a sweep).
+  - name: Second-stage download or fileless execution from world-writable dirs on this host
+    query: (data_process_exec_process_binary:/.*(\/[Cc][Uu][Rr][Ll]|\/[Ww][Gg][Ee][Tt])/ OR data_process_exec_process_binary:/\/([Tt][Mm][Pp]|[Dd][Ee][Vv]\/[Ss][Hh][Mm]|[Vv][Aa][Rr]\/[Tt][Mm][Pp])\/.*/)
+    pivot_on:
+    - host
+    window: 1h
+  - name: Reverse shell / interactive C2 foothold on this host
+    query: (data_process_exec_process_binary:/.*(\/[Nn][Cc]|\/[Nn][Cc][Aa][Tt]|\/[Nn][Ee][Tt][Cc][Aa][Tt]|\/[Ss][Oo][Cc][Aa][Tt])/ OR data_process_exec_process_arguments:/.*(\/[Dd][Ee][Vv]\/[Tt][Cc][Pp]|[Pp][Tt][Yy]\.[Ss][Pp][Aa][Ww][Nn]|[Bb][Aa][Ss][Hh] -[Ii]).*/)
+    pivot_on:
+    - host
+    window: 2h
+  - name: Post-exploitation host and network reconnaissance burst on this host
+    query: data_process_exec_process_binary:/.*(\/[Ww][Hh][Oo][Aa][Mm][Ii]|\/[Ii][Dd]|\/[Uu][Nn][Aa][Mm][Ee]|\/[Hh][Oo][Ss][Tt][Nn][Aa][Mm][Ee]|\/[Ii][Pp]|\/[Ii][Ff][Cc][Oo][Nn][Ff][Ii][Gg]|\/[Ss][Ss]|\/[Nn][Ee][Tt][Ss][Tt][Aa][Tt]|\/[Aa][Rr][Pp]|\/[Ll][Aa][Ss][Tt]|\/[Ww])/
+    pivot_on:
+    - host
+    window: 1h
+  - name: Persistence via cron / systemd / SSH keys / shell profiles on this host
+    query: (data_process_exec_process_binary:/.*(\/[Cc][Rr][Oo][Nn][Tt][Aa][Bb]|\/[Aa][Tt]|\/[Ss][Yy][Ss][Tt][Ee][Mm][Cc][Tt][Ll])/ OR data_process_exec_process_arguments:/.*(\/[Ee][Tt][Cc]\/[Cc][Rr][Oo][Nn]|\/[Ee][Tt][Cc]\/[Ss][Yy][Ss][Tt][Ee][Mm][Dd]|[Aa][Uu][Tt][Hh][Oo][Rr][Ii][Zz][Ee][Dd]_[Kk][Ee][Yy][Ss]|[Rr][Cc]\.[Ll][Oo][Cc][Aa][Ll]|\.[Bb][Aa][Ss][Hh][Rr][Cc]).*/)
+    pivot_on:
+    - host
+    window: 4h
+  - name: Crypto-miner / resource-hijack payload on this host
+    query: (data_process_exec_process_binary:/.*(\/[Xx][Mm][Rr][Ii][Gg]|\/[Mm][Ii][Nn][Ee][Rr][Dd])/ OR data_process_exec_process_arguments:/.*([Ss][Tt][Rr][Aa][Tt][Uu][Mm]\+[Tt][Cc][Pp]|--[Dd][Oo][Nn][Aa][Tt][Ee]-[Ll][Ee][Vv][Ee][Ll]|[Xx][Mm][Rr][Ii][Gg]|[Cc][Rr][Yy][Pp][Tt][Oo][Nn][Ii][Gg][Hh][Tt]).*/)
+    pivot_on:
+    - host
+    window: 6h

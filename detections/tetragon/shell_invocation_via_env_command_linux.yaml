@@ -163,19 +163,58 @@ graylog:
   query: data_process_exec_process_binary:/.*\/[Ee][Nn][Vv]/ AND (data_process_exec_process_arguments:/.*\/[Bb][Ii][Nn]\/[Bb][Aa][Ss][Hh].*/ OR data_process_exec_process_arguments:/.*\/[Bb][Ii][Nn]\/[Dd][Aa][Ss][Hh].*/ OR data_process_exec_process_arguments:/.*\/[Bb][Ii][Nn]\/[Ff][Ii][Ss][Hh].*/ OR data_process_exec_process_arguments:/.*\/[Bb][Ii][Nn]\/[Ss][Hh].*/ OR data_process_exec_process_arguments:/.*\/[Bb][Ii][Nn]\/[Zz][Ss][Hh].*/)
 
 correlation:
-  # Authored by the correlation engine for review.
+  # Authored per-rule (behaviour-researched) for the correlation engine. Related CoPilot
+  # Searches + telemetry pivots to run around an alert, scoped to its host/user/ip/domain.
+  related_rules:
+  - id: ea3ecad2-db86-4a89-ad0b-132a10d2db55
+    name: Interactive Bash Suspicious Children
+    reason: 'Direct follow-on: env /bin/bash -i hands the actor an interactive bash, and this rule flags exactly that bash -i parent then spawning recon/pty-upgrade/reverse-shell children (whoami, base64, pty.spawn, nc). It is what the operator does in the shell env just gave them, so it firing on the same host confirms a hands-on-keyboard breakout, not a benign env call.'
+  - id: 6adfbf8f-52be-4444-9bac-81b539624146
+    name: Shell Execution via Find - Linux
+    reason: Sibling restricted-shell-breakout GTFOBin (find . -exec /bin/sh). find -exec is the single most common SUID/rbash escape, so an actor who got a shell via env very often tried (or will try) find on the same host; co-firing shows deliberate LOLBin enumeration rather than a one-off.
+  - id: 7ab8f73a-fcff-428b-84aa-6a5ff7877dea
+    name: Vim GTFOBin Abuse - Linux
+    reason: Sibling breakout and the canonical restricted-shell escape (vi/vim :!/bin/sh). When a user is boxed into rbash or a limited sudo context, vim and env are two of the first escapes tried, so a vim breakout nearby strengthens the hypothesis that the env event was a deliberate restricted-environment escape.
+  - id: 8c1a5675-cb85-452f-a298-b01b22a51856
+    name: Suspicious Invocation of Shell via AWK - Linux
+    reason: Sibling interpreter-style breakout (awk 'BEGIN{system("/bin/sh")}'). It belongs to the same T1059.004 GTFOBins family as env; co-occurrence on one host within the window indicates the actor is systematically cycling through shell-spawning LOLBins to find one that works or yields root.
+  - id: 0cf7a157-8879-41a2-8f55-388dd23746b7
+    name: Linux Recon Indicators
+    reason: 'Precursor privilege-escalation recon: this rule fires on find -perm -4000 (SUID hunting) and .htpasswd discovery - the exact enumeration that reveals env is SUID-abusable and therefore worth invoking. Seeing it before/around the env breakout explains why env was chosen as the escalation vector.'
+  - id: 0f79c4d2-4e1f-4683-9c36-b5469a665e06
+    name: Access of Sudoers File Content
+    reason: 'Precondition enumeration for env''s GTFOBins sudo path: reading /etc/sudoers shows whether env is sudo-allowed, which is exactly what makes ''sudo env /bin/sh'' a root escalation. An actor inspecting sudoers near an env-spawned shell is planning or confirming that very escalation.'
+  - id: 6a50f16c-3b7b-42d1-b081-0fdd3ba70a73
+    name: User Added To Root/Sudoers Group Using Usermod
+    reason: 'Follow-on privilege/persistence: once env yields a root-capable shell, usermod -aG root/sudoers cements that access for an attacker-controlled account. It is a concrete post-breakout escalation action on the same host and marks the incident moving from access to entrenchment.'
+  - id: 818f7b24-0fba-4c49-a073-8b755573b9c7
+    name: Linux Webshell Indicators
+    reason: 'Likely precursor context: a web server (apache2/nginx/node/tomcat) spawning child commands is the non-interactive www-data foothold attackers escape with ''env /bin/bash -i'' to get a real TTY. A webshell child shortly before the env event tells the story of how the actor reached the host before breaking out.'
+  window: 2h
   enrichment_searches:
-  # Rule-specific telemetry pivots the engine runs around an alert from this rule,
-  # scoped to the alert's host/user/IP within the window (behaviour-targeted, not a sweep).
-    - name: "Shell / interpreter execution on this host"
-      query: '((data_process_exec_process_binary:/.*(\/[Bb][Aa][Ss][Hh]|\/[Ss][Hh]|\/[Dd][Aa][Ss][Hh]|\/[Zz][Ss][Hh]|\/[Kk][Ss][Hh]|\/[Aa][Ss][Hh]|\/[Bb][Uu][Ss][Yy][Bb][Oo][Xx])/) OR (data_process_exec_process_binary:/.*(\/[Pp][Yy][Tt][Hh][Oo][Nn]|\/[Pp][Yy][Tt][Hh][Oo][Nn]3|\/[Pp][Ee][Rr][Ll]|\/[Rr][Uu][Bb][Yy]|\/[Pp][Hh][Pp]|\/[Nn][Oo][Dd][Ee]|\/[Ll][Uu][Aa]|\/[Aa][Ww][Kk])/))'
-      pivot_on: [host]
-      window: 1h
-    - name: "Persistence via cron / systemd / shell profiles on this host"
-      query: '((data_process_exec_process_binary:/.*(\/[Cc][Rr][Oo][Nn][Tt][Aa][Bb]|\/[Ss][Yy][Ss][Tt][Ee][Mm][Cc][Tt][Ll]|\/[Aa][Tt]|\/[Uu][Pp][Dd][Aa][Tt][Ee]-[Rr][Cc]\.[Dd])/) OR (data_process_exec_process_arguments:/.*\/[Ee][Tt][Cc]\/[Cc][Rr][Oo][Nn].*/) OR (data_process_exec_process_arguments:/.*\/[Ee][Tt][Cc]\/[Ss][Yy][Ss][Tt][Ee][Mm][Dd].*/) OR (data_process_exec_process_arguments:/.*[Rr][Cc]\.[Ll][Oo][Cc][Aa][Ll].*/) OR (data_process_exec_process_arguments:/.*\.[Bb][Aa][Ss][Hh][Rr][Cc].*/) OR (data_process_exec_process_arguments:/.*\.[Bb][Aa][Ss][Hh]_[Pp][Rr][Oo][Ff][Ii][Ll][Ee].*/) OR (data_process_exec_process_arguments:/.*\/[Ee][Tt][Cc]\/[Pp][Rr][Oo][Ff][Ii][Ll][Ee].*/) OR (data_process_exec_process_arguments:/.*[Aa][Uu][Tt][Hh][Oo][Rr][Ii][Zz][Ee][Dd]_[Kk][Ee][Yy][Ss].*/) OR (data_process_exec_process_arguments:/.*\/[Ee][Tt][Cc]\/[Ii][Nn][Ii][Tt]\.[Dd].*/))'
-      pivot_on: [host]
-      window: 4h
-    - name: "Reconnaissance commands on this host"
-      query: 'data_process_exec_process_binary:/.*(\/[Ww][Hh][Oo][Aa][Mm][Ii]|\/[Ii][Dd]|\/[Uu][Nn][Aa][Mm][Ee]|\/[Hh][Oo][Ss][Tt][Nn][Aa][Mm][Ee]|\/[Hh][Oo][Ss][Tt][Nn][Aa][Mm][Ee][Cc][Tt][Ll]|\/[Ss][Ss]|\/[Nn][Ee][Tt][Ss][Tt][Aa][Tt]|\/[Ii][Ff][Cc][Oo][Nn][Ff][Ii][Gg]|\/[Aa][Rr][Pp]|\/[Ww]|\/[Ww][Hh][Oo]|\/[Ll][Aa][Ss][Tt]|\/[Ll][Ss][Oo][Ff]|\/[Nn][Mm][Aa][Pp]|\/[Dd][Ii][Gg]|\/[Ff][Ii][Nn][Dd])/'
-      pivot_on: [host]
-      window: 1h
+  # Behaviour-targeted hunts the engine runs around the alert (not a sweep).
+  - name: Other GTFOBins LOLBins spawning a shell on this host
+    query: (data_process_exec_process_binary:/.*(\/[Ff][Ii][Nn][Dd]|\/[Vv][Ii]|\/[Vv][Ii][Mm]|\/[Rr][Vv][Ii][Mm]|\/[Aa][Ww][Kk]|\/[Gg][Aa][Ww][Kk]|\/[Mm][Aa][Ww][Kk]|\/[Nn][Aa][Ww][Kk]|\/[Nn][Ii][Cc][Ee]|\/[Ff][Ll][Oo][Cc][Kk]|\/[Rr][Ss][Yy][Nn][Cc]|\/[Gg][Ii][Tt]|\/[Gg][Cc][Cc]|\/[Cc][Aa][Pp][Ss][Hh]|\/[Tt][Aa][Rr]|\/[Ll][Ee][Ss][Ss]|\/[Mm][Oo][Rr][Ee])/) AND (data_process_exec_process_arguments:/.*\/[Bb][Ii][Nn]\/[Bb][Aa][Ss][Hh].*/ OR data_process_exec_process_arguments:/.*\/[Bb][Ii][Nn]\/[Ss][Hh].*/ OR data_process_exec_process_arguments:/.*\/[Bb][Ii][Nn]\/[Dd][Aa][Ss][Hh].*/ OR data_process_exec_process_arguments:/.*\/[Bb][Ii][Nn]\/[Zz][Ss][Hh].*/ OR data_process_exec_process_arguments:/.*\/[Bb][Ii][Nn]\/[Ff][Ii][Ss][Hh].*/)
+    pivot_on:
+    - host
+    window: 2h
+  - name: Interactive TTY upgrade or reverse-shell channel on this host
+    query: (data_process_exec_process_arguments:/.*[Pp][Tt][Yy]\.[Ss][Pp][Aa][Ww][Nn].*/ OR data_process_exec_process_arguments:/.*[Ii][Mm][Pp][Oo][Rr][Tt] [Pp][Tt][Yy].*/ OR (data_process_exec_process_binary:/.*\/[Ss][Cc][Rr][Ii][Pp][Tt]/ AND data_process_exec_process_arguments:/.*\/[Dd][Ee][Vv]\/[Nn][Uu][Ll][Ll].*/) OR data_process_exec_process_binary:/.*(\/[Nn][Cc]|\/[Nn][Cc][Aa][Tt]|\/[Nn][Ee][Tt][Cc][Aa][Tt]|\/[Ss][Oo][Cc][Aa][Tt])/)
+    pivot_on:
+    - host
+    window: 1h
+  - name: Privilege-escalation execution on this host (sudo/su/pkexec/doas/setcap/sudoers/usermod)
+    query: (data_process_exec_process_binary:/.*(\/[Ss][Uu][Dd][Oo]|\/[Ss][Uu]|\/[Pp][Kk][Ee][Xx][Ee][Cc]|\/[Dd][Oo][Aa][Ss]|\/[Ss][Ee][Tt][Cc][Aa][Pp]|\/[Vv][Ii][Ss][Uu][Dd][Oo]|\/[Cc][Hh][Ss][Hh]|\/[Nn][Ee][Ww][Gg][Rr][Pp])/ OR data_process_exec_process_arguments:/.*\/[Ee][Tt][Cc]\/[Ss][Uu][Dd][Oo][Ee][Rr][Ss].*/ OR (data_process_exec_process_binary:/.*\/[Uu][Ss][Ee][Rr][Mm][Oo][Dd]/ AND data_process_exec_process_arguments:/.*-[Aa][Gg] .*([Rr][Oo][Oo][Tt]|[Ss][Uu][Dd][Oo]).*/))
+    pivot_on:
+    - host
+    window: 2h
+  - name: Post-breakout privilege triage on this host (whoami/id/sudo -l/SUID hunt)
+    query: (data_process_exec_process_binary:/.*(\/[Ww][Hh][Oo][Aa][Mm][Ii]|\/[Ii][Dd]|\/[Uu][Nn][Aa][Mm][Ee]|\/[Hh][Oo][Ss][Tt][Nn][Aa][Mm][Ee]|\/[Gg][Rr][Oo][Uu][Pp][Ss])/ OR data_process_exec_process_arguments:/.* -[Pp][Ee][Rr][Mm] .*4000.*/ OR (data_process_exec_process_binary:/.*\/[Ss][Uu][Dd][Oo]/ AND data_process_exec_process_arguments:/.* -[Ll].*/))
+    pivot_on:
+    - host
+    window: 1h
+  - name: Tooling download or staging after breakout on this host (curl/wget to tmp, chmod +x, exec from tmp)
+    query: ((data_process_exec_process_binary:/.*(\/[Cc][Uu][Rr][Ll]|\/[Ww][Gg][Ee][Tt])/ AND data_process_exec_process_arguments:/.*(\/[Tt][Mm][Pp]\/|\/[Dd][Ee][Vv]\/[Ss][Hh][Mm]\/).*/) OR (data_process_exec_process_binary:/.*\/[Cc][Hh][Mm][Oo][Dd]/ AND data_process_exec_process_arguments:/.*\+[Xx].*/) OR data_process_exec_process_binary:/.*(\/[Tt][Mm][Pp]\/|\/[Dd][Ee][Vv]\/[Ss][Hh][Mm]\/).*/)
+    pivot_on:
+    - host
+    window: 2h

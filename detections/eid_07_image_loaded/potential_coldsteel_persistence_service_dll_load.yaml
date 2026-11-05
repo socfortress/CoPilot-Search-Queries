@@ -137,19 +137,53 @@ graylog:
   query: data_win_system_eventID:"7" AND data_win_eventdata_image:/.*\\[Ss][Vv][Cc][Hh][Oo][Ss][Tt]\.[Ee][Xx][Ee]/ AND data_win_eventdata_imageLoaded:/.*\\[Aa][Pp][Pp][Dd][Aa][Tt][Aa]\\[Rr][Oo][Aa][Mm][Ii][Nn][Gg]\\[Nn][Ee][Ww][Dd][Ee][Vv]\.[Dd][Ll][Ll]/
 
 correlation:
-  # Authored by the correlation engine for review.
+  # Authored per-rule (behaviour-researched) for the correlation engine. Related CoPilot
+  # Searches + telemetry pivots to run around an alert, scoped to its host/user/ip/domain.
+  related_rules:
+  - id: 1fea93a2-1524-4a3c-9828-3aa0c2414e27
+    name: Potential COLDSTEEL Persistence Service DLL Creation
+    reason: 'Direct precursor: writes the exact payload this rule sees loaded (C:\Users\*\AppData\Roaming\newdev.dll). The EID 11 file-drop of newdev.dll must happen before svchost can image-load it.'
+  - id: 3ced239c-7285-4b54-99c4-8525b69293f7
+    name: COLDSTEEL Persistence Service Creation
+    reason: 'Direct precursor: the SCM 7045 that registers the ColdSteel service (msupdate/msupdate2) with ImagePath svchost.exe. This service registration is what makes svchost host and load newdev.dll.'
+  - id: 612e47e9-8a59-43a6-b404-f48683f45bd6
+    name: ServiceDll Hijack
+    reason: 'Direct precursor (mechanism): detects the Services\...\Parameters\ServiceDll registry value being set to a non-System32 DLL. ColdSteel sets ServiceDll to AppData\Roaming\newdev.dll, and svchost reads exactly that value to perform the load this rule observes.'
+  - id: 9f9cd389-cea0-4142-bf1a-a3fd424abedd
+    name: COLDSTEEL RAT Service Persistence Execution
+    reason: 'Co-occurring (same instant, different telemetry): svchost.exe spawned with -k msupdate/msupdate2/alg is the very process instance that loads newdev.dll. This is the EID 1 process-creation view of the same load this EID 7 rule catches.'
+  - id: 88516f06-ebe0-47ad-858e-ae9fd060ddea
+    name: COLDSTEEL RAT Cleanup Command Execution
+    reason: 'Tight follow-on: rundll32 spawned by the same ColdSteel persistence svchost (-k msupdate/alg) calling newdev.dll''s own exports (ServiceMain / UpdateDriverForPlugAndPlayDevicesW / DiUninstallDevice) to run cleanup. Same loaded DLL, same hosting svchost.'
+  - id: c708a93f-46b4-4674-a5b8-54aa6219c5fa
+    name: Potential COLDSTEEL RAT File Indicators
+    reason: 'Co-occurring: another ColdSteel on-disk artifact (dllhost.exe dropped in C:\Users\Public\Documents) staged during the same intrusion that planted newdev.dll.'
+  - id: 95214813-4c7a-4a50-921b-ee5c538e1d16
+    name: Potential COLDSTEEL RAT Windows User Creation
+    reason: 'Follow-on: ColdSteel creating its hidden ANONYMOUS/_DOMAINUSER_ local profile (ProfileList registry) that the RAT then runs its payloads under once persistence is established.'
+  - id: e01b6eb5-1eb4-4465-a165-85d40d874add
+    name: COLDSTEEL RAT Anonymous User Process Execution
+    reason: 'Follow-on: processes executed as the ANONYMOUS user (parent in System32/AppData) are the hands-on-keyboard phase after the implant is loaded and the hidden user exists.'
+  window: 6h
   enrichment_searches:
-  # Rule-specific telemetry pivots the engine runs around an alert from this rule,
-  # scoped to the alert's host/user/IP within the window (behaviour-targeted, not a sweep).
-    - name: "Follow-on LOLBin / signed-binary-proxy execution on this host"
-      query: 'data_win_system_eventID:"1" AND data_win_eventdata_image:/.*(\\[Rr][Uu][Nn][Dd][Ll][Ll]32\.[Ee][Xx][Ee]|\\[Rr][Ee][Gg][Ss][Vv][Rr]32\.[Ee][Xx][Ee]|\\[Mm][Ss][Hh][Tt][Aa]\.[Ee][Xx][Ee]|\\[Ii][Nn][Ss][Tt][Aa][Ll][Ll][Uu][Tt][Ii][Ll]\.[Ee][Xx][Ee]|\\[Rr][Ee][Gg][Aa][Ss][Mm]\.[Ee][Xx][Ee]|\\[Rr][Ee][Gg][Ss][Vv][Cc][Ss]\.[Ee][Xx][Ee]|\\[Mm][Ss][Bb][Uu][Ii][Ll][Dd]\.[Ee][Xx][Ee]|\\[Cc][Ee][Rr][Tt][Uu][Tt][Ii][Ll]\.[Ee][Xx][Ee]|\\[Bb][Ii][Tt][Ss][Aa][Dd][Mm][Ii][Nn]\.[Ee][Xx][Ee]|\\[Ww][Mm][Ii][Cc]\.[Ee][Xx][Ee]|\\[Cc][Mm][Ss][Tt][Pp]\.[Ee][Xx][Ee]|\\[Oo][Dd][Bb][Cc][Cc][Oo][Nn][Ff]\.[Ee][Xx][Ee]|\\[Ff][Oo][Rr][Ff][Ii][Ll][Ee][Ss]\.[Ee][Xx][Ee]|\\[Pp][Cc][Aa][Ll][Uu][Aa]\.[Ee][Xx][Ee]|\\[Mm][Aa][Vv][Ii][Nn][Jj][Ee][Cc][Tt]\.[Ee][Xx][Ee]|\\[Ss][Cc][Rr][Ii][Pp][Tt][Rr][Uu][Nn][Nn][Ee][Rr]\.[Ee][Xx][Ee])/'
-      pivot_on: [host]
-      window: 1h
-    - name: "DLL sideloading / execution from user-writable paths on this host"
-      query: '((data_win_system_eventID:"7" AND (data_win_eventdata_imageLoaded:/.*\\[Uu][Ss][Ee][Rr][Ss]\\.*/ OR data_win_eventdata_imageLoaded:/.*\\[Pp][Rr][Oo][Gg][Rr][Aa][Mm][Dd][Aa][Tt][Aa]\\.*/ OR data_win_eventdata_imageLoaded:/.*\\[Ww][Ii][Nn][Dd][Oo][Ww][Ss]\\[Tt][Ee][Mm][Pp]\\.*/ OR data_win_eventdata_imageLoaded:/.*\\[Aa][Pp][Pp][Dd][Aa][Tt][Aa]\\.*/ OR data_win_eventdata_imageLoaded:/.*\\[Pp][Uu][Bb][Ll][Ii][Cc]\\.*/ OR data_win_eventdata_imageLoaded:/.*\\\$[Rr][Ee][Cc][Yy][Cc][Ll][Ee].*/)) OR (data_win_system_eventID:"1" AND (data_win_eventdata_image:/.*\\[Uu][Ss][Ee][Rr][Ss]\\.*/ OR data_win_eventdata_image:/.*\\[Pp][Rr][Oo][Gg][Rr][Aa][Mm][Dd][Aa][Tt][Aa]\\.*/ OR data_win_eventdata_image:/.*\\[Ww][Ii][Nn][Dd][Oo][Ww][Ss]\\[Tt][Ee][Mm][Pp]\\.*/ OR data_win_eventdata_image:/.*\\[Aa][Pp][Pp][Dd][Aa][Tt][Aa]\\.*/ OR data_win_eventdata_image:/.*\\[Pp][Uu][Bb][Ll][Ii][Cc]\\.*/ OR data_win_eventdata_image:/.*\\\$[Rr][Ee][Cc][Yy][Cc][Ll][Ee].*/)))'
-      pivot_on: [host]
-      window: 2h
-    - name: "Autostart persistence written on this host (Run keys, services, IFEO)"
-      query: '(data_win_system_eventID:"12" OR data_win_system_eventID:"13") AND (data_win_eventdata_targetObject:/.*[Cc][Uu][Rr][Rr][Ee][Nn][Tt][Vv][Ee][Rr][Ss][Ii][Oo][Nn]\\[Rr][Uu][Nn].*/ OR data_win_eventdata_targetObject:/.*[Cc][Uu][Rr][Rr][Ee][Nn][Tt][Vv][Ee][Rr][Ss][Ii][Oo][Nn]\\[Rr][Uu][Nn][Oo][Nn][Cc][Ee].*/ OR data_win_eventdata_targetObject:/.*[Cc][Uu][Rr][Rr][Ee][Nn][Tt][Cc][Oo][Nn][Tt][Rr][Oo][Ll][Ss][Ee][Tt]\\[Ss][Ee][Rr][Vv][Ii][Cc][Ee][Ss]\\.*/ OR data_win_eventdata_targetObject:/.*[Ii][Mm][Aa][Gg][Ee] [Ff][Ii][Ll][Ee] [Ee][Xx][Ee][Cc][Uu][Tt][Ii][Oo][Nn] [Oo][Pp][Tt][Ii][Oo][Nn][Ss]\\.*/ OR data_win_eventdata_targetObject:/.*[Ww][Ii][Nn][Ll][Oo][Gg][Oo][Nn]\\[Ss][Hh][Ee][Ll][Ll].*/ OR data_win_eventdata_targetObject:/.*[Ww][Ii][Nn][Ll][Oo][Gg][Oo][Nn]\\[Uu][Ss][Ee][Rr][Ii][Nn][Ii][Tt].*/ OR data_win_eventdata_targetObject:/.*[Cc][Uu][Rr][Rr][Ee][Nn][Tt][Vv][Ee][Rr][Ss][Ii][Oo][Nn]\\[Ee][Xx][Pp][Ll][Oo][Rr][Ee][Rr]\\[Rr][Uu][Nn].*/ OR data_win_eventdata_targetObject:/.*[Pp][Oo][Ll][Ii][Cc][Ii][Ee][Ss]\\[Ee][Xx][Pp][Ll][Oo][Rr][Ee][Rr]\\[Rr][Uu][Nn].*/ OR data_win_eventdata_targetObject:/.*[Cc][Uu][Rr][Rr][Ee][Nn][Tt][Vv][Ee][Rr][Ss][Ii][Oo][Nn]\\[Ww][Ii][Nn][Dd][Oo][Ww][Ss]\\[Ll][Oo][Aa][Dd].*/)'
-      pivot_on: [host]
-      window: 4h
+  # Behaviour-targeted hunts the engine runs around the alert (not a sweep).
+  - name: C2 egress from the persistence svchost (network + DNS)
+    query: (data_win_system_eventID:"3" OR data_win_system_eventID:"22") AND data_win_eventdata_image:/.*\\[Ss][Vv][Cc][Hh][Oo][Ss][Tt]\.[Ee][Xx][Ee]/
+    pivot_on:
+    - host
+    window: 2h
+  - name: Service registry pointed at a user-writable DLL/ImagePath on this host
+    query: data_win_system_eventID:"13" AND (data_win_eventdata_targetObject:/.*\\[Ss][Ee][Rr][Vv][Ii][Cc][Ee][Ss]\\.*\\[Ss][Ee][Rr][Vv][Ii][Cc][Ee][Dd][Ll][Ll]/ OR data_win_eventdata_targetObject:/.*\\[Ss][Ee][Rr][Vv][Ii][Cc][Ee][Ss]\\.*\\[Ii][Mm][Aa][Gg][Ee][Pp][Aa][Tt][Hh]/) AND (data_win_eventdata_details:/.*\\[Aa][Pp][Pp][Dd][Aa][Tt][Aa]\\.*/ OR data_win_eventdata_details:/.*\\[Uu][Ss][Ee][Rr][Ss]\\.*/ OR data_win_eventdata_details:/.*\\[Pp][Rr][Oo][Gg][Rr][Aa][Mm][Dd][Aa][Tt][Aa]\\.*/)
+    pivot_on:
+    - host
+    window: 6h
+  - name: svchost loading any DLL from a user-writable path (ColdSteel variant coverage)
+    query: data_win_system_eventID:"7" AND data_win_eventdata_image:/.*\\[Ss][Vv][Cc][Hh][Oo][Ss][Tt]\.[Ee][Xx][Ee]/ AND (data_win_eventdata_imageLoaded:/.*\\[Aa][Pp][Pp][Dd][Aa][Tt][Aa]\\.*/ OR data_win_eventdata_imageLoaded:/.*\\[Uu][Ss][Ee][Rr][Ss]\\.*/ OR data_win_eventdata_imageLoaded:/.*\\[Pp][Rr][Oo][Gg][Rr][Aa][Mm][Dd][Aa][Tt][Aa]\\.*/ OR data_win_eventdata_imageLoaded:/.*\\[Tt][Ee][Mm][Pp]\\.*/)
+    pivot_on:
+    - host
+    window: 2h
+  - name: rundll32 spawned by svchost calling newdev.dll / ColdSteel exports
+    query: data_win_system_eventID:"1" AND data_win_eventdata_parentImage:/.*\\[Ss][Vv][Cc][Hh][Oo][Ss][Tt]\.[Ee][Xx][Ee]/ AND data_win_eventdata_image:/.*\\[Rr][Uu][Nn][Dd][Ll][Ll]32\.[Ee][Xx][Ee]/ AND (data_win_eventdata_commandLine:/.*[Nn][Ee][Ww][Dd][Ee][Vv]\.[Dd][Ll][Ll].*/ OR data_win_eventdata_commandLine:/.*[Ss][Ee][Rr][Vv][Ii][Cc][Ee][Mm][Aa][Ii][Nn].*/ OR data_win_eventdata_commandLine:/.*[Uu][Pp][Dd][Aa][Tt][Ee][Dd][Rr][Ii][Vv][Ee][Rr][Ff][Oo][Rr][Pp][Ll][Uu][Gg][Aa][Nn][Dd][Pp][Ll][Aa][Yy][Dd][Ee][Vv][Ii][Cc][Ee][Ss][Ww].*/ OR data_win_eventdata_commandLine:/.*[Dd][Ii][Uu][Nn][Ii][Nn][Ss][Tt][Aa][Ll][Ll][Dd][Ee][Vv][Ii][Cc][Ee].*/)
+    pivot_on:
+    - host
+    window: 2h

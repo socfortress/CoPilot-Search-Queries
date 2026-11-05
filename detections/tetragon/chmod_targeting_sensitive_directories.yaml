@@ -210,23 +210,58 @@ graylog:
   query: data_process_exec_process_binary:/.*\/[Cc][Hh][Mm][Oo][Dd]/ AND (data_process_exec_process_arguments:/.*\/[Tt][Mm][Pp]\/.*/ OR data_process_exec_process_arguments:/.*\/\.[Ll][Ii][Bb][Rr][Aa][Rr][Yy]\/.*/ OR data_process_exec_process_arguments:/.*\/[Ee][Tt][Cc]\/.*/ OR data_process_exec_process_arguments:/.*\/[Oo][Pp][Tt]\/.*/) AND _exists_:data_process_exec_process_arguments AND _exists_:data_process_exec_parent_arguments AND NOT ((data_process_exec_process_arguments:/.*[Cc][Hh][Mm][Oo][Dd] --[Rr][Ee][Ff][Ee][Rr][Ee][Nn][Cc][Ee]=\/[Ee][Tt][Cc]\/[Ss][Hh][Ee][Ll][Ll][Ss].*/ AND data_process_exec_parent_arguments:/.*\/[Uu][Pp][Dd][Aa][Tt][Ee]-[Ss][Hh][Ee][Ll][Ll][Ss]/) OR (data_process_exec_process_arguments:/.*\/[Ee][Tt][Cc]\/.*/ AND data_process_exec_parent_arguments:/.*\/[Vv][Aa][Rr]\/[Ll][Ii][Bb]\/[Dd][Pp][Kk][Gg]\/[Ii][Nn][Ff][Oo]\/.*/ AND data_process_exec_parent_arguments:/.*\.[Pp][Oo][Ss][Tt][Ii][Nn][Ss][Tt] [Cc][Oo][Nn][Ff][Ii][Gg][Uu][Rr][Ee].*/) OR data_process_exec_process_arguments:/[Cc][Hh][Mm][Oo][Dd] 700 \/[Tt][Mm][Pp]\/[Aa][Pp][Tt]-[Kk][Ee][Yy]-[Gg][Pp][Gg][Hh][Oo][Mm][Ee]\..*/ OR data_process_exec_process_arguments:/[Cc][Hh][Mm][Oo][Dd] 755 \/[Vv][Aa][Rr]\/[Tt][Mm][Pp]\/[Mm][Kk][Ii][Nn][Ii][Tt][Rr][Aa][Mm][Ff][Ss].*/ OR data_process_exec_process_arguments:/[Cc][Hh][Mm][Oo][Dd] 0775 \/[Ee][Tt][Cc]\/[Ll][Aa][Nn][Dd][Ss][Cc][Aa][Pp][Ee]\// OR data_process_exec_process_arguments:/[Cc][Hh][Mm][Oo][Dd] 644 \/[Ee][Tt][Cc]\/[Aa][Pp][Pp][Aa][Rr][Mm][Oo][Rr]\.[Dd]\/[Tt][Uu][Nn][Aa][Bb][Ll][Ee][Ss]\/[Hh][Oo][Mm][Ee]\.[Dd]\/[Uu][Bb][Uu][Nn][Tt][Uu]/)
 
 correlation:
-  # Authored by the correlation engine for review.
+  # Authored per-rule (behaviour-researched) for the correlation engine. Related CoPilot
+  # Searches + telemetry pivots to run around an alert, scoped to its host/user/ip/domain.
+  related_rules:
+  - id: cf610c15-ed71-46e1-bdf8-2bd1a99de6c4
+    name: Download File To Potentially Suspicious Directory Via Wget
+    reason: 'Precursor (delivery): wget -O into /tmp is how the file this chmod makes executable was typically staged. Seeing it just before the chmod confirms a download->arm sequence, not a benign admin permission fix.'
+  - id: a2d9e2f3-0f43-4c7a-bcd9-9acfc0d723aa
+    name: Suspicious Download and Execute Pattern via Curl/Wget
+    reason: 'Precursor/stager: curl or wget pulling content into /tmp or /dev/shm then piping to sh is the multi-stage dropper this chmod +x belongs inside; it pins down the delivery that produced the sensitive-dir file.'
+  - id: 312b42b1-bded-4441-8b58-163a3af58775
+    name: Potentially Suspicious Execution From Tmp Folder
+    reason: 'Immediate follow-on: a binary executing out of /tmp right after is the armed payload running - the chmod +x paying off into execution. This is the single strongest confirmation the chmod was malicious.'
+  - id: 30bcce26-51c5-49f2-99c8-7b59e3af36c7
+    name: Execution Of Script Located In Potentially Suspicious Directory
+    reason: 'Follow-on: a shell (bash/sh -c) running a script out of /tmp is the chmod''d script being executed; together they are the stage->arm->run half of the kill chain on the same host.'
+  - id: 6b14bac8-3e3a-4324-8109-42f0546a347f
+    name: Scheduled Cron Task/Job - Linux
+    reason: 'Follow-on persistence: crontab registering a job from /tmp means the actor is persisting the very payload they just made executable in a staging directory (T1053.003).'
+  - id: 34979410-e4b5-4e5d-8cfb-389fdff05c12
+    name: Remove Immutable File Attribute
+    reason: 'Sibling permission abuse under the same technique (T1222.002): chattr -i unlocks an immutable /etc file so it can then be chmod''d or edited; the two are routinely chained when tampering with protected system files.'
+  - id: 86157017-c2b1-4d4a-8c33-93b8e67e4af4
+    name: Potential Suspicious Change To Sensitive/Critical Files
+    reason: 'Overlaps the /etc arm of this rule: editing /etc/sudoers, cron, init.d or *.conf is the persistence/privilege/disruption goal that chmod''ing files under /etc serves, corroborating deliberate tampering over a one-off permission change.'
+  - id: linux-setuid-using-chmod-utility-001
+    name: Linux Setuid Using Chmod Utility
+    reason: 'Sibling escalation via the same chmod tool: setting the setuid bit (chmod u+s / 4755) on a sensitive-dir file is the privilege-escalation face of this activity; cross-source (auditd/full_log) corroboration of chmod abuse on the same host.'
+  window: 2h
   enrichment_searches:
-  # Rule-specific telemetry pivots the engine runs around an alert from this rule,
-  # scoped to the alert's host/user/IP within the window (behaviour-targeted, not a sweep).
-    - name: "Permission / ownership changes on this host"
-      query: 'data_process_exec_process_binary:/.*(\/[Cc][Hh][Mm][Oo][Dd]|\/[Cc][Hh][Oo][Ww][Nn]|\/[Cc][Hh][Aa][Tt][Tt][Rr]|\/[Ss][Ee][Tt][Ff][Aa][Cc][Ll])/'
-      pivot_on: [host]
-      window: 2h
-    - name: "Other executions of this tool-set on this host (any arguments)"
-      query: 'data_process_exec_process_binary:/.*(\/[Cc][Hh][Mm][Oo][Dd])/'
-      pivot_on: [host]
-      window: 2h
-    - name: "Shell / interpreter execution on this host"
-      query: '((data_process_exec_process_binary:/.*(\/[Bb][Aa][Ss][Hh]|\/[Ss][Hh]|\/[Dd][Aa][Ss][Hh]|\/[Zz][Ss][Hh]|\/[Kk][Ss][Hh]|\/[Aa][Ss][Hh]|\/[Bb][Uu][Ss][Yy][Bb][Oo][Xx])/) OR (data_process_exec_process_binary:/.*(\/[Pp][Yy][Tt][Hh][Oo][Nn]|\/[Pp][Yy][Tt][Hh][Oo][Nn]3|\/[Pp][Ee][Rr][Ll]|\/[Rr][Uu][Bb][Yy]|\/[Pp][Hh][Pp]|\/[Nn][Oo][Dd][Ee]|\/[Ll][Uu][Aa]|\/[Aa][Ww][Kk])/))'
-      pivot_on: [host]
-      window: 1h
-    - name: "Reconnaissance commands on this host"
-      query: 'data_process_exec_process_binary:/.*(\/[Ww][Hh][Oo][Aa][Mm][Ii]|\/[Ii][Dd]|\/[Uu][Nn][Aa][Mm][Ee]|\/[Hh][Oo][Ss][Tt][Nn][Aa][Mm][Ee]|\/[Hh][Oo][Ss][Tt][Nn][Aa][Mm][Ee][Cc][Tt][Ll]|\/[Ss][Ss]|\/[Nn][Ee][Tt][Ss][Tt][Aa][Tt]|\/[Ii][Ff][Cc][Oo][Nn][Ff][Ii][Gg]|\/[Aa][Rr][Pp]|\/[Ww]|\/[Ww][Hh][Oo]|\/[Ll][Aa][Ss][Tt]|\/[Ll][Ss][Oo][Ff]|\/[Nn][Mm][Aa][Pp]|\/[Dd][Ii][Gg]|\/[Ff][Ii][Nn][Dd])/'
-      pivot_on: [host]
-      window: 1h
+  # Behaviour-targeted hunts the engine runs around the alert (not a sweep).
+  - name: Payload delivery into staging dirs (wget/curl/scp/ftp -> /tmp,/opt,/var/tmp,/dev/shm)
+    query: (data_process_exec_process_binary:/.*\/([Ww][Gg][Ee][Tt]|[Cc][Uu][Rr][Ll]|[Ss][Cc][Pp]|[Ss][Ff][Tt][Pp]|[Tt][Ff][Tt][Pp]|[Ff][Tt][Pp])/) AND (data_process_exec_process_arguments:/.*\/[Tt][Mm][Pp]\/.*/ OR data_process_exec_process_arguments:/.*\/[Oo][Pp][Tt]\/.*/ OR data_process_exec_process_arguments:/.*\/[Dd][Ee][Vv]\/[Ss][Hh][Mm]\/.*/ OR data_process_exec_process_arguments:/.*\/[Vv][Aa][Rr]\/[Tt][Mm][Pp]\/.*/)
+    pivot_on:
+    - host
+    window: 2h
+  - name: Armed binary executing from a staging directory (/tmp,/var/tmp,/dev/shm)
+    query: (data_process_exec_process_binary:/\/[Tt][Mm][Pp]\/.*/ OR data_process_exec_process_binary:/\/[Vv][Aa][Rr]\/[Tt][Mm][Pp]\/.*/ OR data_process_exec_process_binary:/\/[Dd][Ee][Vv]\/[Ss][Hh][Mm]\/.*/)
+    pivot_on:
+    - host
+    window: 2h
+  - name: Interpreter/shell running a script out of a staging directory
+    query: ((data_process_exec_process_binary:/.*\/([Bb][Aa][Ss][Hh]|[Ss][Hh]|[Dd][Aa][Ss][Hh]|[Zz][Ss][Hh]|[Kk][Ss][Hh])/ AND data_process_exec_process_arguments:/.* -[Cc] .*/) OR data_process_exec_process_binary:/.*\/([Pp][Yy][Tt][Hh][Oo][Nn]3?|[Pp][Ee][Rr][Ll]|[Rr][Uu][Bb][Yy]|[Pp][Hh][Pp])/) AND (data_process_exec_process_arguments:/.*\/[Tt][Mm][Pp]\/.*/ OR data_process_exec_process_arguments:/.*\/[Dd][Ee][Vv]\/[Ss][Hh][Mm]\/.*/ OR data_process_exec_process_arguments:/.*\/[Vv][Aa][Rr]\/[Tt][Mm][Pp]\/.*/)
+    pivot_on:
+    - host
+    window: 2h
+  - name: Privilege-escalation permission bits (chmod setuid/setgid, setcap, chattr immutable)
+    query: (data_process_exec_process_binary:/.*\/[Cc][Hh][Mm][Oo][Dd]/ AND (data_process_exec_process_arguments:/.*\+[Ss].*/ OR data_process_exec_process_arguments:/.*[ ][246][0-7][0-7][0-7].*/)) OR data_process_exec_process_binary:/.*\/[Ss][Ee][Tt][Cc][Aa][Pp]/ OR (data_process_exec_process_binary:/.*\/[Cc][Hh][Aa][Tt][Tt][Rr]/ AND data_process_exec_process_arguments:/.*[ ][+-][Ii].*/)
+    pivot_on:
+    - host
+    window: 2h
+  - name: Persistence establishment (crontab, systemctl enable, writes under /etc cron/systemd/init.d/profile)
+    query: (data_process_exec_process_binary:/.*\/[Cc][Rr][Oo][Nn][Tt][Aa][Bb]/) OR (data_process_exec_process_binary:/.*\/[Ss][Yy][Ss][Tt][Ee][Mm][Cc][Tt][Ll]/ AND data_process_exec_process_arguments:/.*([Ee][Nn][Aa][Bb][Ll][Ee]|[Dd][Aa][Ee][Mm][Oo][Nn]-[Rr][Ee][Ll][Oo][Aa][Dd]).*/) OR data_process_exec_process_arguments:/.*\/[Ee][Tt][Cc]\/([Cc][Rr][Oo][Nn]|[Ss][Yy][Ss][Tt][Ee][Mm][Dd]|[Ii][Nn][Ii][Tt]\.[Dd]|[Rr][Cc]\.[Ll][Oo][Cc][Aa][Ll]|[Pp][Rr][Oo][Ff][Ii][Ll][Ee]).*/
+    pivot_on:
+    - host
+    window: 4h

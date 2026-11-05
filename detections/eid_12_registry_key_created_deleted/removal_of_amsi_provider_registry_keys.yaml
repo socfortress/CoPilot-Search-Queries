@@ -169,19 +169,58 @@ graylog:
   query: data_win_system_eventID:"12" AND (data_win_eventdata_targetObject:/.*\{2781761[Ee]-28[Ee]0-4109-99[Ff][Ee]-[Bb]9[Dd]127[Cc]57[Aa][Ff][Ee]\}/ OR data_win_eventdata_targetObject:/.*\{[Aa]7[Cc]452[Ee][Ff]-8[Ee]9[Ff]-42[Ee][Bb]-9[Ff]2[Bb]-245613[Cc][Aa]0[Dd][Cc]9\}/) AND _exists_:data_win_eventdata_image AND NOT ((data_win_eventdata_image:/[Cc]:\\[Pp][Rr][Oo][Gg][Rr][Aa][Mm][Dd][Aa][Tt][Aa]\\[Mm][Ii][Cc][Rr][Oo][Ss][Oo][Ff][Tt]\\[Ww][Ii][Nn][Dd][Oo][Ww][Ss] [Dd][Ee][Ff][Ee][Nn][Dd][Ee][Rr]\\[Pp][Ll][Aa][Tt][Ff][Oo][Rr][Mm]\\.*/ OR data_win_eventdata_image:/[Cc]:\\[Pp][Rr][Oo][Gg][Rr][Aa][Mm] [Ff][Ii][Ll][Ee][Ss]\\[Ww][Ii][Nn][Dd][Oo][Ww][Ss] [Dd][Ee][Ff][Ee][Nn][Dd][Ee][Rr]\\.*/ OR data_win_eventdata_image:/[Cc]:\\[Pp][Rr][Oo][Gg][Rr][Aa][Mm] [Ff][Ii][Ll][Ee][Ss] \([Xx]86\)\\[Ww][Ii][Nn][Dd][Oo][Ww][Ss] [Dd][Ee][Ff][Ee][Nn][Dd][Ee][Rr]\\.*/) AND data_win_eventdata_image:/.*\\[Mm][Ss][Mm][Pp][Ee][Nn][Gg]\.[Ee][Xx][Ee]/)
 
 correlation:
-  # Authored by the correlation engine for review.
+  # Authored per-rule (behaviour-researched) for the correlation engine. Related CoPilot
+  # Searches + telemetry pivots to run around an alert, scoped to its host/user/ip/domain.
+  related_rules:
+  - id: 7dbbcac2-57a0-45ac-b306-ff30a8bd2981
+    name: Windows AMSI Related Registry Tampering Via CommandLine
+    reason: Process-creation (EID 1) view of AMSI registry tampering by reg.exe/PowerShell -- the same class of elevated tool that performs this provider-key deletion; its hit names the process and command line behind the EID 12 delete.
+  - id: 33efc23c-6ea2-4503-8cfe-bdf82ce8f705
+    name: Potential Persistence Via New AMSI Providers - Registry
+    reason: Writes under the very same HKLM\SOFTWARE\Microsoft\AMSI\Providers subtree this rule watches for deletion; attackers who remove the real Defender provider often register a rogue/fake one, so both firing on one host is one AMSI-provider manipulation.
+  - id: 160d2780-31f7-4922-8b3a-efce30e63e96
+    name: Potential AMSI COM Server Hijacking
+    reason: Neuters AMSI by breaking its COM provider registration (CLSID InprocServer32) -- the same objective (kill AMSI via its registration) reached by a sibling registry method; co-firing confirms a determined AMSI-neutering effort.
+  - id: aa37cbb0-da36-42cb-a90f-fdf216fc7467
+    name: AMSI Disabled via Registry Modification
+    reason: Sets AmsiEnable=0 -- the registry-value variant of disabling AMSI; adversaries commonly try several AMSI-disable methods in one session, so this on the same host corroborates the provider-key deletion.
+  - id: 30edb182-aa75-42c0-b0a9-e998bb29067c
+    name: Potential AMSI Bypass Via .NET Reflection
+    reason: In-process amsiInitFailed bypass -- a complementary AMSI kill that covers the current process when the registry route is insufficient; seen alongside, it widens a single evasion event into a campaign.
+  - id: e0d6c087-2d1c-47fd-8799-3904103c5a98
+    name: AMSI Bypass Pattern Assembly GetType
+    reason: Obfuscated AMSI-bypass PowerShell -- the kind of script that runs once AMSI is blinded; a strong follow-on marking the payload/execution stage after the provider keys are removed.
+  - id: a21e3484-c94d-11eb-b55b-acde48001122
+    name: Unloading AMSI via Reflection
+    reason: In-memory AMSI tampering via System.Management.Automation.Amsi -- co-occurring AMSI neutralization in the same session, confirming intent to execute unscanned code right after the registry bypass.
+  - id: 93d298a1-d28f-47f1-a468-d971e7796679
+    name: Disable Tamper Protection on Windows Defender
+    reason: The elevated actor disabling Defender's self-protection in the same defense-evasion phase -- clearing the way to freely tamper with Defender/AMSI registration; strongly co-occurring with killing the Defender AMSI provider.
+  window: 2h
   enrichment_searches:
-  # Rule-specific telemetry pivots the engine runs around an alert from this rule,
-  # scoped to the alert's host/user/IP within the window (behaviour-targeted, not a sweep).
-    - name: "Other executions of this tool-set on this host (any arguments)"
-      query: 'data_win_system_eventID:"1" AND data_win_eventdata_image:/.*(\\[Mm][Ss][Mm][Pp][Ee][Nn][Gg]\.[Ee][Xx][Ee])/'
-      pivot_on: [host]
-      window: 2h
-    - name: "Autostart persistence written on this host"
-      query: '(data_win_system_eventID:"12" OR data_win_system_eventID:"13") AND (data_win_eventdata_targetObject:/.*[Cc][Uu][Rr][Rr][Ee][Nn][Tt][Vv][Ee][Rr][Ss][Ii][Oo][Nn]\\[Rr][Uu][Nn].*/ OR data_win_eventdata_targetObject:/.*[Cc][Uu][Rr][Rr][Ee][Nn][Tt][Vv][Ee][Rr][Ss][Ii][Oo][Nn]\\[Rr][Uu][Nn][Oo][Nn][Cc][Ee].*/ OR data_win_eventdata_targetObject:/.*[Cc][Uu][Rr][Rr][Ee][Nn][Tt][Cc][Oo][Nn][Tt][Rr][Oo][Ll][Ss][Ee][Tt]\\[Ss][Ee][Rr][Vv][Ii][Cc][Ee][Ss]\\.*/ OR data_win_eventdata_targetObject:/.*[Ii][Mm][Aa][Gg][Ee] [Ff][Ii][Ll][Ee] [Ee][Xx][Ee][Cc][Uu][Tt][Ii][Oo][Nn] [Oo][Pp][Tt][Ii][Oo][Nn][Ss]\\.*/ OR data_win_eventdata_targetObject:/.*[Ww][Ii][Nn][Ll][Oo][Gg][Oo][Nn]\\[Ss][Hh][Ee][Ll][Ll].*/ OR data_win_eventdata_targetObject:/.*[Ww][Ii][Nn][Ll][Oo][Gg][Oo][Nn]\\[Uu][Ss][Ee][Rr][Ii][Nn][Ii][Tt].*/ OR data_win_eventdata_targetObject:/.*[Cc][Uu][Rr][Rr][Ee][Nn][Tt][Vv][Ee][Rr][Ss][Ii][Oo][Nn]\\[Ee][Xx][Pp][Ll][Oo][Rr][Ee][Rr]\\[Rr][Uu][Nn].*/ OR data_win_eventdata_targetObject:/.*[Pp][Oo][Ll][Ii][Cc][Ii][Ee][Ss]\\[Ee][Xx][Pp][Ll][Oo][Rr][Ee][Rr]\\[Rr][Uu][Nn].*/ OR data_win_eventdata_targetObject:/.*[Cc][Uu][Rr][Rr][Ee][Nn][Tt][Vv][Ee][Rr][Ss][Ii][Oo][Nn]\\[Ww][Ii][Nn][Dd][Oo][Ww][Ss]\\[Ll][Oo][Aa][Dd].*/)'
-      pivot_on: [host]
-      window: 2h
-    - name: "Security-tool / Defender tampering on this host"
-      query: 'data_win_system_eventID:"1" AND (data_win_eventdata_commandLine:/.*[Ss][Ee][Tt]-[Mm][Pp][Pp][Rr][Ee][Ff][Ee][Rr][Ee][Nn][Cc][Ee].*/ OR data_win_eventdata_commandLine:/.*[Dd][Ii][Ss][Aa][Bb][Ll][Ee][Rr][Ee][Aa][Ll][Tt][Ii][Mm][Ee][Mm][Oo][Nn][Ii][Tt][Oo][Rr][Ii][Nn][Gg].*/ OR data_win_eventdata_commandLine:/.*[Dd][Ii][Ss][Aa][Bb][Ll][Ee][Aa][Nn][Tt][Ii][Ss][Pp][Yy][Ww][Aa][Rr][Ee].*/ OR data_win_eventdata_commandLine:/.*[Aa][Dd][Dd]-[Mm][Pp][Pp][Rr][Ee][Ff][Ee][Rr][Ee][Nn][Cc][Ee] -[Ee][Xx][Cc][Ll][Uu][Ss][Ii][Oo][Nn][Pp][Aa][Tt][Hh].*/ OR data_win_eventdata_commandLine:/.*[Ww][Ee][Vv][Tt][Uu][Tt][Ii][Ll].*/ OR data_win_eventdata_commandLine:/.*[Cc][Ll][Ee][Aa][Rr]-[Ee][Vv][Ee][Nn][Tt][Ll][Oo][Gg].*/ OR data_win_eventdata_commandLine:/.*[Ff][Ss][Uu][Tt][Ii][Ll] [Uu][Ss][Nn] [Dd][Ee][Ll][Ee][Tt][Ee][Jj][Oo][Uu][Rr][Nn][Aa][Ll].*/ OR data_win_eventdata_commandLine:/.*[Vv][Ss][Ss][Aa][Dd][Mm][Ii][Nn].*/ OR data_win_eventdata_commandLine:/.*[Ss][Tt][Oo][Pp]-[Ss][Ee][Rr][Vv][Ii][Cc][Ee].*/ OR data_win_eventdata_commandLine:/.*[Ss][Cc] [Ss][Tt][Oo][Pp].*/ OR data_win_eventdata_commandLine:/.*[Ss][Cc] [Cc][Oo][Nn][Ff][Ii][Gg].*/)'
-      pivot_on: [host]
-      window: 2h
+  # Behaviour-targeted hunts the engine runs around the alert (not a sweep).
+  - name: AMSI registration tampering on this host (provider keys, AmsiEnable, COM server)
+    query: (data_win_system_eventID:"12" OR data_win_system_eventID:"13") AND (data_win_eventdata_targetObject:/.*\\[Aa][Mm][Ss][Ii]\\.*/ OR data_win_eventdata_targetObject:/.*[Aa][Mm][Ss][Ii][Ee][Nn][Aa][Bb][Ll][Ee].*/ OR data_win_eventdata_targetObject:/.*\{[Ff][Dd][Bb]00[Ee]52-[Aa]214-4[Aa][Aa]1-8[Ff][Bb][Aa]-4357[Bb][Bb]0072[Ee][Cc]\}.*/)
+    pivot_on:
+    - host
+    window: 2h
+  - name: Process deleting or editing AMSI provider registration via reg.exe / PowerShell
+    query: data_win_system_eventID:"1" AND (data_win_eventdata_commandLine:/.*[Mm][Ii][Cc][Rr][Oo][Ss][Oo][Ff][Tt]\\[Aa][Mm][Ss][Ii].*/ OR data_win_eventdata_commandLine:/.*[Aa][Mm][Ss][Ii][Ee][Nn][Aa][Bb][Ll][Ee].*/ OR data_win_eventdata_commandLine:/.*\{2781761[Ee]-28[Ee]0-4109-99[Ff][Ee]-[Bb]9[Dd]127[Cc]57[Aa][Ff][Ee]\}.*/ OR data_win_eventdata_commandLine:/.*\{[Aa]7[Cc]452[Ee][Ff]-8[Ee]9[Ff]-42[Ee][Bb]-9[Ff]2[Bb]-245613[Cc][Aa]0[Dd][Cc]9\}.*/)
+    pivot_on:
+    - host
+    window: 2h
+  - name: AMSI in-memory bypass in PowerShell script blocks on this host
+    query: data_win_system_eventID:"4104" AND (data_win_eventdata_scriptBlockText:/.*[Aa][Mm][Ss][Ii][Ii][Nn][Ii][Tt][Ff][Aa][Ii][Ll][Ee][Dd].*/ OR data_win_eventdata_scriptBlockText:/.*[Aa][Mm][Ss][Ii][Ss][Cc][Aa][Nn][Bb][Uu][Ff][Ff][Ee][Rr].*/ OR data_win_eventdata_scriptBlockText:/.*[Aa][Mm][Ss][Ii][Uu][Tt][Ii][Ll][Ss].*/ OR data_win_eventdata_scriptBlockText:/.*[Aa][Mm][Ss][Ii][Cc][Oo][Nn][Tt][Ee][Xx][Tt].*/ OR data_win_eventdata_scriptBlockText:/.*[Ss][Yy][Ss][Tt][Ee][Mm]\.[Mm][Aa][Nn][Aa][Gg][Ee][Mm][Ee][Nn][Tt]\.[Aa][Uu][Tt][Oo][Mm][Aa][Tt][Ii][Oo][Nn]\.[Aa][Mm][Ss][Ii].*/)
+    pivot_on:
+    - host
+    window: 4h
+  - name: Windows Defender impairment on this host (same evasion phase)
+    query: data_win_system_eventID:"1" AND (data_win_eventdata_commandLine:/.*[Dd][Ii][Ss][Aa][Bb][Ll][Ee][Rr][Ee][Aa][Ll][Tt][Ii][Mm][Ee][Mm][Oo][Nn][Ii][Tt][Oo][Rr][Ii][Nn][Gg].*/ OR data_win_eventdata_commandLine:/.*[Dd][Ii][Ss][Aa][Bb][Ll][Ee][Ii][Oo][Aa][Vv][Pp][Rr][Oo][Tt][Ee][Cc][Tt][Ii][Oo][Nn].*/ OR data_win_eventdata_commandLine:/.*[Ss][Ee][Tt]-[Mm][Pp][Pp][Rr][Ee][Ff][Ee][Rr][Ee][Nn][Cc][Ee].*/ OR data_win_eventdata_commandLine:/.*[Aa][Dd][Dd]-[Mm][Pp][Pp][Rr][Ee][Ff][Ee][Rr][Ee][Nn][Cc][Ee].*/ OR data_win_eventdata_commandLine:/.*-[Ee][Xx][Cc][Ll][Uu][Ss][Ii][Oo][Nn][Pp][Aa][Tt][Hh].*/ OR data_win_eventdata_commandLine:/.*-[Ee][Xx][Cc][Ll][Uu][Ss][Ii][Oo][Nn][Pp][Rr][Oo][Cc][Ee][Ss][Ss].*/ OR data_win_eventdata_commandLine:/.*[Rr][Ee][Mm][Oo][Vv][Ee][Dd][Ee][Ff][Ii][Nn][Ii][Tt][Ii][Oo][Nn][Ss].*/)
+    pivot_on:
+    - host
+    window: 2h
+  - name: Outbound connections from script interpreters on this host (post-bypass C2)
+    query: data_win_system_eventID:"3" AND (data_win_eventdata_image:/.*\\[Pp][Oo][Ww][Ee][Rr][Ss][Hh][Ee][Ll][Ll]\.[Ee][Xx][Ee]/ OR data_win_eventdata_image:/.*\\[Pp][Ww][Ss][Hh]\.[Ee][Xx][Ee]/ OR data_win_eventdata_image:/.*\\[Mm][Ss][Hh][Tt][Aa]\.[Ee][Xx][Ee]/ OR data_win_eventdata_image:/.*\\[Ww][Ss][Cc][Rr][Ii][Pp][Tt]\.[Ee][Xx][Ee]/ OR data_win_eventdata_image:/.*\\[Cc][Ss][Cc][Rr][Ii][Pp][Tt]\.[Ee][Xx][Ee]/ OR data_win_eventdata_image:/.*\\[Rr][Uu][Nn][Dd][Ll][Ll]32\.[Ee][Xx][Ee]/ OR data_win_eventdata_image:/.*\\[Rr][Ee][Gg][Ss][Vv][Rr]32\.[Ee][Xx][Ee]/)
+    pivot_on:
+    - host
+    window: 4h

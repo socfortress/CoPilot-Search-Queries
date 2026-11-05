@@ -193,23 +193,58 @@ graylog:
   query: (data_process_exec_parent_binary:/.*\/[Rr][Ss][Yy][Nn][Cc]/ OR data_process_exec_parent_binary:/.*\/[Rr][Ss][Yy][Nn][Cc][Dd]/) AND (data_process_exec_process_binary:/.*\/[Aa][Ss][Hh]/ OR data_process_exec_process_binary:/.*\/[Bb][Aa][Ss][Hh]/ OR data_process_exec_process_binary:/.*\/[Cc][Ss][Hh]/ OR data_process_exec_process_binary:/.*\/[Dd][Aa][Ss][Hh]/ OR data_process_exec_process_binary:/.*\/[Kk][Ss][Hh]/ OR data_process_exec_process_binary:/.*\/[Ss][Hh]/ OR data_process_exec_process_binary:/.*\/[Tt][Cc][Ss][Hh]/ OR data_process_exec_process_binary:/.*\/[Zz][Ss][Hh]/) AND _exists_:data_process_exec_process_arguments AND NOT (data_process_exec_process_arguments:/.* -[Ee] .*/)
 
 correlation:
-  # Authored by the correlation engine for review.
+  # Authored per-rule (behaviour-researched) for the correlation engine. Related CoPilot
+  # Searches + telemetry pivots to run around an alert, scoped to its host/user/ip/domain.
+  related_rules:
+  - id: e2326866-609f-4015-aea9-7ec634e8aa04
+    name: Shell Execution via Rsync - Linux
+    reason: 'Complementary rsync-abuse detection on the same host: it fires when rsync spawns a shell WITH the ''-e'' flag (GTFOBins restricted-shell breakout / local privesc), whereas this rule fires on the no-''-e'' CVE-2024-12084 RCE path. Both mean the rsync/rsyncd binary is the unexpected parent of a shell, so either firing on this host confirms rsync is being abused beyond a single code path.'
+  - id: c4042d54-110d-45dd-a0e1-05c47822c937
+    name: Python Spawning Pretty TTY Via PTY Module
+    reason: A shell spawned by the rsync daemon is non-interactive (no controlling TTY). The attacker's canonical first move is `python -c 'import pty; pty.spawn(...)'` to upgrade that dumb foothold into a real terminal; this firing on the same host right after the rsync shell confirms a human is now driving the RCE session.
+  - id: 7f734ed0-4f47-46c0-837f-6ee62505abd9
+    name: Potential Netcat Reverse Shell Execution
+    reason: The rsync-spawned shell's most common next action is to call back to the operator. `nc/ncat -e <shell>` establishing an outbound reverse shell on the same host within minutes turns this suspicious daemon shell into a confirmed interactive C2 foothold.
+  - id: ea3ecad2-db86-4a89-ad0b-132a10d2db55
+    name: Interactive Bash Suspicious Children
+    reason: Once the foothold is upgraded to `bash -i`, the attacker's hands-on-keyboard commands (base64 decode, pty.spawn, whoami, nc, iptables) become children of that interactive bash and trip this rule. It is the downstream hands-on-keyboard phase of the same intrusion the rsync shell opened.
+  - id: a2d9e2f3-0f43-4c7a-bcd9-9acfc0d723aa
+    name: Suspicious Download and Execute Pattern via Curl/Wget
+    reason: 'After RCE the operator pulls second-stage tooling: curl/wget fetching a script into /tmp or /dev/shm and piping it to `sh -c`. On the same host shortly after the rsync shell, this is the ingress-tool-transfer step that escalates the foothold into a staged implant.'
+  - id: 5cd16c8f-44a6-4654-81e7-a84d6db507d4
+    name: Process Execution From Shared Memory Directory
+    reason: 'Pairs directly with the download step: an implant fetched into /dev/shm is then executed from that RAM-backed tmpfs for fileless staging. A binary running from /dev/shm on the same host corroborates post-exploitation payload execution following the rsync foothold.'
+  - id: 6b14bac8-3e3a-4324-8109-42f0546a347f
+    name: Scheduled Cron Task/Job - Linux
+    reason: 'Persistence objective after the foothold: a crontab job installed from /tmp survives reboot and the eventual rsyncd patch. Seen on the same host after the rsync shell, it marks the attacker moving from transient access to durable persistence.'
+  - id: fa4aaed5-4fe0-498d-bbc0-08e3346387ba
+    name: Copy Passwd Or Shadow From TMP Path
+    reason: 'Credential-access objective: rsyncd frequently runs as root, so dumping /etc/shadow or /etc/passwd is a prime post-RCE goal. A `cp` of passwd/shadow via a /tmp path on the same host after this alert confirms the attacker is harvesting credentials with the compromised daemon''s privileges.'
+  window: 1h
   enrichment_searches:
-  # Rule-specific telemetry pivots the engine runs around an alert from this rule,
-  # scoped to the alert's host/user/IP within the window (behaviour-targeted, not a sweep).
-    - name: "Shell / interpreter execution on this host"
-      query: '((data_process_exec_process_binary:/.*(\/[Bb][Aa][Ss][Hh]|\/[Ss][Hh]|\/[Dd][Aa][Ss][Hh]|\/[Zz][Ss][Hh]|\/[Kk][Ss][Hh]|\/[Aa][Ss][Hh]|\/[Bb][Uu][Ss][Yy][Bb][Oo][Xx])/) OR (data_process_exec_process_binary:/.*(\/[Pp][Yy][Tt][Hh][Oo][Nn]|\/[Pp][Yy][Tt][Hh][Oo][Nn]3|\/[Pp][Ee][Rr][Ll]|\/[Rr][Uu][Bb][Yy]|\/[Pp][Hh][Pp]|\/[Nn][Oo][Dd][Ee]|\/[Ll][Uu][Aa]|\/[Aa][Ww][Kk])/))'
-      pivot_on: [host]
-      window: 1h
-    - name: "Other executions of this tool-set on this host (any arguments)"
-      query: 'data_process_exec_process_binary:/.*(\/[Rr][Ss][Yy][Nn][Cc]|\/[Rr][Ss][Yy][Nn][Cc][Dd]|\/[Aa][Ss][Hh]|\/[Cc][Ss][Hh]|\/[Kk][Ss][Hh]|\/[Tt][Cc][Ss][Hh]|\/[Zz][Ss][Hh])/'
-      pivot_on: [host]
-      window: 2h
-    - name: "Persistence via cron / systemd / shell profiles on this host"
-      query: '((data_process_exec_process_binary:/.*(\/[Cc][Rr][Oo][Nn][Tt][Aa][Bb]|\/[Ss][Yy][Ss][Tt][Ee][Mm][Cc][Tt][Ll]|\/[Aa][Tt]|\/[Uu][Pp][Dd][Aa][Tt][Ee]-[Rr][Cc]\.[Dd])/) OR (data_process_exec_process_arguments:/.*\/[Ee][Tt][Cc]\/[Cc][Rr][Oo][Nn].*/) OR (data_process_exec_process_arguments:/.*\/[Ee][Tt][Cc]\/[Ss][Yy][Ss][Tt][Ee][Mm][Dd].*/) OR (data_process_exec_process_arguments:/.*[Rr][Cc]\.[Ll][Oo][Cc][Aa][Ll].*/) OR (data_process_exec_process_arguments:/.*\.[Bb][Aa][Ss][Hh][Rr][Cc].*/) OR (data_process_exec_process_arguments:/.*\.[Bb][Aa][Ss][Hh]_[Pp][Rr][Oo][Ff][Ii][Ll][Ee].*/) OR (data_process_exec_process_arguments:/.*\/[Ee][Tt][Cc]\/[Pp][Rr][Oo][Ff][Ii][Ll][Ee].*/) OR (data_process_exec_process_arguments:/.*[Aa][Uu][Tt][Hh][Oo][Rr][Ii][Zz][Ee][Dd]_[Kk][Ee][Yy][Ss].*/) OR (data_process_exec_process_arguments:/.*\/[Ee][Tt][Cc]\/[Ii][Nn][Ii][Tt]\.[Dd].*/))'
-      pivot_on: [host]
-      window: 4h
-    - name: "Reconnaissance commands on this host"
-      query: 'data_process_exec_process_binary:/.*(\/[Ww][Hh][Oo][Aa][Mm][Ii]|\/[Ii][Dd]|\/[Uu][Nn][Aa][Mm][Ee]|\/[Hh][Oo][Ss][Tt][Nn][Aa][Mm][Ee]|\/[Hh][Oo][Ss][Tt][Nn][Aa][Mm][Ee][Cc][Tt][Ll]|\/[Ss][Ss]|\/[Nn][Ee][Tt][Ss][Tt][Aa][Tt]|\/[Ii][Ff][Cc][Oo][Nn][Ff][Ii][Gg]|\/[Aa][Rr][Pp]|\/[Ww]|\/[Ww][Hh][Oo]|\/[Ll][Aa][Ss][Tt]|\/[Ll][Ss][Oo][Ff]|\/[Nn][Mm][Aa][Pp]|\/[Dd][Ii][Gg]|\/[Ff][Ii][Nn][Dd])/'
-      pivot_on: [host]
-      window: 1h
+  # Behaviour-targeted hunts the engine runs around the alert (not a sweep).
+  - name: Child processes spawned by rsync / rsyncd (RCE blast radius)
+    query: (data_process_exec_parent_binary:/.*\/[Rr][Ss][Yy][Nn][Cc]/ OR data_process_exec_parent_binary:/.*\/[Rr][Ss][Yy][Nn][Cc][Dd]/)
+    pivot_on:
+    - host
+    window: 1h
+  - name: Reverse shell / C2 callback from the foothold shell
+    query: ((data_process_exec_process_binary:/.*\/([Nn][Cc]|[Nn][Cc][Aa][Tt]|[Nn][Ee][Tt][Cc][Aa][Tt]|[Ss][Oo][Cc][Aa][Tt])/ AND data_process_exec_process_arguments:/.* -[Ee] .*/) OR data_process_exec_process_arguments:/.*\/[Dd][Ee][Vv]\/[Tt][Cc][Pp]\/.*/ OR data_process_exec_process_arguments:/.*[Pp][Tt][Yy]\.[Ss][Pp][Aa][Ww][Nn].*/ OR data_process_exec_process_arguments:/.*[Ss][Oo][Cc][Kk][Ee][Tt]\.[Ss][Oo][Cc][Kk][Ee][Tt].*/)
+    pivot_on:
+    - host
+    window: 1h
+  - name: Second-stage payload download into tmp / shm
+    query: ((data_process_exec_process_binary:/.*\/([Cc][Uu][Rr][Ll]|[Ww][Gg][Ee][Tt]|[Tt][Ff][Tt][Pp])/) AND (data_process_exec_process_arguments:/.*\/[Tt][Mm][Pp]\/.*/ OR data_process_exec_process_arguments:/.*\/[Dd][Ee][Vv]\/[Ss][Hh][Mm]\/.*/ OR data_process_exec_process_arguments:/.*\/[Vv][Aa][Rr]\/[Tt][Mm][Pp]\/.*/))
+    pivot_on:
+    - host
+    window: 2h
+  - name: Execution of a binary from tmpfs (/dev/shm, /tmp, /var/tmp)
+    query: data_process_exec_process_binary:/\/([Dd][Ee][Vv]\/[Ss][Hh][Mm]|[Tt][Mm][Pp]|[Vv][Aa][Rr]\/[Tt][Mm][Pp]|[Rr][Uu][Nn]\/[Ss][Hh][Mm])\/.*/
+    pivot_on:
+    - host
+    window: 2h
+  - name: Privilege escalation or credential theft after the foothold
+    query: ((data_process_exec_process_binary:/.*\/([Pp][Kk][Ee][Xx][Ee][Cc]|[Ss][Uu][Dd][Oo]|[Ss][Uu])/) OR data_process_exec_process_arguments:/.*\/[Ee][Tt][Cc]\/[Ss][Hh][Aa][Dd][Oo][Ww].*/ OR data_process_exec_process_arguments:/.*[Ii][Dd]_[Rr][Ss][Aa].*/ OR data_process_exec_process_arguments:/.* -[Pp][Ee][Rr][Mm] .*4000.*/)
+    pivot_on:
+    - host
+    window: 4h

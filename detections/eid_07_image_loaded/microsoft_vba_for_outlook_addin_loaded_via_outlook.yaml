@@ -139,44 +139,58 @@ graylog:
   query: data_win_system_eventID:"7" AND data_win_eventdata_image:/.*\\[Oo][Uu][Tt][Ll][Oo][Oo][Kk]\.[Ee][Xx][Ee]/ AND data_win_eventdata_imageLoaded:/.*\\[Oo][Uu][Tt][Ll][Vv][Bb][Aa]\.[Dd][Ll][Ll]/
 
 correlation:
-  # Authored by the correlation engine for review. Related CoPilot Searches to run
-  # around an alert from this rule, scoped to the same host/user/IP within the window.
+  # Authored per-rule (behaviour-researched) for the correlation engine. Related CoPilot
+  # Searches + telemetry pivots to run around an alert, scoped to its host/user/ip/domain.
   related_rules:
-    - id: ec570e53-4c76-45a9-804d-dc3f355ff7a7
-      name: "7Zip Compressing Dump Files"
-      reason: "next kill-chain tactic: Collection"
-    - id: 0a1255c5-d732-4b62-ac02-b5152d34fb83
-      name: "ADExplorer Writing Complete AD Snapshot Into .dat File"
-      reason: "next kill-chain tactic: Discovery"
-    - id: 1ea13e8c-03ea-409b-877d-ce5c3d2c1cb3
-      name: "ADFS Database Named Pipe Connection By Uncommon Tool"
-      reason: "next kill-chain tactic: Collection"
-    - id: 75bf09fa-1dd7-4d18-9af9-dd9e492562eb
-      name: "ADSI-Cache File Creation By Uncommon Tool"
-      reason: "next kill-chain tactic: Command and Control"
-    - id: 33a2d1dd-f3b0-40bd-8baf-7974468927cc
-      name: "APT PRIVATELOG Image Load Pattern"
-      reason: "next kill-chain tactic: Privilege Escalation"
-    - id: 9aa01d62-7667-4d3b-acb8-8cb5103e2014
-      name: "APT27 - Emissary Panda Activity"
-      reason: "next kill-chain tactic: Execution"
-  window: 1h
+  - id: 396ae3eb-4174-4b9b-880e-dc0364d78a19
+    name: Potential Persistence Via Outlook LoadMacroProviderOnBoot Setting
+    reason: 'Precursor and direct cause: setting Outlook\LoadMacroProviderOnBoot=1 is the exact registry switch that forces Outlook to load the VBA macro provider (outlvba.dll) on every start. If this fired recently on the host, it explains this very DLL load as attacker-planted persistence rather than an analyst using macros.'
+  - id: 8c31f563-f9a7-450c-bfa8-35f8f32f1f61
+    name: New Outlook Macro Created
+    reason: 'Precursor: VbaProject.OTM is the Outlook macro store that outlvba.dll compiles and runs. A write to it just before this load is the macro that the newly-initialized VBA engine is about to execute.'
+  - id: 117d3d3a-755c-4a61-b23e-9171146d094c
+    name: Suspicious Outlook Macro Created
+    reason: 'Precursor, higher-fidelity: same VbaProject.OTM store, but written by a process other than outlook.exe - i.e. an external tool planted the macro that outlvba.dll then loads and runs. Strongly implicates a malicious macro behind this load.'
+  - id: e3b50fa5-3c3f-444e-937b-0a99d33731cd
+    name: Outlook Macro Execution Without Warning Setting Enabled
+    reason: 'Precursor: Outlook\Security\Level=1 disables the macro-security prompt so the OTM macro runs silently the moment the VBA engine loads. Pairing this with the outlvba load means the macro executed without any user warning.'
+  - id: c3cefdf4-6703-4e1c-bad8-bf422fc5015a
+    name: Outlook Security Settings Updated - Registry
+    reason: 'Precursor, broad safety-net: any tampering with Outlook security-registry values (macro trust, VBA warnings) that weakens Outlook so a loaded macro can run; catches enabling variants the narrow Security\Level rule misses.'
+  - id: 208748f7-881d-47ac-a29c-07ea84bf691d
+    name: Suspicious Outlook Child Process
+    reason: 'Follow-on, the payload: outlook.exe spawning a suspicious child (script interpreter / LOLBin) is what the VBA macro actually does after the engine loads. This is the execution step that turns a benign-looking DLL load into an incident.'
+  - id: e212d415-0e93-435f-9e1a-f29005bb4723
+    name: Suspicious Remote Child Process From Outlook
+    reason: 'Follow-on: the VBA macro launching a child from an SMB/WebDAV remote path - a macro pulling and running a remotely-hosted stage-2 payload after the engine initializes.'
+  - id: a018fdc3-46a3-44e5-9afb-2cd4af1d4b39
+    name: Suspicious Execution From Outlook Temporary Folder
+    reason: 'Co-occurring delivery: a program executed from Outlook''s attachment temp directory is the phishing attachment that commonly delivers the initial access which then weaponizes Outlook VBA. Ties this load back to the inbound email.'
+  window: 2h
   enrichment_searches:
-  # Rule-specific telemetry pivots the engine runs around an alert from this rule,
-  # scoped to the alert's host/user/IP within the window (behaviour-targeted, not a sweep).
-    - name: "Office / browser spawning a script interpreter on this host"
-      query: 'data_win_system_eventID:"1" AND data_win_eventdata_parentImage:/.*(\\[Ww][Ii][Nn][Ww][Oo][Rr][Dd]\.[Ee][Xx][Ee]|\\[Ee][Xx][Cc][Ee][Ll]\.[Ee][Xx][Ee]|\\[Pp][Oo][Ww][Ee][Rr][Pp][Nn][Tt]\.[Ee][Xx][Ee]|\\[Oo][Uu][Tt][Ll][Oo][Oo][Kk]\.[Ee][Xx][Ee]|\\[Mm][Ss][Aa][Cc][Cc][Ee][Ss][Ss]\.[Ee][Xx][Ee]|\\[Mm][Ss][Pp][Uu][Bb]\.[Ee][Xx][Ee]|\\[Vv][Ii][Ss][Ii][Oo]\.[Ee][Xx][Ee]|\\[Cc][Hh][Rr][Oo][Mm][Ee]\.[Ee][Xx][Ee]|\\[Ff][Ii][Rr][Ee][Ff][Oo][Xx]\.[Ee][Xx][Ee]|\\[Mm][Ss][Ee][Dd][Gg][Ee]\.[Ee][Xx][Ee]|\\[Ii][Ee][Xx][Pp][Ll][Oo][Rr][Ee]\.[Ee][Xx][Ee])/ AND data_win_eventdata_image:/.*(\\[Pp][Oo][Ww][Ee][Rr][Ss][Hh][Ee][Ll][Ll]\.[Ee][Xx][Ee]|\\[Pp][Ww][Ss][Hh]\.[Ee][Xx][Ee]|\\[Pp][Oo][Ww][Ee][Rr][Ss][Hh][Ee][Ll][Ll]_[Ii][Ss][Ee]\.[Ee][Xx][Ee]|\\[Cc][Mm][Dd]\.[Ee][Xx][Ee]|\\[Ww][Ss][Cc][Rr][Ii][Pp][Tt]\.[Ee][Xx][Ee]|\\[Cc][Ss][Cc][Rr][Ii][Pp][Tt]\.[Ee][Xx][Ee]|\\[Mm][Ss][Hh][Tt][Aa]\.[Ee][Xx][Ee]|\\[Rr][Uu][Nn][Dd][Ll][Ll]32\.[Ee][Xx][Ee]|\\[Rr][Ee][Gg][Ss][Vv][Rr]32\.[Ee][Xx][Ee])/'
-      pivot_on: [host]
-      window: 1h
-    - name: "Other executions of this tool-set on this host (any arguments)"
-      query: 'data_win_system_eventID:"1" AND data_win_eventdata_image:/.*(\\[Oo][Uu][Tt][Ll][Oo][Oo][Kk]\.[Ee][Xx][Ee])/'
-      pivot_on: [host]
-      window: 2h
-    - name: "Follow-on LOLBin / signed-binary-proxy execution on this host"
-      query: 'data_win_system_eventID:"1" AND data_win_eventdata_image:/.*(\\[Rr][Uu][Nn][Dd][Ll][Ll]32\.[Ee][Xx][Ee]|\\[Rr][Ee][Gg][Ss][Vv][Rr]32\.[Ee][Xx][Ee]|\\[Mm][Ss][Hh][Tt][Aa]\.[Ee][Xx][Ee]|\\[Ii][Nn][Ss][Tt][Aa][Ll][Ll][Uu][Tt][Ii][Ll]\.[Ee][Xx][Ee]|\\[Rr][Ee][Gg][Aa][Ss][Mm]\.[Ee][Xx][Ee]|\\[Rr][Ee][Gg][Ss][Vv][Cc][Ss]\.[Ee][Xx][Ee]|\\[Mm][Ss][Bb][Uu][Ii][Ll][Dd]\.[Ee][Xx][Ee]|\\[Cc][Ee][Rr][Tt][Uu][Tt][Ii][Ll]\.[Ee][Xx][Ee]|\\[Bb][Ii][Tt][Ss][Aa][Dd][Mm][Ii][Nn]\.[Ee][Xx][Ee]|\\[Ww][Mm][Ii][Cc]\.[Ee][Xx][Ee]|\\[Cc][Mm][Ss][Tt][Pp]\.[Ee][Xx][Ee]|\\[Oo][Dd][Bb][Cc][Cc][Oo][Nn][Ff]\.[Ee][Xx][Ee]|\\[Ff][Oo][Rr][Ff][Ii][Ll][Ee][Ss]\.[Ee][Xx][Ee]|\\[Pp][Cc][Aa][Ll][Uu][Aa]\.[Ee][Xx][Ee]|\\[Mm][Aa][Vv][Ii][Nn][Jj][Ee][Cc][Tt]\.[Ee][Xx][Ee]|\\[Ss][Cc][Rr][Ii][Pp][Tt][Rr][Uu][Nn][Nn][Ee][Rr]\.[Ee][Xx][Ee])/'
-      pivot_on: [host]
-      window: 1h
-    - name: "DLL sideloading / execution from user-writable paths on this host"
-      query: '((data_win_system_eventID:"7" AND (data_win_eventdata_imageLoaded:/.*\\[Uu][Ss][Ee][Rr][Ss]\\.*/ OR data_win_eventdata_imageLoaded:/.*\\[Pp][Rr][Oo][Gg][Rr][Aa][Mm][Dd][Aa][Tt][Aa]\\.*/ OR data_win_eventdata_imageLoaded:/.*\\[Ww][Ii][Nn][Dd][Oo][Ww][Ss]\\[Tt][Ee][Mm][Pp]\\.*/ OR data_win_eventdata_imageLoaded:/.*\\[Aa][Pp][Pp][Dd][Aa][Tt][Aa]\\.*/ OR data_win_eventdata_imageLoaded:/.*\\[Pp][Uu][Bb][Ll][Ii][Cc]\\.*/ OR data_win_eventdata_imageLoaded:/.*\\\$[Rr][Ee][Cc][Yy][Cc][Ll][Ee].*/)) OR (data_win_system_eventID:"1" AND (data_win_eventdata_image:/.*\\[Uu][Ss][Ee][Rr][Ss]\\.*/ OR data_win_eventdata_image:/.*\\[Pp][Rr][Oo][Gg][Rr][Aa][Mm][Dd][Aa][Tt][Aa]\\.*/ OR data_win_eventdata_image:/.*\\[Ww][Ii][Nn][Dd][Oo][Ww][Ss]\\[Tt][Ee][Mm][Pp]\\.*/ OR data_win_eventdata_image:/.*\\[Aa][Pp][Pp][Dd][Aa][Tt][Aa]\\.*/ OR data_win_eventdata_image:/.*\\[Pp][Uu][Bb][Ll][Ii][Cc]\\.*/ OR data_win_eventdata_image:/.*\\\$[Rr][Ee][Cc][Yy][Cc][Ll][Ee].*/)))'
-      pivot_on: [host]
-      window: 2h
+  # Behaviour-targeted hunts the engine runs around the alert (not a sweep).
+  - name: 'VBA macro payload: Outlook spawning a script interpreter or LOLBin child'
+    query: data_win_system_eventID:"1" AND data_win_eventdata_parentImage:/.*\\[Oo][Uu][Tt][Ll][Oo][Oo][Kk]\.[Ee][Xx][Ee]/ AND data_win_eventdata_image:/.*(\\[Pp][Oo][Ww][Ee][Rr][Ss][Hh][Ee][Ll][Ll]\.[Ee][Xx][Ee]|\\[Pp][Ww][Ss][Hh]\.[Ee][Xx][Ee]|\\[Cc][Mm][Dd]\.[Ee][Xx][Ee]|\\[Ww][Ss][Cc][Rr][Ii][Pp][Tt]\.[Ee][Xx][Ee]|\\[Cc][Ss][Cc][Rr][Ii][Pp][Tt]\.[Ee][Xx][Ee]|\\[Mm][Ss][Hh][Tt][Aa]\.[Ee][Xx][Ee]|\\[Rr][Uu][Nn][Dd][Ll][Ll]32\.[Ee][Xx][Ee]|\\[Rr][Ee][Gg][Ss][Vv][Rr]32\.[Ee][Xx][Ee]|\\[Cc][Ee][Rr][Tt][Uu][Tt][Ii][Ll]\.[Ee][Xx][Ee]|\\[Bb][Ii][Tt][Ss][Aa][Dd][Mm][Ii][Nn]\.[Ee][Xx][Ee]|\\[Cc][Uu][Rr][Ll]\.[Ee][Xx][Ee]|\\[Mm][Ss][Ii][Ee][Xx][Ee][Cc]\.[Ee][Xx][Ee])/
+    pivot_on:
+    - host
+    window: 1h
+  - name: 'VBA weaponization setup on this host: VbaProject.OTM written or Outlook macro-security registry enabled'
+    query: (data_win_system_eventID:"11" AND data_win_eventdata_targetFilename:/.*\\[Vv][Bb][Aa][Pp][Rr][Oo][Jj][Ee][Cc][Tt]\.[Oo][Tt][Mm]/) OR (data_win_system_eventID:"13" AND (data_win_eventdata_targetObject:/.*\\[Oo][Uu][Tt][Ll][Oo][Oo][Kk]\\[Ll][Oo][Aa][Dd][Mm][Aa][Cc][Rr][Oo][Pp][Rr][Oo][Vv][Ii][Dd][Ee][Rr][Oo][Nn][Bb][Oo][Oo][Tt]/ OR data_win_eventdata_targetObject:/.*\\[Oo][Uu][Tt][Ll][Oo][Oo][Kk]\\[Ss][Ee][Cc][Uu][Rr][Ii][Tt][Yy]\\[Ll][Ee][Vv][Ee][Ll]/ OR data_win_eventdata_targetObject:/.*[Vv][Bb][Aa][Ww][Aa][Rr][Nn][Ii][Nn][Gg][Ss]/))
+    pivot_on:
+    - host
+    window: 6h
+  - name: Outbound C2 / payload download by the VBA host (outlook.exe network and DNS)
+    query: (data_win_system_eventID:"3" OR data_win_system_eventID:"22") AND data_win_eventdata_image:/.*\\[Oo][Uu][Tt][Ll][Oo][Oo][Kk]\.[Ee][Xx][Ee]/
+    pivot_on:
+    - host
+    window: 1h
+  - name: 'Phishing attachment staged: executable or script written to Outlook''s attachment temp directory'
+    query: data_win_system_eventID:"11" AND (data_win_eventdata_targetFilename:/.*\\[Cc][Oo][Nn][Tt][Ee][Nn][Tt]\.[Oo][Uu][Tt][Ll][Oo][Oo][Kk]\\.*/ OR data_win_eventdata_targetFilename:/.*\\[Oo][Ll][Kk][0-9A-Fa-f].*/) AND data_win_eventdata_targetFilename:/.*\.([Ee][Xx][Ee]|[Dd][Ll][Ll]|[Ss][Cc][Rr]|[Jj][Ss]|[Vv][Bb][Ss]|[Vv][Bb][Ee]|[Ww][Ss][Ff]|[Hh][Tt][Aa]|[Pp][Ss]1|[Bb][Aa][Tt]|[Cc][Mm][Dd]|[Ll][Nn][Kk]|[Ii][Ss][Oo]|[Dd][Oo][Cc][Mm]|[Xx][Ll][Ss][Mm]|[Pp][Pp][Tt][Mm])/
+    pivot_on:
+    - host
+    window: 6h
+  - name: 'Persistence consolidation after the macro: Run-key or scheduled-task creation on this host'
+    query: (data_win_system_eventID:"13" AND (data_win_eventdata_targetObject:/.*\\[Cc][Uu][Rr][Rr][Ee][Nn][Tt][Vv][Ee][Rr][Ss][Ii][Oo][Nn]\\[Rr][Uu][Nn].*/ OR data_win_eventdata_targetObject:/.*\\[Cc][Uu][Rr][Rr][Ee][Nn][Tt][Vv][Ee][Rr][Ss][Ii][Oo][Nn]\\[Rr][Uu][Nn][Oo][Nn][Cc][Ee].*/)) OR (data_win_system_eventID:"1" AND data_win_eventdata_image:/.*\\[Ss][Cc][Hh][Tt][Aa][Ss][Kk][Ss]\.[Ee][Xx][Ee]/)
+    pivot_on:
+    - host
+    window: 2h

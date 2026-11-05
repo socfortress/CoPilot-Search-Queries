@@ -169,19 +169,58 @@ graylog:
   query: data_win_system_eventID:"7" AND data_win_eventdata_image:/.*\\[Cc][Mm][Ss][Tt][Pp]\.[Ee][Xx][Ee]/ AND (data_win_eventdata_imageLoaded:/.*\\[Pp][Ee][Rr][Ff][Ll][Oo][Gg][Ss]\\.*/ OR data_win_eventdata_imageLoaded:/.*\\[Pp][Rr][Oo][Gg][Rr][Aa][Mm][Dd][Aa][Tt][Aa]\\.*/ OR data_win_eventdata_imageLoaded:/.*\\[Uu][Ss][Ee][Rr][Ss]\\.*/ OR data_win_eventdata_imageLoaded:/.*\\[Ww][Ii][Nn][Dd][Oo][Ww][Ss]\\[Tt][Ee][Mm][Pp]\\.*/ OR data_win_eventdata_imageLoaded:/.*[Cc]:\\[Tt][Ee][Mm][Pp]\\.*/) AND (data_win_eventdata_imageLoaded:/.*\.[Dd][Ll][Ll]/ OR data_win_eventdata_imageLoaded:/.*\.[Oo][Cc][Xx]/)
 
 correlation:
-  # Authored by the correlation engine for review.
+  # Authored per-rule (behaviour-researched) for the correlation engine. Related CoPilot
+  # Searches + telemetry pivots to run around an alert, scoped to its host/user/ip/domain.
+  related_rules:
+  - id: 7d4cdc5a-0076-40ca-aac8-f7e714570e47
+    name: CMSTP Execution Process Creation
+    reason: 'Same-process precursor: the Sysmon EID 1 launch of the very cmstp.exe instance whose DLL/OCX load this rule caught. Seeing the launch and this image-load together on one host confirms cmstp was invoked (not just present) and that the signed binary proxied a payload.'
+  - id: e66779cc-383e-4224-a3a4-267eeb585c40
+    name: Bypass UAC via CMSTP
+    reason: 'Direct precursor and intent: detects the ''cmstp.exe /ni /s *.inf'' command line that drives the DLL/OCX load. An INF with a RegisterOCXSection/RunPreSetupCommands section is exactly what makes cmstp load the module this rule flags, and it marks the UAC-bypass (T1548.002) goal behind the proxy execution.'
+  - id: 4b60e6f2-bf39-47b4-b4ea-398e33cfe253
+    name: CMSTP UAC Bypass via COM Object Access
+    reason: 'Confirming co-occurrence of the elevation path: the CMSTP auto-elevate COM object (dllhost with the CMLUA/CMSTP CLSIDs) spawning a High/SYSTEM-integrity child. If this fires on the same host it proves the cmstp activity elevated rather than installed a benign VPN profile.'
+  - id: 3b4b232a-af90-427c-a22f-30b0c0837b95
+    name: CMSTP Execution Process Access
+    reason: 'Same technique via a different lens: CMLUA.dll in the EID 10 call trace is the CMSTP auto-elevate COM object in use. It corroborates the UAC-bypass COM mechanism driving this DLL load from the process-access side.'
+  - id: b6d235fc-1d38-4b12-adbe-325f06728f37
+    name: CMSTP Execution Registry Event
+    reason: 'Co-occurring host artifact: CMMGR32.exe registry touches left behind by cmstp execution. On the same host/window it independently corroborates that Connection Manager Profile Installer ran around the time of the suspicious DLL load.'
+  - id: b5de0c9a-6f19-43e0-af4e-55ad01f550af
+    name: Unsigned DLL Loaded by Windows Utility
+    reason: 'Follow-on / alternative-LOLBin of the identical behaviour: installutil/regasm/regsvcs/regsvr32/rundll32 loading an unsigned DLL. After proxying code through cmstp an operator commonly pivots to a sibling signed binary to load the same staged DLL, and this would catch that next T1218 proxy load.'
+  - id: 799a5f48-0ac1-4e0f-9152-71d137d48c2a
+    name: Abusable DLL Potential Sideloading From Suspicious Location
+    reason: 'Same staging directories, same technique: a known-abusable DLL sideloaded from PerfLogs/Users/Temp. The payload cmstp just loaded lives in one of these writable paths, so the dropped module may trip this image-load detection too, widening the single alert into a staging story.'
+  - id: 9e9a9002-56c4-40fd-9eff-e4b09bfa5f6c
+    name: DLL Load By System Process From Suspicious Locations
+    reason: 'Overlapping co-firing detection: a C:\Windows system process loading a DLL from Users\Public or PerfLogs. cmstp.exe lives in System32, so a load it performs from PerfLogs or a Users path satisfies both rules - two independent detections on one event raise confidence.'
+  window: 2h
   enrichment_searches:
-  # Rule-specific telemetry pivots the engine runs around an alert from this rule,
-  # scoped to the alert's host/user/IP within the window (behaviour-targeted, not a sweep).
-    - name: "Follow-on LOLBin / signed-binary-proxy execution on this host"
-      query: 'data_win_system_eventID:"1" AND data_win_eventdata_image:/.*(\\[Rr][Uu][Nn][Dd][Ll][Ll]32\.[Ee][Xx][Ee]|\\[Rr][Ee][Gg][Ss][Vv][Rr]32\.[Ee][Xx][Ee]|\\[Mm][Ss][Hh][Tt][Aa]\.[Ee][Xx][Ee]|\\[Ii][Nn][Ss][Tt][Aa][Ll][Ll][Uu][Tt][Ii][Ll]\.[Ee][Xx][Ee]|\\[Rr][Ee][Gg][Aa][Ss][Mm]\.[Ee][Xx][Ee]|\\[Rr][Ee][Gg][Ss][Vv][Cc][Ss]\.[Ee][Xx][Ee]|\\[Mm][Ss][Bb][Uu][Ii][Ll][Dd]\.[Ee][Xx][Ee]|\\[Cc][Ee][Rr][Tt][Uu][Tt][Ii][Ll]\.[Ee][Xx][Ee]|\\[Bb][Ii][Tt][Ss][Aa][Dd][Mm][Ii][Nn]\.[Ee][Xx][Ee]|\\[Ww][Mm][Ii][Cc]\.[Ee][Xx][Ee]|\\[Cc][Mm][Ss][Tt][Pp]\.[Ee][Xx][Ee]|\\[Oo][Dd][Bb][Cc][Cc][Oo][Nn][Ff]\.[Ee][Xx][Ee]|\\[Ff][Oo][Rr][Ff][Ii][Ll][Ee][Ss]\.[Ee][Xx][Ee]|\\[Pp][Cc][Aa][Ll][Uu][Aa]\.[Ee][Xx][Ee]|\\[Mm][Aa][Vv][Ii][Nn][Jj][Ee][Cc][Tt]\.[Ee][Xx][Ee]|\\[Ss][Cc][Rr][Ii][Pp][Tt][Rr][Uu][Nn][Nn][Ee][Rr]\.[Ee][Xx][Ee])/'
-      pivot_on: [host]
-      window: 1h
-    - name: "Other executions of this tool-set on this host (any arguments)"
-      query: 'data_win_system_eventID:"1" AND data_win_eventdata_image:/.*(\\[Cc][Mm][Ss][Tt][Pp]\.[Ee][Xx][Ee])/'
-      pivot_on: [host]
-      window: 2h
-    - name: "DLL sideloading / execution from user-writable paths on this host"
-      query: '((data_win_system_eventID:"7" AND (data_win_eventdata_imageLoaded:/.*\\[Uu][Ss][Ee][Rr][Ss]\\.*/ OR data_win_eventdata_imageLoaded:/.*\\[Pp][Rr][Oo][Gg][Rr][Aa][Mm][Dd][Aa][Tt][Aa]\\.*/ OR data_win_eventdata_imageLoaded:/.*\\[Ww][Ii][Nn][Dd][Oo][Ww][Ss]\\[Tt][Ee][Mm][Pp]\\.*/ OR data_win_eventdata_imageLoaded:/.*\\[Aa][Pp][Pp][Dd][Aa][Tt][Aa]\\.*/ OR data_win_eventdata_imageLoaded:/.*\\[Pp][Uu][Bb][Ll][Ii][Cc]\\.*/ OR data_win_eventdata_imageLoaded:/.*\\\$[Rr][Ee][Cc][Yy][Cc][Ll][Ee].*/)) OR (data_win_system_eventID:"1" AND (data_win_eventdata_image:/.*\\[Uu][Ss][Ee][Rr][Ss]\\.*/ OR data_win_eventdata_image:/.*\\[Pp][Rr][Oo][Gg][Rr][Aa][Mm][Dd][Aa][Tt][Aa]\\.*/ OR data_win_eventdata_image:/.*\\[Ww][Ii][Nn][Dd][Oo][Ww][Ss]\\[Tt][Ee][Mm][Pp]\\.*/ OR data_win_eventdata_image:/.*\\[Aa][Pp][Pp][Dd][Aa][Tt][Aa]\\.*/ OR data_win_eventdata_image:/.*\\[Pp][Uu][Bb][Ll][Ii][Cc]\\.*/ OR data_win_eventdata_image:/.*\\\$[Rr][Ee][Cc][Yy][Cc][Ll][Ee].*/)))'
-      pivot_on: [host]
-      window: 2h
+  # Behaviour-targeted hunts the engine runs around the alert (not a sweep).
+  - name: cmstp.exe invoked with an INF or install switches (the driving command line)
+    query: data_win_system_eventID:"1" AND data_win_eventdata_image:/.*\\[Cc][Mm][Ss][Tt][Pp]\.[Ee][Xx][Ee]/ AND (data_win_eventdata_commandLine:/.*\.[Ii][Nn][Ff].*/ OR data_win_eventdata_commandLine:/.*\/[Nn][Ii].*/ OR data_win_eventdata_commandLine:/.*\/[Ss].*/)
+    pivot_on:
+    - host
+    window: 1h
+  - name: INF or DLL/OCX payload dropped into cmstp's writable staging paths
+    query: data_win_system_eventID:"11" AND (data_win_eventdata_targetFilename:/.*\.[Ii][Nn][Ff]/ OR data_win_eventdata_targetFilename:/.*\.[Dd][Ll][Ll]/ OR data_win_eventdata_targetFilename:/.*\.[Oo][Cc][Xx]/) AND (data_win_eventdata_targetFilename:/.*\\[Pp][Ee][Rr][Ff][Ll][Oo][Gg][Ss]\\.*/ OR data_win_eventdata_targetFilename:/.*\\[Pp][Rr][Oo][Gg][Rr][Aa][Mm][Dd][Aa][Tt][Aa]\\.*/ OR data_win_eventdata_targetFilename:/.*\\[Uu][Ss][Ee][Rr][Ss]\\.*/ OR data_win_eventdata_targetFilename:/.*\\[Ww][Ii][Nn][Dd][Oo][Ww][Ss]\\[Tt][Ee][Mm][Pp]\\.*/ OR data_win_eventdata_targetFilename:/.*[Cc]:\\[Tt][Ee][Mm][Pp]\\.*/)
+    pivot_on:
+    - host
+    window: 2h
+  - name: cmstp.exe making an outbound network connection (remote INF/scriptlet or C2)
+    query: data_win_system_eventID:"3" AND data_win_eventdata_initiated:/[Tt][Rr][Uu][Ee]/ AND data_win_eventdata_image:/.*\\[Cc][Mm][Ss][Tt][Pp]\.[Ee][Xx][Ee]/
+    pivot_on:
+    - host
+    window: 1h
+  - name: Child process spawned by cmstp.exe (proxied payload / UAC-bypass child executing)
+    query: data_win_system_eventID:"1" AND data_win_eventdata_parentImage:/.*\\[Cc][Mm][Ss][Tt][Pp]\.[Ee][Xx][Ee]/
+    pivot_on:
+    - host
+    window: 1h
+  - name: Follow-on signed-binary-proxy (LOLBin) execution on this host
+    query: data_win_system_eventID:"1" AND data_win_eventdata_image:/.*\\([Rr][Uu][Nn][Dd][Ll][Ll]32|[Rr][Ee][Gg][Ss][Vv][Rr]32|[Mm][Ss][Hh][Tt][Aa]|[Ii][Nn][Ss][Tt][Aa][Ll][Ll][Uu][Tt][Ii][Ll]|[Rr][Ee][Gg][Aa][Ss][Mm]|[Rr][Ee][Gg][Ss][Vv][Cc][Ss]|[Oo][Dd][Bb][Cc][Cc][Oo][Nn][Ff]|[Mm][Ss][Bb][Uu][Ii][Ll][Dd]|[Vv][Ee][Rr][Cc][Ll][Ss][Ii][Dd])\.[Ee][Xx][Ee]/
+    pivot_on:
+    - host
+    window: 2h

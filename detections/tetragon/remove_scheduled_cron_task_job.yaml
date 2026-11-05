@@ -137,19 +137,58 @@ graylog:
   query: data_process_exec_process_binary:/.*[Cc][Rr][Oo][Nn][Tt][Aa][Bb]/ AND data_process_exec_process_arguments:/.* -[Rr].*/
 
 correlation:
-  # Authored by the correlation engine for review.
+  # Authored per-rule (behaviour-researched) for the correlation engine. Related CoPilot
+  # Searches + telemetry pivots to run around an alert, scoped to its host/user/ip/domain.
+  related_rules:
+  - id: 6b14bac8-3e3a-4324-8109-42f0546a347f
+    name: Scheduled Cron Task/Job - Linux
+    reason: 'Direct counterpart and the attacker''s very next move: after ''crontab -r'' wipes the rival''s schedule, the intruder installs their OWN cron persistence (this rule fires on crontab loading a job from /tmp). Wipe-then-reinstall on the same host is one coinminer persistence swap.'
+  - id: 9069ea3c-b213-4c52-be13-86506a227ab1
+    name: Linux Crypto Mining Indicators
+    reason: Confirms the motive. This rule's own description attributes 'crontab -r' to coinminers wiping competitors; XMRig/stratum/pool arguments on the same host within the window are the smoking gun that the cron wipe was cryptojacking, not admin cleanup.
+  - id: 34979410-e4b5-4e5d-8cfb-389fdff05c12
+    name: Remove Immutable File Attribute
+    reason: 'Enabling precursor from the same miner toolset (shares this rule''s exact Trend Micro reference): rivals mark their cron/config files immutable, so ''chattr -i'' is run just before ''crontab -r'' to strip the lock so the schedule can be removed.'
+  - id: a2d9e2f3-0f43-4c7a-bcd9-9acfc0d723aa
+    name: Suspicious Download and Execute Pattern via Curl/Wget
+    reason: 'Delivery precursor: the coinminer dropper is pulled with curl/wget into /tmp or /dev/shm and run via ''sh -c''; that script is what then executes ''crontab -r''. A download-and-exec on this host just before is the infection that led here.'
+  - id: 4e2a6c91-7f3d-4b6e-9a4f-1c8b0e5a92d4
+    name: Crontab Interactive Edit Execution
+    reason: 'The other crontab verb in the same session: having removed the existing table with ''-r'', the actor re-opens it with ''crontab -e'' to write their own mining job. Co-occurring crontab manipulation confirms a deliberate schedule takeover.'
+  - id: de25eeb8-3655-4643-ac3a-b662d3f26b6b
+    name: Disable Or Stop Services
+    reason: 'Same competitive and defense teardown: alongside wiping cron, the miner stops rival mining services and security/monitoring daemons (systemctl/service stop|disable) to free CPU and evade detection in the same burst.'
+  - id: 5cd16c8f-44a6-4654-81e7-a84d6db507d4
+    name: Process Execution From Shared Memory Directory
+    reason: 'The payload the cleanup makes room for: the coinminer runs fileless from /dev/shm. Execution from shared memory on the same host within the window is the miner that ''crontab -r'' was clearing competitors for.'
+  - id: 1182f3b3-e716-4efa-99ab-d2685d04360f
+    name: History File Deletion
+    reason: 'Anti-forensics in the same hands-on session: after the cron wipe and miner drop, the actor deletes ~/.bash_history to erase the ''crontab -r'' and download commands. Co-occurring history deletion marks this as deliberate malicious cleanup.'
+  window: 2h
   enrichment_searches:
-  # Rule-specific telemetry pivots the engine runs around an alert from this rule,
-  # scoped to the alert's host/user/IP within the window (behaviour-targeted, not a sweep).
-    - name: "Other executions of this tool-set on this host (any arguments)"
-      query: 'data_process_exec_process_binary:/.*(\/[Cc][Rr][Oo][Nn][Tt][Aa][Bb])/'
-      pivot_on: [host]
-      window: 2h
-    - name: "Shell / interpreter execution on this host"
-      query: '((data_process_exec_process_binary:/.*(\/[Bb][Aa][Ss][Hh]|\/[Ss][Hh]|\/[Dd][Aa][Ss][Hh]|\/[Zz][Ss][Hh]|\/[Kk][Ss][Hh]|\/[Aa][Ss][Hh]|\/[Bb][Uu][Ss][Yy][Bb][Oo][Xx])/) OR (data_process_exec_process_binary:/.*(\/[Pp][Yy][Tt][Hh][Oo][Nn]|\/[Pp][Yy][Tt][Hh][Oo][Nn]3|\/[Pp][Ee][Rr][Ll]|\/[Rr][Uu][Bb][Yy]|\/[Pp][Hh][Pp]|\/[Nn][Oo][Dd][Ee]|\/[Ll][Uu][Aa]|\/[Aa][Ww][Kk])/))'
-      pivot_on: [host]
-      window: 1h
-    - name: "Reconnaissance commands on this host"
-      query: 'data_process_exec_process_binary:/.*(\/[Ww][Hh][Oo][Aa][Mm][Ii]|\/[Ii][Dd]|\/[Uu][Nn][Aa][Mm][Ee]|\/[Hh][Oo][Ss][Tt][Nn][Aa][Mm][Ee]|\/[Hh][Oo][Ss][Tt][Nn][Aa][Mm][Ee][Cc][Tt][Ll]|\/[Ss][Ss]|\/[Nn][Ee][Tt][Ss][Tt][Aa][Tt]|\/[Ii][Ff][Cc][Oo][Nn][Ff][Ii][Gg]|\/[Aa][Rr][Pp]|\/[Ww]|\/[Ww][Hh][Oo]|\/[Ll][Aa][Ss][Tt]|\/[Ll][Ss][Oo][Ff]|\/[Nn][Mm][Aa][Pp]|\/[Dd][Ii][Gg]|\/[Ff][Ii][Nn][Dd])/'
-      pivot_on: [host]
-      window: 1h
+  # Behaviour-targeted hunts the engine runs around the alert (not a sweep).
+  - name: Coinminer dropper downloaded/staged to tmpfs on this host
+    query: (((data_process_exec_process_binary:/.*\/[Ww][Gg][Ee][Tt]/ OR data_process_exec_process_binary:/.*\/[Cc][Uu][Rr][Ll]/) OR (data_process_exec_process_arguments:/.*\/[Ww][Gg][Ee][Tt].*/ OR data_process_exec_process_arguments:/.*\/[Cc][Uu][Rr][Ll].*/)) AND (data_process_exec_process_arguments:/.*\/[Tt][Mm][Pp]\/.*/ OR data_process_exec_process_arguments:/.*\/[Dd][Ee][Vv]\/[Ss][Hh][Mm]\/.*/ OR data_process_exec_process_arguments:/.*\/[Vv][Aa][Rr]\/[Tt][Mm][Pp]\/.*/))
+    pivot_on:
+    - host
+    window: 2h
+  - name: Crypto-miner payload or mining-pool arguments on this host
+    query: ((data_process_exec_process_arguments:/.*[Ss][Tt][Rr][Aa][Tt][Uu][Mm]\+[Tt][Cc][Pp].*/ OR data_process_exec_process_arguments:/.* --[Dd][Oo][Nn][Aa][Tt][Ee]-[Ll][Ee][Vv][Ee][Ll].*/ OR data_process_exec_process_arguments:/.* -[Oo] [Pp][Oo][Oo][Ll]\..*/ OR data_process_exec_process_arguments:/.* --[Cc][Pp][Uu]-[Pp][Rr][Ii][Oo][Rr][Ii][Tt][Yy].*/ OR data_process_exec_process_arguments:/.* --[Aa][Ll][Gg][Oo]=[Rr][Xx].*/) OR (data_process_exec_process_binary:/.*\/([Xx][Mm][Rr][Ii][Gg]|[Kk][Dd][Ee][Vv][Tt][Mm][Pp][Ff][Ss][Ii]|[Kk][Ii][Nn][Ss][Ii][Nn][Gg]|[Mm][Ii][Nn][Ee][Rr][Dd])/))
+    pivot_on:
+    - host
+    window: 4h
+  - name: Termination of competing miner processes on this host
+    query: ((data_process_exec_process_binary:/.*\/[Pp][Kk][Ii][Ll][Ll]/ OR data_process_exec_process_binary:/.*\/[Kk][Ii][Ll][Ll][Aa][Ll][Ll]/) AND data_process_exec_process_arguments:/.*([Xx][Mm][Rr][Ii][Gg]|[Kk][Dd][Ee][Vv][Tt][Mm][Pp][Ff][Ss][Ii]|[Kk][Ii][Nn][Ss][Ii][Nn][Gg]|[Mm][Ii][Nn][Ee][Rr][Dd]|[Cc][Nn][Rr][Ii][Gg]|[Ss][Uu][Ss][Tt][Ee][Ss]|[Mm][Ii][Nn][Ee][Rr]|[Xx][Mm][Rr])/)
+    pivot_on:
+    - host
+    window: 2h
+  - name: Attacker-owned cron / systemd / authorized_keys persistence re-established on this host
+    query: ((data_process_exec_process_arguments:/.*\/[Vv][Aa][Rr]\/[Ss][Pp][Oo][Oo][Ll]\/[Cc][Rr][Oo][Nn].*/) OR (data_process_exec_process_arguments:/.*\/[Ee][Tt][Cc]\/[Cc][Rr][Oo][Nn].*/) OR (data_process_exec_process_arguments:/.*[Aa][Uu][Tt][Hh][Oo][Rr][Ii][Zz][Ee][Dd]_[Kk][Ee][Yy][Ss].*/) OR (data_process_exec_process_binary:/.*\/[Cc][Rr][Oo][Nn][Tt][Aa][Bb]/ AND data_process_exec_process_arguments:/.*(\/[Tt][Mm][Pp]\/|\/[Dd][Ee][Vv]\/[Ss][Hh][Mm]\/|-[Ee]).*/))
+    pivot_on:
+    - host
+    window: 4h
+  - name: Binary executed from /dev/shm or /tmp staging on this host
+    query: (data_process_exec_process_binary:/\/[Dd][Ee][Vv]\/[Ss][Hh][Mm]\/.*/ OR data_process_exec_process_binary:/\/[Tt][Mm][Pp]\/.*/ OR data_process_exec_process_binary:/\/[Vv][Aa][Rr]\/[Tt][Mm][Pp]\/.*/)
+    pivot_on:
+    - host
+    window: 4h

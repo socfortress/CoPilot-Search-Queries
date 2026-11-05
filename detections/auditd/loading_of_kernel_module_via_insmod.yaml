@@ -145,23 +145,55 @@ graylog:
   query: data_audit_type:/[Ss][Yy][Ss][Cc][Aa][Ll][Ll]/ AND data_audit_command:/[Ii][Nn][Ss][Mm][Oo][Dd]/ AND data_audit_exe:/\/[Uu][Ss][Rr]\/[Bb][Ii][Nn]\/[Kk][Mm][Oo][Dd]/
 
 correlation:
-  # Authored by the correlation engine for review.
+  # Authored per-rule (behaviour-researched) for the correlation engine. Related CoPilot
+  # Searches + telemetry pivots to run around an alert, scoped to its host/user/ip/domain.
+  related_rules:
+  - id: a1b2c3d4-5e6f-7a8b-9c0d-1e2f3a4b5c6d
+    name: Linux Kernel Module Insertion
+    reason: The same insmod kernel-module insertion seen through Tetragon process_exec (binary /usr/sbin/insmod) rather than this rule's auditd SYSCALL (data_audit_command=insmod, exe=/usr/bin/kmod). A matching Tetragon event on the same host in the window proves a real init_module/finit_module load fired across two independent sensors, not a single-source parsing artifact, and adds the parent process and uid that invoked insmod.
+  - id: 474b415a-d917-4f3b-8c62-9e1a0d5f7b48
+    name: Authencesn Crypto Module Load via Modprobe - Copy-Fail Indicator
+    reason: A kmod/modprobe module-autoload on the same kernel-module surface; as the CVE-2026-31431 AF_ALG Copy-Fail local-privilege-escalation trigger it is a plausible precursor that hands the attacker the root/CAP_SYS_MODULE this insmod requires, so a Copy-Fail hit shortly before the load explains how an unprivileged foothold gained the ability to insert an LKM.
+  - id: linux-kernel-module-rmmod-utility-001
+    name: Linux Kernel Module Using Rmmod Utility
+    reason: rmmod is the raw unload counterpart to raw insmod; rootkit loaders rmmod a conflicting, older, or defensive (security/audit) module before inserting their own, or unload a prior build to reload a patched one, so insmod+rmmod churn on one host in the window marks a deliberate module install rather than a routine driver load.
+  - id: linux-unload-module-via-modprobe-001
+    name: Linux Unload Module Via Modprobe
+    reason: modprobe -r is the dependency-aware unload path used to drop a module and its dependents during the same install/swap sequence; seeing it alongside the insmod widens the module-management activity that separates kernel tampering from a single legitimate load.
+  - id: d9f4b1a6-3c52-4a5c-9c8e-6b7f3e21a0dd
+    name: Linux Kernel Driver Activity Detection
+    reason: Fires on access or writes under /kernel/drivers/, the on-disk tree where .ko files live; a module dropped into or read from /lib/modules/.../kernel/drivers on the same host is the filesystem-side half of this load (the .ko staged just before insmod pulled it in, or the module now resident), pairing the insmod exec with the file it inserted.
+  - id: 4b3cb710-5e83-4715-8c45-8b2b5b3e5751
+    name: Modification of ld.so.preload
+    reason: /etc/ld.so.preload shared-object injection (T1574.006) is the userland sibling of LKM stealth; operators installing rootkit-grade persistence routinely layer a kernel module with an ld.so.preload hook so removing one leaves the other, so an ld.so.preload write in the same window signals a layered persistence install, not an isolated driver load.
+  - id: bed26dea-4525-47f4-b24a-76e30e44ffb0
+    name: Audit Rules Deleted Via Auditctl
+    reason: auditctl -D wipes all audit rules and watches, the very auditd pipeline that produced this insmod alert; an attacker loading an LKM rootkit blinds auditd to hide the kernel tampering, so a rule flush on the same host just before or after the load is the defense-evasion step that both corroborates malicious intent and warns that further kernel activity may go unlogged.
+  window: 2h
   enrichment_searches:
-  # Rule-specific telemetry pivots the engine runs around an alert from this rule,
-  # scoped to the alert's host/user/IP within the window (behaviour-targeted, not a sweep).
-    - name: "Credential / secret-file access on this host"
-      query: '((data_process_exec_process_arguments:/.*\/[Ee][Tt][Cc]\/[Ss][Hh][Aa][Dd][Oo][Ww].*/) OR (data_process_exec_process_arguments:/.*\/[Ee][Tt][Cc]\/[Pp][Aa][Ss][Ss][Ww][Dd].*/) OR (data_process_exec_process_arguments:/.*\/[Ee][Tt][Cc]\/[Ss][Uu][Dd][Oo][Ee][Rr][Ss].*/) OR (data_process_exec_process_arguments:/.*[Ii][Dd]_[Rr][Ss][Aa].*/) OR (data_process_exec_process_arguments:/.*\.[Ss][Ss][Hh]\/.*/) OR (data_process_exec_process_arguments:/.*\/[Ee][Tt][Cc]\/[Gg][Ss][Hh][Aa][Dd][Oo][Ww].*/))'
-      pivot_on: [host]
-      window: 2h
-    - name: "Shell / interpreter execution on this host"
-      query: '((data_process_exec_process_binary:/.*(\/[Bb][Aa][Ss][Hh]|\/[Ss][Hh]|\/[Dd][Aa][Ss][Hh]|\/[Zz][Ss][Hh]|\/[Kk][Ss][Hh]|\/[Aa][Ss][Hh]|\/[Bb][Uu][Ss][Yy][Bb][Oo][Xx])/) OR (data_process_exec_process_binary:/.*(\/[Pp][Yy][Tt][Hh][Oo][Nn]|\/[Pp][Yy][Tt][Hh][Oo][Nn]3|\/[Pp][Ee][Rr][Ll]|\/[Rr][Uu][Bb][Yy]|\/[Pp][Hh][Pp]|\/[Nn][Oo][Dd][Ee]|\/[Ll][Uu][Aa]|\/[Aa][Ww][Kk])/))'
-      pivot_on: [host]
-      window: 1h
-    - name: "Reconnaissance commands on this host"
-      query: 'data_process_exec_process_binary:/.*(\/[Ww][Hh][Oo][Aa][Mm][Ii]|\/[Ii][Dd]|\/[Uu][Nn][Aa][Mm][Ee]|\/[Hh][Oo][Ss][Tt][Nn][Aa][Mm][Ee]|\/[Hh][Oo][Ss][Tt][Nn][Aa][Mm][Ee][Cc][Tt][Ll]|\/[Ss][Ss]|\/[Nn][Ee][Tt][Ss][Tt][Aa][Tt]|\/[Ii][Ff][Cc][Oo][Nn][Ff][Ii][Gg]|\/[Aa][Rr][Pp]|\/[Ww]|\/[Ww][Hh][Oo]|\/[Ll][Aa][Ss][Tt]|\/[Ll][Ss][Oo][Ff]|\/[Nn][Mm][Aa][Pp]|\/[Dd][Ii][Gg]|\/[Ff][Ii][Nn][Dd])/'
-      pivot_on: [host]
-      window: 1h
-    - name: "Privilege-escalation tooling executed on this host"
-      query: 'data_process_exec_process_binary:/.*(\/[Ss][Uu][Dd][Oo]|\/[Ss][Uu]|\/[Pp][Kk][Ee][Xx][Ee][Cc]|\/[Dd][Oo][Aa][Ss]|\/[Ss][Ee][Tt][Cc][Aa][Pp]|\/[Cc][Hh][Ss][Hh]|\/[Nn][Ee][Ww][Gg][Rr][Pp])/'
-      pivot_on: [host]
-      window: 2h
+  # Behaviour-targeted hunts the engine runs around the alert (not a sweep).
+  - name: Kernel-module management tooling run on this host (insmod/rmmod/modprobe/depmod/kmod/lsmod/modinfo)
+    query: (data_process_exec_process_binary:/.*\/([Ii][Nn][Ss][Mm][Oo][Dd]|[Rr][Mm][Mm][Oo][Dd]|[Mm][Oo][Dd][Pp][Rr][Oo][Bb][Ee]|[Dd][Ee][Pp][Mm][Oo][Dd]|[Kk][Mm][Oo][Dd]|[Ll][Ss][Mm][Oo][Dd]|[Mm][Oo][Dd][Ii][Nn][Ff][Oo])/ OR data_audit_command:/.*([Ii][Nn][Ss][Mm][Oo][Dd]|[Rr][Mm][Mm][Oo][Dd]|[Mm][Oo][Dd][Pp][Rr][Oo][Bb][Ee]|[Dd][Ee][Pp][Mm][Oo][Dd]|[Kk][Mm][Oo][Dd])/)
+    pivot_on:
+    - host
+    window: 2h
+  - name: Kernel module (.ko) file referenced by path on this host
+    query: (data_process_exec_process_arguments:/.*\/.*\.[Kk][Oo].*/ OR full_log:/.*\/.*\.[Kk][Oo].*/)
+    pivot_on:
+    - host
+    window: 2h
+  - name: On-host kernel-module compilation or build tree touched (module built on target)
+    query: ((data_process_exec_process_binary:/.*\/([Gg][Cc][Cc]|[Cc][Cc]|[Cc][Ll][Aa][Nn][Gg]|[Mm][Aa][Kk][Ee]|[Ll][Dd]|[Tt][Cc][Cc])/) OR (data_process_exec_process_arguments:/.*(\/[Ll][Ii][Bb]\/[Mm][Oo][Dd][Uu][Ll][Ee][Ss]\/|\/[Uu][Ss][Rr]\/[Ss][Rr][Cc]\/[Ll][Ii][Nn][Uu][Xx]|[Mm][Oo][Dd][Uu][Ll][Ee]\.[Ss][Yy][Mm][Vv][Ee][Rr][Ss]).*/))
+    pivot_on:
+    - host
+    window: 4h
+  - name: Kernel-module boot persistence configured on this host (/etc/modules, modules-load.d, modprobe.d, initramfs rebuild)
+    query: (data_process_exec_process_arguments:/.*(\/[Ee][Tt][Cc]\/[Mm][Oo][Dd][Uu][Ll][Ee][Ss]|\/[Ee][Tt][Cc]\/[Mm][Oo][Dd][Uu][Ll][Ee][Ss]-[Ll][Oo][Aa][Dd]\.[Dd]|\/[Ee][Tt][Cc]\/[Mm][Oo][Dd][Pp][Rr][Oo][Bb][Ee]\.[Dd]).*/ OR data_process_exec_process_binary:/.*\/([Mm][Kk][Ii][Nn][Ii][Tt][Rr][Aa][Mm][Ff][Ss]|[Dd][Rr][Aa][Cc][Uu][Tt]|[Uu][Pp][Dd][Aa][Tt][Ee]-[Ii][Nn][Ii][Tt][Rr][Aa][Mm][Ff][Ss]|[Dd][Ee][Pp][Mm][Oo][Dd])/)
+    pivot_on:
+    - host
+    window: 6h
+  - name: Audit / log tampering around the load on this host (auditctl -D/-e, truncate audit logs, chattr, history wipe)
+    query: ((data_process_exec_process_binary:/.*\/[Aa][Uu][Dd][Ii][Tt][Cc][Tt][Ll]/ AND data_process_exec_process_arguments:/.*-[DdEe].*/) OR (data_process_exec_process_binary:/.*\/([Rr][Mm]|[Ss][Hh][Rr][Ee][Dd]|[Tt][Rr][Uu][Nn][Cc][Aa][Tt][Ee])/ AND data_process_exec_process_arguments:/.*\/[Vv][Aa][Rr]\/[Ll][Oo][Gg]\/([Aa][Uu][Dd][Ii][Tt]|[Ss][Ee][Cc][Uu][Rr][Ee]|[Aa][Uu][Tt][Hh]).*/) OR data_process_exec_process_binary:/.*\/[Cc][Hh][Aa][Tt][Tt][Rr]/ OR data_process_exec_process_arguments:/.*[Bb][Aa][Ss][Hh]_[Hh][Ii][Ss][Tt][Oo][Rr][Yy].*/)
+    pivot_on:
+    - host
+    window: 2h

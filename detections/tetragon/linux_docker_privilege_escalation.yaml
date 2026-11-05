@@ -138,43 +138,58 @@ graylog:
   query: (data_process_exec_process_arguments:/.*runc.*exec.*/ OR (_exists_:data_process_exec_process_docker AND (data_process_exec_process_binary:"/bin/sh" OR data_process_exec_process_binary:"/bin/bash" OR data_process_exec_process_binary:"/usr/bin/sh" OR data_process_exec_process_binary:"/usr/bin/bash"))) AND NOT _exists_:data_win_system_eventID AND NOT rule_groups:/.*windows.*/
 
 correlation:
-  # Authored by the correlation engine for review. Related CoPilot Searches to run
-  # around an alert from this rule, scoped to the same host/user/IP within the window.
+  # Authored per-rule (behaviour-researched) for the correlation engine. Related CoPilot
+  # Searches + telemetry pivots to run around an alert, scoped to its host/user/ip/domain.
   related_rules:
-    - id: cbef820c-e1ff-407f-887f-0a9240a2d477
-      name: "Detect Path Interception By Creation Of program exe"
-      reason: "same analytic story: Privilege Escalation"
-    - id: 909f8fd8-7ac8-11eb-a1f3-acde48001122
-      name: "FodHelper UAC Bypass"
-      reason: "same analytic story: Privilege Escalation"
-    - id: 09725404-a44f-4ed3-9efa-8ed5d69e4c53
-      name: "Get-DomainGroup with PowerShell Script Block"
-      reason: "same analytic story: Privilege Escalation"
-    - id: 67740bd3-1506-469c-b91d-effc322cc6e5
-      name: "Get-WmiObject Ds_Group with PowerShell Script Block"
-      reason: "same analytic story: Privilege Escalation"
-    - id: 59b51620-94c9-11ec-b3d5-acde48001122
-      name: "Kerberos Pre-Authentication Flag Disabled with PowerShell"
-      reason: "same analytic story: Privilege Escalation"
-    - id: ea61e291-af05-4716-932a-67faddb6ae6f
-      name: "PowerShell COM Hijacking InProcServer32 Modification"
-      reason: "same analytic story: Privilege Escalation"
-    - id: 8470d755-0c13-45b3-bd63-387a373c10cf
-      name: "Reg exe Manipulating Windows Services Registry Keys"
-      reason: "same analytic story: Privilege Escalation"
-  window: 1h
+  - id: 818f7b24-0fba-4c49-a073-8b755573b9c7
+    name: Linux Webshell Indicators
+    reason: 'Precursor: a containerised web server (nginx/apache/node/tomcat) spawning shell/recon children is the most common way the Docker-managed /bin/bash this rule catches actually gets launched. Co-firing on the same host in the window says the container shell came from an exploited app, not an admin''s docker exec.'
+  - id: ea3ecad2-db86-4a89-ad0b-132a10d2db55
+    name: Interactive Bash Suspicious Children
+    reason: 'Direct follow-on: the container exec hands the attacker an interactive bash, and this rule flags that bash -i then spawning recon (whoami), reverse-shell (nc) or PTY-upgrade (pty.spawn/base64) children - i.e. what they actually do with the shell they just obtained.'
+  - id: c4042d54-110d-45dd-a0e1-05c47822c937
+    name: Python Spawning Pretty TTY Via PTY Module
+    reason: 'Follow-on: docker/runc exec and web-app reverse shells both drop a dumb non-interactive shell, and python -c ''import pty; pty.spawn()'' is the standard immediate next step to upgrade it to a usable TTY. Seeing it on the host right after the container exec confirms hands-on-keyboard activity.'
+  - id: 7f734ed0-4f47-46c0-837f-6ee62505abd9
+    name: Potential Netcat Reverse Shell Execution
+    reason: 'Follow-on C2: from the container shell the actor establishes outbound command-and-control with nc -e /bin/bash. Its appearance on the same host turns a single suspicious exec into an active, interactive intrusion.'
+  - id: db1ac3be-f606-4e3a-89e0-9607cbe6b98a
+    name: Capsh Shell Invocation - Linux
+    reason: 'Co-occurring escape primitive: capsh manipulates Linux capabilities, and an over-permissive capability set (CAP_SYS_ADMIN, CAP_SYS_MODULE, CAP_DAC_OVERRIDE) is precisely the mechanism a container shell abuses to break out to the host. capsh firing beside this alert is a strong T1611 escape signal.'
+  - id: a1b2c3d4-5e6f-7a8b-9c0d-1e2f3a4b5c6d
+    name: Linux Kernel Module Insertion
+    reason: 'Escape/persistence follow-on: from a privileged container (CAP_SYS_MODULE) an attacker runs insmod to load a module straight into the host kernel - a canonical Docker-to-host escape and a route to rootkit-level host persistence. Highly specific to this detection''s container-escape story.'
+  - id: 0cf7a157-8879-41a2-8f55-388dd23746b7
+    name: Linux Recon Indicators
+    reason: 'Co-occurring escalation recon: find -perm -4000 SUID hunting is the first thing an attacker runs from a fresh container shell to locate an escalation or escape path (a SUID binary, or a SUID binary on a mounted host filesystem). It explains the intent behind the container exec.'
+  - id: f74107df-b6c6-4e80-bf00-4170b658162b
+    name: Sudo Privilege Escalation CVE-2019-14287
+    reason: 'Follow-on privilege escalation: sudo -u#-1 is a root-escalation attempt. Once the actor holds the container/host shell this rule reports, a root-escalation attempt on the same host confirms they are driving toward root rather than performing benign container management.'
+  window: 2h
   enrichment_searches:
-  # Rule-specific telemetry pivots the engine runs around an alert from this rule,
-  # scoped to the alert's host/user/IP within the window (behaviour-targeted, not a sweep).
-    - name: "Container / namespace-escape tooling on this host"
-      query: '((data_process_exec_process_arguments:/.*\/[Vv][Aa][Rr]\/[Rr][Uu][Nn]\/[Dd][Oo][Cc][Kk][Ee][Rr]\.[Ss][Oo][Cc][Kk].*/) OR (data_process_exec_process_arguments:/.*--[Pp][Rr][Ii][Vv][Ii][Ll][Ee][Gg][Ee][Dd].*/) OR (data_process_exec_process_arguments:/.*-[Vv] \/:.*/) OR (data_process_exec_process_arguments:/.*--[Pp][Ii][Dd]=[Hh][Oo][Ss][Tt].*/) OR (data_process_exec_process_arguments:/.*--[Nn][Ee][Tt]=[Hh][Oo][Ss][Tt].*/) OR (data_process_exec_process_arguments:/.*--[Cc][Aa][Pp]-[Aa][Dd][Dd].*/) OR (data_process_exec_process_binary:/.*(\/[Nn][Ss][Ee][Nn][Tt][Ee][Rr])/))'
-      pivot_on: [host]
-      window: 2h
-    - name: "Shell / interpreter execution on this host"
-      query: '((data_process_exec_process_binary:/.*(\/[Bb][Aa][Ss][Hh]|\/[Ss][Hh]|\/[Dd][Aa][Ss][Hh]|\/[Zz][Ss][Hh]|\/[Kk][Ss][Hh]|\/[Aa][Ss][Hh]|\/[Bb][Uu][Ss][Yy][Bb][Oo][Xx])/) OR (data_process_exec_process_binary:/.*(\/[Pp][Yy][Tt][Hh][Oo][Nn]|\/[Pp][Yy][Tt][Hh][Oo][Nn]3|\/[Pp][Ee][Rr][Ll]|\/[Rr][Uu][Bb][Yy]|\/[Pp][Hh][Pp]|\/[Nn][Oo][Dd][Ee]|\/[Ll][Uu][Aa]|\/[Aa][Ww][Kk])/))'
-      pivot_on: [host]
-      window: 1h
-    - name: "Reconnaissance commands on this host"
-      query: 'data_process_exec_process_binary:/.*(\/[Ww][Hh][Oo][Aa][Mm][Ii]|\/[Ii][Dd]|\/[Uu][Nn][Aa][Mm][Ee]|\/[Hh][Oo][Ss][Tt][Nn][Aa][Mm][Ee]|\/[Hh][Oo][Ss][Tt][Nn][Aa][Mm][Ee][Cc][Tt][Ll]|\/[Ss][Ss]|\/[Nn][Ee][Tt][Ss][Tt][Aa][Tt]|\/[Ii][Ff][Cc][Oo][Nn][Ff][Ii][Gg]|\/[Aa][Rr][Pp]|\/[Ww]|\/[Ww][Hh][Oo]|\/[Ll][Aa][Ss][Tt]|\/[Ll][Ss][Oo][Ff]|\/[Nn][Mm][Aa][Pp]|\/[Dd][Ii][Gg]|\/[Ff][Ii][Nn][Dd])/'
-      pivot_on: [host]
-      window: 1h
+  # Behaviour-targeted hunts the engine runs around the alert (not a sweep).
+  - name: Container-escape / namespace-breakout tooling and dangerous Docker flags on this host
+    query: ((data_process_exec_process_binary:/.*(\/[Nn][Ss][Ee][Nn][Tt][Ee][Rr]|\/[Uu][Nn][Ss][Hh][Aa][Rr][Ee]|\/[Ss][Ee][Tt][Nn][Ss]|\/[Cc][Aa][Pp][Ss][Hh]|\/[Gg][Ee][Tt][Cc][Aa][Pp]|\/[Ss][Ee][Tt][Cc][Aa][Pp]|\/[Cc][Hh][Rr][Oo][Oo][Tt])/) OR (data_process_exec_process_arguments:/.*[Dd][Oo][Cc][Kk][Ee][Rr]\.[Ss][Oo][Cc][Kk].*/) OR (data_process_exec_process_arguments:/.*--[Pp][Rr][Ii][Vv][Ii][Ll][Ee][Gg][Ee][Dd].*/) OR (data_process_exec_process_arguments:/.*--[Pp][Ii][Dd]=[Hh][Oo][Ss][Tt].*/) OR (data_process_exec_process_arguments:/.*--[Nn][Ee][Tt]=[Hh][Oo][Ss][Tt].*/) OR (data_process_exec_process_arguments:/.*--[Cc][Aa][Pp]-[Aa][Dd][Dd].*/) OR (data_process_exec_process_arguments:/.*[Rr][Ee][Ll][Ee][Aa][Ss][Ee]_[Aa][Gg][Ee][Nn][Tt].*/) OR (data_process_exec_process_arguments:/.*[Cc][Oo][Rr][Ee]_[Pp][Aa][Tt][Tt][Ee][Rr][Nn].*/))
+    pivot_on:
+    - host
+    window: 2h
+  - name: Host-root mount and sensitive credential / k8s-token / cloud-metadata access on this host
+    query: ((data_process_exec_process_binary:/.*(\/[Mm][Oo][Uu][Nn][Tt]|\/[Uu][Mm][Oo][Uu][Nn][Tt])/) OR (data_process_exec_process_arguments:/.*\/[Ee][Tt][Cc]\/[Ss][Hh][Aa][Dd][Oo][Ww].*/) OR (data_process_exec_process_arguments:/.*\/[Ee][Tt][Cc]\/[Ss][Uu][Dd][Oo][Ee][Rr][Ss].*/) OR (data_process_exec_process_arguments:/.*[Ii][Dd]_[Rr][Ss][Aa].*/) OR (data_process_exec_process_arguments:/.*\/\.[Ss][Ss][Hh]\/.*/) OR (data_process_exec_process_arguments:/.*\/[Vv][Aa][Rr]\/[Rr][Uu][Nn]\/[Ss][Ee][Cc][Rr][Ee][Tt][Ss]\/[Kk][Uu][Bb][Ee][Rr][Nn][Ee][Tt][Ee][Ss]\.[Ii][Oo].*/) OR (data_process_exec_process_arguments:/.*169\.254\.169\.254.*/))
+    pivot_on:
+    - host
+    window: 4h
+  - name: Tooling ingress - curl/wget/fetch pulling exploit or escape payloads on this host
+    query: ((data_process_exec_process_binary:/.*(\/[Cc][Uu][Rr][Ll]|\/[Ww][Gg][Ee][Tt]|\/[Ff][Ee][Tt][Cc][Hh]|\/[Tt][Ff][Tt][Pp])/) AND (data_process_exec_process_arguments:/.*[Hh][Tt][Tt][Pp].*/ OR data_process_exec_process_arguments:/.*[Ff][Tt][Pp].*/))
+    pivot_on:
+    - host
+    window: 2h
+  - name: Reverse-shell and TTY-upgrade patterns on this host
+    query: ((data_process_exec_process_binary:/.*(\/[Ss][Oo][Cc][Aa][Tt]|\/[Mm][Kk][Ff][Ii][Ff][Oo])/) OR (data_process_exec_process_arguments:/.*\/[Dd][Ee][Vv]\/[Tt][Cc][Pp].*/) OR (data_process_exec_process_arguments:/.*\/[Dd][Ee][Vv]\/[Uu][Dd][Pp].*/) OR (data_process_exec_process_arguments:/.*[Bb][Aa][Ss][Hh] -[Ii].*/) OR (data_process_exec_process_arguments:/.*[Ss][Hh] -[Ii].*/) OR (data_process_exec_process_arguments:/.*[Pp][Tt][Yy]\.[Ss][Pp][Aa][Ww][Nn].*/))
+    pivot_on:
+    - host
+    window: 2h
+  - name: Post-escape host persistence via cron / systemd / authorized_keys on this host
+    query: ((data_process_exec_process_binary:/.*(\/[Cc][Rr][Oo][Nn][Tt][Aa][Bb]|\/[Ss][Yy][Ss][Tt][Ee][Mm][Cc][Tt][Ll]|\/[Aa][Tt]|\/[Uu][Pp][Dd][Aa][Tt][Ee]-[Rr][Cc]\.[Dd])/) OR (data_process_exec_process_arguments:/.*\/[Ee][Tt][Cc]\/[Cc][Rr][Oo][Nn].*/) OR (data_process_exec_process_arguments:/.*\/[Ee][Tt][Cc]\/[Ss][Yy][Ss][Tt][Ee][Mm][Dd].*/) OR (data_process_exec_process_arguments:/.*[Rr][Cc]\.[Ll][Oo][Cc][Aa][Ll].*/) OR (data_process_exec_process_arguments:/.*[Aa][Uu][Tt][Hh][Oo][Rr][Ii][Zz][Ee][Dd]_[Kk][Ee][Yy][Ss].*/) OR (data_process_exec_process_arguments:/.*\/[Ee][Tt][Cc]\/[Ii][Nn][Ii][Tt]\.[Dd].*/))
+    pivot_on:
+    - host
+    window: 6h

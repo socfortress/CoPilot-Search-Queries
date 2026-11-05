@@ -179,48 +179,58 @@ graylog:
   query: data_win_system_eventID:"3" AND data_win_eventdata_destinationPort:"88" AND data_win_eventdata_initiated:/[Tt][Rr][Uu][Ee]/ AND _exists_:data_win_eventdata_image AND NOT (data_win_eventdata_image:/[Cc]:\\[Ww][Ii][Nn][Dd][Oo][Ww][Ss]\\[Ss][Yy][Ss][Tt][Ee][Mm]32\\[Ll][Ss][Aa][Ss][Ss]\.[Ee][Xx][Ee]/) AND _exists_:data_win_eventdata_image AND NOT (data_win_eventdata_image:/[Cc]:\\[Pp][Rr][Oo][Gg][Rr][Aa][Mm] [Ff][Ii][Ll][Ee][Ss] \([Xx]86\)\\[Gg][Oo][Oo][Gg][Ll][Ee]\\[Cc][Hh][Rr][Oo][Mm][Ee]\\[Aa][Pp][Pp][Ll][Ii][Cc][Aa][Tt][Ii][Oo][Nn]\\[Cc][Hh][Rr][Oo][Mm][Ee]\.[Ee][Xx][Ee]/ OR data_win_eventdata_image:/[Cc]:\\[Pp][Rr][Oo][Gg][Rr][Aa][Mm] [Ff][Ii][Ll][Ee][Ss]\\[Gg][Oo][Oo][Gg][Ll][Ee]\\[Cc][Hh][Rr][Oo][Mm][Ee]\\[Aa][Pp][Pp][Ll][Ii][Cc][Aa][Tt][Ii][Oo][Nn]\\[Cc][Hh][Rr][Oo][Mm][Ee]\.[Ee][Xx][Ee]/ OR data_win_eventdata_image:/[Cc]:\\[Pp][Rr][Oo][Gg][Rr][Aa][Mm] [Ff][Ii][Ll][Ee][Ss] \([Xx]86\)\\[Mm][Oo][Zz][Ii][Ll][Ll][Aa] [Ff][Ii][Rr][Ee][Ff][Oo][Xx]\\[Ff][Ii][Rr][Ee][Ff][Oo][Xx]\.[Ee][Xx][Ee]/ OR data_win_eventdata_image:/[Cc]:\\[Pp][Rr][Oo][Gg][Rr][Aa][Mm] [Ff][Ii][Ll][Ee][Ss]\\[Mm][Oo][Zz][Ii][Ll][Ll][Aa] [Ff][Ii][Rr][Ee][Ff][Oo][Xx]\\[Ff][Ii][Rr][Ee][Ff][Oo][Xx]\.[Ee][Xx][Ee]/ OR data_win_eventdata_image:/.*\\[Tt][Oo][Mm][Cc][Aa][Tt]\\[Bb][Ii][Nn]\\[Tt][Oo][Mm][Cc][Aa][Tt]8\.[Ee][Xx][Ee]/)
 
 correlation:
-  # Authored by the correlation engine for review. Related CoPilot Searches to run
-  # around an alert from this rule, scoped to the same host/user/IP within the window.
+  # Authored per-rule (behaviour-researched) for the correlation engine. Related CoPilot
+  # Searches + telemetry pivots to run around an alert, scoped to its host/user/ip/domain.
   related_rules:
-    - id: ec570e53-4c76-45a9-804d-dc3f355ff7a7
-      name: "7Zip Compressing Dump Files"
-      reason: "next kill-chain tactic: Collection"
-    - id: 0a1255c5-d732-4b62-ac02-b5152d34fb83
-      name: "ADExplorer Writing Complete AD Snapshot Into .dat File"
-      reason: "next kill-chain tactic: Discovery"
-    - id: 1ea13e8c-03ea-409b-877d-ce5c3d2c1cb3
-      name: "ADFS Database Named Pipe Connection By Uncommon Tool"
-      reason: "next kill-chain tactic: Collection"
-    - id: 75bf09fa-1dd7-4d18-9af9-dd9e492562eb
-      name: "ADSI-Cache File Creation By Uncommon Tool"
-      reason: "next kill-chain tactic: Command and Control"
-    - id: 03e2746e-2b31-42f1-ab7a-eb39365b2422
-      name: "APT31 Judgement Panda Activity"
-      reason: "next kill-chain tactic: Credential Access"
-    - id: fc028194-969d-4122-8abe-0470d5b8f12f
-      name: "Access to Browser Login Data"
-      reason: "next kill-chain tactic: Credential Access"
-  window: 1h
+  - id: 7ec2c172-dceb-4c10-92c9-87c1881b7e18
+    name: HackTool - Rubeus Execution
+    reason: Rubeus is the exact tool the rule cites (GhostPack/Rubeus reference); it speaks raw Kerberos to the KDC itself instead of via LSASS, so its EID1 process-creation event on this host names the binary/arguments that opened the port-88 socket this alert saw.
+  - id: caa9a802-8bd8-4b9e-a5cd-4d6221670219
+    name: Suspicious Kerberos Ticket Request via CLI
+    reason: The outbound port-88 connection IS a ticket request; this catches the on-host command (asktgt/asktgs/kerberoast/asreproast) that generated it, confirming a tool - not LSASS - drove the Kerberos traffic.
+  - id: 1eeed653-dbc8-4187-ad0c-eeebb20e6599
+    name: Potential SPN Enumeration Via Setspn.EXE
+    reason: SPN enumeration is the recon step immediately before Kerberoasting - the attacker lists service accounts with SPNs, then requests their TGS over port 88 to crack offline; seeing it on the same host just before is the precursor.
+  - id: d04ae2b8-ad54-4de0-bd87-4bc1da66aa59
+    name: Kerberoasting Activity - Initial Query
+    reason: 'This is the KDC-side (4769 TGS) view of what the port-88 tool pulled: a burst of service-ticket requests for the same account context confirms the raw connection was Kerberoasting, not a benign client.'
+  - id: 3e2f1b2c-4d5e-11ee-be56-0242ac120002
+    name: Potential AS-REP Roasting via Kerberos TGT Requests
+    reason: The other roast a non-LSASS tool performs over port 88 - 4768 AS-REQ for pre-auth-disabled accounts; correlating it by the same user/account confirms the raw Kerberos connection was AS-REP roasting.
+  - id: 496a0e47-0a33-4dca-b009-9e6ca3591f39
+    name: Suspicious Kerberos RC4 Ticket Encryption
+    reason: Roasting tools force RC4 (etype 0x17) so the returned tickets are crackable offline; an RC4 ticket for the same account in-window is the encryption-downgrade signature that proves the port-88 requests were made to steal crackable credentials.
+  - id: 192a0330-c20b-4356-90b6-7b7049ae0b87
+    name: Successful Overpass the Hash Attempt
+    reason: A non-LSASS process requesting a TGT with stolen key material is textbook overpass-the-hash; this security-log confirmation that the ticket was issued turns the raw connection into the rule's stated 'first-stage privesc / lateral movement' outcome.
+  - id: 8ce07472-496f-11ec-ab3b-3e22fbd008af
+    name: Impacket Lateral Movement Commandline Parameters
+    reason: The ticket obtained over port 88 is then reused (Impacket's -k Kerberos auth) to execute on other hosts; Impacket wmiexec/smbexec/atexec launched from this host right after is the lateral-movement hop the Kerberos theft enables.
+  window: 2h
   enrichment_searches:
-  # Rule-specific telemetry pivots the engine runs around an alert from this rule,
-  # scoped to the alert's host/user/IP within the window (behaviour-targeted, not a sweep).
-    - name: "Kerberos ticket requests for this account"
-      query: '(data_win_system_eventID:"4768" OR data_win_system_eventID:"4769" OR data_win_system_eventID:"4771")'
-      pivot_on: [user]
-      window: 6h
-    - name: "Kerberos ticket / logon activity for this account"
-      query: '(((data_win_system_eventID:"4768" OR data_win_system_eventID:"4769" OR data_win_system_eventID:"4771")) OR ((data_win_system_eventID:"4624" OR data_win_system_eventID:"4625")))'
-      pivot_on: [user]
-      window: 6h
-    - name: "Other executions of this tool-set on this host (any arguments)"
-      query: 'data_win_system_eventID:"1" AND data_win_eventdata_image:/.*(\\[Ll][Ss][Aa][Ss][Ss]\.[Ee][Xx][Ee]|\\[Cc][Hh][Rr][Oo][Mm][Ee]\.[Ee][Xx][Ee]|\\[Ff][Ii][Rr][Ee][Ff][Oo][Xx]\.[Ee][Xx][Ee]|\\[Tt][Oo][Mm][Cc][Aa][Tt]8\.[Ee][Xx][Ee])/'
-      pivot_on: [host]
-      window: 2h
-    - name: "Remote-execution / lateral-movement tooling on this host"
-      query: '(data_win_system_eventID:"1" AND data_win_eventdata_image:/.*(\\[Pp][Ss][Ee][Xx][Ee][Cc]\.[Ee][Xx][Ee]|\\[Pp][Ss][Ee][Xx][Ee][Ss][Vv][Cc]\.[Ee][Xx][Ee]|\\[Pp][Aa][Ee][Xx][Ee][Cc]\.[Ee][Xx][Ee]|\\[Ww][Ii][Nn][Rr][Ss]\.[Ee][Xx][Ee]|\\[Mm][Ss][Tt][Ss][Cc]\.[Ee][Xx][Ee]|\\[Ww][Mm][Ii][Cc]\.[Ee][Xx][Ee])/) OR (data_win_system_eventID:"1" AND data_win_eventdata_image:/.*(\\[Pp][Oo][Ww][Ee][Rr][Ss][Hh][Ee][Ll][Ll]\.[Ee][Xx][Ee]|\\[Pp][Ww][Ss][Hh]\.[Ee][Xx][Ee])/ AND (data_win_eventdata_commandLine:/.*[Ii][Nn][Vv][Oo][Kk][Ee]-[Cc][Oo][Mm][Mm][Aa][Nn][Dd].*/ OR data_win_eventdata_commandLine:/.*[Nn][Ee][Ww]-[Pp][Ss][Ss][Ee][Ss][Ss][Ii][Oo][Nn].*/ OR data_win_eventdata_commandLine:/.*[Ee][Nn][Tt][Ee][Rr]-[Pp][Ss][Ss][Ee][Ss][Ss][Ii][Oo][Nn].*/ OR data_win_eventdata_commandLine:/.*-[Cc][Oo][Mm][Pp][Uu][Tt][Ee][Rr][Nn][Aa][Mm][Ee].*/))'
-      pivot_on: [host]
-      window: 2h
-    - name: "Other hosts connecting to the same destination address (campaign)"
-      query: '(data_win_system_eventID:"22" OR data_win_system_eventID:"3")'
-      pivot_on: [ip]
-      window: 24h
+  # Behaviour-targeted hunts the engine runs around the alert (not a sweep).
+  - name: Kerberos-abuse tooling executed on this host
+    query: data_win_system_eventID:"1" AND (data_win_eventdata_image:/.*\\[Rr][Uu][Bb][Ee][Uu][Ss].*\.[Ee][Xx][Ee]/ OR data_win_eventdata_commandLine:/.*([Rr][Uu][Bb][Ee][Uu][Ss]|[Kk][Ee][Rr][Bb][Ee][Rr][Oo][Aa][Ss][Tt]|[Aa][Ss][Rr][Ee][Pp][Rr][Oo][Aa][Ss][Tt]|[Aa][Ss][Kk][Tt][Gg][Tt]|[Aa][Ss][Kk][Tt][Gg][Ss]|[Tt][Gg][Tt][Dd][Ee][Ll][Ee][Gg]|[Kk][Ee][Rr][Bb][Ee][Rr][Oo][Ss]::|[Cc][Rr][Ee][Aa][Tt][Ee][Nn][Ee][Tt][Oo][Nn][Ll][Yy]).*/)
+    pivot_on:
+    - host
+    window: 2h
+  - name: SPN enumeration / Kerberoast target discovery on this host
+    query: (data_win_system_eventID:"1" AND data_win_eventdata_image:/.*\\[Ss][Ee][Tt][Ss][Pp][Nn]\.[Ee][Xx][Ee]/) OR (data_win_system_eventID:"4104" AND data_win_eventdata_scriptBlockText:/.*([Gg][Ee][Tt][Uu][Ss][Ee][Rr][Ss][Pp][Nn][Ss]|[Ss][Ee][Rr][Vv][Ii][Cc][Ee][Pp][Rr][Ii][Nn][Cc][Ii][Pp][Aa][Ll][Nn][Aa][Mm][Ee]|[Gg][Ee][Tt]-[Dd][Oo][Mm][Aa][Ii][Nn][Ss][Pp][Nn][Tt][Ii][Cc][Kk][Ee][Tt]).*/)
+    pivot_on:
+    - host
+    window: 6h
+  - name: LSASS credential/key access on this host (material for overpass-the-hash)
+    query: data_win_system_eventID:"10" AND data_win_eventdata_targetImage:/.*\\[Ll][Ss][Aa][Ss][Ss]\.[Ee][Xx][Ee]/
+    pivot_on:
+    - host
+    window: 4h
+  - name: Kerberos ticket requests and pre-auth failures for this account
+    query: (data_win_system_eventID:"4768" OR data_win_system_eventID:"4769" OR data_win_system_eventID:"4771")
+    pivot_on:
+    - user
+    window: 6h
+  - name: Lateral-movement / remote-execution tooling launched from this host
+    query: data_win_system_eventID:"1" AND (data_win_eventdata_image:/.*\\([Pp][Ss][Ee][Xx][Ee][Cc]|[Pp][Ss][Ee][Xx][Ee][Ss][Vv][Cc]|[Pp][Aa][Ee][Xx][Ee][Cc]|[Ww][Mm][Ii][Cc]|[Ww][Ii][Nn][Rr][Ss])\.[Ee][Xx][Ee]/ OR data_win_eventdata_commandLine:/.*([Ww][Mm][Ii][Ee][Xx][Ee][Cc]|[Ss][Mm][Bb][Ee][Xx][Ee][Cc]|[Aa][Tt][Ee][Xx][Ee][Cc]|[Dd][Cc][Oo][Mm][Ee][Xx][Ee][Cc]|[Ii][Nn][Vv][Oo][Kk][Ee]-[Cc][Oo][Mm][Mm][Aa][Nn][Dd]|[Ee][Nn][Tt][Ee][Rr]-[Pp][Ss][Ss][Ee][Ss][Ss][Ii][Oo][Nn]).*/)
+    pivot_on:
+    - host
+    window: 2h

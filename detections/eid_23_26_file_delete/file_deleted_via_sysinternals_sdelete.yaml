@@ -157,19 +157,58 @@ graylog:
   query: (data_win_system_eventID:"23" OR data_win_system_eventID:"26") AND (data_win_eventdata_targetFilename:/.*\.[Aa][Aa][Aa]/ OR data_win_eventdata_targetFilename:/.*\.[Zz][Zz][Zz]/) AND _exists_:data_win_eventdata_targetFilename AND NOT (data_win_eventdata_targetFilename:/.*\\[Ww][Ii][Rr][Ee][Ss][Hh][Aa][Rr][Kk]\\[Rr][Aa][Dd][Ii][Uu][Ss]\\[Dd][Ii][Cc][Tt][Ii][Oo][Nn][Aa][Rr][Yy]\.[Aa][Ll][Cc][Aa][Tt][Ee][Ll]-[Ll][Uu][Cc][Ee][Nn][Tt]\.[Aa][Aa][Aa]/)
 
 correlation:
-  # Authored by the correlation engine for review.
+  # Authored per-rule (behaviour-researched) for the correlation engine. Related CoPilot
+  # Searches + telemetry pivots to run around an alert, scoped to its host/user/ip/domain.
+  related_rules:
+  - id: a4824fca-976f-4964-b334-0621379e84c4
+    name: Potential File Overwrite Via Sysinternals SDelete
+    reason: 'Process-creation twin of this alert: this rule catches sdelete.exe launching to overwrite a file, while the file-delete alert catches the resulting .AAA/.ZZZ rename pattern. Together they confirm the same secure wipe and name the operator process, parent and command line.'
+  - id: c1d867fe-8d95-4487-aab4-e53f2d339f90
+    name: Renamed Sysinternals Sdelete Execution
+    reason: This file-delete rule is binary-name-agnostic (it keys on the rename artifact), so it still fires when the operator renames sdelete.exe to evade name-based detection; this rule flags the renamed binary executing, identifying the disguised tool behind the wipe.
+  - id: 39a80702-d7ca-4a83-b776-525b1f86a36d
+    name: Potential Secure Deletion with SDelete
+    reason: Same SDelete .AAA/.ZZZ wipe artifact seen through Security-log object-access auditing (4656/4663/4658) instead of Sysmon FileDelete (23/26) - a second-sensor confirmation of the identical behaviour that also attributes it to the acting user account.
+  - id: 4b046706-5789-4673-b111-66f25fe99534
+    name: Deleted Data Overwritten Via Cipher.EXE
+    reason: 'Same secure-wipe objective by a different tool: operators routinely follow SDelete file wiping with ''cipher /w'' (or ''sdelete -z'') to overwrite free space so the just-deleted data cannot be carved back, completing the same data-destruction step.'
+  - id: add64136-62e5-48ea-807e-88638d02df1e
+    name: Fsutil Suspicious Invocation
+    reason: 'Tight anti-forensic pairing: ''fsutil usn deletejournal'' destroys the NTFS change journal that recorded the very file create/rename/delete operations SDelete just performed, erasing the filesystem trail of the wipe.'
+  - id: 0a1f9d29-6465-4776-b091-7f43b26e4c89
+    name: Prefetch File Deleted
+    reason: 'Same anti-forensic cleanup pass and same FileDelete telemetry (EID 23/26): deleting .pf prefetch files removes the execution evidence of the tooling SDelete is wiping, and the two are frequently seen in the same burst.'
+  - id: cc36992a-4671-4f21-a91d-6c2b72a2edf5
+    name: Suspicious Eventlog Clearing or Configuration Change Activity
+    reason: 'Canonical next cleanup step: after securely wiping files on disk the operator clears the Windows event logs (wevtutil cl / Clear-EventLog) to remove the recorded trace of the intrusion - log clearing and secure deletion are the two halves of one anti-forensic sequence.'
+  - id: windows-indicator-removal-rmdir-001
+    name: Windows Indicator Removal Via Rmdir
+    reason: 'Co-occurring cleanup action: ''rmdir /s /q'' silently removes the staged-tool / payload directories whose files SDelete is overwriting, part of the same evidence-destruction pass on the host.'
+  window: 2h
   enrichment_searches:
-  # Rule-specific telemetry pivots the engine runs around an alert from this rule,
-  # scoped to the alert's host/user/IP within the window (behaviour-targeted, not a sweep).
-    - name: "Log-clearing / anti-forensic activity on this host"
-      query: '(((data_win_eventdata_commandLine:/.*[Ww][Ee][Vv][Tt][Uu][Tt][Ii][Ll] [Cc][Ll].*/ OR data_win_eventdata_commandLine:/.*[Cc][Ll][Ee][Aa][Rr]-[Ee][Vv][Ee][Nn][Tt][Ll][Oo][Gg].*/ OR data_win_eventdata_commandLine:/.*[Ff][Ss][Uu][Tt][Ii][Ll] [Uu][Ss][Nn] [Dd][Ee][Ll][Ee][Tt][Ee][Jj][Oo][Uu][Rr][Nn][Aa][Ll].*/ OR data_win_eventdata_commandLine:/.*[Vv][Ss][Ss][Aa][Dd][Mm][Ii][Nn] [Dd][Ee][Ll][Ee][Tt][Ee].*/ OR data_win_eventdata_commandLine:/.*[Ww][Ee][Vv][Tt][Uu][Tt][Ii][Ll] [Cc][Ll][Ee][Aa][Rr]-[Ll][Oo][Gg].*/)) OR ((data_win_system_eventID:"1102" OR data_win_system_eventID:"104")))'
-      pivot_on: [host]
-      window: 2h
-    - name: "Execution of programs from user-writable paths on this host"
-      query: 'data_win_system_eventID:"1" AND (data_win_eventdata_image:/.*\\[Uu][Ss][Ee][Rr][Ss]\\.*/ OR data_win_eventdata_image:/.*\\[Pp][Rr][Oo][Gg][Rr][Aa][Mm][Dd][Aa][Tt][Aa]\\.*/ OR data_win_eventdata_image:/.*\\[Ww][Ii][Nn][Dd][Oo][Ww][Ss]\\[Tt][Ee][Mm][Pp]\\.*/ OR data_win_eventdata_image:/.*\\[Aa][Pp][Pp][Dd][Aa][Tt][Aa]\\.*/ OR data_win_eventdata_image:/.*\\[Pp][Uu][Bb][Ll][Ii][Cc]\\.*/ OR data_win_eventdata_image:/.*\\\$[Rr][Ee][Cc][Yy][Cc][Ll][Ee].*/)'
-      pivot_on: [host]
-      window: 1h
-    - name: "Autostart persistence written on this host"
-      query: '(data_win_system_eventID:"12" OR data_win_system_eventID:"13") AND (data_win_eventdata_targetObject:/.*[Cc][Uu][Rr][Rr][Ee][Nn][Tt][Vv][Ee][Rr][Ss][Ii][Oo][Nn]\\[Rr][Uu][Nn].*/ OR data_win_eventdata_targetObject:/.*[Cc][Uu][Rr][Rr][Ee][Nn][Tt][Vv][Ee][Rr][Ss][Ii][Oo][Nn]\\[Rr][Uu][Nn][Oo][Nn][Cc][Ee].*/ OR data_win_eventdata_targetObject:/.*[Cc][Uu][Rr][Rr][Ee][Nn][Tt][Cc][Oo][Nn][Tt][Rr][Oo][Ll][Ss][Ee][Tt]\\[Ss][Ee][Rr][Vv][Ii][Cc][Ee][Ss]\\.*/ OR data_win_eventdata_targetObject:/.*[Ii][Mm][Aa][Gg][Ee] [Ff][Ii][Ll][Ee] [Ee][Xx][Ee][Cc][Uu][Tt][Ii][Oo][Nn] [Oo][Pp][Tt][Ii][Oo][Nn][Ss]\\.*/ OR data_win_eventdata_targetObject:/.*[Ww][Ii][Nn][Ll][Oo][Gg][Oo][Nn]\\[Ss][Hh][Ee][Ll][Ll].*/ OR data_win_eventdata_targetObject:/.*[Ww][Ii][Nn][Ll][Oo][Gg][Oo][Nn]\\[Uu][Ss][Ee][Rr][Ii][Nn][Ii][Tt].*/ OR data_win_eventdata_targetObject:/.*[Cc][Uu][Rr][Rr][Ee][Nn][Tt][Vv][Ee][Rr][Ss][Ii][Oo][Nn]\\[Ee][Xx][Pp][Ll][Oo][Rr][Ee][Rr]\\[Rr][Uu][Nn].*/ OR data_win_eventdata_targetObject:/.*[Pp][Oo][Ll][Ii][Cc][Ii][Ee][Ss]\\[Ee][Xx][Pp][Ll][Oo][Rr][Ee][Rr]\\[Rr][Uu][Nn].*/ OR data_win_eventdata_targetObject:/.*[Cc][Uu][Rr][Rr][Ee][Nn][Tt][Vv][Ee][Rr][Ss][Ii][Oo][Nn]\\[Ww][Ii][Nn][Dd][Oo][Ww][Ss]\\[Ll][Oo][Aa][Dd].*/)'
-      pivot_on: [host]
-      window: 2h
+  # Behaviour-targeted hunts the engine runs around the alert (not a sweep).
+  - name: SDelete (incl. renamed) process execution and the paths it wiped on this host
+    query: data_win_system_eventID:"1" AND (data_win_eventdata_originalFileName:/[Ss][Dd][Ee][Ll][Ee][Tt][Ee]\.[Ee][Xx][Ee]/ OR data_win_eventdata_image:/.*\\[Ss][Dd][Ee][Ll][Ee][Tt][Ee][0-9Aa]*\.[Ee][Xx][Ee]/)
+    pivot_on:
+    - host
+    window: 2h
+  - name: Co-occurring anti-forensic / log-clearing activity on this host
+    query: ((data_win_eventdata_commandLine:/.*[Ww][Ee][Vv][Tt][Uu][Tt][Ii][Ll] [Cc][Ll].*/ OR data_win_eventdata_commandLine:/.*[Cc][Ll][Ee][Aa][Rr]-[Ee][Vv][Ee][Nn][Tt][Ll][Oo][Gg].*/ OR data_win_eventdata_commandLine:/.*[Ff][Ss][Uu][Tt][Ii][Ll] [Uu][Ss][Nn] [Dd][Ee][Ll][Ee][Tt][Ee][Jj][Oo][Uu][Rr][Nn][Aa][Ll].*/ OR data_win_eventdata_commandLine:/.*[Vv][Ss][Ss][Aa][Dd][Mm][Ii][Nn] [Dd][Ee][Ll][Ee][Tt][Ee].*/ OR data_win_eventdata_commandLine:/.*[Cc][Ii][Pp][Hh][Ee][Rr] \/[Ww].*/) OR (data_win_system_eventID:"1102" OR data_win_system_eventID:"104"))
+    pivot_on:
+    - host
+    window: 2h
+  - name: Execution of dropped tooling from user-writable paths on this host
+    query: data_win_system_eventID:"1" AND (data_win_eventdata_image:/.*\\[Aa][Pp][Pp][Dd][Aa][Tt][Aa]\\.*/ OR data_win_eventdata_image:/.*\\[Tt][Ee][Mm][Pp]\\.*/ OR data_win_eventdata_image:/.*\\[Pp][Rr][Oo][Gg][Rr][Aa][Mm][Dd][Aa][Tt][Aa]\\.*/ OR data_win_eventdata_image:/.*\\[Pp][Uu][Bb][Ll][Ii][Cc]\\.*/ OR data_win_eventdata_image:/.*\\\$[Rr][Ee][Cc][Yy][Cc][Ll][Ee].*/)
+    pivot_on:
+    - host
+    window: 4h
+  - name: Forensic-artifact deletion burst on this host (SDelete rename extensions and prefetch)
+    query: (data_win_system_eventID:"23" OR data_win_system_eventID:"26" OR data_win_system_eventID:"11") AND (data_win_eventdata_targetFilename:/.*\\[Pp][Rr][Ee][Ff][Ee][Tt][Cc][Hh]\\.*\.[Pp][Ff]/ OR data_win_eventdata_targetFilename:/.*\.[Aa][Aa][Aa]/ OR data_win_eventdata_targetFilename:/.*\.[Zz][Zz][Zz]/)
+    pivot_on:
+    - host
+    window: 2h
+  - name: Same account running secure-deletion / cleanup tooling across hosts
+    query: data_win_system_eventID:"1" AND (data_win_eventdata_originalFileName:/[Ss][Dd][Ee][Ll][Ee][Tt][Ee]\.[Ee][Xx][Ee]/ OR data_win_eventdata_image:/.*\\[Ss][Dd][Ee][Ll][Ee][Tt][Ee][0-9Aa]*\.[Ee][Xx][Ee]/ OR data_win_eventdata_commandLine:/.*[Cc][Ii][Pp][Hh][Ee][Rr] \/[Ww].*/ OR data_win_eventdata_commandLine:/.*[Ww][Ee][Vv][Tt][Uu][Tt][Ii][Ll] [Cc][Ll].*/ OR data_win_eventdata_commandLine:/.*[Dd][Ee][Ll][Ee][Tt][Ee][Jj][Oo][Uu][Rr][Nn][Aa][Ll].*/)
+    pivot_on:
+    - user
+    window: 6h

@@ -172,19 +172,58 @@ graylog:
   query: data_win_system_eventID:"10" AND data_win_eventdata_targetImage:/.*:\\[Ww][Ii][Nn][Dd][Oo][Ww][Ss]\\[Ss][Yy][Ss][Tt][Ee][Mm]32\\[Ss][Vv][Cc][Hh][Oo][Ss][Tt]\.[Ee][Xx][Ee]/ AND data_win_eventdata_grantedAccess:/0[Xx]1[Ff]3[Ff][Ff][Ff]/ AND data_win_eventdata_callTrace:/.*[Uu][Nn][Kk][Nn][Oo][Ww][Nn].*/ AND _exists_:data_win_eventdata_sourceImage AND _exists_:data_win_eventdata_callTrace AND NOT (data_win_eventdata_sourceImage:/.*:\\[Pp][Rr][Oo][Gg][Rr][Aa][Mm] [Ff][Ii][Ll][Ee][Ss]\\[Mm][Ii][Cc][Rr][Oo][Ss][Oo][Ff][Tt] [Vv][Ii][Ss][Uu][Aa][Ll] [Ss][Tt][Uu][Dd][Ii][Oo]\\.*/ AND data_win_eventdata_sourceImage:/.*\\[Mm][Ss][Bb][Uu][Ii][Ll][Dd]\\[Cc][Uu][Rr][Rr][Ee][Nn][Tt]\\[Bb][Ii][Nn]\\[Mm][Ss][Bb][Uu][Ii][Ll][Dd]\.[Ee][Xx][Ee]/ AND (data_win_eventdata_callTrace:/.*[Mm][Ii][Cc][Rr][Oo][Ss][Oo][Ff][Tt]\.[Bb][Uu][Ii][Ll][Dd]\.[Nn][Ii]\.[Dd][Ll][Ll].*/ OR data_win_eventdata_callTrace:/.*[Ss][Yy][Ss][Tt][Ee][Mm]\.[Nn][Ii]\.[Dd][Ll][Ll].*/))
 
 correlation:
-  # Authored by the correlation engine for review.
+  # Authored per-rule (behaviour-researched) for the correlation engine. Related CoPilot
+  # Searches + telemetry pivots to run around an alert, scoped to its host/user/ip/domain.
+  related_rules:
+  - id: 3f3f3506-1895-401b-9cc3-e86b16e630d0
+    name: Potential Direct Syscall of NtOpenProcess
+    reason: 'Same core signal: an UNKNOWN frame in the Sysmon EID 10 call trace means the OpenProcess call came from unbacked / manually-mapped memory (direct syscall). This svchost rule is a targeted instance of that evasion, so the same implant that trips this will open syscall-based handles to other processes too.'
+  - id: a18dd26b-6450-46de-8c91-9659150cf088
+    name: Potentially Suspicious GrantedAccess Flags On LSASS
+    reason: 'LSASS twin of this rule: suspicious high-privilege EID 10 handle access to a sensitive process. An implant opening a 0x1F3FFF (PROCESS_ALL_ACCESS) handle into svchost almost always also opens LSASS for credential theft, so the two co-occur on the same host.'
+  - id: 6309645e-122d-4c5b-bb2b-22e4f9c2fa42
+    name: HackTool - Potential CobaltStrike Process Injection
+    reason: Cobalt Strike beacons are the archetypal unbacked-memory implant that both opens full-access handles into svchost (to migrate / inject) and creates remote threads; an EID 8 beacon injection on the same host confirms the svchost handle-opener is a live beacon.
+  - id: 02d1d718-dd13-41af-989d-ea85c7fab93f
+    name: Rare Remote Thread Creation By Uncommon Source Image
+    reason: 'Injection precursor: an uncommon process creating remote threads is how code reaches the unbacked-memory state this rule catches. A rare EID 8 on the same host explains where the UNKNOWN-call-trace code that opened the svchost handle came from.'
+  - id: d0d2f720-d14f-448d-8242-51ff396a334e
+    name: HackTool - Generic Process Access
+    reason: Flags EID 10 process access originating from known offensive-tool image names. If the svchost handle on this host is opened by (or alongside) a named hacktool, it confirms the access is tooling rather than a benign process.
+  - id: 2f78da12-f7c7-430b-8b19-a28f269b77a3
+    name: Disable Windows Event Logging Via Registry
+    reason: 'Same intent as the referenced Invoke-Phant0m tool (blind Windows event logging) via a different mechanism: disabling an event channel through its WINEVT\Channels ''Enabled'' key. A log-tampering operator commonly uses several such techniques, so it co-occurs as anti-forensics.'
+  - id: 236e7c8e-c9d9-11eb-a824-acde48001122
+    name: Disable Logs Using WevtUtil
+    reason: Follow-on anti-forensics with the same goal of destroying the audit trail (wevtutil 'sl /e:false'). Expected alongside Phant0m-style killing of the Event Log service threads on the same host in the same intrusion.
+  - id: 115fdba9-f017-42e6-84cf-d5573bf2ddf8
+    name: Disable of ETW Trace - Powershell
+    reason: Telemetry-blinding sibling one layer deeper (Remove-/Set-EtwTraceProvider), and PowerShell-hosted like Invoke-Phant0m itself. The same fileless session that opened the svchost handle is likely to also tear down ETW tracing.
+  window: 2h
   enrichment_searches:
-  # Rule-specific telemetry pivots the engine runs around an alert from this rule,
-  # scoped to the alert's host/user/IP within the window (behaviour-targeted, not a sweep).
-    - name: "Process injection / remote-thread & LSASS access on this host"
-      query: '((data_win_system_eventID:"8") OR (data_win_system_eventID:"10" AND data_win_eventdata_targetImage:/.*(\\[Ll][Ss][Aa][Ss][Ss]\.[Ee][Xx][Ee])/) OR (data_win_system_eventID:"1" AND (data_win_eventdata_commandLine:/.*[Cc][Rr][Ee][Aa][Tt][Ee][Rr][Ee][Mm][Oo][Tt][Ee][Tt][Hh][Rr][Ee][Aa][Dd].*/ OR data_win_eventdata_commandLine:/.*[Vv][Ii][Rr][Tt][Uu][Aa][Ll][Aa][Ll][Ll][Oo][Cc][Ee][Xx].*/ OR data_win_eventdata_commandLine:/.*[Ww][Rr][Ii][Tt][Ee][Pp][Rr][Oo][Cc][Ee][Ss][Ss][Mm][Ee][Mm][Oo][Rr][Yy].*/)))'
-      pivot_on: [host]
-      window: 1h
-    - name: "Follow-on LOLBin / signed-binary-proxy execution on this host"
-      query: 'data_win_system_eventID:"1" AND data_win_eventdata_image:/.*(\\[Rr][Uu][Nn][Dd][Ll][Ll]32\.[Ee][Xx][Ee]|\\[Rr][Ee][Gg][Ss][Vv][Rr]32\.[Ee][Xx][Ee]|\\[Mm][Ss][Hh][Tt][Aa]\.[Ee][Xx][Ee]|\\[Ii][Nn][Ss][Tt][Aa][Ll][Ll][Uu][Tt][Ii][Ll]\.[Ee][Xx][Ee]|\\[Rr][Ee][Gg][Aa][Ss][Mm]\.[Ee][Xx][Ee]|\\[Rr][Ee][Gg][Ss][Vv][Cc][Ss]\.[Ee][Xx][Ee]|\\[Mm][Ss][Bb][Uu][Ii][Ll][Dd]\.[Ee][Xx][Ee]|\\[Cc][Ee][Rr][Tt][Uu][Tt][Ii][Ll]\.[Ee][Xx][Ee]|\\[Bb][Ii][Tt][Ss][Aa][Dd][Mm][Ii][Nn]\.[Ee][Xx][Ee]|\\[Ww][Mm][Ii][Cc]\.[Ee][Xx][Ee]|\\[Cc][Mm][Ss][Tt][Pp]\.[Ee][Xx][Ee]|\\[Oo][Dd][Bb][Cc][Cc][Oo][Nn][Ff]\.[Ee][Xx][Ee]|\\[Ff][Oo][Rr][Ff][Ii][Ll][Ee][Ss]\.[Ee][Xx][Ee]|\\[Pp][Cc][Aa][Ll][Uu][Aa]\.[Ee][Xx][Ee]|\\[Mm][Aa][Vv][Ii][Nn][Jj][Ee][Cc][Tt]\.[Ee][Xx][Ee]|\\[Ss][Cc][Rr][Ii][Pp][Tt][Rr][Uu][Nn][Nn][Ee][Rr]\.[Ee][Xx][Ee])/'
-      pivot_on: [host]
-      window: 1h
-    - name: "Memory/credential-dump creation & LSASS access on this host"
-      query: '((data_win_system_eventID:"1" AND data_win_eventdata_image:/.*(\\[Pp][Rr][Oo][Cc][Dd][Uu][Mm][Pp]\.[Ee][Xx][Ee]|\\[Pp][Rr][Oo][Cc][Dd][Uu][Mm][Pp]64\.[Ee][Xx][Ee]|\\[Ss][Qq][Ll][Dd][Uu][Mm][Pp][Ee][Rr]\.[Ee][Xx][Ee]|\\[Cc][Rr][Ee][Aa][Tt][Ee][Dd][Uu][Mm][Pp]\.[Ee][Xx][Ee]|\\[Rr][Dd][Rr][Ll][Ee][Aa][Kk][Dd][Ii][Aa][Gg]\.[Ee][Xx][Ee]|\\[Dd][Uu][Mm][Pp][Ee][Rr][Tt]\.[Ee][Xx][Ee]|\\[Nn][Aa][Nn][Oo][Dd][Uu][Mm][Pp]\.[Ee][Xx][Ee]|\\[Aa][Vv][Dd][Uu][Mm][Pp]\.[Ee][Xx][Ee])/) OR (data_win_system_eventID:"1" AND (data_win_eventdata_commandLine:/.*[Cc][Oo][Mm][Ss][Vv][Cc][Ss]\.[Dd][Ll][Ll].*/ OR data_win_eventdata_commandLine:/.*[Mm][Ii][Nn][Ii][Dd][Uu][Mm][Pp].*/ OR data_win_eventdata_commandLine:/.*[Dd][Uu][Mm][Pp][Ee][Rr][Tt].*/ OR data_win_eventdata_commandLine:/.*[Nn][Aa][Nn][Oo][Dd][Uu][Mm][Pp].*/ OR data_win_eventdata_commandLine:/.*[Ll][Ss][Aa][Ss][Ss].*/ OR data_win_eventdata_commandLine:/.*[Ss][Ee][Kk][Uu][Rr][Ll][Ss][Aa].*/ OR data_win_eventdata_commandLine:/.*[Nn][Tt][Dd][Ss]\.[Dd][Ii][Tt].*/ OR data_win_eventdata_commandLine:/.*[Nn][Tt][Dd][Ss][Uu][Tt][Ii][Ll].*/)) OR (data_win_system_eventID:"10" AND data_win_eventdata_targetImage:/.*(\\[Ll][Ss][Aa][Ss][Ss]\.[Ee][Xx][Ee])/))'
-      pivot_on: [host]
-      window: 1h
+  # Behaviour-targeted hunts the engine runs around the alert (not a sweep).
+  - name: Same unbacked-memory handle access to other critical processes on this host
+    query: data_win_system_eventID:"10" AND data_win_eventdata_callTrace:/.*[Uu][Nn][Kk][Nn][Oo][Ww][Nn].*/ AND data_win_eventdata_targetImage:/.*\\([Ll][Ss][Aa][Ss][Ss]|[Ww][Ii][Nn][Ll][Oo][Gg][Oo][Nn]|[Cc][Ss][Rr][Ss][Ss]|[Ss][Ee][Rr][Vv][Ii][Cc][Ee][Ss]|[Ss][Mm][Ss][Ss]|[Ll][Ss][Mm])\.[Ee][Xx][Ee]/
+    pivot_on:
+    - host
+    window: 1h
+  - name: Remote-thread injection / process tampering on this host (source of the unbacked code)
+    query: (data_win_system_eventID:"8") OR (data_win_system_eventID:"25")
+    pivot_on:
+    - host
+    window: 1h
+  - name: Event-log / ETW / audit-policy blinding on this host (Invoke-Phant0m's purpose)
+    query: (data_win_system_eventID:"1" AND (data_win_eventdata_commandLine:/.*[Ww][Ee][Vv][Tt][Uu][Tt][Ii][Ll].*/ OR data_win_eventdata_commandLine:/.*[Aa][Uu][Dd][Ii][Tt][Pp][Oo][Ll].*/ OR data_win_eventdata_commandLine:/.*[Cc][Ll][Ee][Aa][Rr]-[Ee][Vv][Ee][Nn][Tt][Ll][Oo][Gg].*/ OR data_win_eventdata_commandLine:/.*[Ss][Tt][Oo][Pp]-[Ss][Ee][Rr][Vv][Ii][Cc][Ee].*[Ee][Vv][Ee][Nn][Tt][Ll][Oo][Gg].*/)) OR (data_win_system_eventID:"13" AND data_win_eventdata_targetObject:/.*[Ww][Ii][Nn][Ee][Vv][Tt]\\[Cc][Hh][Aa][Nn][Nn][Ee][Ll][Ss].*/) OR (data_win_system_eventID:"4104" AND (data_win_eventdata_scriptBlockText:/.*[Ee][Tt][Ww][Tt][Rr][Aa][Cc][Ee][Pp][Rr][Oo][Vv][Ii][Dd][Ee][Rr].*/ OR data_win_eventdata_scriptBlockText:/.*[Pp][Hh][Aa][Nn][Tt]0[Mm].*/ OR data_win_eventdata_scriptBlockText:/.*[Ii][Nn][Vv][Oo][Kk][Ee]-[Pp][Hh][Aa][Nn][Tt][Oo][Mm].*/))
+    pivot_on:
+    - host
+    window: 2h
+  - name: In-memory / reflective PowerShell loader & encoded command on this host
+    query: (data_win_system_eventID:"4104" AND (data_win_eventdata_scriptBlockText:/.*[Rr][Ee][Ff][Ll][Ee][Cc][Tt][Ii][Oo][Nn]\.[Aa][Ss][Ss][Ee][Mm][Bb][Ll][Yy].*/ OR data_win_eventdata_scriptBlockText:/.*[Vv][Ii][Rr][Tt][Uu][Aa][Ll][Aa][Ll][Ll][Oo][Cc].*/ OR data_win_eventdata_scriptBlockText:/.*[Cc][Rr][Ee][Aa][Tt][Ee][Tt][Hh][Rr][Ee][Aa][Dd].*/ OR data_win_eventdata_scriptBlockText:/.*[Gg][Ee][Tt][Pp][Rr][Oo][Cc][Aa][Dd][Dd][Rr][Ee][Ss][Ss].*/ OR data_win_eventdata_scriptBlockText:/.*[Oo][Pp][Ee][Nn][Pp][Rr][Oo][Cc][Ee][Ss][Ss].*/)) OR (data_win_system_eventID:"1" AND (data_win_eventdata_commandLine:/.*-[Ee][Nn][Cc].*/ OR data_win_eventdata_commandLine:/.*[Ff][Rr][Oo][Mm][Bb][Aa][Ss][Ee]64[Ss][Tt][Rr][Ii][Nn][Gg].*/ OR data_win_eventdata_commandLine:/.*[Ii][Ee][Xx].*/))
+    pivot_on:
+    - host
+    window: 2h
+  - name: Credential dumping tooling / commands on this host (beacon's likely goal)
+    query: data_win_system_eventID:"1" AND (data_win_eventdata_commandLine:/.*[Cc][Oo][Mm][Ss][Vv][Cc][Ss]\.[Dd][Ll][Ll].*[Mm][Ii][Nn][Ii][Dd][Uu][Mm][Pp].*/ OR data_win_eventdata_commandLine:/.*[Pp][Rr][Oo][Cc][Dd][Uu][Mm][Pp].*/ OR data_win_eventdata_commandLine:/.*[Ss][Ee][Kk][Uu][Rr][Ll][Ss][Aa].*/ OR data_win_eventdata_commandLine:/.*[Nn][Tt][Dd][Ss]\.[Dd][Ii][Tt].*/ OR data_win_eventdata_image:/.*\\[Pp][Rr][Oo][Cc][Dd][Uu][Mm][Pp].*\.[Ee][Xx][Ee]/)
+    pivot_on:
+    - host
+    window: 2h

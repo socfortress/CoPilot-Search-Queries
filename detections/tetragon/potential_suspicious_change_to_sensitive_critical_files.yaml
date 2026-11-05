@@ -275,35 +275,58 @@ graylog:
   query: (((data_process_exec_process_binary:/.*\/[Cc][Aa][Tt]/ OR data_process_exec_process_binary:/.*\/[Ee][Cc][Hh][Oo]/ OR data_process_exec_process_binary:/.*\/[Gg][Rr][Ee][Pp]/ OR data_process_exec_process_binary:/.*\/[Hh][Ee][Aa][Dd]/ OR data_process_exec_process_binary:/.*\/[Mm][Oo][Rr][Ee]/ OR data_process_exec_process_binary:/.*\/[Tt][Aa][Ii][Ll]/) AND data_process_exec_process_arguments:/.*\>.*/) OR data_process_exec_process_binary:/.*\/[Ee][Mm][Aa][Cc][Ss]/ OR data_process_exec_process_binary:/.*\/[Nn][Aa][Nn][Oo]/ OR data_process_exec_process_binary:/.*\/[Ss][Ee][Dd]/ OR data_process_exec_process_binary:/.*\/[Vv][Ii]/ OR data_process_exec_process_binary:/.*\/[Vv][Ii][Mm]/) AND (data_process_exec_process_arguments:/.*\/[Bb][Ii][Nn]\/[Ll][Oo][Gg][Ii][Nn].*/ OR data_process_exec_process_arguments:/.*\/[Bb][Ii][Nn]\/[Pp][Aa][Ss][Ss][Ww][Dd].*/ OR data_process_exec_process_arguments:/.*\/[Bb][Oo][Oo][Tt]\/.*/ OR data_process_exec_process_arguments:/.*\/[Ee][Tt][Cc]\/.*\.[Cc][Oo][Nn][Ff].*/ OR data_process_exec_process_arguments:/.*\/[Ee][Tt][Cc]\/[Cc][Rr][Oo][Nn]\..*/ OR data_process_exec_process_arguments:/.*\/[Ee][Tt][Cc]\/[Cc][Rr][Oo][Nn][Tt][Aa][Bb].*/ OR data_process_exec_process_arguments:/.*\/[Ee][Tt][Cc]\/[Hh][Oo][Ss][Tt][Ss].*/ OR data_process_exec_process_arguments:/.*\/[Ee][Tt][Cc]\/[Ii][Nn][Ii][Tt]\.[Dd].*/ OR data_process_exec_process_arguments:/.*\/[Ee][Tt][Cc]\/[Ss][Uu][Dd][Oo][Ee][Rr][Ss].*/ OR data_process_exec_process_arguments:/.*\/[Oo][Pp][Tt]\/[Bb][Ii][Nn]\/.*/ OR data_process_exec_process_arguments:/.*\/[Ss][Bb][Ii][Nn].*/ OR data_process_exec_process_arguments:/.*\/[Uu][Ss][Rr]\/[Bb][Ii][Nn]\/.*/ OR data_process_exec_process_arguments:/.*\/[Uu][Ss][Rr]\/[Ll][Oo][Cc][Aa][Ll]\/[Bb][Ii][Nn]\/.*/) AND _exists_:data_process_exec_process_binary AND _exists_:data_process_exec_process_arguments AND NOT (data_process_exec_process_binary:/.*\/[Bb][Ii][Nn]\/[Ss][Ee][Dd]/ AND (data_process_exec_process_arguments:/[Ss][Ee][Dd] -[Ii] \/\^.*/ OR data_process_exec_process_arguments:/[Ss][Ee][Dd] -[Nn][Ee] [Ss]\/\^.*/) AND data_process_exec_process_arguments:/.*\/[Ee][Tt][Cc]\/[Mm][Dd][Aa][Dd][Mm]\/[Mm][Dd][Aa][Dd][Mm]\.[Cc][Oo][Nn][Ff]/)
 
 correlation:
-  # Authored by the correlation engine for review. Related CoPilot Searches to run
-  # around an alert from this rule, scoped to the same host/user/IP within the window.
+  # Authored per-rule (behaviour-researched) for the correlation engine. Related CoPilot
+  # Searches + telemetry pivots to run around an alert, scoped to its host/user/ip/domain.
   related_rules:
-    - id: de25eeb8-3655-4643-ac3a-b662d3f26b6b
-      name: "Disable Or Stop Services"
-      reason: "next kill-chain tactic: Impact"
-    - id: 2992ac4d-31e9-4325-99f2-b18a73221bb2
-      name: "ESXi VM Kill Via ESXCLI"
-      reason: "next kill-chain tactic: Impact"
-    - id: 8a46f16c-8c4c-82d1-b121-0fdd3ba70a84
-      name: "Group Has Been Deleted Via Groupdel"
-      reason: "next kill-chain tactic: Impact"
-  window: 1h
+  - id: 34979410-e4b5-4e5d-8cfb-389fdff05c12
+    name: Remove Immutable File Attribute
+    reason: 'Immediate precursor: hardened files like /etc/passwd and /etc/sudoers are often protected with chattr +i, so an attacker runs ''chattr -i'' to unlock the file right before the editor write this rule catches. Both firing on one host minutes apart proves a deliberate defeat-of-protection edit.'
+  - id: 0f79c4d2-4e1f-4683-9c36-b5469a665e06
+    name: Access of Sudoers File Content
+    reason: 'Read-before-write precursor on the same /etc/sudoers target: enumerating who holds sudo rights typically precedes tampering with the sudoers file. If this fired first, the subsequent sudoers edit is targeted privilege escalation, not admin maintenance.'
+  - id: 6a50f16c-3b7b-42d1-b081-0fdd3ba70a73
+    name: User Added To Root/Sudoers Group Using Usermod
+    reason: 'Alternate route to the same end as a sudoers edit: granting an account root/sudo via ''usermod -aG''. Seeing both on one host means the attacker is escalating privilege through more than one mechanism.'
+  - id: 759d0d51-bc99-4b5e-9add-8f5b2c8e7512
+    name: Creation Of An User Account
+    reason: 'Follow-on to tampering with the /bin/passwd and /bin/login targets this rule watches: after altering authentication files the attacker provisions a backdoor account (useradd/adduser) for persistent access.'
+  - id: 4e2a6c91-7f3d-4b6e-9a4f-1c8b0e5a92d4
+    name: Crontab Interactive Edit Execution
+    reason: 'Same cron-persistence intent via a channel this rule misses: ''crontab -e'' edits the per-user spool rather than /etc/cron* or /etc/crontab, so the editor-vs-/etc path match never triggers. Confirms scheduled-task persistence on the host.'
+  - id: 31545105-3444-4584-bebf-c466353230d2
+    name: Touch Suspicious Service File
+    reason: 'Systemd analogue of the /etc/init.d edits this rule flags: creating and timestomping a *.service unit is the modern persistence path. Co-occurring service-file activity expands an init.d edit into a full persistence install plus anti-forensics.'
+  - id: 4b3cb710-5e83-4715-8c45-8b2b5b3e5751
+    name: Modification of ld.so.preload
+    reason: 'Same behaviour class on a sensitive /etc file this rule cannot see: /etc/ld.so.preload has no .conf extension and is absent from the path list, yet editing it injects a shared object into every process. Complementary coverage of ''edit a sensitive /etc file for persistence''.'
+  - id: a94cdd87-6c54-4678-a6cc-2814ffe5a13d
+    name: Unix Shell Configuration Modification
+    reason: 'Same config-edit-for-persistence behaviour aimed at files outside this rule''s path list (/etc/profile, /etc/profile.d, /etc/shells, shell rc files): a command is planted to run on every new shell. Confirms the host is being seeded with login-triggered persistence.'
+  window: 2h
   enrichment_searches:
-  # Rule-specific telemetry pivots the engine runs around an alert from this rule,
-  # scoped to the alert's host/user/IP within the window (behaviour-targeted, not a sweep).
-    - name: "Other executions of this tool-set on this host (any arguments)"
-      query: 'data_process_exec_process_binary:/.*(\/[Vv][Ii][Mm])/'
-      pivot_on: [host]
-      window: 2h
-    - name: "Shell / interpreter execution on this host"
-      query: '((data_process_exec_process_binary:/.*(\/[Bb][Aa][Ss][Hh]|\/[Ss][Hh]|\/[Dd][Aa][Ss][Hh]|\/[Zz][Ss][Hh]|\/[Kk][Ss][Hh]|\/[Aa][Ss][Hh]|\/[Bb][Uu][Ss][Yy][Bb][Oo][Xx])/) OR (data_process_exec_process_binary:/.*(\/[Pp][Yy][Tt][Hh][Oo][Nn]|\/[Pp][Yy][Tt][Hh][Oo][Nn]3|\/[Pp][Ee][Rr][Ll]|\/[Rr][Uu][Bb][Yy]|\/[Pp][Hh][Pp]|\/[Nn][Oo][Dd][Ee]|\/[Ll][Uu][Aa]|\/[Aa][Ww][Kk])/))'
-      pivot_on: [host]
-      window: 1h
-    - name: "Reconnaissance commands on this host"
-      query: 'data_process_exec_process_binary:/.*(\/[Ww][Hh][Oo][Aa][Mm][Ii]|\/[Ii][Dd]|\/[Uu][Nn][Aa][Mm][Ee]|\/[Hh][Oo][Ss][Tt][Nn][Aa][Mm][Ee]|\/[Hh][Oo][Ss][Tt][Nn][Aa][Mm][Ee][Cc][Tt][Ll]|\/[Ss][Ss]|\/[Nn][Ee][Tt][Ss][Tt][Aa][Tt]|\/[Ii][Ff][Cc][Oo][Nn][Ff][Ii][Gg]|\/[Aa][Rr][Pp]|\/[Ww]|\/[Ww][Hh][Oo]|\/[Ll][Aa][Ss][Tt]|\/[Ll][Ss][Oo][Ff]|\/[Nn][Mm][Aa][Pp]|\/[Dd][Ii][Gg]|\/[Ff][Ii][Nn][Dd])/'
-      pivot_on: [host]
-      window: 1h
-    - name: "Destructive tooling on this host"
-      query: '((data_process_exec_process_binary:/.*(\/[Dd][Dd]|\/[Mm][Kk][Ff][Ss]|\/[Ww][Ii][Pp][Ee][Ff][Ss]|\/[Ss][Hh][Rr][Ee][Dd]|\/[Cc][Rr][Yy][Pp][Tt][Ss][Ee][Tt][Uu][Pp])/) OR (data_process_exec_process_arguments:/.*[Rr][Mm] -[Rr][Ff].*/) OR (data_process_exec_process_arguments:/.*--[Nn][Oo]-[Pp][Rr][Ee][Ss][Ee][Rr][Vv][Ee]-[Rr][Oo][Oo][Tt].*/))'
-      pivot_on: [host]
-      window: 2h
+  # Behaviour-targeted hunts the engine runs around the alert (not a sweep).
+  - name: Immutable-attribute removal or ownership/permission change on sensitive paths
+    query: ((data_process_exec_process_binary:/.*\/[Cc][Hh][Aa][Tt][Tt][Rr]/) OR ((data_process_exec_process_binary:/.*\/[Cc][Hh][Mm][Oo][Dd]/ OR data_process_exec_process_binary:/.*\/[Cc][Hh][Oo][Ww][Nn]/) AND (data_process_exec_process_arguments:/.*\/[Ee][Tt][Cc]\/.*/ OR data_process_exec_process_arguments:/.*\/[Ss][Bb][Ii][Nn].*/ OR data_process_exec_process_arguments:/.*\/[Uu][Ss][Rr]\/[Bb][Ii][Nn]\/.*/ OR data_process_exec_process_arguments:/.*\/[Bb][Oo][Oo][Tt]\/.*/)))
+    pivot_on:
+    - host
+    window: 2h
+  - name: Any process writing to persistence-critical locations (cron/systemd/init.d/rc.local/ld.so.preload)
+    query: (data_process_exec_process_arguments:/.*\/[Ee][Tt][Cc]\/[Ss][Yy][Ss][Tt][Ee][Mm][Dd]\/.*/ OR data_process_exec_process_arguments:/.*\/[Ee][Tt][Cc]\/[Cc][Rr][Oo][Nn].*/ OR data_process_exec_process_arguments:/.*\/[Ee][Tt][Cc]\/[Ii][Nn][Ii][Tt]\.[Dd]\/.*/ OR data_process_exec_process_arguments:/.*\/[Ee][Tt][Cc]\/[Rr][Cc]\.[Ll][Oo][Cc][Aa][Ll].*/ OR data_process_exec_process_arguments:/.*\/[Ee][Tt][Cc]\/[Ll][Dd]\.[Ss][Oo]\.[Pp][Rr][Ee][Ll][Oo][Aa][Dd].*/)
+    pivot_on:
+    - host
+    window: 2h
+  - name: Read or copy of credential files (/etc/shadow, /etc/passwd, /etc/sudoers)
+    query: ((data_process_exec_process_binary:/.*\/[Cc][Aa][Tt]/ OR data_process_exec_process_binary:/.*\/[Ll][Ee][Ss][Ss]/ OR data_process_exec_process_binary:/.*\/[Cc][Pp]/ OR data_process_exec_process_binary:/.*\/[Gg][Rr][Ee][Pp]/ OR data_process_exec_process_binary:/.*\/[Aa][Ww][Kk]/) AND (data_process_exec_process_arguments:/.*\/[Ee][Tt][Cc]\/[Ss][Hh][Aa][Dd][Oo][Ww].*/ OR data_process_exec_process_arguments:/.*\/[Ee][Tt][Cc]\/[Pp][Aa][Ss][Ss][Ww][Dd].*/ OR data_process_exec_process_arguments:/.*\/[Ee][Tt][Cc]\/[Ss][Uu][Dd][Oo][Ee][Rr][Ss].*/))
+    pivot_on:
+    - host
+    window: 2h
+  - name: Account and privilege manipulation (useradd/usermod/groupadd/passwd/visudo)
+    query: (data_process_exec_process_binary:/.*\/[Uu][Ss][Ee][Rr][Aa][Dd][Dd]/ OR data_process_exec_process_binary:/.*\/[Aa][Dd][Dd][Uu][Ss][Ee][Rr]/ OR data_process_exec_process_binary:/.*\/[Uu][Ss][Ee][Rr][Mm][Oo][Dd]/ OR data_process_exec_process_binary:/.*\/[Gg][Rr][Oo][Uu][Pp][Aa][Dd][Dd]/ OR data_process_exec_process_binary:/.*\/[Pp][Aa][Ss][Ss][Ww][Dd]/ OR data_process_exec_process_binary:/.*\/[Cc][Hh][Pp][Aa][Ss][Ss][Ww][Dd]/ OR data_process_exec_process_binary:/.*\/[Vv][Ii][Ss][Uu][Dd][Oo]/)
+    pivot_on:
+    - host
+    window: 4h
+  - name: Persistence activation (crontab/systemctl/service/at/systemd-run)
+    query: (data_process_exec_process_binary:/.*\/[Cc][Rr][Oo][Nn][Tt][Aa][Bb]/ OR data_process_exec_process_binary:/.*\/[Ss][Yy][Ss][Tt][Ee][Mm][Cc][Tt][Ll]/ OR data_process_exec_process_binary:/.*\/[Ss][Ee][Rr][Vv][Ii][Cc][Ee]/ OR data_process_exec_process_binary:/.*\/[Aa][Tt]/ OR data_process_exec_process_binary:/.*\/[Ss][Yy][Ss][Tt][Ee][Mm][Dd]-[Rr][Uu][Nn]/)
+    pivot_on:
+    - host
+    window: 2h

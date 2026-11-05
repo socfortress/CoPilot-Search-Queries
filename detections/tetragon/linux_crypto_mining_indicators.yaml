@@ -205,31 +205,58 @@ graylog:
   query: (data_process_exec_process_arguments:/.* --[Cc][Pp][Uu]-[Pp][Rr][Ii][Oo][Rr][Ii][Tt][Yy]=.*/ OR data_process_exec_process_arguments:/.*--[Dd][Oo][Nn][Aa][Tt][Ee]-[Ll][Ee][Vv][Ee][Ll]=0.*/ OR data_process_exec_process_arguments:/.* -[Oo] [Pp][Oo][Oo][Ll]\..*/ OR data_process_exec_process_arguments:/.* --[Nn][Ii][Cc][Ee][Hh][Aa][Ss][Hh].*/ OR data_process_exec_process_arguments:/.* --[Aa][Ll][Gg][Oo]=[Rr][Xx]\/0 .*/ OR data_process_exec_process_arguments:/.*[Ss][Tt][Rr][Aa][Tt][Uu][Mm]\+[Tt][Cc][Pp]:\/\/.*/ OR data_process_exec_process_arguments:/.*[Ss][Tt][Rr][Aa][Tt][Uu][Mm]\+[Uu][Dd][Pp]:\/\/.*/ OR data_process_exec_process_arguments:/.*[Ss][Hh] -[Cc] \/[Ss][Bb][Ii][Nn]\/[Mm][Oo][Dd][Pp][Rr][Oo][Bb][Ee] [Mm][Ss][Rr] [Aa][Ll][Ll][Oo][Ww]_[Ww][Rr][Ii][Tt][Ee][Ss]=[Oo][Nn].*/ OR data_process_exec_process_arguments:/.*[Ll][Ss]1[Kk][Bb]25[Hh][Dd][Gg][Uu][Tt][Bb][Gg][Vv]2[Zz][Ww][Ww]9.*/ OR data_process_exec_process_arguments:/.*0[Tt][Zz][Gg]9[Uu][Yy][Xx][Rr][Ll][Ll][Ww][Xx][Ll][Dd][Mm][Vv][Ss][Pp].*/ OR data_process_exec_process_arguments:/.*[Tt][Ll][Ww][Rr][Vv][Bb][Mm][Ff]0[Zz][Ss]1[Ss][Zz][Xx][Zz][Ll][Bb][Dd].*/ OR data_process_exec_process_arguments:/.*[Cc]3[Rr][Yy][Yy][Xx][Rr]1[Bb][Ss][Tt]0[Yy]3[Aa]6[Ll][Yy].*/ OR data_process_exec_process_arguments:/.*[Nn]0[Cc][Mm][Ff]0[Dd][Ww]0[Rr][Dd][Gg][Nn][Ww][Oo][Ii]8[Vv].*/ OR data_process_exec_process_arguments:/.*[Zz][Dd][Hh][Jj][Hh][Dd][Hh][Vv][Tt][Kk]3[Rr][Jj][Cc][Dd][Oo][Vv][Ll].*/ OR data_process_exec_process_arguments:/.*[Cc]3[Rr][Yy][Yy][Xx][Rr]1[Bb][Ss][Tt]1[Zz][Hh][Aa]6[Ll][Yy].*/ OR data_process_exec_process_arguments:/.*[Nn]0[Cc][Mm][Ff]0[Dd][Ww]0[Rr][Dd][Ww][Rr][Ww][Oo][Ii]8[Vv].*/ OR data_process_exec_process_arguments:/.*[Zz][Dd][Hh][Jj][Hh][Dd][Hh][Vv][Tt][Kk]3[Vv][Kk][Cc][Dd][Oo][Vv][Ll].*/)
 
 correlation:
-  # Authored by the correlation engine for review. Related CoPilot Searches to run
-  # around an alert from this rule, scoped to the same host/user/IP within the window.
+  # Authored per-rule (behaviour-researched) for the correlation engine. Related CoPilot
+  # Searches + telemetry pivots to run around an alert, scoped to its host/user/ip/domain.
   related_rules:
-    - id: de25eeb8-3655-4643-ac3a-b662d3f26b6b
-      name: "Disable Or Stop Services"
-      reason: "next kill-chain tactic: Impact"
-    - id: 2992ac4d-31e9-4325-99f2-b18a73221bb2
-      name: "ESXi VM Kill Via ESXCLI"
-      reason: "next kill-chain tactic: Impact"
-    - id: 8a46f16c-8c4c-82d1-b121-0fdd3ba70a84
-      name: "Group Has Been Deleted Via Groupdel"
-      reason: "next kill-chain tactic: Impact"
-  window: 1h
+  - id: a2d9e2f3-0f43-4c7a-bcd9-9acfc0d723aa
+    name: Suspicious Download and Execute Pattern via Curl/Wget
+    reason: 'Delivery precursor on the same host: the XMRig binary and its config are pulled into /tmp or /dev/shm with curl/wget and run immediately - this is how the miner this rule catches reached the host.'
+  - id: ba592c6d-6888-43c3-b8c6-689b8fe47337
+    name: Linux Base64 Encoded Pipe to Shell
+    reason: 'Direct tie: this rule''s base64 blobs decode to miner arguments (LS1kb25hdGUtbGV2ZWw9 = ''--donate-level='', c3RyYXR1bSt0Y3A6Ly = ''stratum+tcp://''); they are launched by exactly this base64|sh dropper, so this fires on the same command that produced the crypto match.'
+  - id: 880973f3-9708-491c-a77b-2a35a1921158
+    name: Linux Shell Pipe to Shell
+    reason: The plaintext install one-liner (curl ...|sh) that drops and starts the miner - the un-encoded sibling of the base64 dropper, same delivery step just before the miner runs.
+  - id: 5cd16c8f-44a6-4654-81e7-a84d6db507d4
+    name: Process Execution From Shared Memory Directory
+    reason: Linux cryptojackers (Kinsing, TeamTNT) run the miner from /dev/shm to stay off disk; expect the actual miner process to show here on the same host within the window.
+  - id: e3a8a052-111f-4606-9aee-f28ebeb76776
+    name: Disabling Security Tools
+    reason: 'Co-occurring campaign step: the dropper disables AV/EDR and cloud security agents (e.g. Alibaba aegis) to keep the miner from being stopped - routinely runs seconds before or after miner launch.'
+  - id: de25eeb8-3655-4643-ac3a-b662d3f26b6b
+    name: Disable Or Stop Services
+    reason: 'Cryptojacker housekeeping: systemctl/service stop is used to kill rival miners and cloud/monitoring agents and free the CPU for mining - a hallmark co-step, not just a shared Impact tag.'
+  - id: 3be619f4-d9ec-4ea8-a173-18fdd01996ab
+    name: Flush Iptables Ufw Chain
+    reason: The firewall is flushed so the miner's outbound stratum/pool traffic is unimpeded and the host is opened for SSH worming - a recurring step in TeamTNT/Kinsing miner installs.
+  - id: 6b14bac8-3e3a-4324-8109-42f0546a347f
+    name: Scheduled Cron Task/Job - Linux
+    reason: 'Follow-on persistence: a crontab entry pointing at /tmp relaunches the miner after reboot or after it is killed - the mechanism that makes the mining survive remediation.'
+  window: 2h
   enrichment_searches:
-  # Rule-specific telemetry pivots the engine runs around an alert from this rule,
-  # scoped to the alert's host/user/IP within the window (behaviour-targeted, not a sweep).
-    - name: "Shell / interpreter execution on this host"
-      query: '((data_process_exec_process_binary:/.*(\/[Bb][Aa][Ss][Hh]|\/[Ss][Hh]|\/[Dd][Aa][Ss][Hh]|\/[Zz][Ss][Hh]|\/[Kk][Ss][Hh]|\/[Aa][Ss][Hh]|\/[Bb][Uu][Ss][Yy][Bb][Oo][Xx])/) OR (data_process_exec_process_binary:/.*(\/[Pp][Yy][Tt][Hh][Oo][Nn]|\/[Pp][Yy][Tt][Hh][Oo][Nn]3|\/[Pp][Ee][Rr][Ll]|\/[Rr][Uu][Bb][Yy]|\/[Pp][Hh][Pp]|\/[Nn][Oo][Dd][Ee]|\/[Ll][Uu][Aa]|\/[Aa][Ww][Kk])/))'
-      pivot_on: [host]
-      window: 1h
-    - name: "Reconnaissance commands on this host"
-      query: 'data_process_exec_process_binary:/.*(\/[Ww][Hh][Oo][Aa][Mm][Ii]|\/[Ii][Dd]|\/[Uu][Nn][Aa][Mm][Ee]|\/[Hh][Oo][Ss][Tt][Nn][Aa][Mm][Ee]|\/[Hh][Oo][Ss][Tt][Nn][Aa][Mm][Ee][Cc][Tt][Ll]|\/[Ss][Ss]|\/[Nn][Ee][Tt][Ss][Tt][Aa][Tt]|\/[Ii][Ff][Cc][Oo][Nn][Ff][Ii][Gg]|\/[Aa][Rr][Pp]|\/[Ww]|\/[Ww][Hh][Oo]|\/[Ll][Aa][Ss][Tt]|\/[Ll][Ss][Oo][Ff]|\/[Nn][Mm][Aa][Pp]|\/[Dd][Ii][Gg]|\/[Ff][Ii][Nn][Dd])/'
-      pivot_on: [host]
-      window: 1h
-    - name: "Destructive tooling on this host"
-      query: '((data_process_exec_process_binary:/.*(\/[Dd][Dd]|\/[Mm][Kk][Ff][Ss]|\/[Ww][Ii][Pp][Ee][Ff][Ss]|\/[Ss][Hh][Rr][Ee][Dd]|\/[Cc][Rr][Yy][Pp][Tt][Ss][Ee][Tt][Uu][Pp])/) OR (data_process_exec_process_arguments:/.*[Rr][Mm] -[Rr][Ff].*/) OR (data_process_exec_process_arguments:/.*--[Nn][Oo]-[Pp][Rr][Ee][Ss][Ee][Rr][Vv][Ee]-[Rr][Oo][Oo][Tt].*/))'
-      pivot_on: [host]
-      window: 2h
+  # Behaviour-targeted hunts the engine runs around the alert (not a sweep).
+  - name: Miner process footprint on this host (binary names + XMRig/RandomX args)
+    query: (data_process_exec_process_binary:/.*\/([Xx][Mm][Rr][Ii][Gg]|[Mm][Ii][Nn][Ee][Rr][Dd]|[Cc][Pp][Uu][Mm][Ii][Nn][Ee][Rr]|[Kk][Ii][Nn][Ss][Ii][Nn][Gg]|[Kk][Dd][Ee][Vv][Tt][Mm][Pp][Ff][Ss][Ii]).*/ OR data_process_exec_process_arguments:/.*([Xx][Mm][Rr][Ii][Gg]|[Rr][Aa][Nn][Dd][Oo][Mm][Xx]|[Cc][Rr][Yy][Pp][Tt][Oo][Nn][Ii][Gg][Hh][Tt]|[Mm][Oo][Nn][Ee][Rr][Oo]|[Hh][Aa][Ss][Hh][Rr][Aa][Tt][Ee]|--[Mm][Aa][Xx]-[Cc][Pp][Uu]-[Uu][Ss][Aa][Gg][Ee]|--[Cc][Oo][Ii][Nn]).*/)
+    pivot_on:
+    - host
+    window: 1h
+  - name: Downloader staging the payload into a temp directory on this host
+    query: ((data_process_exec_process_binary:/.*\/[Cc][Uu][Rr][Ll].*/ OR data_process_exec_process_binary:/.*\/[Ww][Gg][Ee][Tt].*/ OR data_process_exec_process_binary:/.*\/[Tt][Ff][Tt][Pp].*/) AND (data_process_exec_process_arguments:/.*\/[Tt][Mm][Pp]\/.*/ OR data_process_exec_process_arguments:/.*\/[Dd][Ee][Vv]\/[Ss][Hh][Mm]\/.*/ OR data_process_exec_process_arguments:/.*\/[Vv][Aa][Rr]\/[Tt][Mm][Pp]\/.*/ OR data_process_exec_process_arguments:/.* -[Oo] .*/))
+    pivot_on:
+    - host
+    window: 4h
+  - name: Fileless execution from shared memory or temp directories on this host
+    query: (data_process_exec_process_binary:/\/[Dd][Ee][Vv]\/[Ss][Hh][Mm]\/.*/ OR data_process_exec_process_binary:/\/[Tt][Mm][Pp]\/.*/ OR data_process_exec_process_binary:/\/[Vv][Aa][Rr]\/[Tt][Mm][Pp]\/.*/)
+    pivot_on:
+    - host
+    window: 2h
+  - name: Cron or systemd persistence install on this host
+    query: (data_process_exec_process_binary:/.*\/[Cc][Rr][Oo][Nn][Tt][Aa][Bb].*/ OR data_process_exec_process_arguments:/.*\/[Ee][Tt][Cc]\/[Cc][Rr][Oo][Nn].*/ OR data_process_exec_process_arguments:/.*\/[Vv][Aa][Rr]\/[Ss][Pp][Oo][Oo][Ll]\/[Cc][Rr][Oo][Nn].*/ OR data_process_exec_process_arguments:/.*\/[Ee][Tt][Cc]\/[Ss][Yy][Ss][Tt][Ee][Mm][Dd]\/.*/ OR data_process_exec_process_arguments:/.*\.[Ss][Ee][Rr][Vv][Ii][Cc][Ee].*/)
+    pivot_on:
+    - host
+    window: 6h
+  - name: Hashrate MSR tweak and preload/kernel-module hiding on this host
+    query: ((data_process_exec_process_binary:/.*\/[Mm][Oo][Dd][Pp][Rr][Oo][Bb][Ee].*/ AND data_process_exec_process_arguments:/.*[Mm][Ss][Rr].*/) OR data_process_exec_process_arguments:/.*[Ll][Dd]_[Pp][Rr][Ee][Ll][Oo][Aa][Dd].*/ OR data_process_exec_process_arguments:/.*[Ll][Dd]\.[Ss][Oo]\.[Pp][Rr][Ee][Ll][Oo][Aa][Dd].*/ OR data_process_exec_process_binary:/.*\/[Ii][Nn][Ss][Mm][Oo][Dd].*/)
+    pivot_on:
+    - host
+    window: 2h

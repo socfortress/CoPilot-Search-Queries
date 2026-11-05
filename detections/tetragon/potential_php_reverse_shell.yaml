@@ -183,23 +183,58 @@ graylog:
   query: data_process_exec_process_binary:/.*\/[Pp][Hh][Pp].*/ AND data_process_exec_process_arguments:/.* -[Rr] .*/ AND data_process_exec_process_arguments:/.*[Ff][Ss][Oo][Cc][Kk][Oo][Pp][Ee][Nn].*/ AND (data_process_exec_process_arguments:/.*[Aa][Ss][Hh].*/ OR data_process_exec_process_arguments:/.*[Bb][Aa][Ss][Hh].*/ OR data_process_exec_process_arguments:/.*[Bb][Ss][Hh].*/ OR data_process_exec_process_arguments:/.*[Cc][Ss][Hh].*/ OR data_process_exec_process_arguments:/.*[Kk][Ss][Hh].*/ OR data_process_exec_process_arguments:/.*[Pp][Dd][Kk][Ss][Hh].*/ OR data_process_exec_process_arguments:/.*[Ss][Hh].*/ OR data_process_exec_process_arguments:/.*[Tt][Cc][Ss][Hh].*/ OR data_process_exec_process_arguments:/.*[Zz][Ss][Hh].*/)
 
 correlation:
-  # Authored by the correlation engine for review.
+  # Authored per-rule (behaviour-researched) for the correlation engine. Related CoPilot
+  # Searches + telemetry pivots to run around an alert, scoped to its host/user/ip/domain.
+  related_rules:
+  - id: 818f7b24-0fba-4c49-a073-8b755573b9c7
+    name: Linux Webshell Indicators
+    reason: 'Entry vector: a php -r fsockopen reverse shell is almost always launched from a compromised web app. This rule fires when httpd/nginx/apache/php-fpm spawns a child process on the same host, pinpointing the webshell or RCE that kicked off the one-liner.'
+  - id: 7f734ed0-4f47-46c0-837f-6ee62505abd9
+    name: Potential Netcat Reverse Shell Execution
+    reason: Sibling call-back from the same reverse-shell cheat sheets this rule cites (pentestmonkey/revshells); operators fire several one-liners until one connects, so nc -e /bin/sh on the same host in the window corroborates an active reverse-shell attempt.
+  - id: 2d2f44ff-4611-4778-a8fc-323a0e9850cc
+    name: Inline Python Execution - Spawn Shell Via OS System Library
+    reason: 'Direct analog in another interpreter: inline code (python -c os.system) spawning a shell instead of php -r fsockopen. The same operator commonly tries the Python variant on the same host while probing which interpreter yields a working shell.'
+  - id: c4042d54-110d-45dd-a0e1-05c47822c937
+    name: Python Spawning Pretty TTY Via PTY Module
+    reason: 'Canonical immediate next step: a php fsockopen+exec shell is dumb and non-interactive, so operators run python -c import pty;pty.spawn(bash) to upgrade it to a full interactive TTY. Expect this on the same host seconds to minutes after the alert.'
+  - id: ea3ecad2-db86-4a89-ad0b-132a10d2db55
+    name: Interactive Bash Suspicious Children
+    reason: The reverse shell hands the operator an interactive bash -i; this rule fires on that bash spawning uncommon children (base64, python import, etc.) i.e. the hands-on-keyboard commands run through the reverse shell on the same host.
+  - id: 0cf7a157-8879-41a2-8f55-388dd23746b7
+    name: Linux Recon Indicators
+    reason: First action once the call-back shell is live is host and privilege reconnaissance (find -perm -4000 SUID hunting, .htpasswd/credential files); its presence on the same host confirms a live operator exploring the foothold the php shell opened.
+  - id: a2d9e2f3-0f43-4c7a-bcd9-9acfc0d723aa
+    name: Suspicious Download and Execute Pattern via Curl/Wget
+    reason: A web-user reverse shell is only a staging foothold; operators then pull next-stage tooling (enum scripts, implants) with curl/wget into /tmp or /dev/shm and run it, escalating the php shell from bare access to active tooling on the same host.
+  - id: 0f79c4d2-4e1f-4683-9c36-b5469a665e06
+    name: Access of Sudoers File Content
+    reason: The php shell usually runs as the low-privileged web user (www-data); reading /etc/sudoers to enumerate who can sudo is a top first privilege-escalation check, so this on the same host is the expected next move after the foothold.
+  window: 2h
   enrichment_searches:
-  # Rule-specific telemetry pivots the engine runs around an alert from this rule,
-  # scoped to the alert's host/user/IP within the window (behaviour-targeted, not a sweep).
-    - name: "Other executions of this tool-set on this host (any arguments)"
-      query: 'data_process_exec_process_binary:/.*(\/[Pp][Hh][Pp])/'
-      pivot_on: [host]
-      window: 2h
-    - name: "Persistence via cron / systemd / shell profiles on this host"
-      query: '((data_process_exec_process_binary:/.*(\/[Cc][Rr][Oo][Nn][Tt][Aa][Bb]|\/[Ss][Yy][Ss][Tt][Ee][Mm][Cc][Tt][Ll]|\/[Aa][Tt]|\/[Uu][Pp][Dd][Aa][Tt][Ee]-[Rr][Cc]\.[Dd])/) OR (data_process_exec_process_arguments:/.*\/[Ee][Tt][Cc]\/[Cc][Rr][Oo][Nn].*/) OR (data_process_exec_process_arguments:/.*\/[Ee][Tt][Cc]\/[Ss][Yy][Ss][Tt][Ee][Mm][Dd].*/) OR (data_process_exec_process_arguments:/.*[Rr][Cc]\.[Ll][Oo][Cc][Aa][Ll].*/) OR (data_process_exec_process_arguments:/.*\.[Bb][Aa][Ss][Hh][Rr][Cc].*/) OR (data_process_exec_process_arguments:/.*\.[Bb][Aa][Ss][Hh]_[Pp][Rr][Oo][Ff][Ii][Ll][Ee].*/) OR (data_process_exec_process_arguments:/.*\/[Ee][Tt][Cc]\/[Pp][Rr][Oo][Ff][Ii][Ll][Ee].*/) OR (data_process_exec_process_arguments:/.*[Aa][Uu][Tt][Hh][Oo][Rr][Ii][Zz][Ee][Dd]_[Kk][Ee][Yy][Ss].*/) OR (data_process_exec_process_arguments:/.*\/[Ee][Tt][Cc]\/[Ii][Nn][Ii][Tt]\.[Dd].*/))'
-      pivot_on: [host]
-      window: 4h
-    - name: "Shell / interpreter execution on this host"
-      query: '((data_process_exec_process_binary:/.*(\/[Bb][Aa][Ss][Hh]|\/[Ss][Hh]|\/[Dd][Aa][Ss][Hh]|\/[Zz][Ss][Hh]|\/[Kk][Ss][Hh]|\/[Aa][Ss][Hh]|\/[Bb][Uu][Ss][Yy][Bb][Oo][Xx])/) OR (data_process_exec_process_binary:/.*(\/[Pp][Yy][Tt][Hh][Oo][Nn]|\/[Pp][Yy][Tt][Hh][Oo][Nn]3|\/[Pp][Ee][Rr][Ll]|\/[Rr][Uu][Bb][Yy]|\/[Pp][Hh][Pp]|\/[Nn][Oo][Dd][Ee]|\/[Ll][Uu][Aa]|\/[Aa][Ww][Kk])/))'
-      pivot_on: [host]
-      window: 1h
-    - name: "Reconnaissance commands on this host"
-      query: 'data_process_exec_process_binary:/.*(\/[Ww][Hh][Oo][Aa][Mm][Ii]|\/[Ii][Dd]|\/[Uu][Nn][Aa][Mm][Ee]|\/[Hh][Oo][Ss][Tt][Nn][Aa][Mm][Ee]|\/[Hh][Oo][Ss][Tt][Nn][Aa][Mm][Ee][Cc][Tt][Ll]|\/[Ss][Ss]|\/[Nn][Ee][Tt][Ss][Tt][Aa][Tt]|\/[Ii][Ff][Cc][Oo][Nn][Ff][Ii][Gg]|\/[Aa][Rr][Pp]|\/[Ww]|\/[Ww][Hh][Oo]|\/[Ll][Aa][Ss][Tt]|\/[Ll][Ss][Oo][Ff]|\/[Nn][Mm][Aa][Pp]|\/[Dd][Ii][Gg]|\/[Ff][Ii][Nn][Dd])/'
-      pivot_on: [host]
-      window: 1h
+  # Behaviour-targeted hunts the engine runs around the alert (not a sweep).
+  - name: Child processes spawned by the web stack on this host (webshell command chain)
+    query: data_process_exec_parent_binary:/.*\/([Aa][Pp][Aa][Cc][Hh][Ee]2|[Hh][Tt][Tt][Pp][Dd]|[Nn][Gg][Ii][Nn][Xx]|[Ll][Ii][Gg][Hh][Tt][Tt][Pp][Dd]|[Pp][Hh][Pp]-[Ff][Pp][Mm].*|[Pp][Hh][Pp])/
+    pivot_on:
+    - host
+    window: 2h
+  - name: Any interpreter opening a reverse-shell network primitive on this host
+    query: data_process_exec_process_arguments:/.*([Ff][Ss][Oo][Cc][Kk][Oo][Pp][Ee][Nn]|[Ss][Oo][Cc][Kk][Ee][Tt]\.[Ss][Oo][Cc][Kk][Ee][Tt]|[Ii][Oo]::[Ss][Oo][Cc][Kk][Ee][Tt]|\/[Dd][Ee][Vv]\/[Tt][Cc][Pp]\/).*/
+    pivot_on:
+    - host
+    window: 1h
+  - name: Post-foothold recon and privilege-check burst on this host
+    query: data_process_exec_process_binary:/.*\/([Ww][Hh][Oo][Aa][Mm][Ii]|[Ii][Dd]|[Uu][Nn][Aa][Mm][Ee]|[Hh][Oo][Ss][Tt][Nn][Aa][Mm][Ee]|[Ii][Pp]|[Ii][Ff][Cc][Oo][Nn][Ff][Ii][Gg]|[Nn][Ee][Tt][Ss][Tt][Aa][Tt]|[Ss][Ss]|[Aa][Rr][Pp]|[Ss][Uu][Dd][Oo])/
+    pivot_on:
+    - host
+    window: 1h
+  - name: Access to credential and sensitive files through the shell on this host
+    query: data_process_exec_process_arguments:/.*(\/[Ee][Tt][Cc]\/[Ss][Hh][Aa][Dd][Oo][Ww]|\/[Ee][Tt][Cc]\/[Pp][Aa][Ss][Ss][Ww][Dd]|\.[Ss][Ss][Hh]\/|[Ii][Dd]_[Rr][Ss][Aa]|[Aa][Uu][Tt][Hh][Oo][Rr][Ii][Zz][Ee][Dd]_[Kk][Ee][Yy][Ss]|\.[Bb][Aa][Ss][Hh]_[Hh][Ii][Ss][Tt][Oo][Rr][Yy]|\.[Aa][Ww][Ss]\/[Cc][Rr][Ee][Dd][Ee][Nn][Tt][Ii][Aa][Ll][Ss]).*/
+    pivot_on:
+    - host
+    window: 4h
+  - name: Persistence via cron / systemd / authorized_keys / rc on this host
+    query: ((data_process_exec_process_binary:/.*\/([Cc][Rr][Oo][Nn][Tt][Aa][Bb]|[Ss][Yy][Ss][Tt][Ee][Mm][Cc][Tt][Ll]|[Aa][Tt])/) OR (data_process_exec_process_arguments:/.*(\/[Ee][Tt][Cc]\/[Cc][Rr][Oo][Nn]|\/[Ee][Tt][Cc]\/[Ss][Yy][Ss][Tt][Ee][Mm][Dd]|\/[Ee][Tt][Cc]\/[Rr][Cc]\.[Ll][Oo][Cc][Aa][Ll]|[Aa][Uu][Tt][Hh][Oo][Rr][Ii][Zz][Ee][Dd]_[Kk][Ee][Yy][Ss]|\.[Bb][Aa][Ss][Hh][Rr][Cc]).*/))
+    pivot_on:
+    - host
+    window: 6h

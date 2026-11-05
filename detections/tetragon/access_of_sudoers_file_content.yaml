@@ -184,23 +184,53 @@ graylog:
   query: (data_process_exec_process_binary:/.*\/[Cc][Aa][Tt]/ OR data_process_exec_process_binary:/.*\/[Ee][Dd]/ OR data_process_exec_process_binary:/.*\/[Ee][Gg][Rr][Ee][Pp]/ OR data_process_exec_process_binary:/.*\/[Ee][Mm][Aa][Cc][Ss]/ OR data_process_exec_process_binary:/.*\/[Ff][Gg][Rr][Ee][Pp]/ OR data_process_exec_process_binary:/.*\/[Gg][Rr][Ee][Pp]/ OR data_process_exec_process_binary:/.*\/[Hh][Ee][Aa][Dd]/ OR data_process_exec_process_binary:/.*\/[Ll][Ee][Ss][Ss]/ OR data_process_exec_process_binary:/.*\/[Mm][Oo][Rr][Ee]/ OR data_process_exec_process_binary:/.*\/[Nn][Aa][Nn][Oo]/ OR data_process_exec_process_binary:/.*\/[Tt][Aa][Ii][Ll]/) AND data_process_exec_process_arguments:/.* \/[Ee][Tt][Cc]\/[Ss][Uu][Dd][Oo][Ee][Rr][Ss].*/
 
 correlation:
-  # Authored by the correlation engine for review.
+  # Authored per-rule (behaviour-researched) for the correlation engine. Related CoPilot
+  # Searches + telemetry pivots to run around an alert, scoped to its host/user/ip/domain.
+  related_rules:
+  - id: 0cf7a157-8879-41a2-8f55-388dd23746b7
+    name: Linux Recon Indicators
+    reason: 'Co-occurring privilege-escalation reconnaissance from the same linuxprivchecker script both rules cite: it flags the SUID hunt (find -perm -4000) and .htpasswd search that run in the same burst as reading /etc/sudoers to map escalation paths.'
+  - id: fa4aaed5-4fe0-498d-bbc0-08e3346387ba
+    name: Copy Passwd Or Shadow From TMP Path
+    reason: 'Same recon cluster, different credential file: /etc/passwd and /etc/shadow are staged/read alongside /etc/sudoers to enumerate accounts and crack hashes, so this firing on the same host confirms account-enumeration intent.'
+  - id: linux-auditd-possible-access-sudoers-file-001
+    name: Linux Auditd Possible Access To Sudoers File
+    reason: Auditd/auth.log corroboration of the same /etc/sudoers read at the syscall level, and it also covers sudoers.d edits that this process-exec-of-read-utility rule cannot see.
+  - id: a1b2c3d4-5e6f-7a8b-9c0d-e1f2a3b4c5d6
+    name: Linux Sudoers File Access
+    reason: Companion sudoers detection that additionally fires on NOPASSWD lines, catching the privilege-granting edit an attacker makes right after enumerating who may sudo.
+  - id: linux-visudo-utility-execution-001
+    name: Linux Visudo Utility Execution
+    reason: 'Direct follow-on tamper: visudo editing /etc/sudoers shortly after the file was read indicates the attacker is now adding their own escalation entry rather than just inspecting it.'
+  - id: 6a50f16c-3b7b-42d1-b081-0fdd3ba70a73
+    name: User Added To Root/Sudoers Group Using Usermod
+    reason: 'Follow-on privilege escalation/persistence: having read the sudoers config, the attacker grants themselves sudo by adding an account to the root/sudoers group with usermod -aG.'
+  - id: f74107df-b6c6-4e80-bf00-4170b658162b
+    name: Sudo Privilege Escalation CVE-2019-14287
+    reason: 'Direct follow-on escalation: after learning which commands a user may sudo, the attacker abuses sudo via the -u#-1 bypass to execute as root.'
+  - id: 5f3b8a12-2d4c-4e7b-9c6d-8a1f2b4c9e3f
+    name: Doas Privilege Escalation Detection
+    reason: Alternative escalation path the attacker pivots to via the doas sudo-replacement when sudoers enumeration shows sudo is restricted or logged.
+  window: 1h
   enrichment_searches:
-  # Rule-specific telemetry pivots the engine runs around an alert from this rule,
-  # scoped to the alert's host/user/IP within the window (behaviour-targeted, not a sweep).
-    - name: "Host / credential reconnaissance commands on this host"
-      query: '((data_process_exec_process_binary:/.*(\/[Ww][Hh][Oo][Aa][Mm][Ii]|\/[Ii][Dd]|\/[Uu][Nn][Aa][Mm][Ee]|\/[Hh][Oo][Ss][Tt][Nn][Aa][Mm][Ee]|\/[Hh][Oo][Ss][Tt][Nn][Aa][Mm][Ee][Cc][Tt][Ll]|\/[Ss][Ss]|\/[Nn][Ee][Tt][Ss][Tt][Aa][Tt]|\/[Ii][Ff][Cc][Oo][Nn][Ff][Ii][Gg]|\/[Aa][Rr][Pp]|\/[Ww]|\/[Ww][Hh][Oo]|\/[Ll][Aa][Ss][Tt]|\/[Ll][Ss][Oo][Ff]|\/[Nn][Mm][Aa][Pp]|\/[Dd][Ii][Gg]|\/[Ff][Ii][Nn][Dd])/) OR (((data_process_exec_process_arguments:/.*\/[Ee][Tt][Cc]\/[Ss][Hh][Aa][Dd][Oo][Ww].*/) OR (data_process_exec_process_arguments:/.*\/[Ee][Tt][Cc]\/[Pp][Aa][Ss][Ss][Ww][Dd].*/) OR (data_process_exec_process_arguments:/.*\/[Ee][Tt][Cc]\/[Ss][Uu][Dd][Oo][Ee][Rr][Ss].*/) OR (data_process_exec_process_arguments:/.*[Ii][Dd]_[Rr][Ss][Aa].*/) OR (data_process_exec_process_arguments:/.*\.[Ss][Ss][Hh]\/.*/) OR (data_process_exec_process_arguments:/.*\/[Ee][Tt][Cc]\/[Gg][Ss][Hh][Aa][Dd][Oo][Ww].*/))))'
-      pivot_on: [host]
-      window: 1h
-    - name: "Privilege-escalation tooling executed on this host"
-      query: 'data_process_exec_process_binary:/.*(\/[Ss][Uu][Dd][Oo]|\/[Ss][Uu]|\/[Pp][Kk][Ee][Xx][Ee][Cc]|\/[Dd][Oo][Aa][Ss]|\/[Ss][Ee][Tt][Cc][Aa][Pp]|\/[Cc][Hh][Ss][Hh]|\/[Nn][Ee][Ww][Gg][Rr][Pp])/'
-      pivot_on: [host]
-      window: 2h
-    - name: "Shell / interpreter execution on this host"
-      query: '((data_process_exec_process_binary:/.*(\/[Bb][Aa][Ss][Hh]|\/[Ss][Hh]|\/[Dd][Aa][Ss][Hh]|\/[Zz][Ss][Hh]|\/[Kk][Ss][Hh]|\/[Aa][Ss][Hh]|\/[Bb][Uu][Ss][Yy][Bb][Oo][Xx])/) OR (data_process_exec_process_binary:/.*(\/[Pp][Yy][Tt][Hh][Oo][Nn]|\/[Pp][Yy][Tt][Hh][Oo][Nn]3|\/[Pp][Ee][Rr][Ll]|\/[Rr][Uu][Bb][Yy]|\/[Pp][Hh][Pp]|\/[Nn][Oo][Dd][Ee]|\/[Ll][Uu][Aa]|\/[Aa][Ww][Kk])/))'
-      pivot_on: [host]
-      window: 1h
-    - name: "Reconnaissance commands on this host"
-      query: 'data_process_exec_process_binary:/.*(\/[Ww][Hh][Oo][Aa][Mm][Ii]|\/[Ii][Dd]|\/[Uu][Nn][Aa][Mm][Ee]|\/[Hh][Oo][Ss][Tt][Nn][Aa][Mm][Ee]|\/[Hh][Oo][Ss][Tt][Nn][Aa][Mm][Ee][Cc][Tt][Ll]|\/[Ss][Ss]|\/[Nn][Ee][Tt][Ss][Tt][Aa][Tt]|\/[Ii][Ff][Cc][Oo][Nn][Ff][Ii][Gg]|\/[Aa][Rr][Pp]|\/[Ww]|\/[Ww][Hh][Oo]|\/[Ll][Aa][Ss][Tt]|\/[Ll][Ss][Oo][Ff]|\/[Nn][Mm][Aa][Pp]|\/[Dd][Ii][Gg]|\/[Ff][Ii][Nn][Dd])/'
-      pivot_on: [host]
-      window: 1h
+  # Behaviour-targeted hunts the engine runs around the alert (not a sweep).
+  - name: Sensitive credential and privilege files read on this host
+    query: (data_process_exec_process_arguments:/.*\/[Ee][Tt][Cc]\/[Pp][Aa][Ss][Ss][Ww][Dd].*/ OR data_process_exec_process_arguments:/.*\/[Ee][Tt][Cc]\/[Ss][Hh][Aa][Dd][Oo][Ww].*/ OR data_process_exec_process_arguments:/.*\/[Ee][Tt][Cc]\/[Gg][Ss][Hh][Aa][Dd][Oo][Ww].*/ OR data_process_exec_process_arguments:/.*\/[Ee][Tt][Cc]\/[Ss][Uu][Dd][Oo][Ee][Rr][Ss].*/ OR data_process_exec_process_arguments:/.*[Ss][Uu][Dd][Oo][Ee][Rr][Ss]\.[Dd].*/ OR data_process_exec_process_arguments:/.*\.[Ss][Ss][Hh]\/.*/ OR data_process_exec_process_arguments:/.*[Ii][Dd]_[Rr][Ss][Aa].*/ OR data_process_exec_process_arguments:/.*[Aa][Uu][Tt][Hh][Oo][Rr][Ii][Zz][Ee][Dd]_[Kk][Ee][Yy][Ss].*/)
+    pivot_on:
+    - host
+    window: 1h
+  - name: Privilege-escalation launchers and sudo abuse on this host
+    query: (data_process_exec_process_binary:/.*\/([Ss][Uu][Dd][Oo]|[Ss][Uu]|[Dd][Oo][Aa][Ss]|[Pp][Kk][Ee][Xx][Ee][Cc]|[Nn][Ee][Ww][Gg][Rr][Pp])/ OR data_process_exec_process_arguments:/.* -[Uu]\#.*/)
+    pivot_on:
+    - host
+    window: 2h
+  - name: Sudoers file or privileged-group modification on this host
+    query: (data_process_exec_process_binary:/.*\/[Vv][Ii][Ss][Uu][Dd][Oo]/ OR (data_process_exec_process_binary:/.*\/[Uu][Ss][Ee][Rr][Mm][Oo][Dd]/ AND data_process_exec_process_arguments:/.*-[Aa][Gg] ([Rr][Oo][Oo][Tt]|[Ss][Uu][Dd][Oo][Ee][Rr][Ss]).*/) OR (data_process_exec_process_binary:/.*\/([Tt][Ee][Ee]|[Dd][Dd]|[Cc][Hh][Mm][Oo][Dd]|[Cc][Hh][Oo][Ww][Nn])/ AND data_process_exec_process_arguments:/.*\/[Ee][Tt][Cc]\/[Ss][Uu][Dd][Oo][Ee][Rr][Ss].*/))
+    pivot_on:
+    - host
+    window: 2h
+  - name: SUID and privilege-escalation discovery on this host
+    query: (data_process_exec_process_arguments:/.* -[Pp][Ee][Rr][Mm] [-\/]0?4000.*/ OR data_process_exec_process_arguments:/.* -[Pp][Ee][Rr][Mm] -[Uu]=[Ss].*/ OR data_process_exec_process_binary:/.*\/[Gg][Ee][Tt][Cc][Aa][Pp]/ OR data_process_exec_process_arguments:/.*[Ll][Ii][Nn][Pp][Ee][Aa][Ss].*/ OR data_process_exec_process_arguments:/.*[Ll][Ii][Nn][Uu][Xx][Pp][Rr][Ii][Vv][Cc][Hh][Ee][Cc][Kk][Ee][Rr].*/)
+    pivot_on:
+    - host
+    window: 1h

@@ -178,23 +178,55 @@ graylog:
   query: ((data_process_exec_process_binary:/.*\/[Kk][Mm][Oo][Dd]/ AND data_process_exec_process_arguments:/.*[Mm][Oo][Dd][Pp][Rr][Oo][Bb][Ee].*/ AND data_process_exec_process_arguments:/.*[Cc][Rr][Yy][Pp][Tt][Oo]-[Aa][Uu][Tt][Hh][Ee][Nn][Cc][Ee][Ss][Nn]\(.*/) OR (data_process_exec_process_binary:/.*\/[Mm][Oo][Dd][Pp][Rr][Oo][Bb][Ee]/ AND data_process_exec_process_arguments:/.*[Cc][Rr][Yy][Pp][Tt][Oo]-[Aa][Uu][Tt][Hh][Ee][Nn][Cc][Ee][Ss][Nn]\(.*/))
 
 correlation:
-  # Authored by the correlation engine for review.
+  # Authored per-rule (behaviour-researched) for the correlation engine. Related CoPilot
+  # Searches + telemetry pivots to run around an alert, scoped to its host/user/ip/domain.
+  related_rules:
+  - id: a2d9e2f3-0f43-4c7a-bcd9-9acfc0d723aa
+    name: Suspicious Download and Execute Pattern via Curl/Wget
+    reason: 'Precursor: the Copy-Fail PoC is a C program that is first fetched to a world-writable dir (/tmp, /dev/shm) and run; this rule catches that staging of the local exploit on the target just before the authencesn trigger fires.'
+  - id: 33b3cfb1-574e-44b9-b527-fbf9303b9d7b
+    name: Potential Exploitation of CVE-2025-5054 or CVE-2025-4598
+    reason: Sibling local-privesc that also abuses SUID binaries (dumping SUID-process memory via suid_dumpable) - a host where authencesn Copy-Fail fires is typically being probed for several SUID-binary root primitives in the same session.
+  - id: f74107df-b6c6-4e80-bf00-4170b658162b
+    name: Sudo Privilege Escalation CVE-2019-14287
+    reason: Alternative local-root avenue (sudo -u#-1 bypass) that commonly co-occurs when an attacker with a foothold cycles through known Linux LPE exploits on the same host to win root.
+  - id: a1b2c3d4-5e6f-7a8b-9c0d-1e2f3a4b5c6d
+    name: Linux Kernel Module Insertion
+    reason: Shares the kernel-module-loading surface this rule watches (modprobe/kmod); and after Copy-Fail yields root, manual insmod of an LKM is the classic next step to install a rootkit for persistence.
+  - id: fa4aaed5-4fe0-498d-bbc0-08e3346387ba
+    name: Copy Passwd Or Shadow From TMP Path
+    reason: 'Payoff: once Copy-Fail corrupts a SUID binary and grants root, copying /etc/passwd or /etc/shadow out of a /tmp staging path is the immediate credential-theft objective.'
+  - id: 0f79c4d2-4e1f-4683-9c36-b5469a665e06
+    name: Access of Sudoers File Content
+    reason: 'Follow-on recon: reading /etc/sudoers to enumerate the privilege map and confirm the root/elevated access just obtained through the exploit.'
+  - id: 6a50f16c-3b7b-42d1-b081-0fdd3ba70a73
+    name: User Added To Root/Sudoers Group Using Usermod
+    reason: 'Follow-on persistence: cementing the newly-won root by adding a controlled account to the root or sudoers group via usermod.'
+  window: 2h
   enrichment_searches:
-  # Rule-specific telemetry pivots the engine runs around an alert from this rule,
-  # scoped to the alert's host/user/IP within the window (behaviour-targeted, not a sweep).
-    - name: "Privilege-escalation tooling executed on this host"
-      query: 'data_process_exec_process_binary:/.*(\/[Ss][Uu][Dd][Oo]|\/[Ss][Uu]|\/[Pp][Kk][Ee][Xx][Ee][Cc]|\/[Dd][Oo][Aa][Ss]|\/[Ss][Ee][Tt][Cc][Aa][Pp]|\/[Cc][Hh][Ss][Hh]|\/[Nn][Ee][Ww][Gg][Rr][Pp])/'
-      pivot_on: [host]
-      window: 2h
-    - name: "Other executions of this tool-set on this host (any arguments)"
-      query: 'data_process_exec_process_binary:/.*(\/[Kk][Mm][Oo][Dd]|\/[Mm][Oo][Dd][Pp][Rr][Oo][Bb][Ee])/'
-      pivot_on: [host]
-      window: 2h
-    - name: "Credential / secret-file access on this host"
-      query: '((data_process_exec_process_arguments:/.*\/[Ee][Tt][Cc]\/[Ss][Hh][Aa][Dd][Oo][Ww].*/) OR (data_process_exec_process_arguments:/.*\/[Ee][Tt][Cc]\/[Pp][Aa][Ss][Ss][Ww][Dd].*/) OR (data_process_exec_process_arguments:/.*\/[Ee][Tt][Cc]\/[Ss][Uu][Dd][Oo][Ee][Rr][Ss].*/) OR (data_process_exec_process_arguments:/.*[Ii][Dd]_[Rr][Ss][Aa].*/) OR (data_process_exec_process_arguments:/.*\.[Ss][Ss][Hh]\/.*/) OR (data_process_exec_process_arguments:/.*\/[Ee][Tt][Cc]\/[Gg][Ss][Hh][Aa][Dd][Oo][Ww].*/))'
-      pivot_on: [host]
-      window: 2h
-    - name: "Shell / interpreter execution on this host"
-      query: '((data_process_exec_process_binary:/.*(\/[Bb][Aa][Ss][Hh]|\/[Ss][Hh]|\/[Dd][Aa][Ss][Hh]|\/[Zz][Ss][Hh]|\/[Kk][Ss][Hh]|\/[Aa][Ss][Hh]|\/[Bb][Uu][Ss][Yy][Bb][Oo][Xx])/) OR (data_process_exec_process_binary:/.*(\/[Pp][Yy][Tt][Hh][Oo][Nn]|\/[Pp][Yy][Tt][Hh][Oo][Nn]3|\/[Pp][Ee][Rr][Ll]|\/[Rr][Uu][Bb][Yy]|\/[Pp][Hh][Pp]|\/[Nn][Oo][Dd][Ee]|\/[Ll][Uu][Aa]|\/[Aa][Ww][Kk])/))'
-      pivot_on: [host]
-      window: 1h
+  # Behaviour-targeted hunts the engine runs around the alert (not a sweep).
+  - name: Process executing from a world-writable staging directory (dropped exploit)
+    query: data_process_exec_process_binary:/.*\/([Tt][Mm][Pp]|[Dd][Ee][Vv]\/[Ss][Hh][Mm]|[Vv][Aa][Rr]\/[Tt][Mm][Pp])\/.*/
+    pivot_on:
+    - host
+    window: 2h
+  - name: On-host compilation of a C exploit (AF_ALG Copy-Fail PoC is built locally)
+    query: data_process_exec_process_binary:/.*\/([Cc][Cc]|[Gg][Cc][Cc]|[Cc][Ll][Aa][Nn][Gg]|[Gg]\+\+|[Mm][Aa][Kk][Ee]|[Tt][Cc][Cc])/
+    pivot_on:
+    - host
+    window: 4h
+  - name: SUID-root helper executed (the Copy-Fail page-cache corruption payoff)
+    query: data_process_exec_process_binary:/.*\/([Ss][Uu][Dd][Oo]|[Ss][Uu]|[Pp][Kk][Ee][Xx][Ee][Cc]|[Mm][Oo][Uu][Nn][Tt]|[Uu][Mm][Oo][Uu][Nn][Tt]|[Pp][Aa][Ss][Ss][Ww][Dd]|[Cc][Hh][Ss][Hh]|[Nn][Ee][Ww][Gg][Rr][Pp]|[Gg][Pp][Aa][Ss][Ss][Ww][Dd]|[Ff][Uu][Ss][Ee][Rr][Mm][Oo][Uu][Nn][Tt])/
+    pivot_on:
+    - host
+    window: 1h
+  - name: Credential-store access on this host (/etc/shadow, passwd, sudoers, gshadow)
+    query: (data_process_exec_process_arguments:/.*\/[Ee][Tt][Cc]\/[Ss][Hh][Aa][Dd][Oo][Ww].*/ OR data_process_exec_process_arguments:/.*\/[Ee][Tt][Cc]\/[Gg][Ss][Hh][Aa][Dd][Oo][Ww].*/ OR data_process_exec_process_arguments:/.*\/[Ee][Tt][Cc]\/[Ss][Uu][Dd][Oo][Ee][Rr][Ss].*/ OR data_process_exec_process_arguments:/.*\/[Ee][Tt][Cc]\/[Pp][Aa][Ss][Ss][Ww][Dd].*/)
+    pivot_on:
+    - host
+    window: 2h
+  - name: 'Anti-forensics after rooting: audit-rule flush, log deletion, history clearing'
+    query: ((data_process_exec_process_binary:/.*\/[Aa][Uu][Dd][Ii][Tt][Cc][Tt][Ll]/ AND data_process_exec_process_arguments:/.*-[Dd].*/) OR (data_process_exec_process_arguments:/.*\/[Vv][Aa][Rr]\/[Ll][Oo][Gg]\/.*/ AND data_process_exec_process_binary:/.*\/([Rr][Mm]|[Ss][Hh][Rr][Ee][Dd]|[Tt][Rr][Uu][Nn][Cc][Aa][Tt][Ee])/) OR data_process_exec_process_arguments:/.*[Bb][Aa][Ss][Hh]_[Hh][Ii][Ss][Tt][Oo][Rr][Yy].*/)
+    pivot_on:
+    - host
+    window: 4h

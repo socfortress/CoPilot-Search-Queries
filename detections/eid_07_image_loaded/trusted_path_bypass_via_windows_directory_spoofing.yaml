@@ -149,44 +149,55 @@ graylog:
   query: data_win_system_eventID:"7" AND (data_win_eventdata_imageLoaded:/.*:\\[Ww][Ii][Nn][Dd][Oo][Ww][Ss] \\[Ss][Yy][Ss][Tt][Ee][Mm]32\\.*/ OR data_win_eventdata_imageLoaded:/.*:\\[Ww][Ii][Nn][Dd][Oo][Ww][Ss] \\[Ss][Yy][Ss][Ww][Oo][Ww]64\\.*/)
 
 correlation:
-  # Authored by the correlation engine for review. Related CoPilot Searches to run
-  # around an alert from this rule, scoped to the same host/user/IP within the window.
+  # Authored per-rule (behaviour-researched) for the correlation engine. Related CoPilot
+  # Searches + telemetry pivots to run around an alert, scoped to its host/user/ip/domain.
   related_rules:
-    - id: ec570e53-4c76-45a9-804d-dc3f355ff7a7
-      name: "7Zip Compressing Dump Files"
-      reason: "next kill-chain tactic: Collection"
-    - id: 0a1255c5-d732-4b62-ac02-b5152d34fb83
-      name: "ADExplorer Writing Complete AD Snapshot Into .dat File"
-      reason: "next kill-chain tactic: Discovery"
-    - id: 1ea13e8c-03ea-409b-877d-ce5c3d2c1cb3
-      name: "ADFS Database Named Pipe Connection By Uncommon Tool"
-      reason: "next kill-chain tactic: Collection"
-    - id: 75bf09fa-1dd7-4d18-9af9-dd9e492562eb
-      name: "ADSI-Cache File Creation By Uncommon Tool"
-      reason: "next kill-chain tactic: Command and Control"
-    - id: 33a2d1dd-f3b0-40bd-8baf-7974468927cc
-      name: "APT PRIVATELOG Image Load Pattern"
-      reason: "next kill-chain tactic: Privilege Escalation"
-    - id: 9aa01d62-7667-4d3b-acb8-8cb5103e2014
-      name: "APT27 - Emissary Panda Activity"
-      reason: "next kill-chain tactic: Execution"
+  - id: 4ac47ed3-44c2-4b1f-9d51-bf46e8914126
+    name: TrustedPath UAC Bypass Pattern
+    reason: 'Process-creation twin of this exact technique: it detects the binary EXECUTING from the same mocked ''C:\Windows \System32\''/''SysWOW64\'' (trailing-space) path. If it fires on this host it is the confirming process that sideloaded the DLL this image-load alert caught - assemble both into one incident.'
+  - id: a5ea83a7-05a5-44c1-be2e-addccbbd8c03
+    name: UAC Bypass With Fake DLL
+    reason: 'Same primitive, different lure: an attacker-dropped fake dismcore.dll sideloaded by an auto-elevating DISM process to bypass UAC via image load - a parallel way the planted DLL here reaches high-integrity execution.'
+  - id: 9ed5959a-c43c-4c59-84e3-d28628429456
+    name: UAC Bypass Using Iscsicpl - ImageLoad
+    reason: 'Same sideload-for-elevation vector via a different auto-elevating LOLBin: iscsicpl.exe DLL-search-order hijack loading a custom DLL from a user-writable path. The mocked-directory trick and the iscsicpl sideload are interchangeable UAC-bypass methods an operator runs on the same host.'
+  - id: 4f6c43e2-f989-4ea5-bcd8-843b49a0317c
+    name: UAC Bypass Using WOW64 Logger DLL Hijack
+    reason: 'The SysWOW64-side analogue of this rule''s own SysWOW64 branch: planting wow64log.dll so a WOW64 process loads it elevated (UACMe 30). A wow64-logger hijack on this host is the 32-bit equivalent of the spoofed-SysWOW64 load.'
+  - id: 7a01183d-71a2-46ad-ad5c-acd989ac1793
+    name: UAC Bypass Abusing Winsat Path Parsing - Process
+    reason: 'Sibling trusted-path defeat: winsat.exe path-parsing UAC bypass (UACMe 52) abuses path handling to beat the same trusted-directory check. A UACMe-style toolkit that mocks directories commonly also tries the winsat path trick in the same session.'
+  - id: 909f8fd8-7ac8-11eb-a1f3-acde48001122
+    name: FodHelper UAC Bypass
+    reason: fodhelper.exe is the auto-elevating binary most often copied into the mocked directory. A fodhelper-based UAC bypass firing on the same host in the window indicates a second or alternate elevation attempt by the same actor.
+  - id: a49fa4d5-11db-418c-8473-1e014a8dd462
+    name: Lsass Memory Dump via Comsvcs DLL
+    reason: 'Immediate post-elevation objective: once the DLL runs at high integrity the operator dumps LSASS via comsvcs MiniDump. A comsvcs LSASS dump on this host right after is the credential-theft follow-on that turns a UAC bypass into a full incident.'
   window: 1h
   enrichment_searches:
-  # Rule-specific telemetry pivots the engine runs around an alert from this rule,
-  # scoped to the alert's host/user/IP within the window (behaviour-targeted, not a sweep).
-    - name: "UAC-bypass / privilege-escalation binaries on this host"
-      query: 'data_win_system_eventID:"1" AND (data_win_eventdata_image:/.*(\\[Ff][Oo][Dd][Hh][Ee][Ll][Pp][Ee][Rr]\.[Ee][Xx][Ee]|\\[Ee][Vv][Ee][Nn][Tt][Vv][Ww][Rr]\.[Ee][Xx][Ee]|\\[Ss][Dd][Cc][Ll][Tt]\.[Ee][Xx][Ee]|\\[Cc][Oo][Mm][Pp][Uu][Tt][Ee][Rr][Dd][Ee][Ff][Aa][Uu][Ll][Tt][Ss]\.[Ee][Xx][Ee]|\\[Ss][Ll][Uu][Ii]\.[Ee][Xx][Ee]|\\[Ww][Ss][Rr][Ee][Ss][Ee][Tt]\.[Ee][Xx][Ee])/ OR data_win_eventdata_parentImage:/.*(\\[Ff][Oo][Dd][Hh][Ee][Ll][Pp][Ee][Rr]\.[Ee][Xx][Ee]|\\[Ee][Vv][Ee][Nn][Tt][Vv][Ww][Rr]\.[Ee][Xx][Ee]|\\[Ss][Dd][Cc][Ll][Tt]\.[Ee][Xx][Ee]|\\[Cc][Oo][Mm][Pp][Uu][Tt][Ee][Rr][Dd][Ee][Ff][Aa][Uu][Ll][Tt][Ss]\.[Ee][Xx][Ee]|\\[Ss][Ll][Uu][Ii]\.[Ee][Xx][Ee]|\\[Ww][Ss][Rr][Ee][Ss][Ee][Tt]\.[Ee][Xx][Ee])/)'
-      pivot_on: [host]
-      window: 2h
-    - name: "DLL sideloading / execution from user-writable paths on this host"
-      query: '((data_win_system_eventID:"7" AND (data_win_eventdata_imageLoaded:/.*\\[Uu][Ss][Ee][Rr][Ss]\\.*/ OR data_win_eventdata_imageLoaded:/.*\\[Pp][Rr][Oo][Gg][Rr][Aa][Mm][Dd][Aa][Tt][Aa]\\.*/ OR data_win_eventdata_imageLoaded:/.*\\[Ww][Ii][Nn][Dd][Oo][Ww][Ss]\\[Tt][Ee][Mm][Pp]\\.*/ OR data_win_eventdata_imageLoaded:/.*\\[Aa][Pp][Pp][Dd][Aa][Tt][Aa]\\.*/ OR data_win_eventdata_imageLoaded:/.*\\[Pp][Uu][Bb][Ll][Ii][Cc]\\.*/ OR data_win_eventdata_imageLoaded:/.*\\\$[Rr][Ee][Cc][Yy][Cc][Ll][Ee].*/)) OR (data_win_system_eventID:"1" AND (data_win_eventdata_image:/.*\\[Uu][Ss][Ee][Rr][Ss]\\.*/ OR data_win_eventdata_image:/.*\\[Pp][Rr][Oo][Gg][Rr][Aa][Mm][Dd][Aa][Tt][Aa]\\.*/ OR data_win_eventdata_image:/.*\\[Ww][Ii][Nn][Dd][Oo][Ww][Ss]\\[Tt][Ee][Mm][Pp]\\.*/ OR data_win_eventdata_image:/.*\\[Aa][Pp][Pp][Dd][Aa][Tt][Aa]\\.*/ OR data_win_eventdata_image:/.*\\[Pp][Uu][Bb][Ll][Ii][Cc]\\.*/ OR data_win_eventdata_image:/.*\\\$[Rr][Ee][Cc][Yy][Cc][Ll][Ee].*/)))'
-      pivot_on: [host]
-      window: 2h
-    - name: "Memory/credential-dump creation & LSASS access on this host"
-      query: '((data_win_system_eventID:"1" AND data_win_eventdata_image:/.*(\\[Pp][Rr][Oo][Cc][Dd][Uu][Mm][Pp]\.[Ee][Xx][Ee]|\\[Pp][Rr][Oo][Cc][Dd][Uu][Mm][Pp]64\.[Ee][Xx][Ee]|\\[Ss][Qq][Ll][Dd][Uu][Mm][Pp][Ee][Rr]\.[Ee][Xx][Ee]|\\[Cc][Rr][Ee][Aa][Tt][Ee][Dd][Uu][Mm][Pp]\.[Ee][Xx][Ee]|\\[Rr][Dd][Rr][Ll][Ee][Aa][Kk][Dd][Ii][Aa][Gg]\.[Ee][Xx][Ee]|\\[Dd][Uu][Mm][Pp][Ee][Rr][Tt]\.[Ee][Xx][Ee]|\\[Nn][Aa][Nn][Oo][Dd][Uu][Mm][Pp]\.[Ee][Xx][Ee]|\\[Aa][Vv][Dd][Uu][Mm][Pp]\.[Ee][Xx][Ee])/) OR (data_win_system_eventID:"1" AND (data_win_eventdata_commandLine:/.*[Cc][Oo][Mm][Ss][Vv][Cc][Ss]\.[Dd][Ll][Ll].*/ OR data_win_eventdata_commandLine:/.*[Mm][Ii][Nn][Ii][Dd][Uu][Mm][Pp].*/ OR data_win_eventdata_commandLine:/.*[Dd][Uu][Mm][Pp][Ee][Rr][Tt].*/ OR data_win_eventdata_commandLine:/.*[Nn][Aa][Nn][Oo][Dd][Uu][Mm][Pp].*/ OR data_win_eventdata_commandLine:/.*[Ll][Ss][Aa][Ss][Ss].*/ OR data_win_eventdata_commandLine:/.*[Ss][Ee][Kk][Uu][Rr][Ll][Ss][Aa].*/ OR data_win_eventdata_commandLine:/.*[Nn][Tt][Dd][Ss]\.[Dd][Ii][Tt].*/ OR data_win_eventdata_commandLine:/.*[Nn][Tt][Dd][Ss][Uu][Tt][Ii][Ll].*/)) OR (data_win_system_eventID:"10" AND data_win_eventdata_targetImage:/.*(\\[Ll][Ss][Aa][Ss][Ss]\.[Ee][Xx][Ee])/))'
-      pivot_on: [host]
-      window: 1h
-    - name: "Follow-on LOLBin / signed-binary-proxy execution on this host"
-      query: 'data_win_system_eventID:"1" AND data_win_eventdata_image:/.*(\\[Rr][Uu][Nn][Dd][Ll][Ll]32\.[Ee][Xx][Ee]|\\[Rr][Ee][Gg][Ss][Vv][Rr]32\.[Ee][Xx][Ee]|\\[Mm][Ss][Hh][Tt][Aa]\.[Ee][Xx][Ee]|\\[Ii][Nn][Ss][Tt][Aa][Ll][Ll][Uu][Tt][Ii][Ll]\.[Ee][Xx][Ee]|\\[Rr][Ee][Gg][Aa][Ss][Mm]\.[Ee][Xx][Ee]|\\[Rr][Ee][Gg][Ss][Vv][Cc][Ss]\.[Ee][Xx][Ee]|\\[Mm][Ss][Bb][Uu][Ii][Ll][Dd]\.[Ee][Xx][Ee]|\\[Cc][Ee][Rr][Tt][Uu][Tt][Ii][Ll]\.[Ee][Xx][Ee]|\\[Bb][Ii][Tt][Ss][Aa][Dd][Mm][Ii][Nn]\.[Ee][Xx][Ee]|\\[Ww][Mm][Ii][Cc]\.[Ee][Xx][Ee]|\\[Cc][Mm][Ss][Tt][Pp]\.[Ee][Xx][Ee]|\\[Oo][Dd][Bb][Cc][Cc][Oo][Nn][Ff]\.[Ee][Xx][Ee]|\\[Ff][Oo][Rr][Ff][Ii][Ll][Ee][Ss]\.[Ee][Xx][Ee]|\\[Pp][Cc][Aa][Ll][Uu][Aa]\.[Ee][Xx][Ee]|\\[Mm][Aa][Vv][Ii][Nn][Jj][Ee][Cc][Tt]\.[Ee][Xx][Ee]|\\[Ss][Cc][Rr][Ii][Pp][Tt][Rr][Uu][Nn][Nn][Ee][Rr]\.[Ee][Xx][Ee])/'
-      pivot_on: [host]
-      window: 1h
+  # Behaviour-targeted hunts the engine runs around the alert (not a sweep).
+  - name: Spoofed 'C:\Windows ' (trailing-space) trusted path in process-creation and file-creation
+    query: (data_win_system_eventID:"1" AND (data_win_eventdata_image:/.*:\\[Ww][Ii][Nn][Dd][Oo][Ww][Ss] \\.*/ OR data_win_eventdata_commandLine:/.*:\\[Ww][Ii][Nn][Dd][Oo][Ww][Ss] \\.*/ OR data_win_eventdata_currentDirectory:/.*:\\[Ww][Ii][Nn][Dd][Oo][Ww][Ss] \\.*/)) OR (data_win_system_eventID:"11" AND data_win_eventdata_targetFilename:/.*:\\[Ww][Ii][Nn][Dd][Oo][Ww][Ss] \\.*/)
+    pivot_on:
+    - host
+    window: 2h
+  - name: Auto-elevating / mockable UAC-bypass binaries executing or spawning children on this host
+    query: data_win_system_eventID:"1" AND (data_win_eventdata_image:/.*\\([Ff][Oo][Dd][Hh][Ee][Ll][Pp][Ee][Rr]|[Cc][Oo][Mm][Pp][Uu][Tt][Ee][Rr][Dd][Ee][Ff][Aa][Uu][Ll][Tt][Ss]|[Ss][Dd][Cc][Ll][Tt]|[Ee][Vv][Ee][Nn][Tt][Vv][Ww][Rr]|[Ss][Ll][Uu][Ii]|[Ww][Ss][Rr][Ee][Ss][Ee][Tt]|[Ii][Ss][Cc][Ss][Ii][Cc][Pp][Ll]|[Ww][Ii][Nn][Ss][Aa][Tt]|[Cc][Mm][Ss][Tt][Pp]|[Dd][Ii][Ss][Mm][Hh][Oo][Ss][Tt])\.[Ee][Xx][Ee]/ OR data_win_eventdata_parentImage:/.*\\([Ff][Oo][Dd][Hh][Ee][Ll][Pp][Ee][Rr]|[Cc][Oo][Mm][Pp][Uu][Tt][Ee][Rr][Dd][Ee][Ff][Aa][Uu][Ll][Tt][Ss]|[Ss][Dd][Cc][Ll][Tt]|[Ee][Vv][Ee][Nn][Tt][Vv][Ww][Rr]|[Ss][Ll][Uu][Ii]|[Ww][Ss][Rr][Ee][Ss][Ee][Tt]|[Ii][Ss][Cc][Ss][Ii][Cc][Pp][Ll]|[Ww][Ii][Nn][Ss][Aa][Tt]|[Cc][Mm][Ss][Tt][Pp]|[Dd][Ii][Ss][Mm][Hh][Oo][Ss][Tt])\.[Ee][Xx][Ee]/)
+    pivot_on:
+    - host
+    window: 2h
+  - name: 'Sideloaded payload DLL: unsigned image loads or loads from user-writable staging dirs on this host'
+    query: data_win_system_eventID:"7" AND (data_win_eventdata_signed:"false" OR data_win_eventdata_imageLoaded:/.*\\([Uu][Ss][Ee][Rr][Ss]|[Pp][Rr][Oo][Gg][Rr][Aa][Mm][Dd][Aa][Tt][Aa]|[Aa][Pp][Pp][Dd][Aa][Tt][Aa]|[Tt][Ee][Mm][Pp]|[Pp][Uu][Bb][Ll][Ii][Cc])\\.*/)
+    pivot_on:
+    - host
+    window: 2h
+  - name: LSASS credential access on this host (the elevated attacker's objective)
+    query: (data_win_system_eventID:"10" AND data_win_eventdata_targetImage:/.*\\[Ll][Ss][Aa][Ss][Ss]\.[Ee][Xx][Ee]/) OR (data_win_system_eventID:"1" AND (data_win_eventdata_commandLine:/.*[Cc][Oo][Mm][Ss][Vv][Cc][Ss].*[Mm][Ii][Nn][Ii][Dd][Uu][Mm][Pp].*/ OR data_win_eventdata_commandLine:/.*[Ss][Ee][Kk][Uu][Rr][Ll][Ss][Aa].*/ OR data_win_eventdata_commandLine:/.*[Mm][Ii][Mm][Ii][Kk][Aa][Tt][Zz].*/ OR data_win_eventdata_commandLine:/.*[Nn][Tt][Dd][Ss]\.[Dd][Ii][Tt].*/)) OR (data_win_system_eventID:"11" AND data_win_eventdata_targetFilename:/.*[Ll][Ss][Aa][Ss][Ss].*\.[Dd][Mm][Pp]/)
+    pivot_on:
+    - host
+    window: 1h
+  - name: Defender / security-control tampering on this host (post-elevation defense evasion)
+    query: (data_win_system_eventID:"1" AND (data_win_eventdata_commandLine:/.*[Ss][Ee][Tt]-[Mm][Pp][Pp][Rr][Ee][Ff][Ee][Rr][Ee][Nn][Cc][Ee].*/ OR data_win_eventdata_commandLine:/.*[Dd][Ii][Ss][Aa][Bb][Ll][Ee][Rr][Ee][Aa][Ll][Tt][Ii][Mm][Ee][Mm][Oo][Nn][Ii][Tt][Oo][Rr][Ii][Nn][Gg].*/ OR data_win_eventdata_commandLine:/.*-[Ee][Xx][Cc][Ll][Uu][Ss][Ii][Oo][Nn][Pp][Aa][Tt][Hh].*/ OR data_win_eventdata_commandLine:/.*[Tt][Aa][Mm][Pp][Ee][Rr][Pp][Rr][Oo][Tt][Ee][Cc][Tt][Ii][Oo][Nn].*/)) OR (data_win_system_eventID:"13" AND data_win_eventdata_targetObject:/.*([Ww][Ii][Nn][Dd][Oo][Ww][Ss] [Dd][Ee][Ff][Ee][Nn][Dd][Ee][Rr]|[Dd][Ii][Ss][Aa][Bb][Ll][Ee][Aa][Nn][Tt][Ii][Ss][Pp][Yy][Ww][Aa][Rr][Ee]|[Tt][Aa][Mm][Pp][Ee][Rr][Pp][Rr][Oo][Tt][Ee][Cc][Tt][Ii][Oo][Nn]).*/)
+    pivot_on:
+    - host
+    window: 2h

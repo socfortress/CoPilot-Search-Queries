@@ -140,19 +140,58 @@ graylog:
   query: data_process_exec_process_arguments:/.*(-(W|R)[ ]?([ ]|\"|')([0-9a-fA-F]{2}[ ]?){2,20}([ ]|\"|')).*/
 
 correlation:
-  # Authored by the correlation engine for review.
+  # Authored per-rule (behaviour-researched) for the correlation engine. Related CoPilot
+  # Searches + telemetry pivots to run around an alert, scoped to its host/user/ip/domain.
+  related_rules:
+  - id: a2d9e2f3-0f43-4c7a-bcd9-9acfc0d723aa
+    name: Suspicious Download and Execute Pattern via Curl/Wget
+    reason: 'Precursor: the TeamTNT/Spinning YARN loader fetches pnscan and the rest of the toolkit via curl/wget into /tmp or /dev/shm and runs it with sh -c - this is how the scanner reached the host before it began probing the network.'
+  - id: 5cd16c8f-44a6-4654-81e7-a84d6db507d4
+    name: Process Execution From Shared Memory Directory
+    reason: 'Co-occurring staging: this campaign stages its scanner and miner binaries fileless in /dev/shm; a pnscan or helper binary executing from /dev/shm on the same host is the fileless drop behind the scan.'
+  - id: 312b42b1-bded-4441-8b58-163a3af58775
+    name: Potentially Suspicious Execution From Tmp Folder
+    reason: 'Co-occurring staging: the dropped pnscan binary and its shell stagers are typically written to and executed from /tmp - an execution from /tmp on this host is the likely origin of the scanning process.'
+  - id: a015e032-146d-4717-8944-7a1884122111
+    name: Linux HackTool Execution
+    reason: 'Co-occurring tooling: sibling network scanners and recon tools (naabu, netdiscover, nuclei, httpx) ship in the same offensive toolkit as pnscan; their presence widens the single scan into a full reconnaissance/propagation campaign.'
+  - id: 9069ea3c-b213-4c52-be13-86506a227ab1
+    name: Linux Crypto Mining Indicators
+    reason: 'Follow-on objective: pnscan''s network sweep exists to propagate the worm whose payload is an XMRig miner - stratum/pool arguments on the same host are the campaign''s end goal landing.'
+  - id: 6b14bac8-3e3a-4324-8109-42f0546a347f
+    name: Scheduled Cron Task/Job - Linux
+    reason: 'Follow-on persistence: the campaign installs crontab jobs (run from /tmp) to relaunch the miner and scanner - a cron write on this host shows the intrusion establishing persistence around the scan.'
+  - id: 84c9e83c-599a-458a-a0cb-0ecce44e807a
+    name: UFW Disable Attempt
+    reason: 'Follow-on defense evasion: the loader scripts disable the host firewall so the scanner''s probes, worm propagation and miner pool traffic are not blocked - a firewall disable on this host is a companion step to the scan.'
+  - id: 7f734ed0-4f47-46c0-837f-6ee62505abd9
+    name: Potential Netcat Reverse Shell Execution
+    reason: 'Co-occurring C2: TeamTNT drops netcat reverse shells for interactive control - a reverse shell on the scanning host is the likely operator session driving pnscan and landing on the hosts it discovers.'
+  window: 2h
   enrichment_searches:
-  # Rule-specific telemetry pivots the engine runs around an alert from this rule,
-  # scoped to the alert's host/user/IP within the window (behaviour-targeted, not a sweep).
-    - name: "Privilege-escalation tooling executed on this host"
-      query: 'data_process_exec_process_binary:/.*(\/[Ss][Uu][Dd][Oo]|\/[Ss][Uu]|\/[Pp][Kk][Ee][Xx][Ee][Cc]|\/[Dd][Oo][Aa][Ss]|\/[Ss][Ee][Tt][Cc][Aa][Pp]|\/[Cc][Hh][Ss][Hh]|\/[Nn][Ee][Ww][Gg][Rr][Pp])/'
-      pivot_on: [host]
-      window: 2h
-    - name: "Shell / interpreter execution on this host"
-      query: '((data_process_exec_process_binary:/.*(\/[Bb][Aa][Ss][Hh]|\/[Ss][Hh]|\/[Dd][Aa][Ss][Hh]|\/[Zz][Ss][Hh]|\/[Kk][Ss][Hh]|\/[Aa][Ss][Hh]|\/[Bb][Uu][Ss][Yy][Bb][Oo][Xx])/) OR (data_process_exec_process_binary:/.*(\/[Pp][Yy][Tt][Hh][Oo][Nn]|\/[Pp][Yy][Tt][Hh][Oo][Nn]3|\/[Pp][Ee][Rr][Ll]|\/[Rr][Uu][Bb][Yy]|\/[Pp][Hh][Pp]|\/[Nn][Oo][Dd][Ee]|\/[Ll][Uu][Aa]|\/[Aa][Ww][Kk])/))'
-      pivot_on: [host]
-      window: 1h
-    - name: "Reconnaissance commands on this host"
-      query: 'data_process_exec_process_binary:/.*(\/[Ww][Hh][Oo][Aa][Mm][Ii]|\/[Ii][Dd]|\/[Uu][Nn][Aa][Mm][Ee]|\/[Hh][Oo][Ss][Tt][Nn][Aa][Mm][Ee]|\/[Hh][Oo][Ss][Tt][Nn][Aa][Mm][Ee][Cc][Tt][Ll]|\/[Ss][Ss]|\/[Nn][Ee][Tt][Ss][Tt][Aa][Tt]|\/[Ii][Ff][Cc][Oo][Nn][Ff][Ii][Gg]|\/[Aa][Rr][Pp]|\/[Ww]|\/[Ww][Hh][Oo]|\/[Ll][Aa][Ss][Tt]|\/[Ll][Ss][Oo][Ff]|\/[Nn][Mm][Aa][Pp]|\/[Dd][Ii][Gg]|\/[Ff][Ii][Nn][Dd])/'
-      pivot_on: [host]
-      window: 1h
+  # Behaviour-targeted hunts the engine runs around the alert (not a sweep).
+  - name: Other network-scanning / propagation tooling on this host
+    query: data_process_exec_process_binary:/.*(\/[Pp][Nn][Ss][Cc][Aa][Nn]|\/[Mm][Aa][Ss][Ss][Cc][Aa][Nn]|\/[Zz][Mm][Aa][Pp]|\/[Zz][Gg][Rr][Aa][Bb]|\/[Nn][Mm][Aa][Pp]|\/[Nn][Aa][Aa][Bb][Uu]|\/[Nn][Ee][Tt][Dd][Ii][Ss][Cc][Oo][Vv][Ee][Rr]|\/[Ff][Ss][Cc][Aa][Nn]|\/[Hh][Pp][Ii][Nn][Gg]3)/
+    pivot_on:
+    - host
+    window: 2h
+  - name: Toolkit fetched via curl/wget into a staging directory on this host
+    query: (data_process_exec_process_binary:/.*(\/[Cc][Uu][Rr][Ll]|\/[Ww][Gg][Ee][Tt])/) AND (data_process_exec_process_arguments:/.*(\/[Tt][Mm][Pp]\/|\/[Dd][Ee][Vv]\/[Ss][Hh][Mm]\/|\/[Vv][Aa][Rr]\/[Tt][Mm][Pp]\/).*/)
+    pivot_on:
+    - host
+    window: 2h
+  - name: Binary executed from /tmp, /dev/shm or /var/tmp on this host
+    query: data_process_exec_process_binary:/(\/[Tt][Mm][Pp]\/|\/[Dd][Ee][Vv]\/[Ss][Hh][Mm]\/|\/[Vv][Aa][Rr]\/[Tt][Mm][Pp]\/).*/
+    pivot_on:
+    - host
+    window: 2h
+  - name: Crypto-miner launch on this host
+    query: (data_process_exec_process_binary:/.*\/[Xx][Mm][Rr][Ii][Gg].*/) OR (data_process_exec_process_arguments:/.*([Ss][Tt][Rr][Aa][Tt][Uu][Mm]\+[Tt][Cc][Pp]:\/\/|[Ss][Tt][Rr][Aa][Tt][Uu][Mm]\+[Uu][Dd][Pp]:\/\/|--[Dd][Oo][Nn][Aa][Tt][Ee]-[Ll][Ee][Vv][Ee][Ll]|--[Cc][Pp][Uu]-[Pp][Rr][Ii][Oo][Rr][Ii][Tt][Yy]|-[Oo] [Pp][Oo][Oo][Ll]\.).*/)
+    pivot_on:
+    - host
+    window: 4h
+  - name: Host firewall disabled or flushed on this host
+    query: (data_process_exec_process_arguments:/.*[Uu][Ff][Ww][ ]+[Dd][Ii][Ss][Aa][Bb][Ll][Ee].*/) OR (data_process_exec_process_arguments:/.*[Ii][Pp]6?[Tt][Aa][Bb][Ll][Ee][Ss][ ]+(-[Ff]|--[Ff][Ll][Uu][Ss][Hh]).*/) OR (data_process_exec_process_binary:/.*\/[Uu][Ff][Ww]-[Ii][Nn][Ii][Tt]/)
+    pivot_on:
+    - host
+    window: 4h

@@ -142,48 +142,58 @@ graylog:
   query: data_win_system_eventID:"3" AND data_win_eventdata_initiated:/[Tt][Rr][Uu][Ee]/ AND data_win_eventdata_image:/.*\\[Ii][Mm][Ee][Ww][Dd][Bb][Ll][Dd]\.[Ee][Xx][Ee]/
 
 correlation:
-  # Authored by the correlation engine for review. Related CoPilot Searches to run
-  # around an alert from this rule, scoped to the same host/user/IP within the window.
+  # Authored per-rule (behaviour-researched) for the correlation engine. Related CoPilot
+  # Searches + telemetry pivots to run around an alert, scoped to its host/user/ip/domain.
   related_rules:
-    - id: 75bf09fa-1dd7-4d18-9af9-dd9e492562eb
-      name: "ADSI-Cache File Creation By Uncommon Tool"
-      reason: "next kill-chain tactic: Command and Control"
-    - id: 639c9081-f482-47d3-a0bd-ddee3d4ecd76
-      name: "All Backups Deleted Via Wbadmin.EXE"
-      reason: "next kill-chain tactic: Impact"
-    - id: 0b9ad457-2554-44c1-82c2-d56a99c42377
-      name: "Anydesk Temporary Artefact"
-      reason: "next kill-chain tactic: Command and Control"
-    - id: 7cff77e1-9663-46a3-8260-17f2e1aa9d0a
-      name: "AppX Package Installation Attempts Via AppInstaller.EXE"
-      reason: "next kill-chain tactic: Command and Control"
-    - id: 1f0f6176-6482-4027-b151-00071af39d7e
-      name: "Arbitrary File Download Via ConfigSecurityPolicy.EXE"
-      reason: "next kill-chain tactic: Exfiltration"
-    - id: eee00933-a761-4cd0-be70-c42fe91731e7
-      name: "Arbitrary File Download Via GfxDownloadWrapper.EXE"
-      reason: "next kill-chain tactic: Command and Control"
-  window: 1h
+  - id: 863218bd-c7d0-4c52-80cd-0a96c09f54af
+    name: Arbitrary File Download Via IMEWDBLD.EXE
+    reason: 'The process-creation twin of this exact event: the same IMEWDBLD invocation seen from Sysmon EID 1, where the command line carries the http(s) URL being fetched and parentImage names the process that launched it — the two fields this network-only alert cannot see. Pair them first to learn what was downloaded and who ran it.'
+  - id: 0dba975d-a193-4ed1-a067-424df57570d1
+    name: Uncommon Network Connection Initiated By Certutil.EXE
+    reason: The identical behaviour (a signed download LOLBIN initiating an outbound connection, EID 3) via certutil, the commodity ingress tool. An operator reaching for the obscure IMEWDBLD routinely also runs certutil in the same session, so its firing on this host turns one download into a tooling pattern.
+  - id: c7e91a02-d771-4a6d-a700-42587e0b1095
+    name: Network Connection Initiated By Regsvr32.EXE
+    reason: 'The same abnormal EID-3 pattern — a LOLBIN that has no business touching the network initiating a connection — but regsvr32 /i:URL fetches AND runs a remote scriptlet. Seen alongside the IMEWDBLD download on this host it points to systematic signed-binary abuse: one binary stages the payload, another fetches-and-executes.'
+  - id: 19b08b1c-861d-4e75-a1ef-ea0c1baf202b
+    name: Suspicious Download Via Certutil.EXE
+    reason: Certutil's -urlcache/-split -f download from the process-creation side. It is the most common alternative to a niche downloader like IMEWDBLD; if it fired on this host in the window the actor is cycling through download utilities, and its command line exposes a second fetched URL and output path.
+  - id: d059842b-6b9d-4ed1-b5c3-5b89143c6ede
+    name: File Download Via Bitsadmin
+    reason: bitsadmin /transfer is a stealth download LOLBIN whose BITS job survives reboots and logoffs. Actors pair it with ad-hoc downloaders like IMEWDBLD to re-fetch payloads resiliently, so its presence on the same host in the window signals staged, persistent ingress tooling.
+  - id: e218595b-bbe7-4ee5-8a96-f32a24ad3468
+    name: Suspicious Curl.EXE Download
+    reason: curl.exe, built into modern Windows, is today's default ingress tool. An IMEWDBLD download followed by curl on the same host is the typical 'try the obscure binary, then the reliable downloader' progression, and curl's command line names the next URL and -o/-O output file.
+  - id: f37aba28-a9e6-4045-882c-d5004043b337
+    name: Potential Arbitrary File Download Via Cmdl32.EXE
+    reason: Cmdl32 coerced into downloading a file is the exact same class of trick as IMEWDBLD — an obscure signed Microsoft binary abused as a downloader. An operator who knows one of these LOLBAS downloaders rotates through them to evade per-binary blocking, making it a strong same-campaign companion on this host.
+  - id: 21dd6d38-2b18-4453-9404-a0fe4a0cc288
+    name: Curl Download And Execute Combination
+    reason: 'The escalation an IMEWDBLD download is building toward: a single command that fetches a file and immediately runs it. On the same host it marks the transition from ''payload staged to disk'' to ''payload executing'', and usually names the dropped file path.'
+  window: 2h
   enrichment_searches:
-  # Rule-specific telemetry pivots the engine runs around an alert from this rule,
-  # scoped to the alert's host/user/IP within the window (behaviour-targeted, not a sweep).
-    - name: "Downloader / ingress-tool-transfer activity on this host"
-      query: '(data_win_system_eventID:"1" AND data_win_eventdata_image:/.*(\\[Cc][Ee][Rr][Tt][Uu][Tt][Ii][Ll]\.[Ee][Xx][Ee]|\\[Bb][Ii][Tt][Ss][Aa][Dd][Mm][Ii][Nn]\.[Ee][Xx][Ee]|\\[Cc][Uu][Rr][Ll]\.[Ee][Xx][Ee]|\\[Ww][Gg][Ee][Tt]\.[Ee][Xx][Ee])/) OR (data_win_eventdata_commandLine:/.*[Dd][Oo][Ww][Nn][Ll][Oo][Aa][Dd][Ss][Tt][Rr][Ii][Nn][Gg].*/ OR data_win_eventdata_commandLine:/.*[Dd][Oo][Ww][Nn][Ll][Oo][Aa][Dd][Ff][Ii][Ll][Ee].*/ OR data_win_eventdata_commandLine:/.*[Ii][Nn][Vv][Oo][Kk][Ee]-[Ww][Ee][Bb][Rr][Ee][Qq][Uu][Ee][Ss][Tt].*/ OR data_win_eventdata_commandLine:/.*[Nn][Ee][Tt]\.[Ww][Ee][Bb][Cc][Ll][Ii][Ee][Nn][Tt].*/ OR data_win_eventdata_commandLine:/.*[Ss][Tt][Aa][Rr][Tt]-[Bb][Ii][Tt][Ss][Tt][Rr][Aa][Nn][Ss][Ff][Ee][Rr].*/ OR data_win_eventdata_commandLine:/.*[Ii][Ww][Rr] .*/ OR data_win_eventdata_commandLine:/.*[Cc][Uu][Rr][Ll] .*/ OR data_win_eventdata_commandLine:/.*[Ww][Gg][Ee][Tt] .*/)'
-      pivot_on: [host]
-      window: 1h
-    - name: "Other executions of this tool-set on this host (any arguments)"
-      query: 'data_win_system_eventID:"1" AND data_win_eventdata_image:/.*(\\[Ii][Mm][Ee][Ww][Dd][Bb][Ll][Dd]\.[Ee][Xx][Ee])/'
-      pivot_on: [host]
-      window: 2h
-    - name: "Archive / staging & outbound-transfer tooling on this host"
-      query: '(((data_win_system_eventID:"1" AND data_win_eventdata_image:/.*(\\7[Zz]\.[Ee][Xx][Ee]|\\7[Zz][Aa]\.[Ee][Xx][Ee]|\\7[Zz][Rr]\.[Ee][Xx][Ee]|\\[Rr][Aa][Rr]\.[Ee][Xx][Ee]|\\[Ww][Ii][Nn][Rr][Aa][Rr]\.[Ee][Xx][Ee]|\\[Ww][Zz][Zz][Ii][Pp]\.[Ee][Xx][Ee]|\\[Mm][Aa][Kk][Ee][Cc][Aa][Bb]\.[Ee][Xx][Ee])/) OR (data_win_eventdata_commandLine:/.*[Cc][Oo][Mm][Pp][Rr][Ee][Ss][Ss]-[Aa][Rr][Cc][Hh][Ii][Vv][Ee].*/ OR data_win_eventdata_commandLine:/.*\.7[Zz].*/ OR data_win_eventdata_commandLine:/.*\.[Rr][Aa][Rr].*/ OR data_win_eventdata_commandLine:/.* -[Hh][Pp].*/)) OR (((data_win_system_eventID:"1" AND data_win_eventdata_image:/.*(\\[Rr][Cc][Ll][Oo][Nn][Ee]\.[Ee][Xx][Ee]|\\[Cc][Uu][Rr][Ll]\.[Ee][Xx][Ee]|\\[Ww][Gg][Ee][Tt]\.[Ee][Xx][Ee]|\\[Ww][Ii][Nn][Ss][Cc][Pp]\.[Ee][Xx][Ee]|\\[Pp][Ss][Cc][Pp]\.[Ee][Xx][Ee]|\\[Mm][Ee][Gg][Aa][Cc][Mm][Dd]\.[Ee][Xx][Ee]|\\[Mm][Ee][Gg][Aa][Ss][Yy][Nn][Cc]\.[Ee][Xx][Ee])/) OR ((data_win_eventdata_commandLine:/.*[Ii][Nn][Vv][Oo][Kk][Ee]-[Rr][Ee][Ss][Tt][Mm][Ee][Tt][Hh][Oo][Dd].*/ OR data_win_eventdata_commandLine:/.*[Ss][Tt][Aa][Rr][Tt]-[Bb][Ii][Tt][Ss][Tt][Rr][Aa][Nn][Ss][Ff][Ee][Rr].*/ OR data_win_eventdata_commandLine:/.*[Rr][Cc][Ll][Oo][Nn][Ee].*/ OR data_win_eventdata_commandLine:/.*[Tt][Rr][Aa][Nn][Ss][Ff][Ee][Rr]\.[Ss][Hh].*/ OR data_win_eventdata_commandLine:/.*[Aa][Nn][Oo][Nn][Ff][Ii][Ll][Ee][Ss].*/ OR data_win_eventdata_commandLine:/.*[Pp][Aa][Ss][Tt][Ee][Bb][Ii][Nn].*/ OR data_win_eventdata_commandLine:/.*[Mm][Ee][Gg][Aa]\.[Nn][Zz].*/ OR data_win_eventdata_commandLine:/.*-[Oo][Uu][Tt][Ff][Ii][Ll][Ee].*/ OR data_win_eventdata_commandLine:/.*[Uu][Pp][Ll][Oo][Aa][Dd][Ff][Ii][Ll][Ee].*/)))))'
-      pivot_on: [host]
-      window: 2h
-    - name: "Other hosts connecting to the same destination address (campaign)"
-      query: '(data_win_system_eventID:"22" OR data_win_system_eventID:"3")'
-      pivot_on: [ip]
-      window: 24h
-    - name: "Downloader / C2 tooling executed on this host"
-      query: '(data_win_system_eventID:"1" AND data_win_eventdata_image:/.*(\\[Cc][Ee][Rr][Tt][Uu][Tt][Ii][Ll]\.[Ee][Xx][Ee]|\\[Bb][Ii][Tt][Ss][Aa][Dd][Mm][Ii][Nn]\.[Ee][Xx][Ee]|\\[Cc][Uu][Rr][Ll]\.[Ee][Xx][Ee]|\\[Ww][Gg][Ee][Tt]\.[Ee][Xx][Ee])/) OR (data_win_eventdata_commandLine:/.*[Dd][Oo][Ww][Nn][Ll][Oo][Aa][Dd][Ss][Tt][Rr][Ii][Nn][Gg].*/ OR data_win_eventdata_commandLine:/.*[Dd][Oo][Ww][Nn][Ll][Oo][Aa][Dd][Ff][Ii][Ll][Ee].*/ OR data_win_eventdata_commandLine:/.*[Ii][Nn][Vv][Oo][Kk][Ee]-[Ww][Ee][Bb][Rr][Ee][Qq][Uu][Ee][Ss][Tt].*/ OR data_win_eventdata_commandLine:/.*[Nn][Ee][Tt]\.[Ww][Ee][Bb][Cc][Ll][Ii][Ee][Nn][Tt].*/ OR data_win_eventdata_commandLine:/.*[Ss][Tt][Aa][Rr][Tt]-[Bb][Ii][Tt][Ss][Tt][Rr][Aa][Nn][Ss][Ff][Ee][Rr].*/ OR data_win_eventdata_commandLine:/.*[Ii][Ww][Rr] .*/ OR data_win_eventdata_commandLine:/.*[Cc][Uu][Rr][Ll] .*/ OR data_win_eventdata_commandLine:/.*[Ww][Gg][Ee][Tt] .*/)'
-      pivot_on: [host]
-      window: 1h
+  # Behaviour-targeted hunts the engine runs around the alert (not a sweep).
+  - name: IMEWDBLD process creation on this host (recover the download URL and parent process)
+    query: data_win_system_eventID:"1" AND (data_win_eventdata_image:/.*\\[Ii][Mm][Ee][Ww][Dd][Bb][Ll][Dd]\.[Ee][Xx][Ee]/ OR data_win_eventdata_originalFileName:/[Ii][Mm][Ee][Ww][Dd][Bb][Ll][Dd]\.[Ee][Xx][Ee]/)
+    pivot_on:
+    - host
+    window: 1h
+  - name: DNS query made by IMEWDBLD on this host (resolve the connection's destination to a domain)
+    query: data_win_system_eventID:"22" AND (data_win_eventdata_image:/.*\\[Ii][Mm][Ee][Ww][Dd][Bb][Ll][Dd]\.[Ee][Xx][Ee]/ OR data_win_eventdata_originalFileName:/[Ii][Mm][Ee][Ww][Dd][Bb][Ll][Dd]\.[Ee][Xx][Ee]/)
+    pivot_on:
+    - host
+    window: 1h
+  - name: Payload staged to the browser download cache or temp on this host (the fetched file hitting disk)
+    query: data_win_system_eventID:"11" AND (data_win_eventdata_targetFilename:/.*[Ii][Nn][Ee][Tt][Cc][Aa][Cc][Hh][Ee].*/ OR data_win_eventdata_targetFilename:/.*\\[Tt][Ee][Mm][Pp]\\.*/ OR data_win_eventdata_targetFilename:/.*\\[Dd][Oo][Ww][Nn][Ll][Oo][Aa][Dd][Ss]\\.*/) AND data_win_eventdata_targetFilename:/.*\.([Ee][Xx][Ee]|[Dd][Ll][Ll]|[Ss][Cc][Rr]|[Pp][Ss]1|[Bb][Aa][Tt]|[Cc][Mm][Dd]|[Hh][Tt][Aa]|[Vv][Bb][Ss]|[Jj][Ss]|[Ss][Cc][Tt]|[Zz][Ii][Pp]|7[Zz]|[Rr][Aa][Rr]|[Ii][Ss][Oo]|[Ii][Mm][Gg])/
+    pivot_on:
+    - host
+    window: 1h
+  - name: Execution of a binary from a download-staging directory on this host (the staged payload being run)
+    query: data_win_system_eventID:"1" AND (data_win_eventdata_image:/.*[Ii][Nn][Ee][Tt][Cc][Aa][Cc][Hh][Ee].*/ OR data_win_eventdata_image:/.*\\[Tt][Ee][Mm][Pp]\\.*/ OR data_win_eventdata_image:/.*\\[Dd][Oo][Ww][Nn][Ll][Oo][Aa][Dd][Ss]\\.*/ OR data_win_eventdata_image:/.*\\[Aa][Pp][Pp][Dd][Aa][Tt][Aa]\\[Ll][Oo][Cc][Aa][Ll]\\[Tt][Ee][Mm][Pp]\\.*/)
+    pivot_on:
+    - host
+    window: 2h
+  - name: Other hosts initiating a connection to the same destination (download-server / campaign spread)
+    query: data_win_system_eventID:"3" AND data_win_eventdata_initiated:/[Tt][Rr][Uu][Ee]/
+    pivot_on:
+    - ip
+    window: 24h

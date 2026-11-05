@@ -140,23 +140,58 @@ graylog:
   query: data_process_exec_process_arguments:/.* -[Uu]\#.*/
 
 correlation:
-  # Authored by the correlation engine for review.
+  # Authored per-rule (behaviour-researched) for the correlation engine. Related CoPilot
+  # Searches + telemetry pivots to run around an alert, scoped to its host/user/ip/domain.
+  related_rules:
+  - id: 0f79c4d2-4e1f-4683-9c36-b5469a665e06
+    name: Access of Sudoers File Content
+    reason: 'Precursor: reading /etc/sudoers (cat/grep/less) or running sudo -l is how an operator discovers the (ALL, !root) Runas rule that CVE-2019-14287 weaponizes; seeing it just before this alert confirms deliberate abuse of a known-vulnerable sudoers policy, not an accidental ''-u#'' string.'
+  - id: 0cf7a157-8879-41a2-8f55-388dd23746b7
+    name: Linux Recon Indicators
+    reason: 'Precursor: hunts SUID binaries (find -perm -4000) and credential files - the local privilege-escalation-vector enumeration a hands-on operator performs before attempting a root exploit like this sudo CVE.'
+  - id: a015e032-146d-4717-8944-7a1884122111
+    name: Linux HackTool Execution
+    reason: 'Precursor/co-occurring: linpeas and pspy are exactly what flag a sudo version vulnerable to CVE-2019-14287, and offensive frameworks (sliver, metasploit) stage the follow-up; their execution on this host corroborates an active attacker toolkit behind the -u# attempt.'
+  - id: 5f3b8a12-2d4c-4e7b-9c6d-8a1f2b4c9e3f
+    name: Doas Privilege Escalation Detection
+    reason: 'Co-occurring: doas is sudo''s direct alternative, so an operator probing for any root path commonly tries both sudo (this CVE) and doas on the same host; doas abuse in the same window points to one escalation effort, not an isolated event.'
+  - id: fa4aaed5-4fe0-498d-bbc0-08e3346387ba
+    name: Copy Passwd Or Shadow From TMP Path
+    reason: 'Follow-on: harvesting /etc/shadow (root-only readable) is the classic first action after escalation; a cp of passwd/shadow right after the -u# exploit confirms it reached uid 0 and is being used to steal credentials.'
+  - id: 6a50f16c-3b7b-42d1-b081-0fdd3ba70a73
+    name: User Added To Root/Sudoers Group Using Usermod
+    reason: 'Follow-on persistence: having gained root via the CVE, ''usermod -aG sudo/root'' makes the privilege durable so the operator never has to re-exploit; it directly cements the access this alert represents.'
+  - id: e3a8a052-111f-4606-9aee-f28ebeb76776
+    name: Disabling Security Tools
+    reason: 'Follow-on defense evasion: root obtained via the CVE lets the operator stop or disable Wazuh, auditd or EDR; if it fires after, the escalation is being used to blind the very telemetry that caught it.'
+  - id: 80915f59-9b56-4616-9de0-fd0dea6c12fe
+    name: Linux Logs Clearing Attempts
+    reason: 'Follow-on anti-forensics: wiping /var/log requires root, so log clearing in the same window after a privilege-escalation alert is a cover-tracks step that sharply raises incident confidence and severity.'
+  window: 2h
   enrichment_searches:
-  # Rule-specific telemetry pivots the engine runs around an alert from this rule,
-  # scoped to the alert's host/user/IP within the window (behaviour-targeted, not a sweep).
-    - name: "Privilege-escalation tooling executed on this host"
-      query: 'data_process_exec_process_binary:/.*(\/[Ss][Uu][Dd][Oo]|\/[Ss][Uu]|\/[Pp][Kk][Ee][Xx][Ee][Cc]|\/[Dd][Oo][Aa][Ss]|\/[Ss][Ee][Tt][Cc][Aa][Pp]|\/[Cc][Hh][Ss][Hh]|\/[Nn][Ee][Ww][Gg][Rr][Pp])/'
-      pivot_on: [host]
-      window: 2h
-    - name: "Credential / secret-file access on this host"
-      query: '((data_process_exec_process_arguments:/.*\/[Ee][Tt][Cc]\/[Ss][Hh][Aa][Dd][Oo][Ww].*/) OR (data_process_exec_process_arguments:/.*\/[Ee][Tt][Cc]\/[Pp][Aa][Ss][Ss][Ww][Dd].*/) OR (data_process_exec_process_arguments:/.*\/[Ee][Tt][Cc]\/[Ss][Uu][Dd][Oo][Ee][Rr][Ss].*/) OR (data_process_exec_process_arguments:/.*[Ii][Dd]_[Rr][Ss][Aa].*/) OR (data_process_exec_process_arguments:/.*\.[Ss][Ss][Hh]\/.*/) OR (data_process_exec_process_arguments:/.*\/[Ee][Tt][Cc]\/[Gg][Ss][Hh][Aa][Dd][Oo][Ww].*/))'
-      pivot_on: [host]
-      window: 2h
-    - name: "Shell / interpreter execution on this host"
-      query: '((data_process_exec_process_binary:/.*(\/[Bb][Aa][Ss][Hh]|\/[Ss][Hh]|\/[Dd][Aa][Ss][Hh]|\/[Zz][Ss][Hh]|\/[Kk][Ss][Hh]|\/[Aa][Ss][Hh]|\/[Bb][Uu][Ss][Yy][Bb][Oo][Xx])/) OR (data_process_exec_process_binary:/.*(\/[Pp][Yy][Tt][Hh][Oo][Nn]|\/[Pp][Yy][Tt][Hh][Oo][Nn]3|\/[Pp][Ee][Rr][Ll]|\/[Rr][Uu][Bb][Yy]|\/[Pp][Hh][Pp]|\/[Nn][Oo][Dd][Ee]|\/[Ll][Uu][Aa]|\/[Aa][Ww][Kk])/))'
-      pivot_on: [host]
-      window: 1h
-    - name: "Reconnaissance commands on this host"
-      query: 'data_process_exec_process_binary:/.*(\/[Ww][Hh][Oo][Aa][Mm][Ii]|\/[Ii][Dd]|\/[Uu][Nn][Aa][Mm][Ee]|\/[Hh][Oo][Ss][Tt][Nn][Aa][Mm][Ee]|\/[Hh][Oo][Ss][Tt][Nn][Aa][Mm][Ee][Cc][Tt][Ll]|\/[Ss][Ss]|\/[Nn][Ee][Tt][Ss][Tt][Aa][Tt]|\/[Ii][Ff][Cc][Oo][Nn][Ff][Ii][Gg]|\/[Aa][Rr][Pp]|\/[Ww]|\/[Ww][Hh][Oo]|\/[Ll][Aa][Ss][Tt]|\/[Ll][Ss][Oo][Ff]|\/[Nn][Mm][Aa][Pp]|\/[Dd][Ii][Gg]|\/[Ff][Ii][Nn][Dd])/'
-      pivot_on: [host]
-      window: 1h
+  # Behaviour-targeted hunts the engine runs around the alert (not a sweep).
+  - name: Sudo policy discovery (sudo -l / sudoers read) on this host
+    query: ((data_process_exec_process_binary:/.*\/[Ss][Uu][Dd][Oo]/ AND data_process_exec_process_arguments:/.*-[Ll].*/) OR (data_process_exec_process_arguments:/.*\/[Ee][Tt][Cc]\/[Ss][Uu][Dd][Oo][Ee][Rr][Ss].*/))
+    pivot_on:
+    - host
+    window: 2h
+  - name: Other privilege-escalation binaries (su/doas/pkexec/setcap/newgrp) on this host
+    query: data_process_exec_process_binary:/.*(\/[Ss][Uu]|\/[Ss][Uu][Dd][Oo]|\/[Dd][Oo][Aa][Ss]|\/[Pp][Kk][Ee][Xx][Ee][Cc]|\/[Ss][Ee][Tt][Cc][Aa][Pp]|\/[Nn][Ee][Ww][Gg][Rr][Pp])/
+    pivot_on:
+    - host
+    window: 2h
+  - name: Credential store access (shadow/gshadow/SSH keys) on this host
+    query: ((data_process_exec_process_arguments:/.*\/[Ee][Tt][Cc]\/[Ss][Hh][Aa][Dd][Oo][Ww].*/) OR (data_process_exec_process_arguments:/.*\/[Ee][Tt][Cc]\/[Gg][Ss][Hh][Aa][Dd][Oo][Ww].*/) OR (data_process_exec_process_arguments:/.*[Ii][Dd]_[Rr][Ss][Aa].*/) OR (data_process_exec_process_arguments:/.*[Aa][Uu][Tt][Hh][Oo][Rr][Ii][Zz][Ee][Dd]_[Kk][Ee][Yy][Ss].*/) OR (data_process_exec_process_arguments:/.*\.[Ss][Ss][Hh]\/.*/))
+    pivot_on:
+    - host
+    window: 1h
+  - name: Account / sudoers persistence (usermod/useradd/passwd/visudo/authorized_keys) on this host
+    query: ((data_process_exec_process_binary:/.*(\/[Uu][Ss][Ee][Rr][Mm][Oo][Dd]|\/[Uu][Ss][Ee][Rr][Aa][Dd][Dd]|\/[Aa][Dd][Dd][Uu][Ss][Ee][Rr]|\/[Cc][Hh][Pp][Aa][Ss][Ss][Ww][Dd]|\/[Pp][Aa][Ss][Ss][Ww][Dd]|\/[Vv][Ii][Ss][Uu][Dd][Oo]|\/[Gg][Pp][Aa][Ss][Ss][Ww][Dd])/) OR (data_process_exec_process_arguments:/.*\/[Ee][Tt][Cc]\/[Ss][Uu][Dd][Oo][Ee][Rr][Ss].*/) OR (data_process_exec_process_arguments:/.*[Aa][Uu][Tt][Hh][Oo][Rr][Ii][Zz][Ee][Dd]_[Kk][Ee][Yy][Ss].*/))
+    pivot_on:
+    - host
+    window: 2h
+  - name: 'Defense evasion: security agents stopped or logs/audit rules cleared on this host'
+    query: (((data_process_exec_process_binary:/.*(\/[Ss][Yy][Ss][Tt][Ee][Mm][Cc][Tt][Ll]|\/[Ss][Ee][Rr][Vv][Ii][Cc][Ee]|\/[Pp][Kk][Ii][Ll][Ll]|\/[Kk][Ii][Ll][Ll][Aa][Ll][Ll])/) AND data_process_exec_process_arguments:/.*([Ww][Aa][Zz][Uu][Hh]|[Aa][Uu][Dd][Ii][Tt][Dd]|[Ff][Aa][Ll][Cc][Oo][Nn]|[Oo][Ss][Qq][Uu][Ee][Rr][Yy]|[Ss][Ee][Nn][Tt][Ii][Nn][Ee][Ll]|[Cc][Bb][Dd][Aa][Ee][Mm][Oo][Nn]).*/) OR (data_process_exec_process_binary:/.*\/[Aa][Uu][Dd][Ii][Tt][Cc][Tt][Ll]/ AND data_process_exec_process_arguments:/.*-[Dd].*/) OR (data_process_exec_process_binary:/.*(\/[Rr][Mm]|\/[Ss][Hh][Rr][Ee][Dd]|\/[Tt][Rr][Uu][Nn][Cc][Aa][Tt][Ee])/ AND data_process_exec_process_arguments:/.*\/[Vv][Aa][Rr]\/[Ll][Oo][Gg].*/))
+    pivot_on:
+    - host
+    window: 2h

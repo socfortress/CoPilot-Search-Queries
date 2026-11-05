@@ -162,19 +162,53 @@ graylog:
   query: (data_win_system_eventID:"23" OR data_win_system_eventID:"26") AND data_win_eventdata_targetFilename:/.*\\[Tt][Oo][Mm][Cc][Aa][Tt].*/ AND data_win_eventdata_targetFilename:/.*\\[Ll][Oo][Gg][Ss]\\.*/ AND (data_win_eventdata_targetFilename:/.*[Cc][Aa][Tt][Aa][Ll][Ii][Nn][Aa]\..*/ OR data_win_eventdata_targetFilename:/.*_[Aa][Cc][Cc][Ee][Ss][Ss]_[Ll][Oo][Gg]\..*/ OR data_win_eventdata_targetFilename:/.*[Ll][Oo][Cc][Aa][Ll][Hh][Oo][Ss][Tt]\..*/)
 
 correlation:
-  # Authored by the correlation engine for review.
+  # Authored per-rule (behaviour-researched) for the correlation engine. Related CoPilot
+  # Searches + telemetry pivots to run around an alert, scoped to its host/user/ip/domain.
+  related_rules:
+  - id: bed2a484-9348-4143-8a8a-b801c979301c
+    name: Webshell Detection With Command Line Keywords
+    reason: Fires when a Tomcat/Java web-server process (ws_tomcatservice.exe, or java.exe with catalina.jar/CATALINA_HOME) spawns recon/command-exec processes - the hands-on-keyboard web-shell activity whose HTTP request records live in the very catalina/access logs this alert is deleting.
+  - id: f64e5c19-879c-4bae-b471-6d84c8339677
+    name: Webshell Tool Reconnaissance Activity
+    reason: Detects web-server-spawned processes (explicitly including Tomcat) probing for perl/python/wget - early web-shell reconnaissance on the same Tomcat host; its traces in the access log are exactly what the deletion is erasing.
+  - id: 7c97c625-0350-4f0a-8943-f6cadc88125e
+    name: Mint Sandstorm - Log4J Wstomcat Process Execution
+    reason: Log4Shell RCE spawning child processes from the Tomcat service (ws_tomcatservice.exe) - a concrete Tomcat initial-access vector that precedes an attacker wiping the Tomcat logs to hide the exploit requests.
+  - id: 39f1f9f2-9636-45de-98f6-a4046aa8e4b9
+    name: Potential Webshell Creation On Static Website
+    reason: Creation of a web-shell-extension file in a web root - the foothold drop; deleting the catalina/access logs afterwards removes the HTTP record of the upload and of the subsequent web-shell calls.
+  - id: 4ebc877f-4612-45cb-b3a5-8e3834db36c9
+    name: Webshell Hacking Activity Patterns
+    reason: Web-server parent/child patterns used for credential dumping and exfiltration through a web shell - post-exploitation on the compromised web host that the log deletion is intended to conceal.
+  - id: 3eb8c339-a765-48cc-a150-4364c04652bf
+    name: IIS WebServer Access Logs Deleted
+    reason: The sibling anti-forensic action on the other common Windows web server; both firing on one host signals deliberate, systematic destruction of web access-log evidence rather than routine log rotation.
+  - id: 0649be4a-aeb0-45b0-b89e-7f1668f6d9c0
+    name: IIS WebServer Log Deletion via CommandLine Utilities
+    reason: The identical playbook - compromise a web app, then delete the web-server logs to cover tracks - executed via del/command-line on IIS; co-occurrence points to the same actor clearing every web log on the host.
+  - id: 63c779ba-f638-40a0-a593-ddd45e8b1ddc
+    name: EventLog EVTX File Deleted
+    reason: Deletion of Windows .evtx files, the broader evidence-destruction step that routinely accompanies clearing web-server logs during intrusion cleanup on the same host.
+  window: 2h
   enrichment_searches:
-  # Rule-specific telemetry pivots the engine runs around an alert from this rule,
-  # scoped to the alert's host/user/IP within the window (behaviour-targeted, not a sweep).
-    - name: "Log-clearing / anti-forensic activity on this host"
-      query: '(((data_win_eventdata_commandLine:/.*[Ww][Ee][Vv][Tt][Uu][Tt][Ii][Ll] [Cc][Ll].*/ OR data_win_eventdata_commandLine:/.*[Cc][Ll][Ee][Aa][Rr]-[Ee][Vv][Ee][Nn][Tt][Ll][Oo][Gg].*/ OR data_win_eventdata_commandLine:/.*[Ff][Ss][Uu][Tt][Ii][Ll] [Uu][Ss][Nn] [Dd][Ee][Ll][Ee][Tt][Ee][Jj][Oo][Uu][Rr][Nn][Aa][Ll].*/ OR data_win_eventdata_commandLine:/.*[Vv][Ss][Ss][Aa][Dd][Mm][Ii][Nn] [Dd][Ee][Ll][Ee][Tt][Ee].*/ OR data_win_eventdata_commandLine:/.*[Ww][Ee][Vv][Tt][Uu][Tt][Ii][Ll] [Cc][Ll][Ee][Aa][Rr]-[Ll][Oo][Gg].*/)) OR ((data_win_system_eventID:"1102" OR data_win_system_eventID:"104")))'
-      pivot_on: [host]
-      window: 2h
-    - name: "Execution of programs from user-writable paths on this host"
-      query: 'data_win_system_eventID:"1" AND (data_win_eventdata_image:/.*\\[Uu][Ss][Ee][Rr][Ss]\\.*/ OR data_win_eventdata_image:/.*\\[Pp][Rr][Oo][Gg][Rr][Aa][Mm][Dd][Aa][Tt][Aa]\\.*/ OR data_win_eventdata_image:/.*\\[Ww][Ii][Nn][Dd][Oo][Ww][Ss]\\[Tt][Ee][Mm][Pp]\\.*/ OR data_win_eventdata_image:/.*\\[Aa][Pp][Pp][Dd][Aa][Tt][Aa]\\.*/ OR data_win_eventdata_image:/.*\\[Pp][Uu][Bb][Ll][Ii][Cc]\\.*/ OR data_win_eventdata_image:/.*\\\$[Rr][Ee][Cc][Yy][Cc][Ll][Ee].*/)'
-      pivot_on: [host]
-      window: 1h
-    - name: "Autostart persistence written on this host"
-      query: '(data_win_system_eventID:"12" OR data_win_system_eventID:"13") AND (data_win_eventdata_targetObject:/.*[Cc][Uu][Rr][Rr][Ee][Nn][Tt][Vv][Ee][Rr][Ss][Ii][Oo][Nn]\\[Rr][Uu][Nn].*/ OR data_win_eventdata_targetObject:/.*[Cc][Uu][Rr][Rr][Ee][Nn][Tt][Vv][Ee][Rr][Ss][Ii][Oo][Nn]\\[Rr][Uu][Nn][Oo][Nn][Cc][Ee].*/ OR data_win_eventdata_targetObject:/.*[Cc][Uu][Rr][Rr][Ee][Nn][Tt][Cc][Oo][Nn][Tt][Rr][Oo][Ll][Ss][Ee][Tt]\\[Ss][Ee][Rr][Vv][Ii][Cc][Ee][Ss]\\.*/ OR data_win_eventdata_targetObject:/.*[Ii][Mm][Aa][Gg][Ee] [Ff][Ii][Ll][Ee] [Ee][Xx][Ee][Cc][Uu][Tt][Ii][Oo][Nn] [Oo][Pp][Tt][Ii][Oo][Nn][Ss]\\.*/ OR data_win_eventdata_targetObject:/.*[Ww][Ii][Nn][Ll][Oo][Gg][Oo][Nn]\\[Ss][Hh][Ee][Ll][Ll].*/ OR data_win_eventdata_targetObject:/.*[Ww][Ii][Nn][Ll][Oo][Gg][Oo][Nn]\\[Uu][Ss][Ee][Rr][Ii][Nn][Ii][Tt].*/ OR data_win_eventdata_targetObject:/.*[Cc][Uu][Rr][Rr][Ee][Nn][Tt][Vv][Ee][Rr][Ss][Ii][Oo][Nn]\\[Ee][Xx][Pp][Ll][Oo][Rr][Ee][Rr]\\[Rr][Uu][Nn].*/ OR data_win_eventdata_targetObject:/.*[Pp][Oo][Ll][Ii][Cc][Ii][Ee][Ss]\\[Ee][Xx][Pp][Ll][Oo][Rr][Ee][Rr]\\[Rr][Uu][Nn].*/ OR data_win_eventdata_targetObject:/.*[Cc][Uu][Rr][Rr][Ee][Nn][Tt][Vv][Ee][Rr][Ss][Ii][Oo][Nn]\\[Ww][Ii][Nn][Dd][Oo][Ww][Ss]\\[Ll][Oo][Aa][Dd].*/)'
-      pivot_on: [host]
-      window: 2h
+  # Behaviour-targeted hunts the engine runs around the alert (not a sweep).
+  - name: Tomcat/Java web-server process spawning shells or recon tools on this host
+    query: data_win_system_eventID:"1" AND (data_win_eventdata_parentImage:/.*\\[Jj][Aa][Vv][Aa][Ww]?\.[Ee][Xx][Ee]/ OR data_win_eventdata_parentImage:/.*\\[Tt][Oo][Mm][Cc][Aa][Tt][0-9]*\.[Ee][Xx][Ee]/ OR data_win_eventdata_parentImage:/.*\\[Ww][Ss]_[Tt][Oo][Mm][Cc][Aa][Tt][Ss][Ee][Rr][Vv][Ii][Cc][Ee]\.[Ee][Xx][Ee]/) AND (data_win_eventdata_image:/.*\\[Cc][Mm][Dd]\.[Ee][Xx][Ee]/ OR data_win_eventdata_image:/.*\\[Pp][Oo][Ww][Ee][Rr][Ss][Hh][Ee][Ll][Ll]\.[Ee][Xx][Ee]/ OR data_win_eventdata_image:/.*\\[Pp][Ww][Ss][Hh]\.[Ee][Xx][Ee]/ OR data_win_eventdata_image:/.*\\[Ww][Ss][Cc][Rr][Ii][Pp][Tt]\.[Ee][Xx][Ee]/ OR data_win_eventdata_image:/.*\\[Cc][Ss][Cc][Rr][Ii][Pp][Tt]\.[Ee][Xx][Ee]/ OR data_win_eventdata_image:/.*\\[Ww][Hh][Oo][Aa][Mm][Ii]\.[Ee][Xx][Ee]/ OR data_win_eventdata_image:/.*\\[Nn][Ee][Tt]1?\.[Ee][Xx][Ee]/ OR data_win_eventdata_image:/.*\\[Ii][Pp][Cc][Oo][Nn][Ff][Ii][Gg]\.[Ee][Xx][Ee]/ OR data_win_eventdata_image:/.*\\[Ss][Yy][Ss][Tt][Ee][Mm][Ii][Nn][Ff][Oo]\.[Ee][Xx][Ee]/ OR data_win_eventdata_image:/.*\\[Tt][Aa][Ss][Kk][Ll][Ii][Ss][Tt]\.[Ee][Xx][Ee]/ OR data_win_eventdata_image:/.*\\[Nn][Ee][Tt][Ss][Tt][Aa][Tt]\.[Ee][Xx][Ee]/ OR data_win_eventdata_image:/.*\\[Ss][Cc][Hh][Tt][Aa][Ss][Kk][Ss]\.[Ee][Xx][Ee]/ OR data_win_eventdata_image:/.*\\[Cc][Ee][Rr][Tt][Uu][Tt][Ii][Ll]\.[Ee][Xx][Ee]/ OR data_win_eventdata_image:/.*\\[Bb][Ii][Tt][Ss][Aa][Dd][Mm][Ii][Nn]\.[Ee][Xx][Ee]/)
+    pivot_on:
+    - host
+    window: 4h
+  - name: Web shell or malicious WAR written under Tomcat webapps on this host
+    query: data_win_system_eventID:"11" AND (data_win_eventdata_targetFilename:/.*\\[Ww][Ee][Bb][Aa][Pp][Pp][Ss]\\.*/ OR data_win_eventdata_targetFilename:/.*\\[Tt][Oo][Mm][Cc][Aa][Tt].*/) AND (data_win_eventdata_targetFilename:/.*\.[Jj][Ss][Pp]/ OR data_win_eventdata_targetFilename:/.*\.[Jj][Ss][Pp][Xx]/ OR data_win_eventdata_targetFilename:/.*\.[Ww][Aa][Rr]/)
+    pivot_on:
+    - host
+    window: 24h
+  - name: Companion log-clearing / anti-forensic cleanup on this host
+    query: (data_win_eventdata_commandLine:/.*[Ww][Ee][Vv][Tt][Uu][Tt][Ii][Ll] [Cc][Ll].*/ OR data_win_eventdata_commandLine:/.*[Cc][Ll][Ee][Aa][Rr]-[Ee][Vv][Ee][Nn][Tt][Ll][Oo][Gg].*/ OR data_win_eventdata_commandLine:/.*[Ff][Ss][Uu][Tt][Ii][Ll] [Uu][Ss][Nn] [Dd][Ee][Ll][Ee][Tt][Ee][Jj][Oo][Uu][Rr][Nn][Aa][Ll].*/ OR data_win_eventdata_commandLine:/.*[Vv][Ss][Ss][Aa][Dd][Mm][Ii][Nn] [Dd][Ee][Ll][Ee][Tt][Ee] [Ss][Hh][Aa][Dd][Oo][Ww][Ss].*/ OR data_win_eventdata_commandLine:/.*[Ss][Dd][Ee][Ll][Ee][Tt][Ee].*/) OR (data_win_system_eventID:"1102" OR data_win_system_eventID:"104")
+    pivot_on:
+    - host
+    window: 2h
+  - name: Outbound network connections initiated by the Tomcat/Java process on this host
+    query: data_win_system_eventID:"3" AND data_win_eventdata_initiated:/[Tt][Rr][Uu][Ee]/ AND (data_win_eventdata_image:/.*\\[Jj][Aa][Vv][Aa][Ww]?\.[Ee][Xx][Ee]/ OR data_win_eventdata_image:/.*\\[Tt][Oo][Mm][Cc][Aa][Tt][0-9]*\.[Ee][Xx][Ee]/ OR data_win_eventdata_image:/.*\\[Ww][Ss]_[Tt][Oo][Mm][Cc][Aa][Tt][Ss][Ee][Rr][Vv][Ii][Cc][Ee]\.[Ee][Xx][Ee]/)
+    pivot_on:
+    - host
+    window: 4h

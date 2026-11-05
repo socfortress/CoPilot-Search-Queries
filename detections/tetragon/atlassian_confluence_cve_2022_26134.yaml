@@ -188,23 +188,58 @@ graylog:
   query: data_process_exec_parent_binary:/\/[Oo][Pp][Tt]\/[Aa][Tt][Ll][Aa][Ss][Ss][Ii][Aa][Nn]\/[Cc][Oo][Nn][Ff][Ll][Uu][Ee][Nn][Cc][Ee]\/.*/ AND data_process_exec_parent_binary:/.*\/[Jj][Aa][Vv][Aa]/ AND (data_process_exec_process_arguments:/.*\/[Bb][Ii][Nn]\/[Ss][Hh].*/ OR data_process_exec_process_arguments:/.*[Bb][Aa][Ss][Hh].*/ OR data_process_exec_process_arguments:/.*[Dd][Aa][Ss][Hh].*/ OR data_process_exec_process_arguments:/.*[Kk][Ss][Hh].*/ OR data_process_exec_process_arguments:/.*[Zz][Ss][Hh].*/ OR data_process_exec_process_arguments:/.*[Cc][Ss][Hh].*/ OR data_process_exec_process_arguments:/.*[Ff][Ii][Ss][Hh].*/ OR data_process_exec_process_arguments:/.*[Cc][Uu][Rr][Ll].*/ OR data_process_exec_process_arguments:/.*[Ww][Gg][Ee][Tt].*/ OR data_process_exec_process_arguments:/.*[Pp][Yy][Tt][Hh][Oo][Nn].*/)
 
 correlation:
-  # Authored by the correlation engine for review.
+  # Authored per-rule (behaviour-researched) for the correlation engine. Related CoPilot
+  # Searches + telemetry pivots to run around an alert, scoped to its host/user/ip/domain.
+  related_rules:
+  - id: d292e0af-9a18-420c-9525-ec0ac3936892
+    name: Suspicious Java Children Processes
+    reason: 'Parent-agnostic twin of this rule: the same Confluence JVM (*/java) spawning a shell/curl/wget/python child, minus the /opt/atlassian/confluence path constraint. It fires on the identical exec event, confirming it is the Java process itself launching the interpreter.'
+  - id: f8987c03-4290-4c96-870f-55e75ee377f4
+    name: CVE-2023-22518 Exploitation Attempt - Suspicious Confluence Child Process (Linux)
+    reason: Sibling Confluence RCE detector (java parent whose args contain 'confluence' spawning bash/curl/wget). Co-firing means the same Confluence instance is being driven through a second known exploit path - the host is under active Confluence-targeted exploitation, not a one-off.
+  - id: a2d9e2f3-0f43-4c7a-bcd9-9acfc0d723aa
+    name: Suspicious Download and Execute Pattern via Curl/Wget
+    reason: 'Direct next step: the curl/wget child this rule caught fetches a second-stage payload into /tmp or /dev/shm and runs it via ''sh -c''. Confirms the foothold progressed from code execution to stager retrieval.'
+  - id: 880973f3-9708-491c-a77b-2a35a1921158
+    name: Linux Shell Pipe to Shell
+    reason: 'Fileless variant of the drop: ''sh -c "curl ... | bash"''. The canonical one-liner that CVE-2022-26134 droppers (Kinsing) run straight after the Confluence shell to pull and execute the next stage without touching disk.'
+  - id: 9069ea3c-b213-4c52-be13-86506a227ab1
+    name: Linux Crypto Mining Indicators
+    reason: 'Terminal objective of this CVE in the wild: CVE-2022-26134 was mass-exploited to deploy coin miners (Kinsing/Hezb/z0Miner). A stratum-pool or xmrig exec on the same host within the window is the Confluence foothold cashing out (Impact).'
+  - id: 818f7b24-0fba-4c49-a073-8b755573b9c7
+    name: Linux Webshell Indicators
+    reason: Confluence runs on Tomcat/Java; this rule flags a Tomcat-java parent spawning recon binaries - i.e. an operator driving a JSP/BEHINDER webshell planted in the Confluence webroot, the durable access Volexity documented for this exact zero-day.
+  - id: 0cf7a157-8879-41a2-8f55-388dd23746b7
+    name: Linux Recon Indicators
+    reason: 'Hands-on-keyboard orientation through the new shell: SUID hunting (find -perm -4000) and .htpasswd discovery to map privilege-escalation and credential paths right after the Confluence foothold.'
+  - id: 7f734ed0-4f47-46c0-837f-6ee62505abd9
+    name: Potential Netcat Reverse Shell Execution
+    reason: 'Interactive C2 the operator opens from the foothold: ''nc -e <shell>''. A reverse shell on the same host in-window turns the Confluence RCE into hands-on-keyboard control.'
+  window: 1h
   enrichment_searches:
-  # Rule-specific telemetry pivots the engine runs around an alert from this rule,
-  # scoped to the alert's host/user/IP within the window (behaviour-targeted, not a sweep).
-    - name: "Shell / interpreter execution on this host"
-      query: '((data_process_exec_process_binary:/.*(\/[Bb][Aa][Ss][Hh]|\/[Ss][Hh]|\/[Dd][Aa][Ss][Hh]|\/[Zz][Ss][Hh]|\/[Kk][Ss][Hh]|\/[Aa][Ss][Hh]|\/[Bb][Uu][Ss][Yy][Bb][Oo][Xx])/) OR (data_process_exec_process_binary:/.*(\/[Pp][Yy][Tt][Hh][Oo][Nn]|\/[Pp][Yy][Tt][Hh][Oo][Nn]3|\/[Pp][Ee][Rr][Ll]|\/[Rr][Uu][Bb][Yy]|\/[Pp][Hh][Pp]|\/[Nn][Oo][Dd][Ee]|\/[Ll][Uu][Aa]|\/[Aa][Ww][Kk])/))'
-      pivot_on: [host]
-      window: 1h
-    - name: "Other executions of this tool-set on this host (any arguments)"
-      query: 'data_process_exec_process_binary:/.*(\/[Jj][Aa][Vv][Aa])/'
-      pivot_on: [host]
-      window: 2h
-    - name: "Persistence via cron / systemd / shell profiles on this host"
-      query: '((data_process_exec_process_binary:/.*(\/[Cc][Rr][Oo][Nn][Tt][Aa][Bb]|\/[Ss][Yy][Ss][Tt][Ee][Mm][Cc][Tt][Ll]|\/[Aa][Tt]|\/[Uu][Pp][Dd][Aa][Tt][Ee]-[Rr][Cc]\.[Dd])/) OR (data_process_exec_process_arguments:/.*\/[Ee][Tt][Cc]\/[Cc][Rr][Oo][Nn].*/) OR (data_process_exec_process_arguments:/.*\/[Ee][Tt][Cc]\/[Ss][Yy][Ss][Tt][Ee][Mm][Dd].*/) OR (data_process_exec_process_arguments:/.*[Rr][Cc]\.[Ll][Oo][Cc][Aa][Ll].*/) OR (data_process_exec_process_arguments:/.*\.[Bb][Aa][Ss][Hh][Rr][Cc].*/) OR (data_process_exec_process_arguments:/.*\.[Bb][Aa][Ss][Hh]_[Pp][Rr][Oo][Ff][Ii][Ll][Ee].*/) OR (data_process_exec_process_arguments:/.*\/[Ee][Tt][Cc]\/[Pp][Rr][Oo][Ff][Ii][Ll][Ee].*/) OR (data_process_exec_process_arguments:/.*[Aa][Uu][Tt][Hh][Oo][Rr][Ii][Zz][Ee][Dd]_[Kk][Ee][Yy][Ss].*/) OR (data_process_exec_process_arguments:/.*\/[Ee][Tt][Cc]\/[Ii][Nn][Ii][Tt]\.[Dd].*/))'
-      pivot_on: [host]
-      window: 4h
-    - name: "Reconnaissance commands on this host"
-      query: 'data_process_exec_process_binary:/.*(\/[Ww][Hh][Oo][Aa][Mm][Ii]|\/[Ii][Dd]|\/[Uu][Nn][Aa][Mm][Ee]|\/[Hh][Oo][Ss][Tt][Nn][Aa][Mm][Ee]|\/[Hh][Oo][Ss][Tt][Nn][Aa][Mm][Ee][Cc][Tt][Ll]|\/[Ss][Ss]|\/[Nn][Ee][Tt][Ss][Tt][Aa][Tt]|\/[Ii][Ff][Cc][Oo][Nn][Ff][Ii][Gg]|\/[Aa][Rr][Pp]|\/[Ww]|\/[Ww][Hh][Oo]|\/[Ll][Aa][Ss][Tt]|\/[Ll][Ss][Oo][Ff]|\/[Nn][Mm][Aa][Pp]|\/[Dd][Ii][Gg]|\/[Ff][Ii][Nn][Dd])/'
-      pivot_on: [host]
-      window: 1h
+  # Behaviour-targeted hunts the engine runs around the alert (not a sweep).
+  - name: Second-stage payload download into tmp / shared memory on this host
+    query: (data_process_exec_process_binary:/.*\/[Cc][Uu][Rr][Ll]/ OR data_process_exec_process_binary:/.*\/[Ww][Gg][Ee][Tt]/) AND (data_process_exec_process_arguments:/.*[Hh][Tt][Tt][Pp].*/ OR data_process_exec_process_arguments:/.*\/[Tt][Mm][Pp]\/.*/ OR data_process_exec_process_arguments:/.*\/[Dd][Ee][Vv]\/[Ss][Hh][Mm]\/.*/)
+    pivot_on:
+    - host
+    window: 2h
+  - name: Crypto-miner execution (stratum pool / xmrig / Kinsing) on this host
+    query: (data_process_exec_process_arguments:/.*[Ss][Tt][Rr][Aa][Tt][Uu][Mm]\+[Tt][Cc][Pp]:\/\/.*/ OR data_process_exec_process_arguments:/.*[Ss][Tt][Rr][Aa][Tt][Uu][Mm]\+[Uu][Dd][Pp]:\/\/.*/ OR data_process_exec_process_arguments:/.*--[Dd][Oo][Nn][Aa][Tt][Ee]-[Ll][Ee][Vv][Ee][Ll].*/ OR data_process_exec_process_arguments:/.* -[Oo] [Pp][Oo][Oo][Ll]\..*/ OR data_process_exec_process_binary:/.*\/[Xx][Mm][Rr][Ii][Gg]/ OR data_process_exec_process_arguments:/.*[Xx][Mm][Rr][Ii][Gg].*/ OR data_process_exec_process_arguments:/.*[Kk][Ii][Nn][Ss][Ii][Nn][Gg].*/)
+    pivot_on:
+    - host
+    window: 6h
+  - name: Reverse shell / outbound interactive shell from this host
+    query: ((data_process_exec_process_binary:/.*\/[Nn][Cc]/ OR data_process_exec_process_binary:/.*\/[Nn][Cc][Aa][Tt]/) AND data_process_exec_process_arguments:/.* -[Ee] .*/) OR data_process_exec_process_arguments:/.*\/[Dd][Ee][Vv]\/[Tt][Cc][Pp]\/.*/ OR data_process_exec_process_arguments:/.*[Pp][Tt][Yy]\.[Ss][Pp][Aa][Ww][Nn].*/ OR data_process_exec_process_arguments:/.*[Ss][Oo][Cc][Kk][Ee][Tt]\.[Ss][Oo][Cc][Kk][Ee][Tt].*/
+    pivot_on:
+    - host
+    window: 2h
+  - name: Confluence config & OS credential-store access on this host
+    query: (data_process_exec_process_arguments:/.*[Cc][Oo][Nn][Ff][Ll][Uu][Ee][Nn][Cc][Ee]\.[Cc][Ff][Gg]\.[Xx][Mm][Ll].*/ OR data_process_exec_process_arguments:/.*\/[Ee][Tt][Cc]\/[Ss][Hh][Aa][Dd][Oo][Ww].*/ OR data_process_exec_process_arguments:/.*\/[Ee][Tt][Cc]\/[Pp][Aa][Ss][Ss][Ww][Dd].*/ OR data_process_exec_process_arguments:/.*\.[Ss][Ss][Hh]\/.*/ OR data_process_exec_process_arguments:/.*[Ii][Dd]_[Rr][Ss][Aa].*/)
+    pivot_on:
+    - host
+    window: 4h
+  - name: Persistence install (cron / systemd unit / authorized_keys) on this host
+    query: ((data_process_exec_process_binary:/.*\/[Cc][Rr][Oo][Nn][Tt][Aa][Bb]/ OR data_process_exec_process_binary:/.*\/[Ss][Yy][Ss][Tt][Ee][Mm][Cc][Tt][Ll]/) OR data_process_exec_process_arguments:/.*\/[Ee][Tt][Cc]\/[Cc][Rr][Oo][Nn].*/ OR data_process_exec_process_arguments:/.*\/[Vv][Aa][Rr]\/[Ss][Pp][Oo][Oo][Ll]\/[Cc][Rr][Oo][Nn].*/ OR data_process_exec_process_arguments:/.*\.[Ss][Ee][Rr][Vv][Ii][Cc][Ee].*/ OR data_process_exec_process_arguments:/.*[Aa][Uu][Tt][Hh][Oo][Rr][Ii][Zz][Ee][Dd]_[Kk][Ee][Yy][Ss].*/)
+    pivot_on:
+    - host
+    window: 6h

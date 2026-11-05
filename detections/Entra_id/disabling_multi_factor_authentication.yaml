@@ -67,44 +67,58 @@ graylog:
   query: data_office365_Operation:/.*[Dd][Ii][Ss][Aa][Bb][Ll][Ee] [Ss][Tt][Rr][Oo][Nn][Gg] [Aa][Uu][Tt][Hh][Ee][Nn][Tt][Ii][Cc][Aa][Tt][Ii][Oo][Nn]\..*/
 
 correlation:
-  # Authored by the correlation engine for review. Related CoPilot Searches to run
-  # around an alert from this rule, scoped to the same host/user/IP within the window.
+  # Authored per-rule (behaviour-researched) for the correlation engine. Related CoPilot
+  # Searches + telemetry pivots to run around an alert, scoped to its host/user/ip/domain.
   related_rules:
-    - id: d8b0a4fe-07a8-41be-bd39-b14afa025d95
-      name: "Activity from Anonymous IP Addresses"
-      reason: "next kill-chain tactic: Command and Control"
-    - id: 0f2468a2-5055-4212-a368-7321198ee706
-      name: "Activity from Infrequent Country"
-      reason: "next kill-chain tactic: Command and Control"
-    - id: 13f2d3f5-6497-44a7-bf5f-dc13ffafe5dc
-      name: "Azure Login Bypassing Conditional Access Policies"
-      reason: "next kill-chain tactic: Persistence"
-    - id: 2b669496-d215-47d8-bd9a-f4a45bf07cda
-      name: "Data Exfiltration to Unsanctioned Apps"
-      reason: "next kill-chain tactic: Exfiltration"
-    - id: c191e2fa-f9d6-4ccf-82af-4f2aba08359f
-      name: "Logon from a Risky IP Address"
-      reason: "next kill-chain tactic: Persistence"
-    - id: M365_Email_Forwarding_Created
-      name: "M365 Email Forwarding Created"
-      reason: "next kill-chain tactic: Collection"
-  window: 1h
+  - id: c191e2fa-f9d6-4ccf-82af-4f2aba08359f
+    name: Logon from a Risky IP Address
+    reason: 'Precursor account takeover: disabling another user''s MFA needs a privileged session, which the attacker usually obtains via a risky-IP sign-in on the same account/IP minutes before the Disable Strong Authentication event.'
+  - id: d7eab125-5f94-43df-8710-795b80fa1189
+    name: Microsoft 365 - Impossible Travel Activity
+    reason: 'Precursor stolen-session indicator: an impossible-travel sign-in on the same user just before MFA is removed is strong evidence the account was hijacked rather than an admin doing housekeeping.'
+  - id: d8b0a4fe-07a8-41be-bd39-b14afa025d95
+    name: Activity from Anonymous IP Addresses
+    reason: 'Precursor: the actor often reaches the tenant through Tor/VPN/anonymizing proxy to hide origin; an anonymous-IP sign-in on the same user/IP shortly before the disable corroborates malicious intent.'
+  - id: 13f2d3f5-6497-44a7-bf5f-dc13ffafe5dc
+    name: Azure Login Bypassing Conditional Access Policies
+    reason: 'Same goal, same campaign: removing MFA and bypassing Conditional Access (TokenSmith) are both auth-friction-removal moves; seeing the same user defeat CA around the MFA disable points to deliberate control evasion.'
+  - id: 58f88172-a73d-442b-94c9-95eaed3cbb36
+    name: New Federated Domain Added
+    reason: 'Co-occurring identity-trust tampering: Disable Strong Authentication and adding a federated domain are the paired AADInternals/golden-SAML backdoor TTPs an actor runs together to weaken and then forge tenant authentication.'
+  - id: 42127bdd-9133-474f-a6f1-97b6c08a4339
+    name: New Federated Domain Added - Exchange
+    reason: Co-occurring Exchange-workload variant of the federation backdoor (Add-FederatedDomain, golden-SAML); the same actor stripping MFA frequently also establishes a federated-identity backdoor in the same window.
+  - id: M365_Email_Forwarding_Created
+    name: M365 Email Forwarding Created
+    reason: 'Follow-on BEC collection: once MFA no longer blocks re-entry, the attacker sets mailbox forwarding (Set-Mailbox) on the account to silently exfiltrate incoming mail.'
+  - id: M365_Inbox_Rule_Created
+    name: M365 Inbox Rule Created
+    reason: 'Follow-on BEC persistence/evidence-hiding: after securing MFA-free access, the attacker creates an inbox rule (New-InboxRule) to auto-forward or hide security and reply mail on the same account.'
+  window: 2h
   enrichment_searches:
-  # Rule-specific telemetry pivots the engine runs around an alert from this rule,
-  # scoped to the alert's host/user/IP within the window (behaviour-targeted, not a sweep).
-    - name: "MFA / authentication-method changes by this user"
-      query: '(data_office365_Operation:/.*[Dd][Ii][Ss][Aa][Bb][Ll][Ee] [Ss][Tt][Rr][Oo][Nn][Gg] [Aa][Uu][Tt][Hh][Ee][Nn][Tt][Ii][Cc][Aa][Tt][Ii][Oo][Nn].*/ OR data_office365_Operation:/.*[Uu][Pp][Dd][Aa][Tt][Ee] [Ss][Tt][Ss][Rr][Ee][Ff][Rr][Ee][Ss][Hh][Tt][Oo][Kk][Ee][Nn][Vv][Aa][Ll][Ii][Dd][Ff][Rr][Oo][Mm].*/ OR data_office365_Operation:/.*[Ss][Ee][Tt]-[Cc][Oo][Nn][Dd][Ii][Tt][Ii][Oo][Nn][Aa][Ll][Aa][Cc][Cc][Ee][Ss][Ss][Pp][Oo][Ll][Ii][Cc][Yy].*/ OR data_office365_Operation:/.*[Uu][Pp][Dd][Aa][Tt][Ee] [Aa][Uu][Tt][Hh][Oo][Rr][Ii][Zz][Aa][Tt][Ii][Oo][Nn] [Pp][Oo][Ll][Ii][Cc][Yy].*/ OR data_office365_Operation:/.*[Rr][Ee][Ss][Ee][Tt] [Uu][Ss][Ee][Rr] [Pp][Aa][Ss][Ss][Ww][Oo][Rr][Dd].*/ OR data_office365_Operation:/.*[Uu][Pp][Dd][Aa][Tt][Ee] [Uu][Ss][Ee][Rr].*/)'
-      pivot_on: [user]
-      window: 24h
-    - name: "Role / admin changes by this user"
-      query: '(data_office365_Operation:/.*[Aa][Dd][Dd] [Mm][Ee][Mm][Bb][Ee][Rr] [Tt][Oo] [Rr][Oo][Ll][Ee].*/ OR data_office365_Operation:/.*[Cc][Oo][Nn][Ss][Ee][Nn][Tt] [Tt][Oo] [Aa][Pp][Pp][Ll][Ii][Cc][Aa][Tt][Ii][Oo][Nn].*/ OR data_office365_Operation:/.*[Aa][Dd][Dd] [Ss][Ee][Rr][Vv][Ii][Cc][Ee] [Pp][Rr][Ii][Nn][Cc][Ii][Pp][Aa][Ll].*/ OR data_office365_Operation:/.*[Aa][Dd][Dd] [Aa][Pp][Pp][Ll][Ii][Cc][Aa][Tt][Ii][Oo][Nn].*/ OR data_office365_Operation:/.*[Aa][Dd][Dd] [Dd][Ee][Ll][Ee][Gg][Aa][Tt][Ee][Dd] [Pp][Ee][Rr][Mm][Ii][Ss][Ss][Ii][Oo][Nn] [Gg][Rr][Aa][Nn][Tt].*/ OR data_office365_Operation:/.*[Ss][Ee][Tt] [Ff][Ee][Dd][Ee][Rr][Aa][Tt][Ii][Oo][Nn] [Ss][Ee][Tt][Tt][Ii][Nn][Gg][Ss].*/)'
-      pivot_on: [user]
-      window: 24h
-    - name: "Sign-in activity by this user"
-      query: '(data_office365_Operation:/.*[Uu][Ss][Ee][Rr][Ll][Oo][Gg][Gg][Ee][Dd][Ii][Nn].*/ OR data_office365_Operation:/.*[Uu][Ss][Ee][Rr][Ll][Oo][Gg][Ii][Nn][Ff][Aa][Ii][Ll][Ee][Dd].*/)'
-      pivot_on: [user]
-      window: 6h
-    - name: "Directory / role / app-consent changes by this user"
-      query: '(data_office365_Operation:/.*[Aa][Dd][Dd] [Mm][Ee][Mm][Bb][Ee][Rr] [Tt][Oo] [Rr][Oo][Ll][Ee].*/ OR data_office365_Operation:/.*[Cc][Oo][Nn][Ss][Ee][Nn][Tt] [Tt][Oo] [Aa][Pp][Pp][Ll][Ii][Cc][Aa][Tt][Ii][Oo][Nn].*/ OR data_office365_Operation:/.*[Aa][Dd][Dd] [Ss][Ee][Rr][Vv][Ii][Cc][Ee] [Pp][Rr][Ii][Nn][Cc][Ii][Pp][Aa][Ll].*/ OR data_office365_Operation:/.*[Aa][Dd][Dd] [Aa][Pp][Pp][Ll][Ii][Cc][Aa][Tt][Ii][Oo][Nn].*/ OR data_office365_Operation:/.*[Aa][Dd][Dd] [Dd][Ee][Ll][Ee][Gg][Aa][Tt][Ee][Dd] [Pp][Ee][Rr][Mm][Ii][Ss][Ss][Ii][Oo][Nn] [Gg][Rr][Aa][Nn][Tt].*/ OR data_office365_Operation:/.*[Ss][Ee][Tt] [Ff][Ee][Dd][Ee][Rr][Aa][Tt][Ii][Oo][Nn] [Ss][Ee][Tt][Tt][Ii][Nn][Gg][Ss].*/)'
-      pivot_on: [user]
-      window: 24h
+  # Behaviour-targeted hunts the engine runs around the alert (not a sweep).
+  - name: MFA and strong-authentication changes on this account
+    query: (data_office365_Operation:/.*[Ss][Tt][Rr][Oo][Nn][Gg] [Aa][Uu][Tt][Hh][Ee][Nn][Tt][Ii][Cc][Aa][Tt][Ii][Oo][Nn].*/ OR data_office365_Operation:/.*[Ss][Ee][Cc][Uu][Rr][Ii][Tt][Yy] [Ii][Nn][Ff][Oo].*/ OR data_office365_Operation:/.*[Ss][Tt][Ss][Rr][Ee][Ff][Rr][Ee][Ss][Hh][Tt][Oo][Kk][Ee][Nn].*/)
+    pivot_on:
+    - user
+    window: 24h
+  - name: Password reset or change on this account
+    query: data_office365_Operation:/.*[Uu][Ss][Ee][Rr] [Pp][Aa][Ss][Ss][Ww][Oo][Rr][Dd].*/
+    pivot_on:
+    - user
+    window: 24h
+  - name: Privileged role granted to this account
+    query: data_office365_Operation:/.*[Mm][Ee][Mm][Bb][Ee][Rr] [Tt][Oo] [Rr][Oo][Ll][Ee].*/
+    pivot_on:
+    - user
+    window: 24h
+  - name: Mailbox forwarding or inbox rules set for this account
+    query: (data_office365_Operation:/.*[Ss][Ee][Tt]-[Mm][Aa][Ii][Ll][Bb][Oo][Xx].*/ OR data_office365_Operation:/.*[Ii][Nn][Bb][Oo][Xx][Rr][Uu][Ll][Ee].*/)
+    pivot_on:
+    - user
+    window: 6h
+  - name: Other sign-ins from the same source IP
+    query: (data_office365_Operation:/.*[Uu][Ss][Ee][Rr][Ll][Oo][Gg][Gg][Ee][Dd][Ii][Nn].*/ OR data_office365_Operation:/.*[Uu][Ss][Ee][Rr][Ll][Oo][Gg][Ii][Nn][Ff][Aa][Ii][Ll][Ee][Dd].*/)
+    pivot_on:
+    - ip
+    window: 2h
