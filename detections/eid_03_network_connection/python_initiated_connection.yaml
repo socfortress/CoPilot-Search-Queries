@@ -211,48 +211,55 @@ graylog:
   query: data_win_system_eventID:"3" AND data_win_eventdata_initiated:/[Tt][Rr][Uu][Ee]/ AND data_win_eventdata_image:/.*\\[Pp][Yy][Tt][Hh][Oo][Nn].*/ AND data_win_eventdata_image:/.*\.[Ee][Xx][Ee].*/ AND _exists_:data_win_eventdata_destinationIp AND _exists_:data_win_eventdata_sourceIp AND _exists_:data_win_eventdata_commandLine AND NOT ((data_win_eventdata_destinationIp:"127.0.0.1" AND data_win_eventdata_sourceIp:"127.0.0.1") OR (data_win_eventdata_commandLine:/.*[Pp][Ii][Pp]\.[Ee][Xx][Ee].*/ AND data_win_eventdata_commandLine:/.*[Ii][Nn][Ss][Tt][Aa][Ll][Ll].*/)) AND _exists_:data_win_eventdata_parentImage AND _exists_:data_win_eventdata_commandLine AND NOT ((data_win_eventdata_parentImage:/[Cc]:\\[Pp][Rr][Oo][Gg][Rr][Aa][Mm][Dd][Aa][Tt][Aa]\\[Aa][Nn][Aa][Cc][Oo][Nn][Dd][Aa]3\\[Ss][Cc][Rr][Ii][Pp][Tt][Ss]\\[Cc][Oo][Nn][Dd][Aa]\.[Ee][Xx][Ee]/ AND data_win_eventdata_commandLine:/.*:\\[Pp][Rr][Oo][Gg][Rr][Aa][Mm][Dd][Aa][Tt][Aa]\\[Aa][Nn][Aa][Cc][Oo][Nn][Dd][Aa]3\\[Ss][Cc][Rr][Ii][Pp][Tt][Ss]\\[Cc][Oo][Nn][Dd][Aa]-[Ss][Cc][Rr][Ii][Pp][Tt]\.[Pp][Yy].*/ AND data_win_eventdata_commandLine:/.*[Uu][Pp][Dd][Aa][Tt][Ee].*/) OR (data_win_eventdata_parentImage:/[Cc]:\\[Pp][Rr][Oo][Gg][Rr][Aa][Mm][Dd][Aa][Tt][Aa]\\[Aa][Nn][Aa][Cc][Oo][Nn][Dd][Aa]3\\[Pp][Yy][Tt][Hh][Oo][Nn]\.[Ee][Xx][Ee]/ AND data_win_eventdata_commandLine:/.*[Cc]:\\[Pp][Rr][Oo][Gg][Rr][Aa][Mm][Dd][Aa][Tt][Aa]\\[Aa][Nn][Aa][Cc][Oo][Nn][Dd][Aa]3\\[Ss][Cc][Rr][Ii][Pp][Tt][Ss]\\[Jj][Uu][Pp][Yy][Tt][Ee][Rr]-[Nn][Oo][Tt][Ee][Bb][Oo][Oo][Kk]-[Ss][Cc][Rr][Ii][Pp][Tt]\.[Pp][Yy].*/))
 
 correlation:
-  # Authored by the correlation engine for review. Related CoPilot Searches to run
-  # around an alert from this rule, scoped to the same host/user/IP within the window.
+  # Authored per-rule (behaviour-researched) for the correlation engine. Related CoPilot
+  # Searches + telemetry pivots to run around an alert, scoped to its host/user/ip/domain.
   related_rules:
-    - id: ec570e53-4c76-45a9-804d-dc3f355ff7a7
-      name: "7Zip Compressing Dump Files"
-      reason: "next kill-chain tactic: Collection"
-    - id: 0a1255c5-d732-4b62-ac02-b5152d34fb83
-      name: "ADExplorer Writing Complete AD Snapshot Into .dat File"
-      reason: "next kill-chain tactic: Discovery"
-    - id: 1ea13e8c-03ea-409b-877d-ce5c3d2c1cb3
-      name: "ADFS Database Named Pipe Connection By Uncommon Tool"
-      reason: "next kill-chain tactic: Collection"
-    - id: 75bf09fa-1dd7-4d18-9af9-dd9e492562eb
-      name: "ADSI-Cache File Creation By Uncommon Tool"
-      reason: "next kill-chain tactic: Command and Control"
-    - id: 03e2746e-2b31-42f1-ab7a-eb39365b2422
-      name: "APT31 Judgement Panda Activity"
-      reason: "next kill-chain tactic: Collection"
-    - id: 9212f354-7775-4e28-9c9f-8f0a4544e664
-      name: "Active Directory Database Snapshot Via ADExplorer"
-      reason: "next kill-chain tactic: Discovery"
+  - id: 899133d5-4d7c-4a7f-94ee-27355c879d90
+    name: Python Inline Command Execution
+    reason: The EID 1 that explains this connection. A `python -c` one-liner is the usual launcher for a socket reverse shell or an inline scapy/socket scanner, and it carries the full command line, parent process and user that the EID 3 network event omits - the evidence that decides whether this python was dev tooling or an attacker payload.
+  - id: 50a0aa3d-ab16-4594-a8aa-5145a6e6792b
+    name: Python One-Liners with Base64 Decoding
+    reason: 'Precursor that removes the benign reading: a `python -c ... b64decode(...)` one-liner decodes and runs a hidden payload. If it fired on this host just before the connection, the outbound traffic is attacker-staged, not a script politely using the socket library.'
+  - id: 480e7e51-e797-47e3-8d72-ebfce65b6d8d
+    name: Python Spawning Pretty TTY on Windows
+    reason: 'Co-occurring interactive-shell upgrade: `import pty; pty.spawn()` turns a python reverse shell into a full TTY. The connection this rule caught is most likely that reverse shell, and this is its hands-on-keyboard follow-on on the same host.'
+  - id: 78e678d2-bf64-4fe6-aa52-2f7b11dddee7
+    name: Windows Detect Network Scanner Behavior
+    reason: 'Same-incident corroboration on the same data source (EID 3): it fires when one process opens many unique ports/destinations in a short window. Python port-scanning with scapy/socket - the rule''s own primary T1046 behaviour - produces exactly that fan-out, so the two together confirm a scan rather than a single benign call.'
+  - id: 54773c5f-f1cc-4703-9126-2f797d96a69d
+    name: PUA - Advanced Port Scanner Execution
+    reason: 'Co-occurring discovery tooling: operators mapping the subnet with python scapy routinely also drop Advanced Port Scanner (a ransomware-affiliate favourite) in the same recon stage on the same host, so its execution corroborates the network-discovery read of this alert.'
+  - id: f8be3e82-46a3-4e4e-ada5-8e538ae8b9c9
+    name: Credential Dumping Activity By Python Based Tool
+    reason: 'Follow-on escalation of a python-tooled intrusion: after recon or C2 the same Python stack (LaZagne/pypykatz) opens LSASS for credentials. Seeing it on this host turns a discovery/connection alert into an active credential-access incident.'
+  - id: 0dba975d-a193-4ed1-a067-424df57570d1
+    name: Uncommon Network Connection Initiated By Certutil.EXE
+    reason: 'Sibling tool-initiated outbound connection (EID 3) and the classic ingress-transfer follow-on: if python''s connection was pulling a second stage, certutil fetching the payload on the same host in the same window corroborates ingress tool transfer by a non-browser utility.'
   window: 1h
   enrichment_searches:
-  # Rule-specific telemetry pivots the engine runs around an alert from this rule,
-  # scoped to the alert's host/user/IP within the window (behaviour-targeted, not a sweep).
-    - name: "Other executions of this tool-set on this host (any arguments)"
-      query: 'data_win_system_eventID:"1" AND data_win_eventdata_image:/.*(\\\.[Ee][Xx][Ee]|\\[Cc][Oo][Nn][Dd][Aa]\.[Ee][Xx][Ee]|\\[Pp][Yy][Tt][Hh][Oo][Nn]\.[Ee][Xx][Ee])/'
-      pivot_on: [host]
-      window: 2h
-    - name: "Remote-execution / lateral-movement tooling on this host"
-      query: '(data_win_system_eventID:"1" AND data_win_eventdata_image:/.*(\\[Pp][Ss][Ee][Xx][Ee][Cc]\.[Ee][Xx][Ee]|\\[Pp][Ss][Ee][Xx][Ee][Ss][Vv][Cc]\.[Ee][Xx][Ee]|\\[Pp][Aa][Ee][Xx][Ee][Cc]\.[Ee][Xx][Ee]|\\[Ww][Ii][Nn][Rr][Ss]\.[Ee][Xx][Ee]|\\[Mm][Ss][Tt][Ss][Cc]\.[Ee][Xx][Ee]|\\[Ww][Mm][Ii][Cc]\.[Ee][Xx][Ee])/) OR (data_win_system_eventID:"1" AND data_win_eventdata_image:/.*(\\[Pp][Oo][Ww][Ee][Rr][Ss][Hh][Ee][Ll][Ll]\.[Ee][Xx][Ee]|\\[Pp][Ww][Ss][Hh]\.[Ee][Xx][Ee])/ AND (data_win_eventdata_commandLine:/.*[Ii][Nn][Vv][Oo][Kk][Ee]-[Cc][Oo][Mm][Mm][Aa][Nn][Dd].*/ OR data_win_eventdata_commandLine:/.*[Nn][Ee][Ww]-[Pp][Ss][Ss][Ee][Ss][Ss][Ii][Oo][Nn].*/ OR data_win_eventdata_commandLine:/.*[Ee][Nn][Tt][Ee][Rr]-[Pp][Ss][Ss][Ee][Ss][Ss][Ii][Oo][Nn].*/ OR data_win_eventdata_commandLine:/.*-[Cc][Oo][Mm][Pp][Uu][Tt][Ee][Rr][Nn][Aa][Mm][Ee].*/))'
-      pivot_on: [host]
-      window: 2h
-    - name: "Other hosts connecting to the same destination address (campaign)"
-      query: '(data_win_system_eventID:"22" OR data_win_system_eventID:"3")'
-      pivot_on: [ip]
-      window: 24h
-    - name: "Downloader / C2 tooling executed on this host"
-      query: '(data_win_system_eventID:"1" AND data_win_eventdata_image:/.*(\\[Cc][Ee][Rr][Tt][Uu][Tt][Ii][Ll]\.[Ee][Xx][Ee]|\\[Bb][Ii][Tt][Ss][Aa][Dd][Mm][Ii][Nn]\.[Ee][Xx][Ee]|\\[Cc][Uu][Rr][Ll]\.[Ee][Xx][Ee]|\\[Ww][Gg][Ee][Tt]\.[Ee][Xx][Ee])/) OR (data_win_eventdata_commandLine:/.*[Dd][Oo][Ww][Nn][Ll][Oo][Aa][Dd][Ss][Tt][Rr][Ii][Nn][Gg].*/ OR data_win_eventdata_commandLine:/.*[Dd][Oo][Ww][Nn][Ll][Oo][Aa][Dd][Ff][Ii][Ll][Ee].*/ OR data_win_eventdata_commandLine:/.*[Ii][Nn][Vv][Oo][Kk][Ee]-[Ww][Ee][Bb][Rr][Ee][Qq][Uu][Ee][Ss][Tt].*/ OR data_win_eventdata_commandLine:/.*[Nn][Ee][Tt]\.[Ww][Ee][Bb][Cc][Ll][Ii][Ee][Nn][Tt].*/ OR data_win_eventdata_commandLine:/.*[Ss][Tt][Aa][Rr][Tt]-[Bb][Ii][Tt][Ss][Tt][Rr][Aa][Nn][Ss][Ff][Ee][Rr].*/ OR data_win_eventdata_commandLine:/.*[Ii][Ww][Rr] .*/ OR data_win_eventdata_commandLine:/.*[Cc][Uu][Rr][Ll] .*/ OR data_win_eventdata_commandLine:/.*[Ww][Gg][Ee][Tt] .*/)'
-      pivot_on: [host]
-      window: 1h
-    - name: "DNS queries by script interpreters / LOLBins on this host"
-      query: 'data_win_system_eventID:"22" AND (data_win_eventdata_image:/.*(\\[Pp][Oo][Ww][Ee][Rr][Ss][Hh][Ee][Ll][Ll]\.[Ee][Xx][Ee]|\\[Pp][Ww][Ss][Hh]\.[Ee][Xx][Ee]|\\[Pp][Oo][Ww][Ee][Rr][Ss][Hh][Ee][Ll][Ll]_[Ii][Ss][Ee]\.[Ee][Xx][Ee]|\\[Cc][Mm][Dd]\.[Ee][Xx][Ee]|\\[Ww][Ss][Cc][Rr][Ii][Pp][Tt]\.[Ee][Xx][Ee]|\\[Cc][Ss][Cc][Rr][Ii][Pp][Tt]\.[Ee][Xx][Ee]|\\[Mm][Ss][Hh][Tt][Aa]\.[Ee][Xx][Ee]|\\[Rr][Uu][Nn][Dd][Ll][Ll]32\.[Ee][Xx][Ee]|\\[Rr][Ee][Gg][Ss][Vv][Rr]32\.[Ee][Xx][Ee]|\\[Mm][Ss][Hh][Tt][Aa]\.[Ee][Xx][Ee]|\\[Ii][Nn][Ss][Tt][Aa][Ll][Ll][Uu][Tt][Ii][Ll]\.[Ee][Xx][Ee]|\\[Rr][Ee][Gg][Aa][Ss][Mm]\.[Ee][Xx][Ee]|\\[Rr][Ee][Gg][Ss][Vv][Cc][Ss]\.[Ee][Xx][Ee]|\\[Mm][Ss][Bb][Uu][Ii][Ll][Dd]\.[Ee][Xx][Ee]|\\[Cc][Ee][Rr][Tt][Uu][Tt][Ii][Ll]\.[Ee][Xx][Ee]|\\[Bb][Ii][Tt][Ss][Aa][Dd][Mm][Ii][Nn]\.[Ee][Xx][Ee]|\\[Ww][Mm][Ii][Cc]\.[Ee][Xx][Ee]|\\[Cc][Mm][Ss][Tt][Pp]\.[Ee][Xx][Ee])/ OR data_win_eventdata_image:/.*(\\[Oo][Dd][Bb][Cc][Cc][Oo][Nn][Ff]\.[Ee][Xx][Ee]|\\[Ff][Oo][Rr][Ff][Ii][Ll][Ee][Ss]\.[Ee][Xx][Ee]|\\[Pp][Cc][Aa][Ll][Uu][Aa]\.[Ee][Xx][Ee]|\\[Mm][Aa][Vv][Ii][Nn][Jj][Ee][Cc][Tt]\.[Ee][Xx][Ee]|\\[Ss][Cc][Rr][Ii][Pp][Tt][Rr][Uu][Nn][Nn][Ee][Rr]\.[Ee][Xx][Ee])/)'
-      pivot_on: [host]
-      window: 1h
+  # Behaviour-targeted hunts the engine runs around the alert (not a sweep).
+  - name: Python launch on this host with network / scanning / reverse-shell libraries (EID 1 command line, parent, user)
+    query: data_win_system_eventID:"1" AND data_win_eventdata_image:/.*\\[Pp][Yy][Tt][Hh][Oo][Nn].*\.[Ee][Xx][Ee]/ AND (data_win_eventdata_commandLine:/.*[Ss][Oo][Cc][Kk][Ee][Tt].*/ OR data_win_eventdata_commandLine:/.*[Ss][Cc][Aa][Pp][Yy].*/ OR data_win_eventdata_commandLine:/.*[Rr][Ee][Qq][Uu][Ee][Ss][Tt][Ss].*/ OR data_win_eventdata_commandLine:/.*[Uu][Rr][Ll][Ll][Ii][Bb].*/ OR data_win_eventdata_commandLine:/.*[Pp][Aa][Rr][Aa][Mm][Ii][Kk][Oo].*/ OR data_win_eventdata_commandLine:/.*[Ff][Tt][Pp][Ll][Ii][Bb].*/ OR data_win_eventdata_commandLine:/.*[Ss][Mm][Tt][Pp][Ll][Ii][Bb].*/ OR data_win_eventdata_commandLine:/.*[Pp][Tt][Yy].*/ OR data_win_eventdata_commandLine:/.*[Cc][Oo][Nn][Nn][Ee][Cc][Tt].*/ OR data_win_eventdata_commandLine:/.*[Nn][Mm][Aa][Pp].*/ OR data_win_eventdata_commandLine:/.* -[Cc] .*/)
+    pivot_on:
+    - host
+    window: 2h
+  - name: Full outbound-connection fan-out by Python on this host (port scan vs C2 beacon)
+    query: data_win_system_eventID:"3" AND data_win_eventdata_image:/.*\\[Pp][Yy][Tt][Hh][Oo][Nn].*\.[Ee][Xx][Ee]/ AND data_win_eventdata_initiated:/[Tt][Rr][Uu][Ee]/
+    pivot_on:
+    - host
+    window: 1h
+  - name: DNS queries made by Python on this host (C2 domain / target-name resolution)
+    query: data_win_system_eventID:"22" AND data_win_eventdata_image:/.*\\[Pp][Yy][Tt][Hh][Oo][Nn].*\.[Ee][Xx][Ee]/
+    pivot_on:
+    - host
+    window: 2h
+  - name: Other hosts contacting the same destination (shared C2 / lateral target across the estate)
+    query: (data_win_system_eventID:"3" AND data_win_eventdata_initiated:/[Tt][Rr][Uu][Ee]/) OR data_win_system_eventID:"22"
+    pivot_on:
+    - ip
+    window: 24h
+  - name: 'How Python got here: suspicious-parent spawn or dropped .py / python.exe on this host'
+    query: (data_win_system_eventID:"1" AND data_win_eventdata_image:/.*\\[Pp][Yy][Tt][Hh][Oo][Nn].*\.[Ee][Xx][Ee]/ AND data_win_eventdata_parentImage:/.*(\\[Ww][Ii][Nn][Ww][Oo][Rr][Dd]\.[Ee][Xx][Ee]|\\[Ee][Xx][Cc][Ee][Ll]\.[Ee][Xx][Ee]|\\[Pp][Oo][Ww][Ee][Rr][Pp][Nn][Tt]\.[Ee][Xx][Ee]|\\[Oo][Uu][Tt][Ll][Oo][Oo][Kk]\.[Ee][Xx][Ee]|\\[Mm][Ss][Hh][Tt][Aa]\.[Ee][Xx][Ee]|\\[Ww][Ss][Cc][Rr][Ii][Pp][Tt]\.[Ee][Xx][Ee]|\\[Cc][Ss][Cc][Rr][Ii][Pp][Tt]\.[Ee][Xx][Ee]|\\[Cc][Mm][Dd]\.[Ee][Xx][Ee]|\\[Pp][Oo][Ww][Ee][Rr][Ss][Hh][Ee][Ll][Ll]\.[Ee][Xx][Ee]|\\[Pp][Ww][Ss][Hh]\.[Ee][Xx][Ee]|\\[Rr][Uu][Nn][Dd][Ll][Ll]32\.[Ee][Xx][Ee]|\\[Rr][Ee][Gg][Ss][Vv][Rr]32\.[Ee][Xx][Ee])/) OR (data_win_system_eventID:"11" AND (data_win_eventdata_targetFilename:/.*\.[Pp][Yy]/ OR data_win_eventdata_targetFilename:/.*\\[Pp][Yy][Tt][Hh][Oo][Nn].*\.[Ee][Xx][Ee]/))
+    pivot_on:
+    - host
+    window: 4h

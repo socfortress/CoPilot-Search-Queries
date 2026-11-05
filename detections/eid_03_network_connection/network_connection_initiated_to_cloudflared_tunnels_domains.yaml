@@ -166,48 +166,58 @@ graylog:
   query: data_win_system_eventID:"3" AND data_win_eventdata_initiated:/[Tt][Rr][Uu][Ee]/ AND (data_win_eventdata_destinationHostname:/.*\.[Vv]2\.[Aa][Rr][Gg][Oo][Tt][Uu][Nn][Nn][Ee][Ll]\.[Cc][Oo][Mm]/ OR data_win_eventdata_destinationHostname:/.*[Pp][Rr][Oo][Tt][Oo][Cc][Oo][Ll]-[Vv]2\.[Aa][Rr][Gg][Oo][Tt][Uu][Nn][Nn][Ee][Ll]\.[Cc][Oo][Mm]/ OR data_win_eventdata_destinationHostname:/.*[Tt][Rr][Yy][Cc][Ll][Oo][Uu][Dd][Ff][Ll][Aa][Rr][Ee]\.[Cc][Oo][Mm]/ OR data_win_eventdata_destinationHostname:/.*[Uu][Pp][Dd][Aa][Tt][Ee]\.[Aa][Rr][Gg][Oo][Tt][Uu][Nn][Nn][Ee][Ll]\.[Cc][Oo][Mm]/)
 
 correlation:
-  # Authored by the correlation engine for review. Related CoPilot Searches to run
-  # around an alert from this rule, scoped to the same host/user/IP within the window.
+  # Authored per-rule (behaviour-researched) for the correlation engine. Related CoPilot
+  # Searches + telemetry pivots to run around an alert, scoped to its host/user/ip/domain.
   related_rules:
-    - id: 75bf09fa-1dd7-4d18-9af9-dd9e492562eb
-      name: "ADSI-Cache File Creation By Uncommon Tool"
-      reason: "next kill-chain tactic: Command and Control"
-    - id: 639c9081-f482-47d3-a0bd-ddee3d4ecd76
-      name: "All Backups Deleted Via Wbadmin.EXE"
-      reason: "next kill-chain tactic: Impact"
-    - id: 0b9ad457-2554-44c1-82c2-d56a99c42377
-      name: "Anydesk Temporary Artefact"
-      reason: "next kill-chain tactic: Command and Control"
-    - id: 7cff77e1-9663-46a3-8260-17f2e1aa9d0a
-      name: "AppX Package Installation Attempts Via AppInstaller.EXE"
-      reason: "next kill-chain tactic: Command and Control"
-    - id: 1f0f6176-6482-4027-b151-00071af39d7e
-      name: "Arbitrary File Download Via ConfigSecurityPolicy.EXE"
-      reason: "next kill-chain tactic: Exfiltration"
-    - id: eee00933-a761-4cd0-be70-c42fe91731e7
-      name: "Arbitrary File Download Via GfxDownloadWrapper.EXE"
-      reason: "next kill-chain tactic: Command and Control"
-  window: 1h
+  - id: 222129f7-f4dc-4568-b0d2-22440a9639ba
+    name: Cloudflared Quick Tunnel Execution
+    reason: 'The process that opens this connection: a free TryCloudflare quick tunnel generates the random *.trycloudflare.com host this rule matched (Akira-observed). If it fired on this host in-window, the EID 3 connection is a confirmed quick-tunnel, not incidental Cloudflare traffic.'
+  - id: 9a019ffc-3580-4c9d-8d87-079f7e8d3fd4
+    name: Cloudflared Tunnel Execution
+    reason: The `cloudflared ... tunnel run` execution that dials back to a named tunnel this rule saw on the wire - a direct process-to-network pairing confirming the outbound reverse tunnel used for persistent remote access.
+  - id: e0c69ebd-b54f-4aed-8ae3-e3467843f3f0
+    name: Renamed Cloudflared.EXE Execution
+    reason: Operators rename cloudflared to defeat image-name detection; this network rule is the backstop that still catches the argotunnel traffic. Both firing on one host means evasive cloudflared, high confidence.
+  - id: a1d9eec5-33b2-4177-8d24-27fe754d0812
+    name: Cloudflared Tunnels Related DNS Requests
+    reason: The DNS resolution of the same argotunnel/trycloudflare domains one event before this connect - the immediately-preceding link in the same resolve-then-connect chain on this host.
+  - id: 7050bba1-1aed-454e-8f73-3f46f09ce56a
+    name: Cloudflared Tunnel Connections Cleanup
+    reason: A later `cloudflared tunnel cleanup` run tears down and clears tunnel state - an anti-forensics follow-on that marks the end of the session this connection opened.
+  - id: 1d08ac94-400d-4469-a82f-daee9a908849
+    name: Communication To Ngrok Tunneling Service Initiated
+    reason: Same reverse-tunnel TTP via an alternate provider; operators routinely fall back to ngrok when one edge is blocked. Both from one host in-window widens this into a deliberate tunnelling campaign, not a one-off.
+  - id: 4b657234-038e-4ad5-997c-4be42340bce4
+    name: Network Connection Initiated To Visual Studio Code Tunnels Domain
+    reason: Interchangeable abuse of VS Code dev-tunnels for the same reverse-shell/persistence goal; co-occurrence on the host signals the actor is cycling through multiple tunnel brokers for resilient C2.
+  - id: 8a3038e8-9c9d-46f8-b184-66234a160f6f
+    name: Potential Remote Desktop Tunneling
+    reason: 'The payoff: a reverse SSH tunnel forwarding :3389 for interactive access - what these quick tunnels are typically stood up to expose (RDP/SSH/SMB). Its presence shows the tunnel is being used for hands-on-keyboard access.'
+  window: 2h
   enrichment_searches:
-  # Rule-specific telemetry pivots the engine runs around an alert from this rule,
-  # scoped to the alert's host/user/IP within the window (behaviour-targeted, not a sweep).
-    - name: "Protocol-tunnelling tooling on this host"
-      query: '((data_win_system_eventID:"1" AND data_win_eventdata_image:/.*(\\[Nn][Gg][Rr][Oo][Kk]\.[Ee][Xx][Ee]|\\[Pp][Ll][Ii][Nn][Kk]\.[Ee][Xx][Ee]|\\[Ss][Ss][Hh]\.[Ee][Xx][Ee]|\\[Ff][Rr][Pp][Cc]\.[Ee][Xx][Ee]|\\[Cc][Hh][Ii][Ss][Ee][Ll]\.[Ee][Xx][Ee]|\\[Cc][Ll][Oo][Uu][Dd][Ff][Ll][Aa][Rr][Ee][Dd]\.[Ee][Xx][Ee])/) OR (data_win_system_eventID:"3" AND data_win_eventdata_image:/.*(\\[Nn][Gg][Rr][Oo][Kk]\.[Ee][Xx][Ee]|\\[Pp][Ll][Ii][Nn][Kk]\.[Ee][Xx][Ee]|\\[Ss][Ss][Hh]\.[Ee][Xx][Ee]|\\[Ff][Rr][Pp][Cc]\.[Ee][Xx][Ee]|\\[Cc][Hh][Ii][Ss][Ee][Ll]\.[Ee][Xx][Ee]|\\[Cc][Ll][Oo][Uu][Dd][Ff][Ll][Aa][Rr][Ee][Dd]\.[Ee][Xx][Ee])/) OR ((data_win_eventdata_commandLine:/.*-[Rr] 127\.0\.0\.1.*/ OR data_win_eventdata_commandLine:/.*[Ss][Ss][Hh] -[Rr].*/ OR data_win_eventdata_commandLine:/.*[Pp][Oo][Rr][Tt][Ff][Ww][Dd].*/ OR data_win_eventdata_commandLine:/.*[Ss][Oo][Cc][Kk][Ss].*/)))'
-      pivot_on: [host]
-      window: 1h
-    - name: "Outbound transfer / cloud-storage egress on this host"
-      query: '((data_win_system_eventID:"1" AND data_win_eventdata_image:/.*(\\[Rr][Cc][Ll][Oo][Nn][Ee]\.[Ee][Xx][Ee]|\\[Cc][Uu][Rr][Ll]\.[Ee][Xx][Ee]|\\[Ww][Gg][Ee][Tt]\.[Ee][Xx][Ee]|\\[Ww][Ii][Nn][Ss][Cc][Pp]\.[Ee][Xx][Ee]|\\[Pp][Ss][Cc][Pp]\.[Ee][Xx][Ee]|\\[Mm][Ee][Gg][Aa][Cc][Mm][Dd]\.[Ee][Xx][Ee]|\\[Mm][Ee][Gg][Aa][Ss][Yy][Nn][Cc]\.[Ee][Xx][Ee])/) OR ((data_win_eventdata_commandLine:/.*[Ii][Nn][Vv][Oo][Kk][Ee]-[Rr][Ee][Ss][Tt][Mm][Ee][Tt][Hh][Oo][Dd].*/ OR data_win_eventdata_commandLine:/.*[Ss][Tt][Aa][Rr][Tt]-[Bb][Ii][Tt][Ss][Tt][Rr][Aa][Nn][Ss][Ff][Ee][Rr].*/ OR data_win_eventdata_commandLine:/.*[Rr][Cc][Ll][Oo][Nn][Ee].*/ OR data_win_eventdata_commandLine:/.*[Tt][Rr][Aa][Nn][Ss][Ff][Ee][Rr]\.[Ss][Hh].*/ OR data_win_eventdata_commandLine:/.*[Aa][Nn][Oo][Nn][Ff][Ii][Ll][Ee][Ss].*/ OR data_win_eventdata_commandLine:/.*[Pp][Aa][Ss][Tt][Ee][Bb][Ii][Nn].*/ OR data_win_eventdata_commandLine:/.*[Mm][Ee][Gg][Aa]\.[Nn][Zz].*/ OR data_win_eventdata_commandLine:/.*-[Oo][Uu][Tt][Ff][Ii][Ll][Ee].*/ OR data_win_eventdata_commandLine:/.*[Uu][Pp][Ll][Oo][Aa][Dd][Ff][Ii][Ll][Ee].*/)))'
-      pivot_on: [host]
-      window: 2h
-    - name: "Archive / staging & outbound-transfer tooling on this host"
-      query: '(((data_win_system_eventID:"1" AND data_win_eventdata_image:/.*(\\7[Zz]\.[Ee][Xx][Ee]|\\7[Zz][Aa]\.[Ee][Xx][Ee]|\\7[Zz][Rr]\.[Ee][Xx][Ee]|\\[Rr][Aa][Rr]\.[Ee][Xx][Ee]|\\[Ww][Ii][Nn][Rr][Aa][Rr]\.[Ee][Xx][Ee]|\\[Ww][Zz][Zz][Ii][Pp]\.[Ee][Xx][Ee]|\\[Mm][Aa][Kk][Ee][Cc][Aa][Bb]\.[Ee][Xx][Ee])/) OR (data_win_eventdata_commandLine:/.*[Cc][Oo][Mm][Pp][Rr][Ee][Ss][Ss]-[Aa][Rr][Cc][Hh][Ii][Vv][Ee].*/ OR data_win_eventdata_commandLine:/.*\.7[Zz].*/ OR data_win_eventdata_commandLine:/.*\.[Rr][Aa][Rr].*/ OR data_win_eventdata_commandLine:/.* -[Hh][Pp].*/)) OR (((data_win_system_eventID:"1" AND data_win_eventdata_image:/.*(\\[Rr][Cc][Ll][Oo][Nn][Ee]\.[Ee][Xx][Ee]|\\[Cc][Uu][Rr][Ll]\.[Ee][Xx][Ee]|\\[Ww][Gg][Ee][Tt]\.[Ee][Xx][Ee]|\\[Ww][Ii][Nn][Ss][Cc][Pp]\.[Ee][Xx][Ee]|\\[Pp][Ss][Cc][Pp]\.[Ee][Xx][Ee]|\\[Mm][Ee][Gg][Aa][Cc][Mm][Dd]\.[Ee][Xx][Ee]|\\[Mm][Ee][Gg][Aa][Ss][Yy][Nn][Cc]\.[Ee][Xx][Ee])/) OR ((data_win_eventdata_commandLine:/.*[Ii][Nn][Vv][Oo][Kk][Ee]-[Rr][Ee][Ss][Tt][Mm][Ee][Tt][Hh][Oo][Dd].*/ OR data_win_eventdata_commandLine:/.*[Ss][Tt][Aa][Rr][Tt]-[Bb][Ii][Tt][Ss][Tt][Rr][Aa][Nn][Ss][Ff][Ee][Rr].*/ OR data_win_eventdata_commandLine:/.*[Rr][Cc][Ll][Oo][Nn][Ee].*/ OR data_win_eventdata_commandLine:/.*[Tt][Rr][Aa][Nn][Ss][Ff][Ee][Rr]\.[Ss][Hh].*/ OR data_win_eventdata_commandLine:/.*[Aa][Nn][Oo][Nn][Ff][Ii][Ll][Ee][Ss].*/ OR data_win_eventdata_commandLine:/.*[Pp][Aa][Ss][Tt][Ee][Bb][Ii][Nn].*/ OR data_win_eventdata_commandLine:/.*[Mm][Ee][Gg][Aa]\.[Nn][Zz].*/ OR data_win_eventdata_commandLine:/.*-[Oo][Uu][Tt][Ff][Ii][Ll][Ee].*/ OR data_win_eventdata_commandLine:/.*[Uu][Pp][Ll][Oo][Aa][Dd][Ff][Ii][Ll][Ee].*/)))))'
-      pivot_on: [host]
-      window: 2h
-    - name: "Other hosts connecting to the same destination address (campaign)"
-      query: '(data_win_system_eventID:"22" OR data_win_system_eventID:"3")'
-      pivot_on: [ip]
-      window: 24h
-    - name: "Downloader / C2 tooling executed on this host"
-      query: '(data_win_system_eventID:"1" AND data_win_eventdata_image:/.*(\\[Cc][Ee][Rr][Tt][Uu][Tt][Ii][Ll]\.[Ee][Xx][Ee]|\\[Bb][Ii][Tt][Ss][Aa][Dd][Mm][Ii][Nn]\.[Ee][Xx][Ee]|\\[Cc][Uu][Rr][Ll]\.[Ee][Xx][Ee]|\\[Ww][Gg][Ee][Tt]\.[Ee][Xx][Ee])/) OR (data_win_eventdata_commandLine:/.*[Dd][Oo][Ww][Nn][Ll][Oo][Aa][Dd][Ss][Tt][Rr][Ii][Nn][Gg].*/ OR data_win_eventdata_commandLine:/.*[Dd][Oo][Ww][Nn][Ll][Oo][Aa][Dd][Ff][Ii][Ll][Ee].*/ OR data_win_eventdata_commandLine:/.*[Ii][Nn][Vv][Oo][Kk][Ee]-[Ww][Ee][Bb][Rr][Ee][Qq][Uu][Ee][Ss][Tt].*/ OR data_win_eventdata_commandLine:/.*[Nn][Ee][Tt]\.[Ww][Ee][Bb][Cc][Ll][Ii][Ee][Nn][Tt].*/ OR data_win_eventdata_commandLine:/.*[Ss][Tt][Aa][Rr][Tt]-[Bb][Ii][Tt][Ss][Tt][Rr][Aa][Nn][Ss][Ff][Ee][Rr].*/ OR data_win_eventdata_commandLine:/.*[Ii][Ww][Rr] .*/ OR data_win_eventdata_commandLine:/.*[Cc][Uu][Rr][Ll] .*/ OR data_win_eventdata_commandLine:/.*[Ww][Gg][Ee][Tt] .*/)'
-      pivot_on: [host]
-      window: 1h
+  # Behaviour-targeted hunts the engine runs around the alert (not a sweep).
+  - name: Cloudflared tunnel process executed on this host
+    query: (data_win_system_eventID:"1" AND (data_win_eventdata_image:/.*\\[Cc][Ll][Oo][Uu][Dd][Ff][Ll][Aa][Rr][Ee][Dd]\.[Ee][Xx][Ee]/ OR data_win_eventdata_commandLine:/.*[Cc][Ll][Oo][Uu][Dd][Ff][Ll][Aa][Rr][Ee][Dd].*/ OR data_win_eventdata_commandLine:/.*[Tt][Rr][Yy][Cc][Ll][Oo][Uu][Dd][Ff][Ll][Aa][Rr][Ee].*/ OR data_win_eventdata_commandLine:/.*[Aa][Rr][Gg][Oo][Tt][Uu][Nn][Nn][Ee][Ll].*/ OR data_win_eventdata_commandLine:/.*[Tt][Uu][Nn][Nn][Ee][Ll] --[Uu][Rr][Ll].*/ OR data_win_eventdata_commandLine:/.*[Tt][Uu][Nn][Nn][Ee][Ll] [Rr][Uu][Nn].*/))
+    pivot_on:
+    - host
+    window: 2h
+  - name: DNS resolution of Cloudflare tunnel domains on this host
+    query: (data_win_system_eventID:"22" AND (data_win_eventdata_queryName:/.*[Tt][Rr][Yy][Cc][Ll][Oo][Uu][Dd][Ff][Ll][Aa][Rr][Ee]\.[Cc][Oo][Mm]/ OR data_win_eventdata_queryName:/.*[Aa][Rr][Gg][Oo][Tt][Uu][Nn][Nn][Ee][Ll]\.[Cc][Oo][Mm]/))
+    pivot_on:
+    - host
+    window: 2h
+  - name: Alternate reverse-tunnel brokers reached from this host
+    query: ((data_win_system_eventID:"3" OR data_win_system_eventID:"22") AND (data_win_eventdata_destinationHostname:/.*[Nn][Gg][Rr][Oo][Kk].*/ OR data_win_eventdata_queryName:/.*[Nn][Gg][Rr][Oo][Kk].*/ OR data_win_eventdata_destinationHostname:/.*[Dd][Ee][Vv][Tt][Uu][Nn][Nn][Ee][Ll][Ss]\.[Mm][Ss]/ OR data_win_eventdata_queryName:/.*[Dd][Ee][Vv][Tt][Uu][Nn][Nn][Ee][Ll][Ss]\.[Mm][Ss]/ OR data_win_eventdata_destinationHostname:/.*[Tt][Uu][Nn][Nn][Ee][Ll][Ss]\.[Aa][Pp][Ii]\.[Vv][Ii][Ss][Uu][Aa][Ll][Ss][Tt][Uu][Dd][Ii][Oo]\.[Cc][Oo][Mm]/ OR data_win_eventdata_queryName:/.*[Tt][Uu][Nn][Nn][Ee][Ll][Ss]\.[Aa][Pp][Ii]\.[Vv][Ii][Ss][Uu][Aa][Ll][Ss][Tt][Uu][Dd][Ii][Oo]\.[Cc][Oo][Mm]/ OR data_win_eventdata_destinationHostname:/.*[Ll][Oo][Cc][Aa][Ll][Tt][Oo][Nn][Ee][Tt].*/ OR data_win_eventdata_queryName:/.*[Ll][Oo][Cc][Aa][Ll][Tt][Oo][Nn][Ee][Tt].*/ OR data_win_eventdata_destinationHostname:/.*[Ll][Oo][Cc][Aa][Ll][Hh][Oo][Ss][Tt]\.[Rr][Uu][Nn]/ OR data_win_eventdata_queryName:/.*[Ll][Oo][Cc][Aa][Ll][Hh][Oo][Ss][Tt]\.[Rr][Uu][Nn]/))
+    pivot_on:
+    - host
+    window: 4h
+  - name: Local RDP/SSH/SMB service exposed or forwarded through a tunnel on this host
+    query: (data_win_system_eventID:"1" AND (data_win_eventdata_commandLine:/.*--[Uu][Rr][Ll].*(127\.0\.0\.1|[Ll][Oo][Cc][Aa][Ll][Hh][Oo][Ss][Tt]|[Rr][Dd][Pp]:\/\/|[Ss][Ss][Hh]:\/\/|[Tt][Cc][Pp]:\/\/).*/ OR data_win_eventdata_commandLine:/.* -[LlRr] .*:(3389|445|5985|5986|139).*/ OR data_win_eventdata_commandLine:/.*(127\.0\.0\.1|[Ll][Oo][Cc][Aa][Ll][Hh][Oo][Ss][Tt]):(3389|445|5985|5986).*/))
+    pivot_on:
+    - host
+    window: 2h
+  - name: Cloudflared binary downloaded or dropped onto this host
+    query: ((data_win_system_eventID:"11" AND data_win_eventdata_targetFilename:/.*[Cc][Ll][Oo][Uu][Dd][Ff][Ll][Aa][Rr][Ee][Dd].*\.[Ee][Xx][Ee]/) OR (data_win_system_eventID:"1" AND (data_win_eventdata_commandLine:/.*[Cc][Ll][Oo][Uu][Dd][Ff][Ll][Aa][Rr][Ee][Dd].*\.[Ee][Xx][Ee].*/ OR data_win_eventdata_commandLine:/.*[Gg][Ii][Tt][Hh][Uu][Bb]\.[Cc][Oo][Mm]\/[Cc][Ll][Oo][Uu][Dd][Ff][Ll][Aa][Rr][Ee].*/) AND (data_win_eventdata_image:/.*\\([Cc][Uu][Rr][Ll]|[Cc][Ee][Rr][Tt][Uu][Tt][Ii][Ll]|[Bb][Ii][Tt][Ss][Aa][Dd][Mm][Ii][Nn]|[Pp][Oo][Ww][Ee][Rr][Ss][Hh][Ee][Ll][Ll]|[Pp][Ww][Ss][Hh])\.[Ee][Xx][Ee]/ OR data_win_eventdata_commandLine:/.*([Dd][Oo][Ww][Nn][Ll][Oo][Aa][Dd]|[Ii][Nn][Vv][Oo][Kk][Ee]-[Ww][Ee][Bb][Rr][Ee][Qq][Uu][Ee][Ss][Tt]|[Ii][Ww][Rr] ).*/)))
+    pivot_on:
+    - host
+    window: 6h

@@ -153,44 +153,58 @@ graylog:
   query: data_win_system_eventID:"8" AND (data_win_eventdata_sourceImage:/.*\\[Ww][Aa][Bb][Mm][Ii][Gg]\.[Ee][Xx][Ee]/ OR data_win_eventdata_sourceImage:/.*\\[Ww][Aa][Bb]\.[Ee][Xx][Ee]/ OR data_win_eventdata_sourceImage:/.*\\[Ii][Mm][Aa][Gg][Ii][Nn][Gg][Dd][Ee][Vv][Ii][Cc][Ee][Ss]\.[Ee][Xx][Ee]/) AND data_win_eventdata_targetImage:/.*\\[Rr][Uu][Nn][Dd][Ll][Ll]32\.[Ee][Xx][Ee]/
 
 correlation:
-  # Authored by the correlation engine for review. Related CoPilot Searches to run
-  # around an alert from this rule, scoped to the same host/user/IP within the window.
+  # Authored per-rule (behaviour-researched) for the correlation engine. Related CoPilot
+  # Searches + telemetry pivots to run around an alert, scoped to its host/user/ip/domain.
   related_rules:
-    - id: ec570e53-4c76-45a9-804d-dc3f355ff7a7
-      name: "7Zip Compressing Dump Files"
-      reason: "next kill-chain tactic: Collection"
-    - id: 0a1255c5-d732-4b62-ac02-b5152d34fb83
-      name: "ADExplorer Writing Complete AD Snapshot Into .dat File"
-      reason: "next kill-chain tactic: Discovery"
-    - id: 1ea13e8c-03ea-409b-877d-ce5c3d2c1cb3
-      name: "ADFS Database Named Pipe Connection By Uncommon Tool"
-      reason: "next kill-chain tactic: Collection"
-    - id: 75bf09fa-1dd7-4d18-9af9-dd9e492562eb
-      name: "ADSI-Cache File Creation By Uncommon Tool"
-      reason: "next kill-chain tactic: Command and Control"
-    - id: 33a2d1dd-f3b0-40bd-8baf-7974468927cc
-      name: "APT PRIVATELOG Image Load Pattern"
-      reason: "next kill-chain tactic: Privilege Escalation"
-    - id: 9aa01d62-7667-4d3b-acb8-8cb5103e2014
-      name: "APT27 - Emissary Panda Activity"
-      reason: "next kill-chain tactic: Execution"
-  window: 1h
+  - id: fc014922-5def-4da9-a0fc-28c973f41bfb
+    name: Execution DLL of Choice Using WAB.EXE
+    reason: 'Precursor: a non-default DLL written to HKCU Software\Microsoft\WAB\DLLPath makes wab.exe side-load Bumblebee''s payload - the exact mechanism that plants the attacker code inside the wab.exe/wabmig.exe that then issues this CreateRemoteThread into rundll32.'
+  - id: 395907ee-96e5-4666-af2e-2ca91688e151
+    name: Wab Execution From Non Default Location
+    reason: 'Precursor/co-occurring: the hijacked wab.exe/wabmig.exe (this rule''s injecting source image) running from an unusual path - the same Bumblebee loader stage that launches the remote-thread injection.'
+  - id: 63d1ccc0-2a43-4f4b-9289-361b308991ff
+    name: Wab/Wabmig Unusual Parent Or Child Processes
+    reason: 'Co-occurring: wab.exe/wabmig.exe spawned by svchost/WmiPrvSE/dllhost (the Bumblebee loader) - the same compromised source process that performs this CreateRemoteThread.'
+  - id: f11f2808-adb4-46c0-802a-8660db50fa99
+    name: ImagingDevices Unusual Parent/Child Processes
+    reason: 'Co-occurring: abnormal parent/child of ImagingDevices.exe, the third Bumblebee host binary this rule watches as an injection source image.'
+  - id: 6309645e-122d-4c5b-bb2b-22e4f9c2fa42
+    name: HackTool - Potential CobaltStrike Process Injection
+    reason: 'Same EID 8 technique, next beat: the Cobalt Strike beacon''s own CreateRemoteThread (recognisable 0B80/0C7C/0C88 start addresses) - the payload Bumblebee delivers through exactly this injection.'
+  - id: ae9c6a7c-9521-42a6-915e-5aaa8689d529
+    name: CobaltStrike Load by Rundll32
+    reason: 'Co-occurring: rundll32.exe (this rule''s injection target) loading a Cobalt Strike DLL via the StartW export - the beacon now executing inside the injected process.'
+  - id: 85adeb13-4fc9-4e68-8a4a-c7cb2c336eb7
+    name: CobaltStrike Named Pipe Patterns
+    reason: 'Confirmation: a malleable-C2 named pipe created by the injected beacon - evidence this remote thread produced a live Cobalt Strike implant rather than a benign thread.'
+  - id: 514e7e3e-b3b4-4a67-af60-be20f139198b
+    name: PUA - AdFind.EXE Execution
+    reason: 'Follow-on: hands-on-keyboard Active Directory reconnaissance run from the beacon - the documented next step in these Bumblebee-to-domain-admin intrusions (same DFIR Report chain this rule cites).'
+  window: 2h
   enrichment_searches:
-  # Rule-specific telemetry pivots the engine runs around an alert from this rule,
-  # scoped to the alert's host/user/IP within the window (behaviour-targeted, not a sweep).
-    - name: "Follow-on LOLBin / signed-binary-proxy execution on this host"
-      query: 'data_win_system_eventID:"1" AND data_win_eventdata_image:/.*(\\[Rr][Uu][Nn][Dd][Ll][Ll]32\.[Ee][Xx][Ee]|\\[Rr][Ee][Gg][Ss][Vv][Rr]32\.[Ee][Xx][Ee]|\\[Mm][Ss][Hh][Tt][Aa]\.[Ee][Xx][Ee]|\\[Ii][Nn][Ss][Tt][Aa][Ll][Ll][Uu][Tt][Ii][Ll]\.[Ee][Xx][Ee]|\\[Rr][Ee][Gg][Aa][Ss][Mm]\.[Ee][Xx][Ee]|\\[Rr][Ee][Gg][Ss][Vv][Cc][Ss]\.[Ee][Xx][Ee]|\\[Mm][Ss][Bb][Uu][Ii][Ll][Dd]\.[Ee][Xx][Ee]|\\[Cc][Ee][Rr][Tt][Uu][Tt][Ii][Ll]\.[Ee][Xx][Ee]|\\[Bb][Ii][Tt][Ss][Aa][Dd][Mm][Ii][Nn]\.[Ee][Xx][Ee]|\\[Ww][Mm][Ii][Cc]\.[Ee][Xx][Ee]|\\[Cc][Mm][Ss][Tt][Pp]\.[Ee][Xx][Ee]|\\[Oo][Dd][Bb][Cc][Cc][Oo][Nn][Ff]\.[Ee][Xx][Ee]|\\[Ff][Oo][Rr][Ff][Ii][Ll][Ee][Ss]\.[Ee][Xx][Ee]|\\[Pp][Cc][Aa][Ll][Uu][Aa]\.[Ee][Xx][Ee]|\\[Mm][Aa][Vv][Ii][Nn][Jj][Ee][Cc][Tt]\.[Ee][Xx][Ee]|\\[Ss][Cc][Rr][Ii][Pp][Tt][Rr][Uu][Nn][Nn][Ee][Rr]\.[Ee][Xx][Ee])/'
-      pivot_on: [host]
-      window: 1h
-    - name: "Outbound connections by script interpreters on this host"
-      query: 'data_win_system_eventID:"3" AND data_win_eventdata_image:/.*(\\[Pp][Oo][Ww][Ee][Rr][Ss][Hh][Ee][Ll][Ll]\.[Ee][Xx][Ee]|\\[Pp][Ww][Ss][Hh]\.[Ee][Xx][Ee]|\\[Pp][Oo][Ww][Ee][Rr][Ss][Hh][Ee][Ll][Ll]_[Ii][Ss][Ee]\.[Ee][Xx][Ee]|\\[Cc][Mm][Dd]\.[Ee][Xx][Ee]|\\[Ww][Ss][Cc][Rr][Ii][Pp][Tt]\.[Ee][Xx][Ee]|\\[Cc][Ss][Cc][Rr][Ii][Pp][Tt]\.[Ee][Xx][Ee]|\\[Mm][Ss][Hh][Tt][Aa]\.[Ee][Xx][Ee]|\\[Rr][Uu][Nn][Dd][Ll][Ll]32\.[Ee][Xx][Ee]|\\[Rr][Ee][Gg][Ss][Vv][Rr]32\.[Ee][Xx][Ee])/'
-      pivot_on: [host]
-      window: 1h
-    - name: "Autostart persistence written on this host (Run keys, services, IFEO)"
-      query: '(data_win_system_eventID:"12" OR data_win_system_eventID:"13") AND (data_win_eventdata_targetObject:/.*[Cc][Uu][Rr][Rr][Ee][Nn][Tt][Vv][Ee][Rr][Ss][Ii][Oo][Nn]\\[Rr][Uu][Nn].*/ OR data_win_eventdata_targetObject:/.*[Cc][Uu][Rr][Rr][Ee][Nn][Tt][Vv][Ee][Rr][Ss][Ii][Oo][Nn]\\[Rr][Uu][Nn][Oo][Nn][Cc][Ee].*/ OR data_win_eventdata_targetObject:/.*[Cc][Uu][Rr][Rr][Ee][Nn][Tt][Cc][Oo][Nn][Tt][Rr][Oo][Ll][Ss][Ee][Tt]\\[Ss][Ee][Rr][Vv][Ii][Cc][Ee][Ss]\\.*/ OR data_win_eventdata_targetObject:/.*[Ii][Mm][Aa][Gg][Ee] [Ff][Ii][Ll][Ee] [Ee][Xx][Ee][Cc][Uu][Tt][Ii][Oo][Nn] [Oo][Pp][Tt][Ii][Oo][Nn][Ss]\\.*/ OR data_win_eventdata_targetObject:/.*[Ww][Ii][Nn][Ll][Oo][Gg][Oo][Nn]\\[Ss][Hh][Ee][Ll][Ll].*/ OR data_win_eventdata_targetObject:/.*[Ww][Ii][Nn][Ll][Oo][Gg][Oo][Nn]\\[Uu][Ss][Ee][Rr][Ii][Nn][Ii][Tt].*/ OR data_win_eventdata_targetObject:/.*[Cc][Uu][Rr][Rr][Ee][Nn][Tt][Vv][Ee][Rr][Ss][Ii][Oo][Nn]\\[Ee][Xx][Pp][Ll][Oo][Rr][Ee][Rr]\\[Rr][Uu][Nn].*/ OR data_win_eventdata_targetObject:/.*[Pp][Oo][Ll][Ii][Cc][Ii][Ee][Ss]\\[Ee][Xx][Pp][Ll][Oo][Rr][Ee][Rr]\\[Rr][Uu][Nn].*/ OR data_win_eventdata_targetObject:/.*[Cc][Uu][Rr][Rr][Ee][Nn][Tt][Vv][Ee][Rr][Ss][Ii][Oo][Nn]\\[Ww][Ii][Nn][Dd][Oo][Ww][Ss]\\[Ll][Oo][Aa][Dd].*/)'
-      pivot_on: [host]
-      window: 4h
-    - name: "Process injection / remote-thread & LSASS access on this host"
-      query: '((data_win_system_eventID:"8") OR (data_win_system_eventID:"10" AND data_win_eventdata_targetImage:/.*(\\[Ll][Ss][Aa][Ss][Ss]\.[Ee][Xx][Ee])/) OR (data_win_system_eventID:"1" AND (data_win_eventdata_commandLine:/.*[Cc][Rr][Ee][Aa][Tt][Ee][Rr][Ee][Mm][Oo][Tt][Ee][Tt][Hh][Rr][Ee][Aa][Dd].*/ OR data_win_eventdata_commandLine:/.*[Vv][Ii][Rr][Tt][Uu][Aa][Ll][Aa][Ll][Ll][Oo][Cc][Ee][Xx].*/ OR data_win_eventdata_commandLine:/.*[Ww][Rr][Ii][Tt][Ee][Pp][Rr][Oo][Cc][Ee][Ss][Ss][Mm][Ee][Mm][Oo][Rr][Yy].*/)))'
-      pivot_on: [host]
-      window: 1h
+  # Behaviour-targeted hunts the engine runs around the alert (not a sweep).
+  - name: 'Beacon call-home: outbound connections by the injected rundll32 and the hijacked WAB-family binaries'
+    query: data_win_system_eventID:"3" AND (data_win_eventdata_image:/.*\\[Rr][Uu][Nn][Dd][Ll][Ll]32\.[Ee][Xx][Ee]/ OR data_win_eventdata_image:/.*\\[Ww][Aa][Bb]\.[Ee][Xx][Ee]/ OR data_win_eventdata_image:/.*\\[Ww][Aa][Bb][Mm][Ii][Gg]\.[Ee][Xx][Ee]/ OR data_win_eventdata_image:/.*\\[Ii][Mm][Aa][Gg][Ii][Nn][Gg][Dd][Ee][Vv][Ii][Cc][Ee][Ss]\.[Ee][Xx][Ee]/)
+    pivot_on:
+    - host
+    window: 1h
+  - name: 'Bumblebee loader footprint on this host: WAB-family execution and the WAB\DLLPath registry hijack'
+    query: (data_win_system_eventID:"1" AND (data_win_eventdata_image:/.*\\[Ww][Aa][Bb]\.[Ee][Xx][Ee]/ OR data_win_eventdata_image:/.*\\[Ww][Aa][Bb][Mm][Ii][Gg]\.[Ee][Xx][Ee]/ OR data_win_eventdata_image:/.*\\[Ii][Mm][Aa][Gg][Ii][Nn][Gg][Dd][Ee][Vv][Ii][Cc][Ee][Ss]\.[Ee][Xx][Ee]/)) OR (data_win_system_eventID:"13" AND data_win_eventdata_targetObject:/.*\\[Ss][Oo][Ff][Tt][Ww][Aa][Rr][Ee]\\[Mm][Ii][Cc][Rr][Oo][Ss][Oo][Ff][Tt]\\[Ww][Aa][Bb]\\[Dd][Ll][Ll][Pp][Aa][Tt][Hh]/)
+    pivot_on:
+    - host
+    window: 2h
+  - name: 'Cobalt Strike payload fingerprints: CS-signature remote threads and malleable-C2 named pipes'
+    query: (data_win_system_eventID:"8" AND (data_win_eventdata_startAddress:/.*0[Bb]80/ OR data_win_eventdata_startAddress:/.*0[Cc]7[Cc]/ OR data_win_eventdata_startAddress:/.*0[Cc]88/)) OR ((data_win_system_eventID:"17" OR data_win_system_eventID:"18") AND (data_win_eventdata_pipeName:/.*[Mm][Ss][Ss][Ee]-.*/ OR data_win_eventdata_pipeName:/.*[Pp][Oo][Ss][Tt][Ee][Xx]_.*/ OR data_win_eventdata_pipeName:/.*[Mm][Ss][Aa][Gg][Ee][Nn][Tt]_.*/ OR data_win_eventdata_pipeName:/.*[Ff][Uu][Ll][Ll][Dd][Uu][Pp][Ll][Ee][Xx]_.*/ OR data_win_eventdata_pipeName:/.*[Mm][Ss][Rr][Pp][Cc]_.*/ OR data_win_eventdata_pipeName:/.*[Dd][Ss][Ee][Rr][Nn][Aa][Mm][Ee][Pp][Ii][Pp][Ee].*/ OR data_win_eventdata_pipeName:/.*[Mm][Yy][Pp][Ii][Pp][Ee]-.*/))
+    pivot_on:
+    - host
+    window: 2h
+  - name: Operator hands-on Active Directory / domain discovery from the beacon
+    query: data_win_system_eventID:"1" AND (data_win_eventdata_image:/.*\\[Aa][Dd][Ff][Ii][Nn][Dd]\.[Ee][Xx][Ee]/ OR data_win_eventdata_image:/.*\\[Nn][Ll][Tt][Ee][Ss][Tt]\.[Ee][Xx][Ee]/ OR data_win_eventdata_image:/.*\\[Dd][Ss][Qq][Uu][Ee][Rr][Yy]\.[Ee][Xx][Ee]/ OR data_win_eventdata_image:/.*\\[Aa][Dd][Ee][Xx][Pp][Ll][Oo][Rr][Ee][Rr].*\.[Ee][Xx][Ee]/ OR data_win_eventdata_commandLine:/.*[Dd][Oo][Mm][Aa][Ii][Nn]_[Tt][Rr][Uu][Ss][Tt][Ss].*/ OR data_win_eventdata_commandLine:/.*[Gg][Rr][Oo][Uu][Pp].*[Dd][Oo][Mm][Aa][Ii][Nn] [Aa][Dd][Mm][Ii][Nn][Ss].*/)
+    pivot_on:
+    - host
+    window: 4h
+  - name: LSASS credential access and memory dumping on this host
+    query: (data_win_system_eventID:"10" AND data_win_eventdata_targetImage:/.*\\[Ll][Ss][Aa][Ss][Ss]\.[Ee][Xx][Ee]/) OR (data_win_system_eventID:"1" AND (data_win_eventdata_commandLine:/.*[Cc][Oo][Mm][Ss][Vv][Cc][Ss]\.[Dd][Ll][Ll].*[Mm][Ii][Nn][Ii][Dd][Uu][Mm][Pp].*/ OR data_win_eventdata_commandLine:/.*[Mm][Ii][Nn][Ii][Dd][Uu][Mm][Pp].*[Ll][Ss][Aa][Ss][Ss].*/ OR data_win_eventdata_commandLine:/.*[Ss][Ee][Kk][Uu][Rr][Ll][Ss][Aa].*/ OR data_win_eventdata_image:/.*\\[Pp][Rr][Oo][Cc][Dd][Uu][Mm][Pp].*\.[Ee][Xx][Ee]/ OR data_win_eventdata_image:/.*\\[Rr][Dd][Rr][Ll][Ee][Aa][Kk][Dd][Ii][Aa][Gg]\.[Ee][Xx][Ee]/))
+    pivot_on:
+    - host
+    window: 4h

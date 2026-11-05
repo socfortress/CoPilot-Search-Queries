@@ -179,48 +179,58 @@ graylog:
   query: data_win_system_eventID:"3" AND (data_win_eventdata_destinationPort:"25" OR data_win_eventdata_destinationPort:"587" OR data_win_eventdata_destinationPort:"465" OR data_win_eventdata_destinationPort:"2525") AND data_win_eventdata_initiated:/[Tt][Rr][Uu][Ee]/ AND _exists_:data_win_eventdata_image AND NOT (data_win_eventdata_image:/.*\\[Tt][Hh][Uu][Nn][Dd][Ee][Rr][Bb][Ii][Rr][Dd]\.[Ee][Xx][Ee]/ OR data_win_eventdata_image:/.*\\[Oo][Uu][Tt][Ll][Oo][Oo][Kk]\.[Ee][Xx][Ee]/ OR data_win_eventdata_image:/[Cc]:\\[Pp][Rr][Oo][Gg][Rr][Aa][Mm] [Ff][Ii][Ll][Ee][Ss]\\[Mm][Ii][Cc][Rr][Oo][Ss][Oo][Ff][Tt]\\[Ee][Xx][Cc][Hh][Aa][Nn][Gg][Ee] [Ss][Ee][Rr][Vv][Ee][Rr]\\.*/ OR (data_win_eventdata_image:/[Cc]:\\[Pp][Rr][Oo][Gg][Rr][Aa][Mm] [Ff][Ii][Ll][Ee][Ss]\\[Ww][Ii][Nn][Dd][Oo][Ww][Ss][Aa][Pp][Pp][Ss]\\[Mm][Ii][Cc][Rr][Oo][Ss][Oo][Ff][Tt]\.[Ww][Ii][Nn][Dd][Oo][Ww][Ss][Cc][Oo][Mm][Mm][Uu][Nn][Ii][Cc][Aa][Tt][Ii][Oo][Nn][Ss][Aa][Pp][Pp][Ss]_.*/ AND data_win_eventdata_image:/.*\\[Hh][Xx][Tt][Ss][Rr]\.[Ee][Xx][Ee]/))
 
 correlation:
-  # Authored by the correlation engine for review. Related CoPilot Searches to run
-  # around an alert from this rule, scoped to the same host/user/IP within the window.
+  # Authored per-rule (behaviour-researched) for the correlation engine. Related CoPilot
+  # Searches + telemetry pivots to run around an alert, scoped to its host/user/ip/domain.
   related_rules:
-    - id: 639c9081-f482-47d3-a0bd-ddee3d4ecd76
-      name: "All Backups Deleted Via Wbadmin.EXE"
-      reason: "next kill-chain tactic: Impact"
-    - id: 1f0f6176-6482-4027-b151-00071af39d7e
-      name: "Arbitrary File Download Via ConfigSecurityPolicy.EXE"
-      reason: "next kill-chain tactic: Exfiltration"
-    - id: 06125661-3814-4e03-bfa2-1e4411c60ac3
-      name: "Backup Files Deleted"
-      reason: "next kill-chain tactic: Impact"
-    - id: 1444443e-6757-43e4-9ea4-c8fc705f79a2
-      name: "Boot Configuration Tampering Via Bcdedit.EXE"
-      reason: "next kill-chain tactic: Impact"
-    - id: 1d08ac94-400d-4469-a82f-daee9a908849
-      name: "Communication To Ngrok Tunneling Service Initiated"
-      reason: "next kill-chain tactic: Exfiltration"
-    - id: 855bc8b5-2ae8-402e-a9ed-b889e6df1900
-      name: "Copy From Or To Admin Share Or Sysvol Folder"
-      reason: "next kill-chain tactic: Exfiltration"
-  window: 1h
+  - id: 312d0384-401c-4b8b-abdf-685ffba9a332
+    name: Email Exifiltration Via Powershell
+    reason: 'Likely the exact process behind this SMTP connection: PowerShell harvesting mailbox/SMTP addresses (Get-Recipient, SmtpAddress) to mail stolen data out (DEV-0270 pattern) - process-creation twin of this network detection on the same host.'
+  - id: 2837e152-93c8-43d2-85ba-c3cd3c2ae614
+    name: Powershell Local Email Collection
+    reason: 'Precursor collection (T1114.001): harvests local Outlook mail via Interop.Outlook; the stolen mailbox data is what a non-mail process then exfiltrates over SMTP.'
+  - id: c1dda054-d638-4c16-afc8-53e007f3fbc5
+    name: Automated Collection Command PowerShell
+    reason: 'Precursor collection (T1119): bulk automated gathering of internal files on the same host immediately before the data is mailed out.'
+  - id: 9fbf5927-5261-4284-a71d-f681029ea574
+    name: Compress Data and Lock With Password for Exfiltration With 7-ZIP
+    reason: 'Staging step (T1560.001): password-locked 7-Zip archive of collected data is the bundle a non-mail process then ships out over SMTP - stage directly precedes this exfil.'
+  - id: afe52666-401e-4a02-b4ff-5d128990b8cb
+    name: Suspicious Greedy Compression Using Rar.EXE
+    reason: 'Staging step (T1560): recursive password-protected RAR of system/staging folders; the archive produced is the payload of this SMTP exfiltration.'
+  - id: 7d1aaf3d-4304-425c-b7c3-162055e0b3ab
+    name: Potential Data Exfiltration Activity Via CommandLine Tools
+    reason: Co-occurring exfil over an additional channel (CLI web-request upload) from the same host - points to a multi-channel exfiltration, not an isolated SMTP send.
+  - id: 98a96a5a-64a0-4c42-92c5-489da3866cb0
+    name: DNS Exfiltration and Tunneling Tools Execution
+    reason: 'Sibling exfiltration-over-alternative-protocol (T1048.001 DNS vs this rule''s T1048.003 SMTP): the same actor falling back to DNS to move data when SMTP is blocked.'
+  - id: 1d08ac94-400d-4469-a82f-daee9a908849
+    name: Communication To Ngrok Tunneling Service Initiated
+    reason: Co-occurring attacker-controlled egress/tunnel (EID 3 network sibling) used for exfiltration or second-stage pull - corroborates unauthorized outbound data movement from this host.
+  window: 2h
   enrichment_searches:
-  # Rule-specific telemetry pivots the engine runs around an alert from this rule,
-  # scoped to the alert's host/user/IP within the window (behaviour-targeted, not a sweep).
-    - name: "Outbound transfer / exfiltration tooling on this host"
-      query: '((data_win_system_eventID:"1" AND data_win_eventdata_image:/.*(\\[Rr][Cc][Ll][Oo][Nn][Ee]\.[Ee][Xx][Ee]|\\[Cc][Uu][Rr][Ll]\.[Ee][Xx][Ee]|\\[Ww][Gg][Ee][Tt]\.[Ee][Xx][Ee]|\\[Ww][Ii][Nn][Ss][Cc][Pp]\.[Ee][Xx][Ee]|\\[Pp][Ss][Cc][Pp]\.[Ee][Xx][Ee]|\\[Mm][Ee][Gg][Aa][Cc][Mm][Dd]\.[Ee][Xx][Ee]|\\[Mm][Ee][Gg][Aa][Ss][Yy][Nn][Cc]\.[Ee][Xx][Ee])/) OR ((data_win_eventdata_commandLine:/.*[Ii][Nn][Vv][Oo][Kk][Ee]-[Rr][Ee][Ss][Tt][Mm][Ee][Tt][Hh][Oo][Dd].*/ OR data_win_eventdata_commandLine:/.*[Ss][Tt][Aa][Rr][Tt]-[Bb][Ii][Tt][Ss][Tt][Rr][Aa][Nn][Ss][Ff][Ee][Rr].*/ OR data_win_eventdata_commandLine:/.*[Rr][Cc][Ll][Oo][Nn][Ee].*/ OR data_win_eventdata_commandLine:/.*[Tt][Rr][Aa][Nn][Ss][Ff][Ee][Rr]\.[Ss][Hh].*/ OR data_win_eventdata_commandLine:/.*[Aa][Nn][Oo][Nn][Ff][Ii][Ll][Ee][Ss].*/ OR data_win_eventdata_commandLine:/.*[Pp][Aa][Ss][Tt][Ee][Bb][Ii][Nn].*/ OR data_win_eventdata_commandLine:/.*[Mm][Ee][Gg][Aa]\.[Nn][Zz].*/ OR data_win_eventdata_commandLine:/.*-[Oo][Uu][Tt][Ff][Ii][Ll][Ee].*/ OR data_win_eventdata_commandLine:/.*[Uu][Pp][Ll][Oo][Aa][Dd][Ff][Ii][Ll][Ee].*/)))'
-      pivot_on: [host]
-      window: 2h
-    - name: "Other executions of this tool-set on this host (any arguments)"
-      query: 'data_win_system_eventID:"1" AND data_win_eventdata_image:/.*(\\[Tt][Hh][Uu][Nn][Dd][Ee][Rr][Bb][Ii][Rr][Dd]\.[Ee][Xx][Ee]|\\[Oo][Uu][Tt][Ll][Oo][Oo][Kk]\.[Ee][Xx][Ee]|\\[Hh][Xx][Tt][Ss][Rr]\.[Ee][Xx][Ee])/'
-      pivot_on: [host]
-      window: 2h
-    - name: "Other hosts connecting to the same destination address (campaign)"
-      query: '(data_win_system_eventID:"22" OR data_win_system_eventID:"3")'
-      pivot_on: [ip]
-      window: 24h
-    - name: "Downloader / C2 tooling executed on this host"
-      query: '(data_win_system_eventID:"1" AND data_win_eventdata_image:/.*(\\[Cc][Ee][Rr][Tt][Uu][Tt][Ii][Ll]\.[Ee][Xx][Ee]|\\[Bb][Ii][Tt][Ss][Aa][Dd][Mm][Ii][Nn]\.[Ee][Xx][Ee]|\\[Cc][Uu][Rr][Ll]\.[Ee][Xx][Ee]|\\[Ww][Gg][Ee][Tt]\.[Ee][Xx][Ee])/) OR (data_win_eventdata_commandLine:/.*[Dd][Oo][Ww][Nn][Ll][Oo][Aa][Dd][Ss][Tt][Rr][Ii][Nn][Gg].*/ OR data_win_eventdata_commandLine:/.*[Dd][Oo][Ww][Nn][Ll][Oo][Aa][Dd][Ff][Ii][Ll][Ee].*/ OR data_win_eventdata_commandLine:/.*[Ii][Nn][Vv][Oo][Kk][Ee]-[Ww][Ee][Bb][Rr][Ee][Qq][Uu][Ee][Ss][Tt].*/ OR data_win_eventdata_commandLine:/.*[Nn][Ee][Tt]\.[Ww][Ee][Bb][Cc][Ll][Ii][Ee][Nn][Tt].*/ OR data_win_eventdata_commandLine:/.*[Ss][Tt][Aa][Rr][Tt]-[Bb][Ii][Tt][Ss][Tt][Rr][Aa][Nn][Ss][Ff][Ee][Rr].*/ OR data_win_eventdata_commandLine:/.*[Ii][Ww][Rr] .*/ OR data_win_eventdata_commandLine:/.*[Cc][Uu][Rr][Ll] .*/ OR data_win_eventdata_commandLine:/.*[Ww][Gg][Ee][Tt] .*/)'
-      pivot_on: [host]
-      window: 1h
-    - name: "DNS queries by script interpreters / LOLBins on this host"
-      query: 'data_win_system_eventID:"22" AND (data_win_eventdata_image:/.*(\\[Pp][Oo][Ww][Ee][Rr][Ss][Hh][Ee][Ll][Ll]\.[Ee][Xx][Ee]|\\[Pp][Ww][Ss][Hh]\.[Ee][Xx][Ee]|\\[Pp][Oo][Ww][Ee][Rr][Ss][Hh][Ee][Ll][Ll]_[Ii][Ss][Ee]\.[Ee][Xx][Ee]|\\[Cc][Mm][Dd]\.[Ee][Xx][Ee]|\\[Ww][Ss][Cc][Rr][Ii][Pp][Tt]\.[Ee][Xx][Ee]|\\[Cc][Ss][Cc][Rr][Ii][Pp][Tt]\.[Ee][Xx][Ee]|\\[Mm][Ss][Hh][Tt][Aa]\.[Ee][Xx][Ee]|\\[Rr][Uu][Nn][Dd][Ll][Ll]32\.[Ee][Xx][Ee]|\\[Rr][Ee][Gg][Ss][Vv][Rr]32\.[Ee][Xx][Ee]|\\[Mm][Ss][Hh][Tt][Aa]\.[Ee][Xx][Ee]|\\[Ii][Nn][Ss][Tt][Aa][Ll][Ll][Uu][Tt][Ii][Ll]\.[Ee][Xx][Ee]|\\[Rr][Ee][Gg][Aa][Ss][Mm]\.[Ee][Xx][Ee]|\\[Rr][Ee][Gg][Ss][Vv][Cc][Ss]\.[Ee][Xx][Ee]|\\[Mm][Ss][Bb][Uu][Ii][Ll][Dd]\.[Ee][Xx][Ee]|\\[Cc][Ee][Rr][Tt][Uu][Tt][Ii][Ll]\.[Ee][Xx][Ee]|\\[Bb][Ii][Tt][Ss][Aa][Dd][Mm][Ii][Nn]\.[Ee][Xx][Ee]|\\[Ww][Mm][Ii][Cc]\.[Ee][Xx][Ee]|\\[Cc][Mm][Ss][Tt][Pp]\.[Ee][Xx][Ee])/ OR data_win_eventdata_image:/.*(\\[Oo][Dd][Bb][Cc][Cc][Oo][Nn][Ff]\.[Ee][Xx][Ee]|\\[Ff][Oo][Rr][Ff][Ii][Ll][Ee][Ss]\.[Ee][Xx][Ee]|\\[Pp][Cc][Aa][Ll][Uu][Aa]\.[Ee][Xx][Ee]|\\[Mm][Aa][Vv][Ii][Nn][Jj][Ee][Cc][Tt]\.[Ee][Xx][Ee]|\\[Ss][Cc][Rr][Ii][Pp][Tt][Rr][Uu][Nn][Nn][Ee][Rr]\.[Ee][Xx][Ee])/)'
-      pivot_on: [host]
-      window: 1h
+  # Behaviour-targeted hunts the engine runs around the alert (not a sweep).
+  - name: Mail-sending tooling or scripting executed on this host
+    query: data_win_system_eventID:"1" AND (data_win_eventdata_image:/.*(\\[Bb][Ll][Aa][Tt]\.[Ee][Xx][Ee]|\\[Ss][Ee][Nn][Dd][Ee][Mm][Aa][Ii][Ll]\.[Ee][Xx][Ee]|\\[Mm][Aa][Ii][Ll][Ss][Ee][Nn][Dd]\.[Ee][Xx][Ee]|\\[Bb][Mm][Aa][Ii][Ll]\.[Ee][Xx][Ee]|\\[Ss][Ww][Aa][Kk][Ss]\.[Ee][Xx][Ee])/ OR data_win_eventdata_commandLine:/.*[Ss][Ee][Nn][Dd]-[Mm][Aa][Ii][Ll][Mm][Ee][Ss][Ss][Aa][Gg][Ee].*/ OR data_win_eventdata_commandLine:/.*[Nn][Ee][Tt]\.[Mm][Aa][Ii][Ll].*/ OR data_win_eventdata_commandLine:/.*[Ss][Mm][Tt][Pp][Cc][Ll][Ii][Ee][Nn][Tt].*/ OR data_win_eventdata_commandLine:/.*[Mm][Aa][Ii][Ll][Mm][Ee][Ss][Ss][Aa][Gg][Ee].*/ OR data_win_eventdata_commandLine:/.*-[Ss][Mm][Tt][Pp][Ss][Ee][Rr][Vv][Ee][Rr].*/ OR data_win_eventdata_commandLine:/.*[Mm][Aa][Ii][Ll][Kk][Ii][Tt].*/)
+    pivot_on:
+    - host
+    window: 2h
+  - name: PowerShell SMTP mail-send code in script blocks on this host
+    query: data_win_system_eventID:"4104" AND (data_win_eventdata_scriptBlockText:/.*[Ss][Ee][Nn][Dd]-[Mm][Aa][Ii][Ll][Mm][Ee][Ss][Ss][Aa][Gg][Ee].*/ OR data_win_eventdata_scriptBlockText:/.*[Ss][Yy][Ss][Tt][Ee][Mm]\.[Nn][Ee][Tt]\.[Mm][Aa][Ii][Ll].*/ OR data_win_eventdata_scriptBlockText:/.*[Ss][Mm][Tt][Pp][Cc][Ll][Ii][Ee][Nn][Tt].*/ OR data_win_eventdata_scriptBlockText:/.*[Mm][Aa][Ii][Ll][Mm][Ee][Ss][Ss][Aa][Gg][Ee].*/ OR data_win_eventdata_scriptBlockText:/.*[Ee][Nn][Aa][Bb][Ll][Ee][Ss][Ss][Ll].*/ OR data_win_eventdata_scriptBlockText:/.*-[Ss][Mm][Tt][Pp][Ss][Ee][Rr][Vv][Ee][Rr].*/ OR data_win_eventdata_scriptBlockText:/.*[Dd][Ee][Ll][Ii][Vv][Ee][Rr][Yy][Mm][Ee][Tt][Hh][Oo][Dd].*/)
+    pivot_on:
+    - host
+    window: 2h
+  - name: Data archived / password-staged on this host (exfil payload)
+    query: data_win_system_eventID:"1" AND (data_win_eventdata_image:/.*(\\7[Zz]\.[Ee][Xx][Ee]|\\7[Zz][Aa]\.[Ee][Xx][Ee]|\\7[Zz][Rr]\.[Ee][Xx][Ee]|\\[Rr][Aa][Rr]\.[Ee][Xx][Ee]|\\[Ww][Ii][Nn][Rr][Aa][Rr]\.[Ee][Xx][Ee]|\\[Ww][Zz][Zz][Ii][Pp]\.[Ee][Xx][Ee]|\\[Mm][Aa][Kk][Ee][Cc][Aa][Bb]\.[Ee][Xx][Ee])/ OR data_win_eventdata_commandLine:/.*[Cc][Oo][Mm][Pp][Rr][Ee][Ss][Ss]-[Aa][Rr][Cc][Hh][Ii][Vv][Ee].*/ OR data_win_eventdata_commandLine:/.*\.7[Zz].*/ OR data_win_eventdata_commandLine:/.*\.[Rr][Aa][Rr].*/ OR data_win_eventdata_commandLine:/.* -[Hh][Pp].*/)
+    pivot_on:
+    - host
+    window: 4h
+  - name: Additional outbound upload / egress channels on this host
+    query: data_win_system_eventID:"1" AND (data_win_eventdata_image:/.*(\\[Rr][Cc][Ll][Oo][Nn][Ee]\.[Ee][Xx][Ee]|\\[Cc][Uu][Rr][Ll]\.[Ee][Xx][Ee]|\\[Ww][Gg][Ee][Tt]\.[Ee][Xx][Ee]|\\[Ww][Ii][Nn][Ss][Cc][Pp]\.[Ee][Xx][Ee]|\\[Pp][Ss][Cc][Pp]\.[Ee][Xx][Ee]|\\[Bb][Ii][Tt][Ss][Aa][Dd][Mm][Ii][Nn]\.[Ee][Xx][Ee]|\\[Cc][Ee][Rr][Tt][Uu][Tt][Ii][Ll]\.[Ee][Xx][Ee]|\\[Mm][Ee][Gg][Aa][Cc][Mm][Dd]\.[Ee][Xx][Ee])/ OR data_win_eventdata_commandLine:/.*[Ii][Nn][Vv][Oo][Kk][Ee]-[Rr][Ee][Ss][Tt][Mm][Ee][Tt][Hh][Oo][Dd].*/ OR data_win_eventdata_commandLine:/.*[Ii][Nn][Vv][Oo][Kk][Ee]-[Ww][Ee][Bb][Rr][Ee][Qq][Uu][Ee][Ss][Tt].*/ OR data_win_eventdata_commandLine:/.*[Uu][Pp][Ll][Oo][Aa][Dd][Ss][Tt][Rr][Ii][Nn][Gg].*/ OR data_win_eventdata_commandLine:/.*[Uu][Pp][Ll][Oo][Aa][Dd][Ff][Ii][Ll][Ee].*/ OR data_win_eventdata_commandLine:/.*[Ss][Tt][Aa][Rr][Tt]-[Bb][Ii][Tt][Ss][Tt][Rr][Aa][Nn][Ss][Ff][Ee][Rr].*/)
+    pivot_on:
+    - host
+    window: 2h
+  - name: Other hosts making outbound SMTP to the same destination (campaign)
+    query: data_win_system_eventID:"3" AND data_win_eventdata_initiated:/[Tt][Rr][Uu][Ee]/ AND (data_win_eventdata_destinationPort:"25" OR data_win_eventdata_destinationPort:"587" OR data_win_eventdata_destinationPort:"465" OR data_win_eventdata_destinationPort:"2525")
+    pivot_on:
+    - ip
+    window: 24h

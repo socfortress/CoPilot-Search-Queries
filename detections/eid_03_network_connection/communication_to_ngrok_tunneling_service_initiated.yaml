@@ -182,48 +182,58 @@ graylog:
   query: data_win_system_eventID:"3" AND (data_win_eventdata_destinationHostname:/.*[Tt][Uu][Nn][Nn][Ee][Ll]\.[Uu][Ss]\.[Nn][Gg][Rr][Oo][Kk]\.[Cc][Oo][Mm].*/ OR data_win_eventdata_destinationHostname:/.*[Tt][Uu][Nn][Nn][Ee][Ll]\.[Ee][Uu]\.[Nn][Gg][Rr][Oo][Kk]\.[Cc][Oo][Mm].*/ OR data_win_eventdata_destinationHostname:/.*[Tt][Uu][Nn][Nn][Ee][Ll]\.[Aa][Pp]\.[Nn][Gg][Rr][Oo][Kk]\.[Cc][Oo][Mm].*/ OR data_win_eventdata_destinationHostname:/.*[Tt][Uu][Nn][Nn][Ee][Ll]\.[Aa][Uu]\.[Nn][Gg][Rr][Oo][Kk]\.[Cc][Oo][Mm].*/ OR data_win_eventdata_destinationHostname:/.*[Tt][Uu][Nn][Nn][Ee][Ll]\.[Ss][Aa]\.[Nn][Gg][Rr][Oo][Kk]\.[Cc][Oo][Mm].*/ OR data_win_eventdata_destinationHostname:/.*[Tt][Uu][Nn][Nn][Ee][Ll]\.[Jj][Pp]\.[Nn][Gg][Rr][Oo][Kk]\.[Cc][Oo][Mm].*/ OR data_win_eventdata_destinationHostname:/.*[Tt][Uu][Nn][Nn][Ee][Ll]\.[Ii][Nn]\.[Nn][Gg][Rr][Oo][Kk]\.[Cc][Oo][Mm].*/)
 
 correlation:
-  # Authored by the correlation engine for review. Related CoPilot Searches to run
-  # around an alert from this rule, scoped to the same host/user/IP within the window.
+  # Authored per-rule (behaviour-researched) for the correlation engine. Related CoPilot
+  # Searches + telemetry pivots to run around an alert, scoped to its host/user/ip/domain.
   related_rules:
-    - id: 75bf09fa-1dd7-4d18-9af9-dd9e492562eb
-      name: "ADSI-Cache File Creation By Uncommon Tool"
-      reason: "next kill-chain tactic: Command and Control"
-    - id: 639c9081-f482-47d3-a0bd-ddee3d4ecd76
-      name: "All Backups Deleted Via Wbadmin.EXE"
-      reason: "next kill-chain tactic: Impact"
-    - id: 0b9ad457-2554-44c1-82c2-d56a99c42377
-      name: "Anydesk Temporary Artefact"
-      reason: "next kill-chain tactic: Command and Control"
-    - id: 7cff77e1-9663-46a3-8260-17f2e1aa9d0a
-      name: "AppX Package Installation Attempts Via AppInstaller.EXE"
-      reason: "next kill-chain tactic: Command and Control"
-    - id: 1f0f6176-6482-4027-b151-00071af39d7e
-      name: "Arbitrary File Download Via ConfigSecurityPolicy.EXE"
-      reason: "next kill-chain tactic: Exfiltration"
-    - id: eee00933-a761-4cd0-be70-c42fe91731e7
-      name: "Arbitrary File Download Via GfxDownloadWrapper.EXE"
-      reason: "next kill-chain tactic: Command and Control"
-  window: 1h
+  - id: ee37eb7c-a4e7-4cd5-8fa4-efa27f1c3f31
+    name: PUA - Ngrok Execution
+    reason: 'Process-side of the very same ngrok agent that opened this connection: EventID 1 for ngrok.exe exposes the tunnel subcommand and the internal port being published (e.g. `tcp 3389`), confirming which binary initiated the tunnel and exactly which local service is now reachable off-box.'
+  - id: 18249279-932f-45e2-b37a-8925f2597670
+    name: Process Initiated Network Connection To Ngrok Domain
+    reason: Sibling network detection covering ngrok's control/web domains (ngrok.io/.app/.dev, ngrok-free.*); co-firing on the same host within the window confirms a live, authenticated ngrok agent session rather than an incidental one-off resolution of a tunnel endpoint.
+  - id: 8a3038e8-9c9d-46f8-b184-66234a160f6f
+    name: Potential Remote Desktop Tunneling
+    reason: The dominant purpose of an ngrok tunnel on an endpoint is to forward RDP (3389) over a reverse channel for hands-on access; seen on the same host it shows the just-opened tunnel is being used to carry interactive remote control past the firewall/NAT.
+  - id: 51e33403-2a37-4d66-a574-1fda1782cc31
+    name: RDP Login from Localhost
+    reason: A logonType 10 (RemoteInteractive/RDP) session sourced from 127.0.0.1 or ::1 is the signature of an RDP session delivered through a local tunnel terminator - direct proof the ngrok reverse tunnel was actually used to gain an interactive session on this host.
+  - id: 01aeb693-138d-49d2-9403-c4f52d7d3d62
+    name: RDP Connection Allowed Via Netsh.EXE
+    reason: Opening the host firewall for TCP 3389 via netsh is the enabling step that lets ngrok-tunneled RDP reach the local listener; on the same host it is the precursor that makes the tunneled remote-access usable.
+  - id: 2daa93a0-a5fb-41c5-8cd8-3c11294bfd1f
+    name: Potential SSH Tunnel Persistence Install Using A Scheduled Task
+    reason: Attackers persist reverse tunnels so the foothold survives reboots; a scheduled task launching a reverse tunnel on the same host is the durability step for the exact access this ngrok tunnel just established.
+  - id: 32410e29-5f94-4568-b6a3-d91a8adad863
+    name: PUA - Fast Reverse Proxy (FRP) Execution
+    reason: A second reverse-proxy tunneler (frpc/frps) running on the same host signals a deliberate tunneling toolkit and attacker redundancy, strongly raising confidence that the ngrok connection is an intrusion rather than sanctioned developer use.
+  - id: a54f842a-3713-4b45-8c84-5f136fdebd3c
+    name: New PortProxy Registry Entry Added
+    reason: A netsh portproxy v4tov4\tcp registry entry wires a durable local port-forward that routes the ngrok-exposed port onto an internal service; a co-occurring enabler that extends and persists the off-box exposure this tunnel creates.
+  window: 2h
   enrichment_searches:
-  # Rule-specific telemetry pivots the engine runs around an alert from this rule,
-  # scoped to the alert's host/user/IP within the window (behaviour-targeted, not a sweep).
-    - name: "Protocol-tunnelling tooling on this host"
-      query: '((data_win_system_eventID:"1" AND data_win_eventdata_image:/.*(\\[Nn][Gg][Rr][Oo][Kk]\.[Ee][Xx][Ee]|\\[Pp][Ll][Ii][Nn][Kk]\.[Ee][Xx][Ee]|\\[Ss][Ss][Hh]\.[Ee][Xx][Ee]|\\[Ff][Rr][Pp][Cc]\.[Ee][Xx][Ee]|\\[Cc][Hh][Ii][Ss][Ee][Ll]\.[Ee][Xx][Ee]|\\[Cc][Ll][Oo][Uu][Dd][Ff][Ll][Aa][Rr][Ee][Dd]\.[Ee][Xx][Ee])/) OR (data_win_system_eventID:"3" AND data_win_eventdata_image:/.*(\\[Nn][Gg][Rr][Oo][Kk]\.[Ee][Xx][Ee]|\\[Pp][Ll][Ii][Nn][Kk]\.[Ee][Xx][Ee]|\\[Ss][Ss][Hh]\.[Ee][Xx][Ee]|\\[Ff][Rr][Pp][Cc]\.[Ee][Xx][Ee]|\\[Cc][Hh][Ii][Ss][Ee][Ll]\.[Ee][Xx][Ee]|\\[Cc][Ll][Oo][Uu][Dd][Ff][Ll][Aa][Rr][Ee][Dd]\.[Ee][Xx][Ee])/) OR ((data_win_eventdata_commandLine:/.*-[Rr] 127\.0\.0\.1.*/ OR data_win_eventdata_commandLine:/.*[Ss][Ss][Hh] -[Rr].*/ OR data_win_eventdata_commandLine:/.*[Pp][Oo][Rr][Tt][Ff][Ww][Dd].*/ OR data_win_eventdata_commandLine:/.*[Ss][Oo][Cc][Kk][Ss].*/)))'
-      pivot_on: [host]
-      window: 1h
-    - name: "Proxy / tunnelling tooling on this host"
-      query: '((data_win_system_eventID:"1" AND data_win_eventdata_image:/.*(\\[Nn][Gg][Rr][Oo][Kk]\.[Ee][Xx][Ee]|\\[Pp][Ll][Ii][Nn][Kk]\.[Ee][Xx][Ee]|\\[Ss][Ss][Hh]\.[Ee][Xx][Ee]|\\[Ff][Rr][Pp][Cc]\.[Ee][Xx][Ee]|\\[Cc][Hh][Ii][Ss][Ee][Ll]\.[Ee][Xx][Ee]|\\[Cc][Ll][Oo][Uu][Dd][Ff][Ll][Aa][Rr][Ee][Dd]\.[Ee][Xx][Ee])/) OR (data_win_system_eventID:"3" AND data_win_eventdata_image:/.*(\\[Nn][Gg][Rr][Oo][Kk]\.[Ee][Xx][Ee]|\\[Pp][Ll][Ii][Nn][Kk]\.[Ee][Xx][Ee]|\\[Ss][Ss][Hh]\.[Ee][Xx][Ee]|\\[Ff][Rr][Pp][Cc]\.[Ee][Xx][Ee]|\\[Cc][Hh][Ii][Ss][Ee][Ll]\.[Ee][Xx][Ee]|\\[Cc][Ll][Oo][Uu][Dd][Ff][Ll][Aa][Rr][Ee][Dd]\.[Ee][Xx][Ee])/) OR ((data_win_eventdata_commandLine:/.*-[Rr] 127\.0\.0\.1.*/ OR data_win_eventdata_commandLine:/.*[Ss][Ss][Hh] -[Rr].*/ OR data_win_eventdata_commandLine:/.*[Pp][Oo][Rr][Tt][Ff][Ww][Dd].*/ OR data_win_eventdata_commandLine:/.*[Ss][Oo][Cc][Kk][Ss].*/)))'
-      pivot_on: [host]
-      window: 1h
-    - name: "Outbound transfer / cloud-storage egress on this host"
-      query: '((data_win_system_eventID:"1" AND data_win_eventdata_image:/.*(\\[Rr][Cc][Ll][Oo][Nn][Ee]\.[Ee][Xx][Ee]|\\[Cc][Uu][Rr][Ll]\.[Ee][Xx][Ee]|\\[Ww][Gg][Ee][Tt]\.[Ee][Xx][Ee]|\\[Ww][Ii][Nn][Ss][Cc][Pp]\.[Ee][Xx][Ee]|\\[Pp][Ss][Cc][Pp]\.[Ee][Xx][Ee]|\\[Mm][Ee][Gg][Aa][Cc][Mm][Dd]\.[Ee][Xx][Ee]|\\[Mm][Ee][Gg][Aa][Ss][Yy][Nn][Cc]\.[Ee][Xx][Ee])/) OR ((data_win_eventdata_commandLine:/.*[Ii][Nn][Vv][Oo][Kk][Ee]-[Rr][Ee][Ss][Tt][Mm][Ee][Tt][Hh][Oo][Dd].*/ OR data_win_eventdata_commandLine:/.*[Ss][Tt][Aa][Rr][Tt]-[Bb][Ii][Tt][Ss][Tt][Rr][Aa][Nn][Ss][Ff][Ee][Rr].*/ OR data_win_eventdata_commandLine:/.*[Rr][Cc][Ll][Oo][Nn][Ee].*/ OR data_win_eventdata_commandLine:/.*[Tt][Rr][Aa][Nn][Ss][Ff][Ee][Rr]\.[Ss][Hh].*/ OR data_win_eventdata_commandLine:/.*[Aa][Nn][Oo][Nn][Ff][Ii][Ll][Ee][Ss].*/ OR data_win_eventdata_commandLine:/.*[Pp][Aa][Ss][Tt][Ee][Bb][Ii][Nn].*/ OR data_win_eventdata_commandLine:/.*[Mm][Ee][Gg][Aa]\.[Nn][Zz].*/ OR data_win_eventdata_commandLine:/.*-[Oo][Uu][Tt][Ff][Ii][Ll][Ee].*/ OR data_win_eventdata_commandLine:/.*[Uu][Pp][Ll][Oo][Aa][Dd][Ff][Ii][Ll][Ee].*/)))'
-      pivot_on: [host]
-      window: 2h
-    - name: "Archive / staging & outbound-transfer tooling on this host"
-      query: '(((data_win_system_eventID:"1" AND data_win_eventdata_image:/.*(\\7[Zz]\.[Ee][Xx][Ee]|\\7[Zz][Aa]\.[Ee][Xx][Ee]|\\7[Zz][Rr]\.[Ee][Xx][Ee]|\\[Rr][Aa][Rr]\.[Ee][Xx][Ee]|\\[Ww][Ii][Nn][Rr][Aa][Rr]\.[Ee][Xx][Ee]|\\[Ww][Zz][Zz][Ii][Pp]\.[Ee][Xx][Ee]|\\[Mm][Aa][Kk][Ee][Cc][Aa][Bb]\.[Ee][Xx][Ee])/) OR (data_win_eventdata_commandLine:/.*[Cc][Oo][Mm][Pp][Rr][Ee][Ss][Ss]-[Aa][Rr][Cc][Hh][Ii][Vv][Ee].*/ OR data_win_eventdata_commandLine:/.*\.7[Zz].*/ OR data_win_eventdata_commandLine:/.*\.[Rr][Aa][Rr].*/ OR data_win_eventdata_commandLine:/.* -[Hh][Pp].*/)) OR (((data_win_system_eventID:"1" AND data_win_eventdata_image:/.*(\\[Rr][Cc][Ll][Oo][Nn][Ee]\.[Ee][Xx][Ee]|\\[Cc][Uu][Rr][Ll]\.[Ee][Xx][Ee]|\\[Ww][Gg][Ee][Tt]\.[Ee][Xx][Ee]|\\[Ww][Ii][Nn][Ss][Cc][Pp]\.[Ee][Xx][Ee]|\\[Pp][Ss][Cc][Pp]\.[Ee][Xx][Ee]|\\[Mm][Ee][Gg][Aa][Cc][Mm][Dd]\.[Ee][Xx][Ee]|\\[Mm][Ee][Gg][Aa][Ss][Yy][Nn][Cc]\.[Ee][Xx][Ee])/) OR ((data_win_eventdata_commandLine:/.*[Ii][Nn][Vv][Oo][Kk][Ee]-[Rr][Ee][Ss][Tt][Mm][Ee][Tt][Hh][Oo][Dd].*/ OR data_win_eventdata_commandLine:/.*[Ss][Tt][Aa][Rr][Tt]-[Bb][Ii][Tt][Ss][Tt][Rr][Aa][Nn][Ss][Ff][Ee][Rr].*/ OR data_win_eventdata_commandLine:/.*[Rr][Cc][Ll][Oo][Nn][Ee].*/ OR data_win_eventdata_commandLine:/.*[Tt][Rr][Aa][Nn][Ss][Ff][Ee][Rr]\.[Ss][Hh].*/ OR data_win_eventdata_commandLine:/.*[Aa][Nn][Oo][Nn][Ff][Ii][Ll][Ee][Ss].*/ OR data_win_eventdata_commandLine:/.*[Pp][Aa][Ss][Tt][Ee][Bb][Ii][Nn].*/ OR data_win_eventdata_commandLine:/.*[Mm][Ee][Gg][Aa]\.[Nn][Zz].*/ OR data_win_eventdata_commandLine:/.*-[Oo][Uu][Tt][Ff][Ii][Ll][Ee].*/ OR data_win_eventdata_commandLine:/.*[Uu][Pp][Ll][Oo][Aa][Dd][Ff][Ii][Ll][Ee].*/)))))'
-      pivot_on: [host]
-      window: 2h
-    - name: "Other hosts connecting to the same destination address (campaign)"
-      query: '(data_win_system_eventID:"22" OR data_win_system_eventID:"3")'
-      pivot_on: [ip]
-      window: 24h
+  # Behaviour-targeted hunts the engine runs around the alert (not a sweep).
+  - name: Ngrok agent execution and the local port it is tunnelling (same host)
+    query: data_win_system_eventID:"1" AND (data_win_eventdata_image:/.*\\[Nn][Gg][Rr][Oo][Kk]\.[Ee][Xx][Ee]/ OR data_win_eventdata_commandLine:/.* [Tt][Cc][Pp] (3389|445|139|22|5985|5986).*/ OR data_win_eventdata_commandLine:/.* [Hh][Tt][Tt][Pp] [0-9].*/ OR data_win_eventdata_commandLine:/.*[Aa][Uu][Tt][Hh][Tt][Oo][Kk][Ee][Nn] .*/ OR data_win_eventdata_commandLine:/.*[Ss][Tt][Aa][Rr][Tt] --[Aa][Ll][Ll].*/)
+    pivot_on:
+    - host
+    window: 2h
+  - name: Other reverse-tunnel / port-forward tooling on this host
+    query: data_win_system_eventID:"1" AND (data_win_eventdata_image:/.*\\([Pp][Ll][Ii][Nn][Kk]|[Ss][Ss][Hh]|[Cc][Hh][Ii][Ss][Ee][Ll]|[Ff][Rr][Pp][Cc]|[Ff][Rr][Pp][Ss]|[Cc][Ll][Oo][Uu][Dd][Ff][Ll][Aa][Rr][Ee][Dd]|[Ii][Oo][Xx]|[Gg][Oo][Ss][Tt]|[Dd][Ee][Vv][Tt][Uu][Nn][Nn][Ee][Ll]|[Rr][Ee][Vv][Ss][Oo][Cc][Kk][Ss]|3[Pp][Rr][Oo][Xx][Yy])\.[Ee][Xx][Ee]/ OR data_win_eventdata_commandLine:/.* -[Rr] [0-9].*:.*/ OR data_win_eventdata_commandLine:/.*[Ss][Ss][Hh].* -[Rr] .*/ OR data_win_eventdata_commandLine:/.*[Pp][Oo][Rr][Tt][Pp][Rr][Oo][Xx][Yy].*/ OR data_win_eventdata_commandLine:/.*[Dd][Yy][Nn][Aa][Mm][Ii][Cc][Ff][Oo][Rr][Ww][Aa][Rr][Dd].*/)
+    pivot_on:
+    - host
+    window: 2h
+  - name: RDP exposed or used through the tunnel on this host (firewall / portproxy / localhost RDP logon)
+    query: (data_win_system_eventID:"4624" AND data_win_eventdata_logonType:"10" AND (data_win_eventdata_ipAddress:"127.0.0.1" OR data_win_eventdata_ipAddress:"::1")) OR (data_win_system_eventID:"1" AND data_win_eventdata_image:/.*\\[Nn][Ee][Tt][Ss][Hh]\.[Ee][Xx][Ee]/ AND data_win_eventdata_commandLine:/.*3389.*/ AND (data_win_eventdata_commandLine:/.*[Aa][Ll][Ll][Oo][Ww].*/ OR data_win_eventdata_commandLine:/.*[Pp][Oo][Rr][Tt][Oo][Pp][Ee][Nn][Ii][Nn][Gg].*/ OR data_win_eventdata_commandLine:/.*[Cc][Oo][Nn][Nn][Ee][Cc][Tt][Aa][Dd][Dd][Rr][Ee][Ss][Ss].*/)) OR ((data_win_system_eventID:"12" OR data_win_system_eventID:"13" OR data_win_system_eventID:"14") AND (data_win_eventdata_targetObject:/.*[Pp][Oo][Rr][Tt][Pp][Rr][Oo][Xx][Yy].*/ OR data_win_eventdata_targetObject:/.*[Ff][Dd][Ee][Nn][Yy][Tt][Ss][Cc][Oo][Nn][Nn][Ee][Cc][Tt][Ii][Oo][Nn][Ss].*/))
+    pivot_on:
+    - host
+    window: 4h
+  - name: DNS resolution of ngrok and alternative tunnelling services on this host
+    query: data_win_system_eventID:"22" AND (data_win_eventdata_queryName:/.*[Nn][Gg][Rr][Oo][Kk].*/ OR data_win_eventdata_queryName:/.*[Ee][Qq][Uu][Ii][Nn][Oo][Xx].*/ OR data_win_eventdata_queryName:/.*[Tt][Rr][Yy][Cc][Ll][Oo][Uu][Dd][Ff][Ll][Aa][Rr][Ee].*/ OR data_win_eventdata_queryName:/.*[Dd][Ee][Vv][Tt][Uu][Nn][Nn][Ee][Ll][Ss].*/ OR data_win_eventdata_queryName:/.*[Ll][Oo][Cc][Aa][Ll][Tt][Oo][Nn][Ee][Tt].*/ OR data_win_eventdata_queryName:/.*[Ss][Ee][Rr][Vv][Ee][Oo].*/ OR data_win_eventdata_queryName:/.*[Pp][Aa][Gg][Ee][Kk][Ii][Tt][Ee].*/)
+    pivot_on:
+    - host
+    window: 2h
+  - name: Other internal hosts beaconing to the same ngrok tunnel endpoint (campaign)
+    query: data_win_system_eventID:"3" AND data_win_eventdata_initiated:/[Tt][Rr][Uu][Ee]/ AND data_win_eventdata_destinationHostname:/.*[Nn][Gg][Rr][Oo][Kk].*/
+    pivot_on:
+    - ip
+    window: 24h

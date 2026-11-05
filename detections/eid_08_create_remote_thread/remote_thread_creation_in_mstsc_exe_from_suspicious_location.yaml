@@ -161,23 +161,58 @@ graylog:
   query: data_win_system_eventID:"8" AND data_win_eventdata_targetImage:/.*\\[Mm][Ss][Tt][Ss][Cc]\.[Ee][Xx][Ee]/ AND (data_win_eventdata_sourceImage:/.*:\\[Tt][Ee][Mm][Pp]\\.*/ OR data_win_eventdata_sourceImage:/.*:\\[Uu][Ss][Ee][Rr][Ss]\\[Pp][Uu][Bb][Ll][Ii][Cc]\\.*/ OR data_win_eventdata_sourceImage:/.*:\\[Ww][Ii][Nn][Dd][Oo][Ww][Ss]\\[Pp][Ee][Rr][Ff][Ll][Oo][Gg][Ss]\\.*/ OR data_win_eventdata_sourceImage:/.*:\\[Ww][Ii][Nn][Dd][Oo][Ww][Ss]\\[Tt][Aa][Ss][Kk][Ss]\\.*/ OR data_win_eventdata_sourceImage:/.*:\\[Ww][Ii][Nn][Dd][Oo][Ww][Ss]\\[Tt][Ee][Mm][Pp]\\.*/ OR data_win_eventdata_sourceImage:/.*\\[Aa][Pp][Pp][Dd][Aa][Tt][Aa]\\[Ll][Oo][Cc][Aa][Ll]\\[Tt][Ee][Mm][Pp]\\.*/)
 
 correlation:
-  # Authored by the correlation engine for review.
+  # Authored per-rule (behaviour-researched) for the correlation engine. Related CoPilot
+  # Searches + telemetry pivots to run around an alert, scoped to its host/user/ip/domain.
+  related_rules:
+  - id: b447f7de-1e53-4cbf-bfb4-f1f6d0b04e4e
+    name: Suspicious Binaries and Scripts in Public Folder
+    reason: 'Precursor/staging: the injector binary is written into C:\Users\Public — one of the exact suspicious source locations this rule keys on — just before it creates the remote thread in mstsc.exe.'
+  - id: 69bd9b97-2be2-41b6-9816-fb08757a4d1a
+    name: Potentially Suspicious Execution From Parent Process In Public Folder
+    reason: 'Precursor/launch: a process executing out of \Users\Public is the untrusted-location binary that then performs this CreateRemoteThread injection into the RDP client.'
+  - id: 02d1d718-dd13-41af-989d-ea85c7fab93f
+    name: Rare Remote Thread Creation By Uncommon Source Image
+    reason: Same CreateRemoteThread (EID 8) injection primitive — the same temp/public-staged injector trips this when it injects into processes other than mstsc.exe on the same host.
+  - id: a1a144b7-5c9b-4853-a559-2172be8d4a03
+    name: Remote Thread Creation In Uncommon Target Image
+    reason: The same injector fanning its remote-thread injection out to other unusual target processes (calc/notepad/spoolsv) beyond the RDP client — widens a single alert into a campaign.
+  - id: 6309645e-122d-4c5b-bb2b-22e4f9c2fa42
+    name: HackTool - Potential CobaltStrike Process Injection
+    reason: Identifies the injection toolkit (a Cobalt Strike beacon) likely driving the mstsc.exe remote thread on this host, corroborating a hands-on-keyboard intrusion.
+  - id: f239b326-2f41-4d6b-9dfa-c846a60ef505
+    name: Password Dumper Remote Thread in LSASS
+    reason: Same CreateRemoteThread credential-access primitive pointed at LSASS — the actor broadening the harvest from RDP-client credentials to local secrets.
+  - id: 954f0af7-62dd-418f-b3df-a84bc2c7a774
+    name: New Remote Desktop Connection Initiated Via Mstsc.EXE
+    reason: The outbound RDP session this API hook is positioned to steal credentials from, and/or the attacker reconnecting outbound with the harvested RDP creds.
+  - id: ed74fe75-7594-4b4b-ae38-e38e3fd2eb23
+    name: Outbound RDP Connections Over Non-Standard Tools
+    reason: 'Follow-on lateral movement: RDP credentials captured from mstsc.exe reused to connect outbound over port 3389.'
+  window: 2h
   enrichment_searches:
-  # Rule-specific telemetry pivots the engine runs around an alert from this rule,
-  # scoped to the alert's host/user/IP within the window (behaviour-targeted, not a sweep).
-    - name: "Remote-execution / lateral-movement tooling on this host"
-      query: '(data_win_system_eventID:"1" AND data_win_eventdata_image:/.*(\\[Pp][Ss][Ee][Xx][Ee][Cc]\.[Ee][Xx][Ee]|\\[Pp][Ss][Ee][Xx][Ee][Ss][Vv][Cc]\.[Ee][Xx][Ee]|\\[Pp][Aa][Ee][Xx][Ee][Cc]\.[Ee][Xx][Ee]|\\[Ww][Ii][Nn][Rr][Ss]\.[Ee][Xx][Ee]|\\[Mm][Ss][Tt][Ss][Cc]\.[Ee][Xx][Ee]|\\[Ww][Mm][Ii][Cc]\.[Ee][Xx][Ee])/) OR (data_win_system_eventID:"1" AND data_win_eventdata_image:/.*(\\[Pp][Oo][Ww][Ee][Rr][Ss][Hh][Ee][Ll][Ll]\.[Ee][Xx][Ee]|\\[Pp][Ww][Ss][Hh]\.[Ee][Xx][Ee])/ AND (data_win_eventdata_commandLine:/.*[Ii][Nn][Vv][Oo][Kk][Ee]-[Cc][Oo][Mm][Mm][Aa][Nn][Dd].*/ OR data_win_eventdata_commandLine:/.*[Nn][Ee][Ww]-[Pp][Ss][Ss][Ee][Ss][Ss][Ii][Oo][Nn].*/ OR data_win_eventdata_commandLine:/.*[Ee][Nn][Tt][Ee][Rr]-[Pp][Ss][Ss][Ee][Ss][Ss][Ii][Oo][Nn].*/ OR data_win_eventdata_commandLine:/.*-[Cc][Oo][Mm][Pp][Uu][Tt][Ee][Rr][Nn][Aa][Mm][Ee].*/))'
-      pivot_on: [host]
-      window: 2h
-    - name: "Process injection / remote-thread & LSASS access on this host"
-      query: '((data_win_system_eventID:"8") OR (data_win_system_eventID:"10" AND data_win_eventdata_targetImage:/.*(\\[Ll][Ss][Aa][Ss][Ss]\.[Ee][Xx][Ee])/) OR (data_win_system_eventID:"1" AND (data_win_eventdata_commandLine:/.*[Cc][Rr][Ee][Aa][Tt][Ee][Rr][Ee][Mm][Oo][Tt][Ee][Tt][Hh][Rr][Ee][Aa][Dd].*/ OR data_win_eventdata_commandLine:/.*[Vv][Ii][Rr][Tt][Uu][Aa][Ll][Aa][Ll][Ll][Oo][Cc][Ee][Xx].*/ OR data_win_eventdata_commandLine:/.*[Ww][Rr][Ii][Tt][Ee][Pp][Rr][Oo][Cc][Ee][Ss][Ss][Mm][Ee][Mm][Oo][Rr][Yy].*/)))'
-      pivot_on: [host]
-      window: 1h
-    - name: "Follow-on LOLBin / signed-binary-proxy execution on this host"
-      query: 'data_win_system_eventID:"1" AND data_win_eventdata_image:/.*(\\[Rr][Uu][Nn][Dd][Ll][Ll]32\.[Ee][Xx][Ee]|\\[Rr][Ee][Gg][Ss][Vv][Rr]32\.[Ee][Xx][Ee]|\\[Mm][Ss][Hh][Tt][Aa]\.[Ee][Xx][Ee]|\\[Ii][Nn][Ss][Tt][Aa][Ll][Ll][Uu][Tt][Ii][Ll]\.[Ee][Xx][Ee]|\\[Rr][Ee][Gg][Aa][Ss][Mm]\.[Ee][Xx][Ee]|\\[Rr][Ee][Gg][Ss][Vv][Cc][Ss]\.[Ee][Xx][Ee]|\\[Mm][Ss][Bb][Uu][Ii][Ll][Dd]\.[Ee][Xx][Ee]|\\[Cc][Ee][Rr][Tt][Uu][Tt][Ii][Ll]\.[Ee][Xx][Ee]|\\[Bb][Ii][Tt][Ss][Aa][Dd][Mm][Ii][Nn]\.[Ee][Xx][Ee]|\\[Ww][Mm][Ii][Cc]\.[Ee][Xx][Ee]|\\[Cc][Mm][Ss][Tt][Pp]\.[Ee][Xx][Ee]|\\[Oo][Dd][Bb][Cc][Cc][Oo][Nn][Ff]\.[Ee][Xx][Ee]|\\[Ff][Oo][Rr][Ff][Ii][Ll][Ee][Ss]\.[Ee][Xx][Ee]|\\[Pp][Cc][Aa][Ll][Uu][Aa]\.[Ee][Xx][Ee]|\\[Mm][Aa][Vv][Ii][Nn][Jj][Ee][Cc][Tt]\.[Ee][Xx][Ee]|\\[Ss][Cc][Rr][Ii][Pp][Tt][Rr][Uu][Nn][Nn][Ee][Rr]\.[Ee][Xx][Ee])/'
-      pivot_on: [host]
-      window: 1h
-    - name: "Memory/credential-dump creation & LSASS access on this host"
-      query: '((data_win_system_eventID:"1" AND data_win_eventdata_image:/.*(\\[Pp][Rr][Oo][Cc][Dd][Uu][Mm][Pp]\.[Ee][Xx][Ee]|\\[Pp][Rr][Oo][Cc][Dd][Uu][Mm][Pp]64\.[Ee][Xx][Ee]|\\[Ss][Qq][Ll][Dd][Uu][Mm][Pp][Ee][Rr]\.[Ee][Xx][Ee]|\\[Cc][Rr][Ee][Aa][Tt][Ee][Dd][Uu][Mm][Pp]\.[Ee][Xx][Ee]|\\[Rr][Dd][Rr][Ll][Ee][Aa][Kk][Dd][Ii][Aa][Gg]\.[Ee][Xx][Ee]|\\[Dd][Uu][Mm][Pp][Ee][Rr][Tt]\.[Ee][Xx][Ee]|\\[Nn][Aa][Nn][Oo][Dd][Uu][Mm][Pp]\.[Ee][Xx][Ee]|\\[Aa][Vv][Dd][Uu][Mm][Pp]\.[Ee][Xx][Ee])/) OR (data_win_system_eventID:"1" AND (data_win_eventdata_commandLine:/.*[Cc][Oo][Mm][Ss][Vv][Cc][Ss]\.[Dd][Ll][Ll].*/ OR data_win_eventdata_commandLine:/.*[Mm][Ii][Nn][Ii][Dd][Uu][Mm][Pp].*/ OR data_win_eventdata_commandLine:/.*[Dd][Uu][Mm][Pp][Ee][Rr][Tt].*/ OR data_win_eventdata_commandLine:/.*[Nn][Aa][Nn][Oo][Dd][Uu][Mm][Pp].*/ OR data_win_eventdata_commandLine:/.*[Ll][Ss][Aa][Ss][Ss].*/ OR data_win_eventdata_commandLine:/.*[Ss][Ee][Kk][Uu][Rr][Ll][Ss][Aa].*/ OR data_win_eventdata_commandLine:/.*[Nn][Tt][Dd][Ss]\.[Dd][Ii][Tt].*/ OR data_win_eventdata_commandLine:/.*[Nn][Tt][Dd][Ss][Uu][Tt][Ii][Ll].*/)) OR (data_win_system_eventID:"10" AND data_win_eventdata_targetImage:/.*(\\[Ll][Ss][Aa][Ss][Ss]\.[Ee][Xx][Ee])/))'
-      pivot_on: [host]
-      window: 1h
+  # Behaviour-targeted hunts the engine runs around the alert (not a sweep).
+  - name: Injector staged or launched from this rule's suspicious source locations
+    query: (data_win_system_eventID:"1" AND (data_win_eventdata_image:/.*:\\[Tt][Ee][Mm][Pp]\\.*/ OR data_win_eventdata_image:/.*:\\[Uu][Ss][Ee][Rr][Ss]\\[Pp][Uu][Bb][Ll][Ii][Cc]\\.*/ OR data_win_eventdata_image:/.*:\\[Ww][Ii][Nn][Dd][Oo][Ww][Ss]\\[Pp][Ee][Rr][Ff][Ll][Oo][Gg][Ss]\\.*/ OR data_win_eventdata_image:/.*:\\[Ww][Ii][Nn][Dd][Oo][Ww][Ss]\\[Tt][Aa][Ss][Kk][Ss]\\.*/ OR data_win_eventdata_image:/.*:\\[Ww][Ii][Nn][Dd][Oo][Ww][Ss]\\[Tt][Ee][Mm][Pp]\\.*/ OR data_win_eventdata_image:/.*\\[Aa][Pp][Pp][Dd][Aa][Tt][Aa]\\[Ll][Oo][Cc][Aa][Ll]\\[Tt][Ee][Mm][Pp]\\.*/)) OR (data_win_system_eventID:"11" AND (data_win_eventdata_targetFilename:/.*:\\[Tt][Ee][Mm][Pp]\\.*\.([Ee][Xx][Ee]|[Dd][Ll][Ll])/ OR data_win_eventdata_targetFilename:/.*\\[Uu][Ss][Ee][Rr][Ss]\\[Pp][Uu][Bb][Ll][Ii][Cc]\\.*\.([Ee][Xx][Ee]|[Dd][Ll][Ll])/ OR data_win_eventdata_targetFilename:/.*\\[Aa][Pp][Pp][Dd][Aa][Tt][Aa]\\[Ll][Oo][Cc][Aa][Ll]\\[Tt][Ee][Mm][Pp]\\.*\.([Ee][Xx][Ee]|[Dd][Ll][Ll])/))
+    pivot_on:
+    - host
+    window: 2h
+  - name: Outbound RDP from the hooked mstsc client (credentials the hook harvests)
+    query: (data_win_system_eventID:"1" AND data_win_eventdata_image:/.*\\[Mm][Ss][Tt][Ss][Cc]\.[Ee][Xx][Ee]/ AND data_win_eventdata_commandLine:/.* \/[Vv]:.*/) OR (data_win_system_eventID:"3" AND data_win_eventdata_destinationPort:"3389")
+    pivot_on:
+    - host
+    window: 2h
+  - name: 'Broader credential theft: remote-thread or process-access into LSASS'
+    query: (data_win_system_eventID:"8" AND data_win_eventdata_targetImage:/.*\\[Ll][Ss][Aa][Ss][Ss]\.[Ee][Xx][Ee]/) OR (data_win_system_eventID:"10" AND data_win_eventdata_targetImage:/.*\\[Ll][Ss][Aa][Ss][Ss]\.[Ee][Xx][Ee]/)
+    pivot_on:
+    - host
+    window: 1h
+  - name: This account's RDP (RemoteInteractive) logons — harvested-credential reuse
+    query: (data_win_system_eventID:"4624" OR data_win_system_eventID:"4625") AND data_win_eventdata_logonType:"10"
+    pivot_on:
+    - user
+    window: 6h
+  - name: Remote-execution / lateral-movement tooling launched on this host
+    query: (data_win_system_eventID:"1" AND data_win_eventdata_image:/.*(\\[Pp][Ss][Ee][Xx][Ee][Cc]\.[Ee][Xx][Ee]|\\[Pp][Ss][Ee][Xx][Ee][Ss][Vv][Cc]\.[Ee][Xx][Ee]|\\[Pp][Aa][Ee][Xx][Ee][Cc]\.[Ee][Xx][Ee]|\\[Ww][Ii][Nn][Rr][Ss]\.[Ee][Xx][Ee]|\\[Ww][Mm][Ii][Cc]\.[Ee][Xx][Ee])/) OR (data_win_system_eventID:"1" AND data_win_eventdata_image:/.*(\\[Pp][Oo][Ww][Ee][Rr][Ss][Hh][Ee][Ll][Ll]\.[Ee][Xx][Ee]|\\[Pp][Ww][Ss][Hh]\.[Ee][Xx][Ee])/ AND (data_win_eventdata_commandLine:/.*[Ii][Nn][Vv][Oo][Kk][Ee]-[Cc][Oo][Mm][Mm][Aa][Nn][Dd].*/ OR data_win_eventdata_commandLine:/.*[Ee][Nn][Tt][Ee][Rr]-[Pp][Ss][Ss][Ee][Ss][Ss][Ii][Oo][Nn].*/ OR data_win_eventdata_commandLine:/.*[Nn][Ee][Ww]-[Pp][Ss][Ss][Ee][Ss][Ss][Ii][Oo][Nn].*/))
+    pivot_on:
+    - host
+    window: 2h

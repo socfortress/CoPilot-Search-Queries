@@ -161,48 +161,58 @@ graylog:
   query: data_win_system_eventID:"3" AND data_win_eventdata_initiated:/[Tt][Rr][Uu][Ee]/ AND (data_win_eventdata_destinationHostname:/.*[Aa][Pp][Ii]\.[Dd][Rr][Oo][Pp][Bb][Oo][Xx][Aa][Pp][Ii]\.[Cc][Oo][Mm]/ OR data_win_eventdata_destinationHostname:/.*[Cc][Oo][Nn][Tt][Ee][Nn][Tt]\.[Dd][Rr][Oo][Pp][Bb][Oo][Xx][Aa][Pp][Ii]\.[Cc][Oo][Mm]/) AND _exists_:data_win_eventdata_image AND NOT (data_win_eventdata_image:/.*\\[Dd][Rr][Oo][Pp][Bb][Oo][Xx].*/)
 
 correlation:
-  # Authored by the correlation engine for review. Related CoPilot Searches to run
-  # around an alert from this rule, scoped to the same host/user/IP within the window.
+  # Authored per-rule (behaviour-researched) for the correlation engine. Related CoPilot
+  # Searches + telemetry pivots to run around an alert, scoped to its host/user/ip/domain.
   related_rules:
-    - id: 75bf09fa-1dd7-4d18-9af9-dd9e492562eb
-      name: "ADSI-Cache File Creation By Uncommon Tool"
-      reason: "next kill-chain tactic: Command and Control"
-    - id: 639c9081-f482-47d3-a0bd-ddee3d4ecd76
-      name: "All Backups Deleted Via Wbadmin.EXE"
-      reason: "next kill-chain tactic: Impact"
-    - id: 0b9ad457-2554-44c1-82c2-d56a99c42377
-      name: "Anydesk Temporary Artefact"
-      reason: "next kill-chain tactic: Command and Control"
-    - id: 7cff77e1-9663-46a3-8260-17f2e1aa9d0a
-      name: "AppX Package Installation Attempts Via AppInstaller.EXE"
-      reason: "next kill-chain tactic: Command and Control"
-    - id: 1f0f6176-6482-4027-b151-00071af39d7e
-      name: "Arbitrary File Download Via ConfigSecurityPolicy.EXE"
-      reason: "next kill-chain tactic: Exfiltration"
-    - id: eee00933-a761-4cd0-be70-c42fe91731e7
-      name: "Arbitrary File Download Via GfxDownloadWrapper.EXE"
-      reason: "next kill-chain tactic: Command and Control"
-  window: 1h
+  - id: c3dbbc9f-ef1d-470a-a90a-d343448d5875
+    name: Suspicious Non-Browser Network Communication With Telegram API
+    reason: 'Exact sibling behaviour: a non-browser process reaching a legitimate cloud web-service API for covert C2/exfil over Sysmon EID 3. Actors who abuse Dropbox (e.g. MoleRats) routinely run a parallel Telegram channel on the same host, so this firing alongside strongly corroborates web-service C2 or cloud exfil rather than a benign integration.'
+  - id: 9fbf5927-5261-4284-a71d-f681029ea574
+    name: Compress Data and Lock With Password for Exfiltration With 7-ZIP
+    reason: 'Collection/staging precursor: data compressed and password-locked on the host is the step that immediately precedes pushing it to Dropbox (T1560.001 -> T1567.002). Seeing it just before this alert reframes the Dropbox traffic as deliberate exfiltration of staged data.'
+  - id: e2e80da2-8c66-4e00-ae3c-2eebd29f6b6d
+    name: Compress Data and Lock With Password for Exfiltration With WINZIP
+    reason: 'Staging precursor, WinZip variant: the other common password-protect archiver used to collect and encrypt data before cloud upload. Covers the case the operator staged with WinZip rather than 7-Zip ahead of the Dropbox exfil.'
+  - id: e328cc73-f92a-42fb-b3fa-7c2cffda981a
+    name: Curl File Upload To File Sharing Websites
+    reason: Same exfiltration-to-cloud behaviour (T1567.002) via a different carrier (curl upload). On the same host it confirms intentional cloud exfil and often reveals a second egress path the Dropbox channel is only one part of.
+  - id: 7d1aaf3d-4304-425c-b7c3-162055e0b3ab
+    name: Potential Data Exfiltration Activity Via CommandLine Tools
+    reason: Co-occurring CLI utilities exfiltrating over web requests. It corroborates the exfil reading of the Dropbox connection and names the actual tool/command driving the upload, which the network event alone does not show.
+  - id: 85b0b087-eddf-4a2b-b033-d771fa2b9775
+    name: PowerShell Download and Execution Cradles
+    reason: 'Ingress precursor on the T1105 branch: the download cradle that fetched and launched the non-Dropbox binary now talking to the Dropbox API. It pins how the connecting process arrived on the host before it used Dropbox as a payload/C2 channel.'
+  - id: 0dba975d-a193-4ed1-a067-424df57570d1
+    name: Uncommon Network Connection Initiated By Certutil.EXE
+    reason: 'Parallel ingress-tool-transfer over the same Sysmon EID 3 outbound family: a LOLBin pulling payloads at the same time indicates a staged tool-delivery chain running alongside the Dropbox channel rather than a one-off.'
+  - id: 9c5037d1-c568-49b3-88c7-9846a5bdc2be
+    name: Suspicious Run Key from Download
+    reason: 'Follow-on persistence: a payload pulled through the Dropbox channel typically lands in a Download or temp directory and registers Run-key persistence from there. Firing shortly after this alert escalates ingress into an established foothold.'
+  window: 2h
   enrichment_searches:
-  # Rule-specific telemetry pivots the engine runs around an alert from this rule,
-  # scoped to the alert's host/user/IP within the window (behaviour-targeted, not a sweep).
-    - name: "Downloader / ingress-tool-transfer activity on this host"
-      query: '(data_win_system_eventID:"1" AND data_win_eventdata_image:/.*(\\[Cc][Ee][Rr][Tt][Uu][Tt][Ii][Ll]\.[Ee][Xx][Ee]|\\[Bb][Ii][Tt][Ss][Aa][Dd][Mm][Ii][Nn]\.[Ee][Xx][Ee]|\\[Cc][Uu][Rr][Ll]\.[Ee][Xx][Ee]|\\[Ww][Gg][Ee][Tt]\.[Ee][Xx][Ee])/) OR (data_win_eventdata_commandLine:/.*[Dd][Oo][Ww][Nn][Ll][Oo][Aa][Dd][Ss][Tt][Rr][Ii][Nn][Gg].*/ OR data_win_eventdata_commandLine:/.*[Dd][Oo][Ww][Nn][Ll][Oo][Aa][Dd][Ff][Ii][Ll][Ee].*/ OR data_win_eventdata_commandLine:/.*[Ii][Nn][Vv][Oo][Kk][Ee]-[Ww][Ee][Bb][Rr][Ee][Qq][Uu][Ee][Ss][Tt].*/ OR data_win_eventdata_commandLine:/.*[Nn][Ee][Tt]\.[Ww][Ee][Bb][Cc][Ll][Ii][Ee][Nn][Tt].*/ OR data_win_eventdata_commandLine:/.*[Ss][Tt][Aa][Rr][Tt]-[Bb][Ii][Tt][Ss][Tt][Rr][Aa][Nn][Ss][Ff][Ee][Rr].*/ OR data_win_eventdata_commandLine:/.*[Ii][Ww][Rr] .*/ OR data_win_eventdata_commandLine:/.*[Cc][Uu][Rr][Ll] .*/ OR data_win_eventdata_commandLine:/.*[Ww][Gg][Ee][Tt] .*/)'
-      pivot_on: [host]
-      window: 1h
-    - name: "Outbound transfer / cloud-storage egress on this host"
-      query: '((data_win_system_eventID:"1" AND data_win_eventdata_image:/.*(\\[Rr][Cc][Ll][Oo][Nn][Ee]\.[Ee][Xx][Ee]|\\[Cc][Uu][Rr][Ll]\.[Ee][Xx][Ee]|\\[Ww][Gg][Ee][Tt]\.[Ee][Xx][Ee]|\\[Ww][Ii][Nn][Ss][Cc][Pp]\.[Ee][Xx][Ee]|\\[Pp][Ss][Cc][Pp]\.[Ee][Xx][Ee]|\\[Mm][Ee][Gg][Aa][Cc][Mm][Dd]\.[Ee][Xx][Ee]|\\[Mm][Ee][Gg][Aa][Ss][Yy][Nn][Cc]\.[Ee][Xx][Ee])/) OR ((data_win_eventdata_commandLine:/.*[Ii][Nn][Vv][Oo][Kk][Ee]-[Rr][Ee][Ss][Tt][Mm][Ee][Tt][Hh][Oo][Dd].*/ OR data_win_eventdata_commandLine:/.*[Ss][Tt][Aa][Rr][Tt]-[Bb][Ii][Tt][Ss][Tt][Rr][Aa][Nn][Ss][Ff][Ee][Rr].*/ OR data_win_eventdata_commandLine:/.*[Rr][Cc][Ll][Oo][Nn][Ee].*/ OR data_win_eventdata_commandLine:/.*[Tt][Rr][Aa][Nn][Ss][Ff][Ee][Rr]\.[Ss][Hh].*/ OR data_win_eventdata_commandLine:/.*[Aa][Nn][Oo][Nn][Ff][Ii][Ll][Ee][Ss].*/ OR data_win_eventdata_commandLine:/.*[Pp][Aa][Ss][Tt][Ee][Bb][Ii][Nn].*/ OR data_win_eventdata_commandLine:/.*[Mm][Ee][Gg][Aa]\.[Nn][Zz].*/ OR data_win_eventdata_commandLine:/.*-[Oo][Uu][Tt][Ff][Ii][Ll][Ee].*/ OR data_win_eventdata_commandLine:/.*[Uu][Pp][Ll][Oo][Aa][Dd][Ff][Ii][Ll][Ee].*/)))'
-      pivot_on: [host]
-      window: 2h
-    - name: "Archive / staging & outbound-transfer tooling on this host"
-      query: '(((data_win_system_eventID:"1" AND data_win_eventdata_image:/.*(\\7[Zz]\.[Ee][Xx][Ee]|\\7[Zz][Aa]\.[Ee][Xx][Ee]|\\7[Zz][Rr]\.[Ee][Xx][Ee]|\\[Rr][Aa][Rr]\.[Ee][Xx][Ee]|\\[Ww][Ii][Nn][Rr][Aa][Rr]\.[Ee][Xx][Ee]|\\[Ww][Zz][Zz][Ii][Pp]\.[Ee][Xx][Ee]|\\[Mm][Aa][Kk][Ee][Cc][Aa][Bb]\.[Ee][Xx][Ee])/) OR (data_win_eventdata_commandLine:/.*[Cc][Oo][Mm][Pp][Rr][Ee][Ss][Ss]-[Aa][Rr][Cc][Hh][Ii][Vv][Ee].*/ OR data_win_eventdata_commandLine:/.*\.7[Zz].*/ OR data_win_eventdata_commandLine:/.*\.[Rr][Aa][Rr].*/ OR data_win_eventdata_commandLine:/.* -[Hh][Pp].*/)) OR (((data_win_system_eventID:"1" AND data_win_eventdata_image:/.*(\\[Rr][Cc][Ll][Oo][Nn][Ee]\.[Ee][Xx][Ee]|\\[Cc][Uu][Rr][Ll]\.[Ee][Xx][Ee]|\\[Ww][Gg][Ee][Tt]\.[Ee][Xx][Ee]|\\[Ww][Ii][Nn][Ss][Cc][Pp]\.[Ee][Xx][Ee]|\\[Pp][Ss][Cc][Pp]\.[Ee][Xx][Ee]|\\[Mm][Ee][Gg][Aa][Cc][Mm][Dd]\.[Ee][Xx][Ee]|\\[Mm][Ee][Gg][Aa][Ss][Yy][Nn][Cc]\.[Ee][Xx][Ee])/) OR ((data_win_eventdata_commandLine:/.*[Ii][Nn][Vv][Oo][Kk][Ee]-[Rr][Ee][Ss][Tt][Mm][Ee][Tt][Hh][Oo][Dd].*/ OR data_win_eventdata_commandLine:/.*[Ss][Tt][Aa][Rr][Tt]-[Bb][Ii][Tt][Ss][Tt][Rr][Aa][Nn][Ss][Ff][Ee][Rr].*/ OR data_win_eventdata_commandLine:/.*[Rr][Cc][Ll][Oo][Nn][Ee].*/ OR data_win_eventdata_commandLine:/.*[Tt][Rr][Aa][Nn][Ss][Ff][Ee][Rr]\.[Ss][Hh].*/ OR data_win_eventdata_commandLine:/.*[Aa][Nn][Oo][Nn][Ff][Ii][Ll][Ee][Ss].*/ OR data_win_eventdata_commandLine:/.*[Pp][Aa][Ss][Tt][Ee][Bb][Ii][Nn].*/ OR data_win_eventdata_commandLine:/.*[Mm][Ee][Gg][Aa]\.[Nn][Zz].*/ OR data_win_eventdata_commandLine:/.*-[Oo][Uu][Tt][Ff][Ii][Ll][Ee].*/ OR data_win_eventdata_commandLine:/.*[Uu][Pp][Ll][Oo][Aa][Dd][Ff][Ii][Ll][Ee].*/)))))'
-      pivot_on: [host]
-      window: 2h
-    - name: "Other hosts connecting to the same destination address (campaign)"
-      query: '(data_win_system_eventID:"22" OR data_win_system_eventID:"3")'
-      pivot_on: [ip]
-      window: 24h
-    - name: "Downloader / C2 tooling executed on this host"
-      query: '(data_win_system_eventID:"1" AND data_win_eventdata_image:/.*(\\[Cc][Ee][Rr][Tt][Uu][Tt][Ii][Ll]\.[Ee][Xx][Ee]|\\[Bb][Ii][Tt][Ss][Aa][Dd][Mm][Ii][Nn]\.[Ee][Xx][Ee]|\\[Cc][Uu][Rr][Ll]\.[Ee][Xx][Ee]|\\[Ww][Gg][Ee][Tt]\.[Ee][Xx][Ee])/) OR (data_win_eventdata_commandLine:/.*[Dd][Oo][Ww][Nn][Ll][Oo][Aa][Dd][Ss][Tt][Rr][Ii][Nn][Gg].*/ OR data_win_eventdata_commandLine:/.*[Dd][Oo][Ww][Nn][Ll][Oo][Aa][Dd][Ff][Ii][Ll][Ee].*/ OR data_win_eventdata_commandLine:/.*[Ii][Nn][Vv][Oo][Kk][Ee]-[Ww][Ee][Bb][Rr][Ee][Qq][Uu][Ee][Ss][Tt].*/ OR data_win_eventdata_commandLine:/.*[Nn][Ee][Tt]\.[Ww][Ee][Bb][Cc][Ll][Ii][Ee][Nn][Tt].*/ OR data_win_eventdata_commandLine:/.*[Ss][Tt][Aa][Rr][Tt]-[Bb][Ii][Tt][Ss][Tt][Rr][Aa][Nn][Ss][Ff][Ee][Rr].*/ OR data_win_eventdata_commandLine:/.*[Ii][Ww][Rr] .*/ OR data_win_eventdata_commandLine:/.*[Cc][Uu][Rr][Ll] .*/ OR data_win_eventdata_commandLine:/.*[Ww][Gg][Ee][Tt] .*/)'
-      pivot_on: [host]
-      window: 1h
+  # Behaviour-targeted hunts the engine runs around the alert (not a sweep).
+  - name: DNS resolution of the Dropbox API hostnames on this host
+    query: data_win_system_eventID:"22" AND (data_win_eventdata_queryName:/.*[Aa][Pp][Ii]\.[Dd][Rr][Oo][Pp][Bb][Oo][Xx][Aa][Pp][Ii]\.[Cc][Oo][Mm]/ OR data_win_eventdata_queryName:/.*[Cc][Oo][Nn][Tt][Ee][Nn][Tt]\.[Dd][Rr][Oo][Pp][Bb][Oo][Xx][Aa][Pp][Ii]\.[Cc][Oo][Mm]/)
+    pivot_on:
+    - host
+    window: 1h
+  - name: 'Collection staging: password-protected archiving on this host'
+    query: data_win_system_eventID:"1" AND (data_win_eventdata_image:/.*\\(7[Zz]\.[Ee][Xx][Ee]|7[Zz][Aa]\.[Ee][Xx][Ee]|7[Zz][Rr]\.[Ee][Xx][Ee]|[Ww][Ii][Nn][Rr][Aa][Rr]\.[Ee][Xx][Ee]|[Rr][Aa][Rr]\.[Ee][Xx][Ee]|[Ww][Zz][Zz][Ii][Pp]\.[Ee][Xx][Ee])/ OR data_win_eventdata_commandLine:/.* -[Hh][Pp].*/ OR data_win_eventdata_commandLine:/.*[Cc][Oo][Mm][Pp][Rr][Ee][Ss][Ss]-[Aa][Rr][Cc][Hh][Ii][Vv][Ee].*/)
+    pivot_on:
+    - host
+    window: 4h
+  - name: Staged archive files written to dropper-favored directories on this host
+    query: data_win_system_eventID:"11" AND data_win_eventdata_targetFilename:/.*\.(7[Zz]|[Rr][Aa][Rr]|[Zz][Ii][Pp]|[Tt][Aa][Rr]|[Gg][Zz]|[Cc][Aa][Bb])/ AND (data_win_eventdata_targetFilename:/.*\\[Tt][Ee][Mm][Pp]\\.*/ OR data_win_eventdata_targetFilename:/.*\\[Aa][Pp][Pp][Dd][Aa][Tt][Aa]\\.*/ OR data_win_eventdata_targetFilename:/.*\\[Pp][Rr][Oo][Gg][Rr][Aa][Mm][Dd][Aa][Tt][Aa]\\.*/ OR data_win_eventdata_targetFilename:/.*\\[Uu][Ss][Ee][Rr][Ss]\\[Pp][Uu][Bb][Ll][Ii][Cc]\\.*/)
+    pivot_on:
+    - host
+    window: 4h
+  - name: Parallel web-service C2 / cloud-exfil channels contacted from this host
+    query: (data_win_system_eventID:"22" OR data_win_system_eventID:"3") AND (data_win_eventdata_queryName:/.*([Tt][Ee][Ll][Ee][Gg][Rr][Aa][Mm]|[Dd][Ii][Ss][Cc][Oo][Rr][Dd]|[Pp][Aa][Ss][Tt][Ee][Bb][Ii][Nn]|[Mm][Ee][Gg][Aa]\.[Nn][Zz]|[Aa][Nn][Oo][Nn][Ff][Ii][Ll][Ee][Ss]|[Tt][Rr][Aa][Nn][Ss][Ff][Ee][Rr]\.[Ss][Hh]|[Ff][Ii][Ll][Ee]\.[Ii][Oo])/ OR data_win_eventdata_destinationHostname:/.*([Tt][Ee][Ll][Ee][Gg][Rr][Aa][Mm]|[Dd][Ii][Ss][Cc][Oo][Rr][Dd]|[Pp][Aa][Ss][Tt][Ee][Bb][Ii][Nn]|[Mm][Ee][Gg][Aa]\.[Nn][Zz]|[Aa][Nn][Oo][Nn][Ff][Ii][Ll][Ee][Ss]|[Tt][Rr][Aa][Nn][Ss][Ff][Ee][Rr]\.[Ss][Hh]|[Ff][Ii][Ll][Ee]\.[Ii][Oo])/)
+    pivot_on:
+    - host
+    window: 2h
+  - name: Office / script-host spawned child processes on this host
+    query: data_win_system_eventID:"1" AND data_win_eventdata_parentImage:/.*\\([Ww][Ii][Nn][Ww][Oo][Rr][Dd]\.[Ee][Xx][Ee]|[Ee][Xx][Cc][Ee][Ll]\.[Ee][Xx][Ee]|[Pp][Oo][Ww][Ee][Rr][Pp][Nn][Tt]\.[Ee][Xx][Ee]|[Oo][Uu][Tt][Ll][Oo][Oo][Kk]\.[Ee][Xx][Ee]|[Mm][Ss][Hh][Tt][Aa]\.[Ee][Xx][Ee]|[Ww][Ss][Cc][Rr][Ii][Pp][Tt]\.[Ee][Xx][Ee]|[Cc][Ss][Cc][Rr][Ii][Pp][Tt]\.[Ee][Xx][Ee])/
+    pivot_on:
+    - host
+    window: 4h

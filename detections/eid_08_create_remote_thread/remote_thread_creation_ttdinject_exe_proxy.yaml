@@ -133,40 +133,58 @@ graylog:
   query: data_win_system_eventID:"8" AND data_win_eventdata_sourceImage:/.*\\[Tt][Tt][Dd][Ii][Nn][Jj][Ee][Cc][Tt]\.[Ee][Xx][Ee]/
 
 correlation:
-  # Authored by the correlation engine for review. Related CoPilot Searches to run
-  # around an alert from this rule, scoped to the same host/user/IP within the window.
+  # Authored per-rule (behaviour-researched) for the correlation engine. Related CoPilot
+  # Searches + telemetry pivots to run around an alert, scoped to its host/user/ip/domain.
   related_rules:
-    - id: ec570e53-4c76-45a9-804d-dc3f355ff7a7
-      name: "7Zip Compressing Dump Files"
-      reason: "next kill-chain tactic: Collection"
-    - id: 0a1255c5-d732-4b62-ac02-b5152d34fb83
-      name: "ADExplorer Writing Complete AD Snapshot Into .dat File"
-      reason: "next kill-chain tactic: Discovery"
-    - id: 1ea13e8c-03ea-409b-877d-ce5c3d2c1cb3
-      name: "ADFS Database Named Pipe Connection By Uncommon Tool"
-      reason: "next kill-chain tactic: Collection"
-    - id: 75bf09fa-1dd7-4d18-9af9-dd9e492562eb
-      name: "ADSI-Cache File Creation By Uncommon Tool"
-      reason: "next kill-chain tactic: Command and Control"
-    - id: 33a2d1dd-f3b0-40bd-8baf-7974468927cc
-      name: "APT PRIVATELOG Image Load Pattern"
-      reason: "next kill-chain tactic: Privilege Escalation"
-    - id: 9aa01d62-7667-4d3b-acb8-8cb5103e2014
-      name: "APT27 - Emissary Panda Activity"
-      reason: "next kill-chain tactic: Execution"
-  window: 1h
+  - id: b27077d6-23e6-45d2-81a0-e2b356eea5fd
+    name: Use of TTDInject.exe
+    reason: 'Direct precursor, same binary: the EID 1 process-creation of the very ttdinject.exe that then spawned this remote thread. Its command line (/Launch, /ClientParams, -recordMode TTDRecorder), parent and user reveal whether this is a developer or an attacker proxy-executing a payload under the signed TTD recorder.'
+  - id: 0b4ae027-2a2d-4b93-8c7e-962caaba5b2a
+    name: Time Travel Debugging Utility Usage
+    reason: 'Reveals the proxy-execution payload: catches child processes spawned by tttracer.exe (ttdinject''s launcher). The process launched under the TTD recorder is the actual payload this injection is proxying (T1218 / T1003.001).'
+  - id: e76c8240-d68f-4773-8880-5c6f63595aaf
+    name: Time Travel Debugging Utility Usage - Image
+    reason: 'Confirms the injection landed, victim side: EID 7 image-load of the TTD recording DLLs (ttdrecord/ttdwriter/ttdloader) into the target process ttdinject''s remote thread injected, identifying the injected process.'
+  - id: a1a144b7-5c9b-4853-a559-2172be8d4a03
+    name: Remote Thread Creation In Uncommon Target Image
+    reason: 'Same EID 8 injection technique, target side: flags a remote thread landing in a commonly-abused proxy/hollowing target (calc.exe, notepad.exe, spoolsv.exe) - exactly the innocuous processes a ttdinject /Launch proxy injects into.'
+  - id: f239b326-2f41-4d6b-9dfa-c846a60ef505
+    name: Password Dumper Remote Thread in LSASS
+    reason: 'Credential-theft follow-on via the identical primitive: an EID 8 remote thread into lsass.exe with an empty start module. If the injected payload pivots to LSASS, this is the same remote-thread injection aimed at password dumping (T1003.001).'
+  - id: 6309645e-122d-4c5b-bb2b-22e4f9c2fa42
+    name: HackTool - Potential CobaltStrike Process Injection
+    reason: 'Co-occurring staged payload: Cobalt Strike beacon remote-thread start-address signatures on the same host. A signed-binary proxy injection commonly stages a CS beacon that then performs its own process injection.'
+  - id: 4f73421b-5a0b-4bbf-a892-5a7fb99bea66
+    name: Mavinject Inject DLL Into Running Process
+    reason: 'Sibling signed-binary injection tradecraft: mavinject.exe is the archetypal Microsoft-signed LOLBIN DLL injector. An operator abusing ttdinject for signed-proxy injection frequently reaches for mavinject on the same host.'
+  - id: b5c7395f-e501-4a08-94d4-57fe7a9da9d2
+    name: Potential Binary Proxy Execution Via Cdb.EXE
+    reason: 'Same tooling family: cdb.exe is the console debugger shipped in the same Debugging Tools for Windows package as ttdinject.exe, abused for identical T1127 signed-binary proxy execution - a strong sign the attacker is living off the debugging suite.'
+  window: 2h
   enrichment_searches:
-  # Rule-specific telemetry pivots the engine runs around an alert from this rule,
-  # scoped to the alert's host/user/IP within the window (behaviour-targeted, not a sweep).
-    - name: "Autostart persistence written on this host (Run keys, services, IFEO)"
-      query: '(data_win_system_eventID:"12" OR data_win_system_eventID:"13") AND (data_win_eventdata_targetObject:/.*[Cc][Uu][Rr][Rr][Ee][Nn][Tt][Vv][Ee][Rr][Ss][Ii][Oo][Nn]\\[Rr][Uu][Nn].*/ OR data_win_eventdata_targetObject:/.*[Cc][Uu][Rr][Rr][Ee][Nn][Tt][Vv][Ee][Rr][Ss][Ii][Oo][Nn]\\[Rr][Uu][Nn][Oo][Nn][Cc][Ee].*/ OR data_win_eventdata_targetObject:/.*[Cc][Uu][Rr][Rr][Ee][Nn][Tt][Cc][Oo][Nn][Tt][Rr][Oo][Ll][Ss][Ee][Tt]\\[Ss][Ee][Rr][Vv][Ii][Cc][Ee][Ss]\\.*/ OR data_win_eventdata_targetObject:/.*[Ii][Mm][Aa][Gg][Ee] [Ff][Ii][Ll][Ee] [Ee][Xx][Ee][Cc][Uu][Tt][Ii][Oo][Nn] [Oo][Pp][Tt][Ii][Oo][Nn][Ss]\\.*/ OR data_win_eventdata_targetObject:/.*[Ww][Ii][Nn][Ll][Oo][Gg][Oo][Nn]\\[Ss][Hh][Ee][Ll][Ll].*/ OR data_win_eventdata_targetObject:/.*[Ww][Ii][Nn][Ll][Oo][Gg][Oo][Nn]\\[Uu][Ss][Ee][Rr][Ii][Nn][Ii][Tt].*/ OR data_win_eventdata_targetObject:/.*[Cc][Uu][Rr][Rr][Ee][Nn][Tt][Vv][Ee][Rr][Ss][Ii][Oo][Nn]\\[Ee][Xx][Pp][Ll][Oo][Rr][Ee][Rr]\\[Rr][Uu][Nn].*/ OR data_win_eventdata_targetObject:/.*[Pp][Oo][Ll][Ii][Cc][Ii][Ee][Ss]\\[Ee][Xx][Pp][Ll][Oo][Rr][Ee][Rr]\\[Rr][Uu][Nn].*/ OR data_win_eventdata_targetObject:/.*[Cc][Uu][Rr][Rr][Ee][Nn][Tt][Vv][Ee][Rr][Ss][Ii][Oo][Nn]\\[Ww][Ii][Nn][Dd][Oo][Ww][Ss]\\[Ll][Oo][Aa][Dd].*/)'
-      pivot_on: [host]
-      window: 4h
-    - name: "Process injection / remote-thread & LSASS access on this host"
-      query: '((data_win_system_eventID:"8") OR (data_win_system_eventID:"10" AND data_win_eventdata_targetImage:/.*(\\[Ll][Ss][Aa][Ss][Ss]\.[Ee][Xx][Ee])/) OR (data_win_system_eventID:"1" AND (data_win_eventdata_commandLine:/.*[Cc][Rr][Ee][Aa][Tt][Ee][Rr][Ee][Mm][Oo][Tt][Ee][Tt][Hh][Rr][Ee][Aa][Dd].*/ OR data_win_eventdata_commandLine:/.*[Vv][Ii][Rr][Tt][Uu][Aa][Ll][Aa][Ll][Ll][Oo][Cc][Ee][Xx].*/ OR data_win_eventdata_commandLine:/.*[Ww][Rr][Ii][Tt][Ee][Pp][Rr][Oo][Cc][Ee][Ss][Ss][Mm][Ee][Mm][Oo][Rr][Yy].*/)))'
-      pivot_on: [host]
-      window: 1h
-    - name: "Follow-on LOLBin / signed-binary-proxy execution on this host"
-      query: 'data_win_system_eventID:"1" AND data_win_eventdata_image:/.*(\\[Rr][Uu][Nn][Dd][Ll][Ll]32\.[Ee][Xx][Ee]|\\[Rr][Ee][Gg][Ss][Vv][Rr]32\.[Ee][Xx][Ee]|\\[Mm][Ss][Hh][Tt][Aa]\.[Ee][Xx][Ee]|\\[Ii][Nn][Ss][Tt][Aa][Ll][Ll][Uu][Tt][Ii][Ll]\.[Ee][Xx][Ee]|\\[Rr][Ee][Gg][Aa][Ss][Mm]\.[Ee][Xx][Ee]|\\[Rr][Ee][Gg][Ss][Vv][Cc][Ss]\.[Ee][Xx][Ee]|\\[Mm][Ss][Bb][Uu][Ii][Ll][Dd]\.[Ee][Xx][Ee]|\\[Cc][Ee][Rr][Tt][Uu][Tt][Ii][Ll]\.[Ee][Xx][Ee]|\\[Bb][Ii][Tt][Ss][Aa][Dd][Mm][Ii][Nn]\.[Ee][Xx][Ee]|\\[Ww][Mm][Ii][Cc]\.[Ee][Xx][Ee]|\\[Cc][Mm][Ss][Tt][Pp]\.[Ee][Xx][Ee]|\\[Oo][Dd][Bb][Cc][Cc][Oo][Nn][Ff]\.[Ee][Xx][Ee]|\\[Ff][Oo][Rr][Ff][Ii][Ll][Ee][Ss]\.[Ee][Xx][Ee]|\\[Pp][Cc][Aa][Ll][Uu][Aa]\.[Ee][Xx][Ee]|\\[Mm][Aa][Vv][Ii][Nn][Jj][Ee][Cc][Tt]\.[Ee][Xx][Ee]|\\[Ss][Cc][Rr][Ii][Pp][Tt][Rr][Uu][Nn][Nn][Ee][Rr]\.[Ee][Xx][Ee])/'
-      pivot_on: [host]
-      window: 1h
+  # Behaviour-targeted hunts the engine runs around the alert (not a sweep).
+  - name: TTD injector / recorder launch and its proxy target on this host (ttdinject, tttracer, TTDRecorder, -recordMode)
+    query: data_win_system_eventID:"1" AND (data_win_eventdata_image:/.*\\[Tt][Tt][Dd][Ii][Nn][Jj][Ee][Cc][Tt]\.[Ee][Xx][Ee]/ OR data_win_eventdata_image:/.*\\[Tt][Tt][Tt][Rr][Aa][Cc][Ee][Rr]\.[Ee][Xx][Ee]/ OR data_win_eventdata_originalFileName:/[Tt][Tt][Dd][Ii][Nn][Jj][Ee][Cc][Tt]\.[Ee][Xx][Ee]/ OR data_win_eventdata_commandLine:/.*[Tt][Tt][Dd][Rr][Ee][Cc][Oo][Rr][Dd][Ee][Rr].*/ OR data_win_eventdata_commandLine:/.*-[Rr][Ee][Cc][Oo][Rr][Dd][Mm][Oo][Dd][Ee].*/)
+    pivot_on:
+    - host
+    window: 1h
+  - name: TTD recording DLLs loaded into the injected target on this host (ttdrecord/ttdwriter/ttdloader)
+    query: data_win_system_eventID:"7" AND (data_win_eventdata_imageLoaded:/.*\\[Tt][Tt][Dd][Rr][Ee][Cc][Oo][Rr][Dd]\.[Dd][Ll][Ll]/ OR data_win_eventdata_imageLoaded:/.*\\[Tt][Tt][Dd][Ww][Rr][Ii][Tt][Ee][Rr]\.[Dd][Ll][Ll]/ OR data_win_eventdata_imageLoaded:/.*\\[Tt][Tt][Dd][Ll][Oo][Aa][Dd][Ee][Rr]\.[Dd][Ll][Ll]/)
+    pivot_on:
+    - host
+    window: 1h
+  - name: LSASS credential access or dumping on this host (process access, remote thread into LSASS, minidump/sekurlsa/comsvcs)
+    query: (data_win_system_eventID:"10" AND data_win_eventdata_targetImage:/.*\\[Ll][Ss][Aa][Ss][Ss]\.[Ee][Xx][Ee]/) OR (data_win_system_eventID:"8" AND data_win_eventdata_targetImage:/.*\\[Ll][Ss][Aa][Ss][Ss]\.[Ee][Xx][Ee]/) OR (data_win_system_eventID:"1" AND (data_win_eventdata_commandLine:/.*[Mm][Ii][Nn][Ii][Dd][Uu][Mm][Pp].*/ OR data_win_eventdata_commandLine:/.*[Ss][Ee][Kk][Uu][Rr][Ll][Ss][Aa].*/ OR data_win_eventdata_commandLine:/.*[Cc][Oo][Mm][Ss][Vv][Cc][Ss]\.[Dd][Ll][Ll].*/))
+    pivot_on:
+    - host
+    window: 2h
+  - name: Other signed-binary / debugging-utility injectors on this host (mavinject, cdb, ntsd, tracker, AccCheckConsole, msra)
+    query: data_win_system_eventID:"1" AND (data_win_eventdata_image:/.*\\[Mm][Aa][Vv][Ii][Nn][Jj][Ee][Cc][Tt]\.[Ee][Xx][Ee]/ OR data_win_eventdata_image:/.*\\[Cc][Dd][Bb]\.[Ee][Xx][Ee]/ OR data_win_eventdata_image:/.*\\[Nn][Tt][Ss][Dd]\.[Ee][Xx][Ee]/ OR data_win_eventdata_image:/.*\\[Tt][Rr][Aa][Cc][Kk][Ee][Rr]\.[Ee][Xx][Ee]/ OR data_win_eventdata_image:/.*\\[Aa][Cc][Cc][Cc][Hh][Ee][Cc][Kk][Cc][Oo][Nn][Ss][Oo][Ll][Ee]\.[Ee][Xx][Ee]/ OR data_win_eventdata_image:/.*\\[Mm][Ss][Rr][Aa]\.[Ee][Xx][Ee]/ OR data_win_eventdata_originalFileName:/[Mm][Aa][Vv][Ii][Nn][Jj][Ee][Cc][Tt]\.[Ee][Xx][Ee]/)
+    pivot_on:
+    - host
+    window: 2h
+  - name: C2 egress from debugging utilities or proxy carriers on this host (ttdinject/tttracer/rundll32/regsvr32/mshta network connections)
+    query: data_win_system_eventID:"3" AND (data_win_eventdata_image:/.*\\[Tt][Tt][Dd][Ii][Nn][Jj][Ee][Cc][Tt]\.[Ee][Xx][Ee]/ OR data_win_eventdata_image:/.*\\[Tt][Tt][Tt][Rr][Aa][Cc][Ee][Rr]\.[Ee][Xx][Ee]/ OR data_win_eventdata_image:/.*\\[Rr][Uu][Nn][Dd][Ll][Ll]32\.[Ee][Xx][Ee]/ OR data_win_eventdata_image:/.*\\[Rr][Ee][Gg][Ss][Vv][Rr]32\.[Ee][Xx][Ee]/ OR data_win_eventdata_image:/.*\\[Mm][Ss][Hh][Tt][Aa]\.[Ee][Xx][Ee]/)
+    pivot_on:
+    - host
+    window: 1h

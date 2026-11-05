@@ -157,19 +157,52 @@ graylog:
   query: data_win_system_eventID:"10" AND data_win_eventdata_sourceImage:/.*\\[Ww][Ee][Rr][Ff][Aa][Uu][Ll][Tt][Ss][Ee][Cc][Uu][Rr][Ee]\.[Ee][Xx][Ee]/ AND data_win_eventdata_targetImage:/.*\\[Mm][Ss][Mm][Pp][Ee][Nn][Gg]\.[Ee][Xx][Ee]/ AND (data_win_eventdata_callTrace:/.*\\[Dd][Bb][Gg][Cc][Oo][Rr][Ee]\.[Dd][Ll][Ll].*/ OR data_win_eventdata_callTrace:/.*\\[Dd][Bb][Gg][Hh][Ee][Ll][Pp]\.[Dd][Ll][Ll].*/)
 
 correlation:
-  # Authored by the correlation engine for review.
+  # Authored per-rule (behaviour-researched) for the correlation engine. Related CoPilot
+  # Searches + telemetry pivots to run around an alert, scoped to its host/user/ip/domain.
+  related_rules:
+  - id: c598cc0c-9e70-4852-b9eb-8921af79f598
+    name: Hacktool - EDR-Freeze Execution
+    reason: 'The EID 1 launch half of this exact attack: the EDR-Freeze.exe process (matched by name/IMPHASH) is what drives WerFaultSecure''s MiniDump against MsMpEng seen here. Expect it on the same host within seconds before this access; it names the operator and parent behind the freeze.'
+  - id: 1f0b4cac-9c81-41f4-95d0-8475ff46b3e2
+    name: PPL Tampering Via WerFaultSecure
+    reason: 'The command line that starts this very access: WerFaultSecure.exe spawned with the PPL-abuse args (/pid /tid /h /encfile 268310) to freeze or dump a protected process. It identifies the parent, user and target PID behind the WerFaultSecure->MsMpEng access.'
+  - id: 9f5c1d59-33be-4e60-bcab-85d2f566effd
+    name: Suspicious Process Access to LSASS with Dbgcore/Dbghelp DLLs
+    reason: Same EID 10 + dbgcore/dbghelp MiniDumpWriteDump primitive, turned on LSASS for credential theft. The operator who freezes Defender with this technique routinely dumps LSASS in the same session; on this host in the window it is the payoff the freeze was meant to cover.
+  - id: e5b33f7d-eb93-48b6-9851-09e1e610b6d7
+    name: Credential Dumping Attempt Via WerFault
+    reason: Sibling WER-family abuse (WerFault->LSASS at 0x1FFFFF) harvesting credentials. Dumping LSASS while MsMpEng is suspended is the classic objective of an EDR-Freeze; co-occurrence on this host confirms credential access carried out under AV cover.
+  - id: eb2d07d4-49cb-4523-801a-da002df36602
+    name: HackTool - EDRSilencer Execution
+    reason: 'Same ''blind the defenses'' T1685 playbook by a different mechanism: EDRSilencer mutes the EDR agent via WFP filters while this suspends the AV process. Both on one host in the window signal a deliberate defense-neutralization stage before the main action.'
+  - id: b28e58e4-2a72-4fae-bdee-0fbe904db642
+    name: Windows Defender Real-time Protection Disabled
+    reason: 'Persistent counterpart to the transient freeze: the operator also turning Defender real-time protection off outright. It corroborates a concerted effort to neutralize MsMpEng on this host rather than a one-off benign Windows Error Reporting event.'
+  window: 1h
   enrichment_searches:
-  # Rule-specific telemetry pivots the engine runs around an alert from this rule,
-  # scoped to the alert's host/user/IP within the window (behaviour-targeted, not a sweep).
-    - name: "Process injection / remote-thread & LSASS access on this host"
-      query: '((data_win_system_eventID:"8") OR (data_win_system_eventID:"10" AND data_win_eventdata_targetImage:/.*(\\[Ll][Ss][Aa][Ss][Ss]\.[Ee][Xx][Ee])/) OR (data_win_system_eventID:"1" AND (data_win_eventdata_commandLine:/.*[Cc][Rr][Ee][Aa][Tt][Ee][Rr][Ee][Mm][Oo][Tt][Ee][Tt][Hh][Rr][Ee][Aa][Dd].*/ OR data_win_eventdata_commandLine:/.*[Vv][Ii][Rr][Tt][Uu][Aa][Ll][Aa][Ll][Ll][Oo][Cc][Ee][Xx].*/ OR data_win_eventdata_commandLine:/.*[Ww][Rr][Ii][Tt][Ee][Pp][Rr][Oo][Cc][Ee][Ss][Ss][Mm][Ee][Mm][Oo][Rr][Yy].*/)))'
-      pivot_on: [host]
-      window: 1h
-    - name: "Follow-on LOLBin / signed-binary-proxy execution on this host"
-      query: 'data_win_system_eventID:"1" AND data_win_eventdata_image:/.*(\\[Rr][Uu][Nn][Dd][Ll][Ll]32\.[Ee][Xx][Ee]|\\[Rr][Ee][Gg][Ss][Vv][Rr]32\.[Ee][Xx][Ee]|\\[Mm][Ss][Hh][Tt][Aa]\.[Ee][Xx][Ee]|\\[Ii][Nn][Ss][Tt][Aa][Ll][Ll][Uu][Tt][Ii][Ll]\.[Ee][Xx][Ee]|\\[Rr][Ee][Gg][Aa][Ss][Mm]\.[Ee][Xx][Ee]|\\[Rr][Ee][Gg][Ss][Vv][Cc][Ss]\.[Ee][Xx][Ee]|\\[Mm][Ss][Bb][Uu][Ii][Ll][Dd]\.[Ee][Xx][Ee]|\\[Cc][Ee][Rr][Tt][Uu][Tt][Ii][Ll]\.[Ee][Xx][Ee]|\\[Bb][Ii][Tt][Ss][Aa][Dd][Mm][Ii][Nn]\.[Ee][Xx][Ee]|\\[Ww][Mm][Ii][Cc]\.[Ee][Xx][Ee]|\\[Cc][Mm][Ss][Tt][Pp]\.[Ee][Xx][Ee]|\\[Oo][Dd][Bb][Cc][Cc][Oo][Nn][Ff]\.[Ee][Xx][Ee]|\\[Ff][Oo][Rr][Ff][Ii][Ll][Ee][Ss]\.[Ee][Xx][Ee]|\\[Pp][Cc][Aa][Ll][Uu][Aa]\.[Ee][Xx][Ee]|\\[Mm][Aa][Vv][Ii][Nn][Jj][Ee][Cc][Tt]\.[Ee][Xx][Ee]|\\[Ss][Cc][Rr][Ii][Pp][Tt][Rr][Uu][Nn][Nn][Ee][Rr]\.[Ee][Xx][Ee])/'
-      pivot_on: [host]
-      window: 1h
-    - name: "Memory/credential-dump creation & LSASS access on this host"
-      query: '((data_win_system_eventID:"1" AND data_win_eventdata_image:/.*(\\[Pp][Rr][Oo][Cc][Dd][Uu][Mm][Pp]\.[Ee][Xx][Ee]|\\[Pp][Rr][Oo][Cc][Dd][Uu][Mm][Pp]64\.[Ee][Xx][Ee]|\\[Ss][Qq][Ll][Dd][Uu][Mm][Pp][Ee][Rr]\.[Ee][Xx][Ee]|\\[Cc][Rr][Ee][Aa][Tt][Ee][Dd][Uu][Mm][Pp]\.[Ee][Xx][Ee]|\\[Rr][Dd][Rr][Ll][Ee][Aa][Kk][Dd][Ii][Aa][Gg]\.[Ee][Xx][Ee]|\\[Dd][Uu][Mm][Pp][Ee][Rr][Tt]\.[Ee][Xx][Ee]|\\[Nn][Aa][Nn][Oo][Dd][Uu][Mm][Pp]\.[Ee][Xx][Ee]|\\[Aa][Vv][Dd][Uu][Mm][Pp]\.[Ee][Xx][Ee])/) OR (data_win_system_eventID:"1" AND (data_win_eventdata_commandLine:/.*[Cc][Oo][Mm][Ss][Vv][Cc][Ss]\.[Dd][Ll][Ll].*/ OR data_win_eventdata_commandLine:/.*[Mm][Ii][Nn][Ii][Dd][Uu][Mm][Pp].*/ OR data_win_eventdata_commandLine:/.*[Dd][Uu][Mm][Pp][Ee][Rr][Tt].*/ OR data_win_eventdata_commandLine:/.*[Nn][Aa][Nn][Oo][Dd][Uu][Mm][Pp].*/ OR data_win_eventdata_commandLine:/.*[Ll][Ss][Aa][Ss][Ss].*/ OR data_win_eventdata_commandLine:/.*[Ss][Ee][Kk][Uu][Rr][Ll][Ss][Aa].*/ OR data_win_eventdata_commandLine:/.*[Nn][Tt][Dd][Ss]\.[Dd][Ii][Tt].*/ OR data_win_eventdata_commandLine:/.*[Nn][Tt][Dd][Ss][Uu][Tt][Ii][Ll].*/)) OR (data_win_system_eventID:"10" AND data_win_eventdata_targetImage:/.*(\\[Ll][Ss][Aa][Ss][Ss]\.[Ee][Xx][Ee])/))'
-      pivot_on: [host]
-      window: 1h
+  # Behaviour-targeted hunts the engine runs around the alert (not a sweep).
+  - name: WerFaultSecure / EDR-Freeze tool launch that drove this access (EID 1)
+    query: data_win_system_eventID:"1" AND (data_win_eventdata_image:/.*\\[Ww][Ee][Rr][Ff][Aa][Uu][Ll][Tt][Ss][Ee][Cc][Uu][Rr][Ee]\.[Ee][Xx][Ee]/ OR data_win_eventdata_originalFileName:/[Ww][Ee][Rr][Ff][Aa][Uu][Ll][Tt][Ss][Ee][Cc][Uu][Rr][Ee]\.[Ee][Xx][Ee]/ OR data_win_eventdata_image:/.*\\[Ee][Dd][Rr]-?[Ff][Rr][Ee][Ee][Zz][Ee].*\.[Ee][Xx][Ee]/ OR data_win_eventdata_commandLine:/.* 268310.*/)
+    pivot_on:
+    - host
+    window: 1h
+  - name: LSASS credential dumping under the Defender freeze (EID 10/8/1)
+    query: (data_win_system_eventID:"10" AND data_win_eventdata_targetImage:/.*\\[Ll][Ss][Aa][Ss][Ss]\.[Ee][Xx][Ee]/) OR (data_win_system_eventID:"8" AND data_win_eventdata_targetImage:/.*\\[Ll][Ss][Aa][Ss][Ss]\.[Ee][Xx][Ee]/) OR (data_win_system_eventID:"1" AND (data_win_eventdata_image:/.*\\[Pp][Rr][Oo][Cc][Dd][Uu][Mm][Pp].*\.[Ee][Xx][Ee]/ OR data_win_eventdata_image:/.*\\[Nn][Aa][Nn][Oo][Dd][Uu][Mm][Pp]\.[Ee][Xx][Ee]/ OR data_win_eventdata_image:/.*\\[Mm][Ii][Mm][Ii][Kk][Aa][Tt][Zz]\.[Ee][Xx][Ee]/ OR data_win_eventdata_commandLine:/.*[Cc][Oo][Mm][Ss][Vv][Cc][Ss].*[Mm][Ii][Nn][Ii][Dd][Uu][Mm][Pp].*/ OR data_win_eventdata_commandLine:/.*[Ss][Ee][Kk][Uu][Rr][Ll][Ss][Aa].*/))
+    pivot_on:
+    - host
+    window: 1h
+  - name: Parallel Defender / EDR neutralization on this host (Set-MpPreference, MpCmdRun, sc stop, EDRSilencer, registry)
+    query: (data_win_system_eventID:"1" AND (data_win_eventdata_commandLine:/.*[Ss][Ee][Tt]-[Mm][Pp][Pp][Rr][Ee][Ff][Ee][Rr][Ee][Nn][Cc][Ee].*/ OR data_win_eventdata_commandLine:/.*[Rr][Ee][Mm][Oo][Vv][Ee]-[Mm][Pp][Pp][Rr][Ee][Ff][Ee][Rr][Ee][Nn][Cc][Ee].*/ OR data_win_eventdata_commandLine:/.*[Dd][Ii][Ss][Aa][Bb][Ll][Ee][Rr][Ee][Aa][Ll][Tt][Ii][Mm][Ee][Mm][Oo][Nn][Ii][Tt][Oo][Rr][Ii][Nn][Gg].*/ OR data_win_eventdata_image:/.*\\[Mm][Pp][Cc][Mm][Dd][Rr][Uu][Nn]\.[Ee][Xx][Ee]/ OR data_win_eventdata_image:/.*\\[Ee][Dd][Rr][Ss][Ii][Ll][Ee][Nn][Cc][Ee][Rr].*\.[Ee][Xx][Ee]/ OR (data_win_eventdata_commandLine:/.*[Ss][Tt][Oo][Pp].*/ AND (data_win_eventdata_commandLine:/.*[Ww][Ii][Nn][Dd][Ee][Ff][Ee][Nn][Dd].*/ OR data_win_eventdata_commandLine:/.*[Ss][Ee][Nn][Ss][Ee].*/)))) OR (data_win_system_eventID:"13" AND data_win_eventdata_targetObject:/.*([Ww][Ii][Nn][Dd][Oo][Ww][Ss] [Dd][Ee][Ff][Ee][Nn][Dd][Ee][Rr]|[Dd][Ii][Ss][Aa][Bb][Ll][Ee][Aa][Nn][Tt][Ii][Ss][Pp][Yy][Ww][Aa][Rr][Ee]|[Dd][Ii][Ss][Aa][Bb][Ll][Ee][Rr][Ee][Aa][Ll][Tt][Ii][Mm][Ee][Mm][Oo][Nn][Ii][Tt][Oo][Rr][Ii][Nn][Gg]|[Tt][Aa][Mm][Pp][Ee][Rr][Pp][Rr][Oo][Tt][Ee][Cc][Tt][Ii][Oo][Nn]).*/)
+    pivot_on:
+    - host
+    window: 2h
+  - name: Payload execution from user-writable dirs & remote-thread injection while MsMpEng is suspended
+    query: (data_win_system_eventID:"8") OR (data_win_system_eventID:"1" AND data_win_eventdata_image:/.*\\([Aa][Pp][Pp][Dd][Aa][Tt][Aa]|[Tt][Ee][Mm][Pp]|[Pp][Uu][Bb][Ll][Ii][Cc]|[Pp][Rr][Oo][Gg][Rr][Aa][Mm][Dd][Aa][Tt][Aa]|[Dd][Oo][Ww][Nn][Ll][Oo][Aa][Dd][Ss])\\.*\.[Ee][Xx][Ee]/)
+    pivot_on:
+    - host
+    window: 1h
+  - name: Foothold/persistence established during the Defender blind window (service, scheduled task, Run key)
+    query: (data_win_system_eventID:"1" AND data_win_eventdata_image:/.*\\[Ss][Cc]\.[Ee][Xx][Ee]/ AND data_win_eventdata_commandLine:/.*[Cc][Rr][Ee][Aa][Tt][Ee].*/) OR (data_win_system_eventID:"1" AND data_win_eventdata_image:/.*\\[Ss][Cc][Hh][Tt][Aa][Ss][Kk][Ss]\.[Ee][Xx][Ee]/ AND data_win_eventdata_commandLine:/.*\/[Cc][Rr][Ee][Aa][Tt][Ee].*/) OR (data_win_system_eventID:"13" AND data_win_eventdata_targetObject:/.*\\[Cc][Uu][Rr][Rr][Ee][Nn][Tt][Vv][Ee][Rr][Ss][Ii][Oo][Nn]\\[Rr][Uu][Nn].*/)
+    pivot_on:
+    - host
+    window: 2h

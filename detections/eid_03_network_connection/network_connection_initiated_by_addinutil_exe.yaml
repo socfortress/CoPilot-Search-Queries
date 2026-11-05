@@ -142,27 +142,58 @@ graylog:
   query: data_win_system_eventID:"3" AND data_win_eventdata_initiated:/[Tt][Rr][Uu][Ee]/ AND data_win_eventdata_image:/.*\\[Aa][Dd][Dd][Ii][Nn][Uu][Tt][Ii][Ll]\.[Ee][Xx][Ee]/
 
 correlation:
-  # Authored by the correlation engine for review.
+  # Authored per-rule (behaviour-researched) for the correlation engine. Related CoPilot
+  # Searches + telemetry pivots to run around an alert, scoped to its host/user/ip/domain.
+  related_rules:
+  - id: 631b22a4-70f4-4e2f-9ea8-42f84d9df6d8
+    name: Suspicious AddinUtil.EXE CommandLine Execution
+    reason: 'Same-host/same-process precursor: fires when AddinUtil.exe is launched with -AddInRoot:/-PipelineRoot: pointing at Temp/Desktop/Downloads/Public, loading the attacker''s Addins.Store payload - that redirected add-in assembly is almost certainly what is now beaconing in this EID 3 connection.'
+  - id: b5746143-59d6-4603-8d06-acbd60e166ee
+    name: Uncommon Child Process Of AddinUtil.EXE
+    reason: 'Same-host/same-process precursor: AddinUtil spawning a non-conhost/WerFault child is the proxy-execution payload; the outbound connection in this alert may originate from that spawned process, so it names the executing malware.'
+  - id: 6120ac2a-a34b-42c0-a9bd-1fb9f459f348
+    name: AddinUtil.EXE Execution From Uncommon Directory
+    reason: 'Same-host precursor: shows AddinUtil.exe ran from a dropped, non-Microsoft.NET\Framework path (delivery stage) - the reason a trusted LOLBAS binary came to make an unexpected outbound connection.'
+  - id: 4f2cd9b6-4a17-440f-bb2a-687abb65993a
+    name: Uncommon AddinUtil.EXE CommandLine Execution
+    reason: 'Same-host precursor: AddInRoot/PipelineRoot set to a non-VSTA path is the broader weaponization signal that the add-in pipeline was redirected to attacker content immediately before this connection fired.'
+  - id: 7b434893-c57d-4f41-908d-6a17bf1ae98f
+    name: Network Connection Initiated From Process Located In Potentially Suspicious Or Uncommon Location
+    reason: 'Same EID 3 event co-detection: if AddinUtil.exe was executed from a suspicious path (this rule''s location list even includes \Windows\addins\), it fires on the identical initiated connection and corroborates the beacon independently of the image name.'
+  - id: 4fbf9270-43da-11ec-9486-acde48001122
+    name: Windows InstallUtil Remote Network Connection
+    reason: 'Closest .NET Framework LOLBin cousin: InstallUtil.exe (same Microsoft.NET\Framework* family) reaching a remote URL is the sibling signed-binary-proxy + ingress technique attackers pair with AddinUtil in the same intrusion.'
+  - id: 50e54b8d-ad73-43f8-96a1-5191685b17a4
+    name: Silenttrinity Stager Msbuild Activity
+    reason: 'Near-identical behaviour on the same host: another signed .NET Framework utility (MSBuild) initiating an EID 3 C2 connection over 80/443 - the same ''.NET LOLBin beaconing'' pattern, and evidence a known C2 framework is active.'
+  - id: 0dba975d-a193-4ed1-a067-424df57570d1
+    name: Uncommon Network Connection Initiated By Certutil.EXE
+    reason: 'Likely follow-on: once AddinUtil establishes C2, certutil.exe is the classic next step to pull the second-stage payload; its appearance on the same host in the window expands this into a staged ingress intrusion.'
+  window: 1h
   enrichment_searches:
-  # Rule-specific telemetry pivots the engine runs around an alert from this rule,
-  # scoped to the alert's host/user/IP within the window (behaviour-targeted, not a sweep).
-    - name: "Follow-on LOLBin / signed-binary-proxy execution on this host"
-      query: 'data_win_system_eventID:"1" AND data_win_eventdata_image:/.*(\\[Rr][Uu][Nn][Dd][Ll][Ll]32\.[Ee][Xx][Ee]|\\[Rr][Ee][Gg][Ss][Vv][Rr]32\.[Ee][Xx][Ee]|\\[Mm][Ss][Hh][Tt][Aa]\.[Ee][Xx][Ee]|\\[Ii][Nn][Ss][Tt][Aa][Ll][Ll][Uu][Tt][Ii][Ll]\.[Ee][Xx][Ee]|\\[Rr][Ee][Gg][Aa][Ss][Mm]\.[Ee][Xx][Ee]|\\[Rr][Ee][Gg][Ss][Vv][Cc][Ss]\.[Ee][Xx][Ee]|\\[Mm][Ss][Bb][Uu][Ii][Ll][Dd]\.[Ee][Xx][Ee]|\\[Cc][Ee][Rr][Tt][Uu][Tt][Ii][Ll]\.[Ee][Xx][Ee]|\\[Bb][Ii][Tt][Ss][Aa][Dd][Mm][Ii][Nn]\.[Ee][Xx][Ee]|\\[Ww][Mm][Ii][Cc]\.[Ee][Xx][Ee]|\\[Cc][Mm][Ss][Tt][Pp]\.[Ee][Xx][Ee]|\\[Oo][Dd][Bb][Cc][Cc][Oo][Nn][Ff]\.[Ee][Xx][Ee]|\\[Ff][Oo][Rr][Ff][Ii][Ll][Ee][Ss]\.[Ee][Xx][Ee]|\\[Pp][Cc][Aa][Ll][Uu][Aa]\.[Ee][Xx][Ee]|\\[Mm][Aa][Vv][Ii][Nn][Jj][Ee][Cc][Tt]\.[Ee][Xx][Ee]|\\[Ss][Cc][Rr][Ii][Pp][Tt][Rr][Uu][Nn][Nn][Ee][Rr]\.[Ee][Xx][Ee])/'
-      pivot_on: [host]
-      window: 1h
-    - name: "Other executions of this tool-set on this host (any arguments)"
-      query: 'data_win_system_eventID:"1" AND data_win_eventdata_image:/.*(\\[Aa][Dd][Dd][Ii][Nn][Uu][Tt][Ii][Ll]\.[Ee][Xx][Ee])/'
-      pivot_on: [host]
-      window: 2h
-    - name: "Other hosts connecting to the same destination address (campaign)"
-      query: '(data_win_system_eventID:"22" OR data_win_system_eventID:"3")'
-      pivot_on: [ip]
-      window: 24h
-    - name: "Downloader / C2 tooling executed on this host"
-      query: '(data_win_system_eventID:"1" AND data_win_eventdata_image:/.*(\\[Cc][Ee][Rr][Tt][Uu][Tt][Ii][Ll]\.[Ee][Xx][Ee]|\\[Bb][Ii][Tt][Ss][Aa][Dd][Mm][Ii][Nn]\.[Ee][Xx][Ee]|\\[Cc][Uu][Rr][Ll]\.[Ee][Xx][Ee]|\\[Ww][Gg][Ee][Tt]\.[Ee][Xx][Ee])/) OR (data_win_eventdata_commandLine:/.*[Dd][Oo][Ww][Nn][Ll][Oo][Aa][Dd][Ss][Tt][Rr][Ii][Nn][Gg].*/ OR data_win_eventdata_commandLine:/.*[Dd][Oo][Ww][Nn][Ll][Oo][Aa][Dd][Ff][Ii][Ll][Ee].*/ OR data_win_eventdata_commandLine:/.*[Ii][Nn][Vv][Oo][Kk][Ee]-[Ww][Ee][Bb][Rr][Ee][Qq][Uu][Ee][Ss][Tt].*/ OR data_win_eventdata_commandLine:/.*[Nn][Ee][Tt]\.[Ww][Ee][Bb][Cc][Ll][Ii][Ee][Nn][Tt].*/ OR data_win_eventdata_commandLine:/.*[Ss][Tt][Aa][Rr][Tt]-[Bb][Ii][Tt][Ss][Tt][Rr][Aa][Nn][Ss][Ff][Ee][Rr].*/ OR data_win_eventdata_commandLine:/.*[Ii][Ww][Rr] .*/ OR data_win_eventdata_commandLine:/.*[Cc][Uu][Rr][Ll] .*/ OR data_win_eventdata_commandLine:/.*[Ww][Gg][Ee][Tt] .*/)'
-      pivot_on: [host]
-      window: 1h
-    - name: "DNS queries by script interpreters / LOLBins on this host"
-      query: 'data_win_system_eventID:"22" AND (data_win_eventdata_image:/.*(\\[Pp][Oo][Ww][Ee][Rr][Ss][Hh][Ee][Ll][Ll]\.[Ee][Xx][Ee]|\\[Pp][Ww][Ss][Hh]\.[Ee][Xx][Ee]|\\[Pp][Oo][Ww][Ee][Rr][Ss][Hh][Ee][Ll][Ll]_[Ii][Ss][Ee]\.[Ee][Xx][Ee]|\\[Cc][Mm][Dd]\.[Ee][Xx][Ee]|\\[Ww][Ss][Cc][Rr][Ii][Pp][Tt]\.[Ee][Xx][Ee]|\\[Cc][Ss][Cc][Rr][Ii][Pp][Tt]\.[Ee][Xx][Ee]|\\[Mm][Ss][Hh][Tt][Aa]\.[Ee][Xx][Ee]|\\[Rr][Uu][Nn][Dd][Ll][Ll]32\.[Ee][Xx][Ee]|\\[Rr][Ee][Gg][Ss][Vv][Rr]32\.[Ee][Xx][Ee]|\\[Mm][Ss][Hh][Tt][Aa]\.[Ee][Xx][Ee]|\\[Ii][Nn][Ss][Tt][Aa][Ll][Ll][Uu][Tt][Ii][Ll]\.[Ee][Xx][Ee]|\\[Rr][Ee][Gg][Aa][Ss][Mm]\.[Ee][Xx][Ee]|\\[Rr][Ee][Gg][Ss][Vv][Cc][Ss]\.[Ee][Xx][Ee]|\\[Mm][Ss][Bb][Uu][Ii][Ll][Dd]\.[Ee][Xx][Ee]|\\[Cc][Ee][Rr][Tt][Uu][Tt][Ii][Ll]\.[Ee][Xx][Ee]|\\[Bb][Ii][Tt][Ss][Aa][Dd][Mm][Ii][Nn]\.[Ee][Xx][Ee]|\\[Ww][Mm][Ii][Cc]\.[Ee][Xx][Ee]|\\[Cc][Mm][Ss][Tt][Pp]\.[Ee][Xx][Ee])/ OR data_win_eventdata_image:/.*(\\[Oo][Dd][Bb][Cc][Cc][Oo][Nn][Ff]\.[Ee][Xx][Ee]|\\[Ff][Oo][Rr][Ff][Ii][Ll][Ee][Ss]\.[Ee][Xx][Ee]|\\[Pp][Cc][Aa][Ll][Uu][Aa]\.[Ee][Xx][Ee]|\\[Mm][Aa][Vv][Ii][Nn][Jj][Ee][Cc][Tt]\.[Ee][Xx][Ee]|\\[Ss][Cc][Rr][Ii][Pp][Tt][Rr][Uu][Nn][Nn][Ee][Rr]\.[Ee][Xx][Ee])/)'
-      pivot_on: [host]
-      window: 1h
+  # Behaviour-targeted hunts the engine runs around the alert (not a sweep).
+  - name: AddinUtil.EXE execution and command line on this host (recover the weaponization)
+    query: data_win_system_eventID:"1" AND (data_win_eventdata_image:/.*\\[Aa][Dd][Dd][Ii][Nn][Uu][Tt][Ii][Ll]\.[Ee][Xx][Ee]/ OR data_win_eventdata_originalFileName:/[Aa][Dd][Dd][Ii][Nn][Uu][Tt][Ii][Ll]\.[Ee][Xx][Ee]/)
+    pivot_on:
+    - host
+    window: 2h
+  - name: Child processes spawned by AddinUtil.EXE on this host (proxy-exec payload)
+    query: data_win_system_eventID:"1" AND data_win_eventdata_parentImage:/.*\\[Aa][Dd][Dd][Ii][Nn][Uu][Tt][Ii][Ll]\.[Ee][Xx][Ee]/
+    pivot_on:
+    - host
+    window: 1h
+  - name: Add-in pipeline / Addins.Store payload dropped on this host
+    query: data_win_system_eventID:"11" AND (data_win_eventdata_targetFilename:/.*[Aa][Dd][Dd][Ii][Nn][Ss]\.[Ss][Tt][Oo][Rr][Ee]/ OR data_win_eventdata_targetFilename:/.*\\[Hh][Oo][Ss][Tt][Ss][Ii][Dd][Ee][Aa][Dd][Aa][Pp][Tt][Ee][Rr][Ss]\\.*/ OR data_win_eventdata_targetFilename:/.*\\[Aa][Dd][Dd][Ii][Nn][Ss][Ii][Dd][Ee][Aa][Dd][Aa][Pp][Tt][Ee][Rr][Ss]\\.*/ OR data_win_eventdata_targetFilename:/.*\\[Aa][Dd][Dd][Ii][Nn][Vv][Ii][Ee][Ww][Ss]\\.*/ OR data_win_eventdata_targetFilename:/.*\\[Pp][Ii][Pp][Ee][Ll][Ii][Nn][Ee][Ss][Ee][Gg][Mm][Ee][Nn][Tt][Ss]\\.*/)
+    pivot_on:
+    - host
+    window: 2h
+  - name: DNS resolution of the C2 by AddinUtil / script interpreters on this host
+    query: data_win_system_eventID:"22" AND data_win_eventdata_image:/.*(\\[Aa][Dd][Dd][Ii][Nn][Uu][Tt][Ii][Ll]\.[Ee][Xx][Ee]|\\[Pp][Oo][Ww][Ee][Rr][Ss][Hh][Ee][Ll][Ll]\.[Ee][Xx][Ee]|\\[Pp][Ww][Ss][Hh]\.[Ee][Xx][Ee]|\\[Cc][Mm][Dd]\.[Ee][Xx][Ee]|\\[Ww][Ss][Cc][Rr][Ii][Pp][Tt]\.[Ee][Xx][Ee]|\\[Cc][Ss][Cc][Rr][Ii][Pp][Tt]\.[Ee][Xx][Ee]|\\[Mm][Ss][Hh][Tt][Aa]\.[Ee][Xx][Ee]|\\[Rr][Uu][Nn][Dd][Ll][Ll]32\.[Ee][Xx][Ee]|\\[Rr][Ee][Gg][Ss][Vv][Rr]32\.[Ee][Xx][Ee]|\\[Ii][Nn][Ss][Tt][Aa][Ll][Ll][Uu][Tt][Ii][Ll]\.[Ee][Xx][Ee]|\\[Mm][Ss][Bb][Uu][Ii][Ll][Dd]\.[Ee][Xx][Ee])/
+    pivot_on:
+    - host
+    window: 1h
+  - name: Other hosts beaconing to the same destination address (campaign spread)
+    query: (data_win_system_eventID:"3" AND data_win_eventdata_initiated:/[Tt][Rr][Uu][Ee]/) OR data_win_system_eventID:"22"
+    pivot_on:
+    - ip
+    window: 24h

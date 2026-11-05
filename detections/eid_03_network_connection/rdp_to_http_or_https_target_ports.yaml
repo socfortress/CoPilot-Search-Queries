@@ -156,48 +156,58 @@ graylog:
   query: data_win_system_eventID:"3" AND data_win_eventdata_image:/.*\\[Ss][Vv][Cc][Hh][Oo][Ss][Tt]\.[Ee][Xx][Ee]/ AND data_win_eventdata_initiated:/[Tt][Rr][Uu][Ee]/ AND data_win_eventdata_sourcePort:"3389" AND (data_win_eventdata_destinationPort:"80" OR data_win_eventdata_destinationPort:"443")
 
 correlation:
-  # Authored by the correlation engine for review. Related CoPilot Searches to run
-  # around an alert from this rule, scoped to the same host/user/IP within the window.
+  # Authored per-rule (behaviour-researched) for the correlation engine. Related CoPilot
+  # Searches + telemetry pivots to run around an alert, scoped to its host/user/ip/domain.
   related_rules:
-    - id: ec570e53-4c76-45a9-804d-dc3f355ff7a7
-      name: "7Zip Compressing Dump Files"
-      reason: "next kill-chain tactic: Collection"
-    - id: 1ea13e8c-03ea-409b-877d-ce5c3d2c1cb3
-      name: "ADFS Database Named Pipe Connection By Uncommon Tool"
-      reason: "next kill-chain tactic: Collection"
-    - id: 75bf09fa-1dd7-4d18-9af9-dd9e492562eb
-      name: "ADSI-Cache File Creation By Uncommon Tool"
-      reason: "next kill-chain tactic: Command and Control"
-    - id: 03e2746e-2b31-42f1-ab7a-eb39365b2422
-      name: "APT31 Judgement Panda Activity"
-      reason: "next kill-chain tactic: Collection"
-    - id: 639c9081-f482-47d3-a0bd-ddee3d4ecd76
-      name: "All Backups Deleted Via Wbadmin.EXE"
-      reason: "next kill-chain tactic: Impact"
-    - id: a5d85486-b89c-11eb-8267-acde48001122
-      name: "Allow Inbound Traffic In Firewall Rule"
-      reason: "next kill-chain tactic: Lateral Movement"
+  - id: f38ce0b9-5e97-4b47-a211-7dc8d8b871da
+    name: Potential RDP Tunneling Via Plink
+    reason: 'Direct precursor and most likely cause: plink -R forwarding local 3389 over a web port is the canonical tool in the Mandiant RDP-tunneling technique this rule references, and its execution is exactly what makes svchost/termsvcs egress to 80/443.'
+  - id: f7d7ebd5-a016-46e2-9c54-f9932f2d386d
+    name: Potential RDP Tunneling Via SSH
+    reason: 'Direct precursor: ssh.exe reverse-forwarding :3389 relays the RDP service out over 80/443 - the same tunnel this rule observes leaving the host, seen from the process-creation side.'
+  - id: 8a3038e8-9c9d-46f8-b184-66234a160f6f
+    name: Potential Remote Desktop Tunneling
+    reason: 'Precursor: generic SSH-utility setup of a reverse RDP tunnel; broadens coverage of the tool that established the 3389-over-web-port relay this egress is carrying.'
+  - id: 782d6f3e-4c5d-4b8c-92a3-1d05fed72e63
+    name: RDP Port Forwarding Rule Added Via Netsh.EXE
+    reason: 'Living-off-the-land precursor: netsh portproxy of port 3389 is the native-tooling alternative to plink/ssh for building the same 3389->remote forward that produces this outbound connection.'
+  - id: a54f842a-3713-4b45-8c84-5f136fdebd3c
+    name: New PortProxy Registry Entry Added
+    reason: 'Persistent precursor artifact: the Services\PortProxy\v4tov4 registry entry that backs a netsh 3389 port-forward; its presence on the host confirms the forward driving this egress was configured.'
+  - id: a2863fbc-d5cb-48d5-83fb-d976d4b1743b
+    name: RDP Sensitive Settings Changed to Zero
+    reason: 'Enablement precursor: setting fDenyTSConnections=0 turns the RDP (termsvcs) service on so it can be relayed; a common setup step before tunnelling RDP into or out of the host.'
+  - id: 5bed80b6-b3e8-428e-a3ae-d3c757589e41
+    name: RDP over Reverse SSH Tunnel WFP
+    reason: 'Closest sibling - same behaviour, different sensor: detects svchost/termsvcs RDP talking to the loopback address (the local tunnel endpoint) via WFP; firing alongside this rule confirms the reverse-RDP-tunnel from the security-event-log vantage.'
+  - id: 51e33403-2a37-4d66-a574-1fda1782cc31
+    name: RDP Login from Localhost
+    reason: 'Follow-on payoff: a tunnelled RDP session lands as a logon sourced from 127.0.0.1; its appearance on the same host confirms an attacker is now interactively logged in through this tunnel.'
   window: 1h
   enrichment_searches:
-  # Rule-specific telemetry pivots the engine runs around an alert from this rule,
-  # scoped to the alert's host/user/IP within the window (behaviour-targeted, not a sweep).
-    - name: "Protocol-tunnelling tooling on this host"
-      query: '((data_win_system_eventID:"1" AND data_win_eventdata_image:/.*(\\[Nn][Gg][Rr][Oo][Kk]\.[Ee][Xx][Ee]|\\[Pp][Ll][Ii][Nn][Kk]\.[Ee][Xx][Ee]|\\[Ss][Ss][Hh]\.[Ee][Xx][Ee]|\\[Ff][Rr][Pp][Cc]\.[Ee][Xx][Ee]|\\[Cc][Hh][Ii][Ss][Ee][Ll]\.[Ee][Xx][Ee]|\\[Cc][Ll][Oo][Uu][Dd][Ff][Ll][Aa][Rr][Ee][Dd]\.[Ee][Xx][Ee])/) OR (data_win_system_eventID:"3" AND data_win_eventdata_image:/.*(\\[Nn][Gg][Rr][Oo][Kk]\.[Ee][Xx][Ee]|\\[Pp][Ll][Ii][Nn][Kk]\.[Ee][Xx][Ee]|\\[Ss][Ss][Hh]\.[Ee][Xx][Ee]|\\[Ff][Rr][Pp][Cc]\.[Ee][Xx][Ee]|\\[Cc][Hh][Ii][Ss][Ee][Ll]\.[Ee][Xx][Ee]|\\[Cc][Ll][Oo][Uu][Dd][Ff][Ll][Aa][Rr][Ee][Dd]\.[Ee][Xx][Ee])/) OR ((data_win_eventdata_commandLine:/.*-[Rr] 127\.0\.0\.1.*/ OR data_win_eventdata_commandLine:/.*[Ss][Ss][Hh] -[Rr].*/ OR data_win_eventdata_commandLine:/.*[Pp][Oo][Rr][Tt][Ff][Ww][Dd].*/ OR data_win_eventdata_commandLine:/.*[Ss][Oo][Cc][Kk][Ss].*/)))'
-      pivot_on: [host]
-      window: 1h
-    - name: "Remote-execution / lateral-movement tooling on this host"
-      query: '(data_win_system_eventID:"1" AND data_win_eventdata_image:/.*(\\[Pp][Ss][Ee][Xx][Ee][Cc]\.[Ee][Xx][Ee]|\\[Pp][Ss][Ee][Xx][Ee][Ss][Vv][Cc]\.[Ee][Xx][Ee]|\\[Pp][Aa][Ee][Xx][Ee][Cc]\.[Ee][Xx][Ee]|\\[Ww][Ii][Nn][Rr][Ss]\.[Ee][Xx][Ee]|\\[Mm][Ss][Tt][Ss][Cc]\.[Ee][Xx][Ee]|\\[Ww][Mm][Ii][Cc]\.[Ee][Xx][Ee])/) OR (data_win_system_eventID:"1" AND data_win_eventdata_image:/.*(\\[Pp][Oo][Ww][Ee][Rr][Ss][Hh][Ee][Ll][Ll]\.[Ee][Xx][Ee]|\\[Pp][Ww][Ss][Hh]\.[Ee][Xx][Ee])/ AND (data_win_eventdata_commandLine:/.*[Ii][Nn][Vv][Oo][Kk][Ee]-[Cc][Oo][Mm][Mm][Aa][Nn][Dd].*/ OR data_win_eventdata_commandLine:/.*[Nn][Ee][Ww]-[Pp][Ss][Ss][Ee][Ss][Ss][Ii][Oo][Nn].*/ OR data_win_eventdata_commandLine:/.*[Ee][Nn][Tt][Ee][Rr]-[Pp][Ss][Ss][Ee][Ss][Ss][Ii][Oo][Nn].*/ OR data_win_eventdata_commandLine:/.*-[Cc][Oo][Mm][Pp][Uu][Tt][Ee][Rr][Nn][Aa][Mm][Ee].*/))'
-      pivot_on: [host]
-      window: 2h
-    - name: "Memory/credential-dump creation & LSASS access on this host"
-      query: '((data_win_system_eventID:"1" AND data_win_eventdata_image:/.*(\\[Pp][Rr][Oo][Cc][Dd][Uu][Mm][Pp]\.[Ee][Xx][Ee]|\\[Pp][Rr][Oo][Cc][Dd][Uu][Mm][Pp]64\.[Ee][Xx][Ee]|\\[Ss][Qq][Ll][Dd][Uu][Mm][Pp][Ee][Rr]\.[Ee][Xx][Ee]|\\[Cc][Rr][Ee][Aa][Tt][Ee][Dd][Uu][Mm][Pp]\.[Ee][Xx][Ee]|\\[Rr][Dd][Rr][Ll][Ee][Aa][Kk][Dd][Ii][Aa][Gg]\.[Ee][Xx][Ee]|\\[Dd][Uu][Mm][Pp][Ee][Rr][Tt]\.[Ee][Xx][Ee]|\\[Nn][Aa][Nn][Oo][Dd][Uu][Mm][Pp]\.[Ee][Xx][Ee]|\\[Aa][Vv][Dd][Uu][Mm][Pp]\.[Ee][Xx][Ee])/) OR (data_win_system_eventID:"1" AND (data_win_eventdata_commandLine:/.*[Cc][Oo][Mm][Ss][Vv][Cc][Ss]\.[Dd][Ll][Ll].*/ OR data_win_eventdata_commandLine:/.*[Mm][Ii][Nn][Ii][Dd][Uu][Mm][Pp].*/ OR data_win_eventdata_commandLine:/.*[Dd][Uu][Mm][Pp][Ee][Rr][Tt].*/ OR data_win_eventdata_commandLine:/.*[Nn][Aa][Nn][Oo][Dd][Uu][Mm][Pp].*/ OR data_win_eventdata_commandLine:/.*[Ll][Ss][Aa][Ss][Ss].*/ OR data_win_eventdata_commandLine:/.*[Ss][Ee][Kk][Uu][Rr][Ll][Ss][Aa].*/ OR data_win_eventdata_commandLine:/.*[Nn][Tt][Dd][Ss]\.[Dd][Ii][Tt].*/ OR data_win_eventdata_commandLine:/.*[Nn][Tt][Dd][Ss][Uu][Tt][Ii][Ll].*/)) OR (data_win_system_eventID:"10" AND data_win_eventdata_targetImage:/.*(\\[Ll][Ss][Aa][Ss][Ss]\.[Ee][Xx][Ee])/))'
-      pivot_on: [host]
-      window: 1h
-    - name: "Other hosts connecting to the same destination address (campaign)"
-      query: '(data_win_system_eventID:"22" OR data_win_system_eventID:"3")'
-      pivot_on: [ip]
-      window: 24h
-    - name: "Downloader / C2 tooling executed on this host"
-      query: '(data_win_system_eventID:"1" AND data_win_eventdata_image:/.*(\\[Cc][Ee][Rr][Tt][Uu][Tt][Ii][Ll]\.[Ee][Xx][Ee]|\\[Bb][Ii][Tt][Ss][Aa][Dd][Mm][Ii][Nn]\.[Ee][Xx][Ee]|\\[Cc][Uu][Rr][Ll]\.[Ee][Xx][Ee]|\\[Ww][Gg][Ee][Tt]\.[Ee][Xx][Ee])/) OR (data_win_eventdata_commandLine:/.*[Dd][Oo][Ww][Nn][Ll][Oo][Aa][Dd][Ss][Tt][Rr][Ii][Nn][Gg].*/ OR data_win_eventdata_commandLine:/.*[Dd][Oo][Ww][Nn][Ll][Oo][Aa][Dd][Ff][Ii][Ll][Ee].*/ OR data_win_eventdata_commandLine:/.*[Ii][Nn][Vv][Oo][Kk][Ee]-[Ww][Ee][Bb][Rr][Ee][Qq][Uu][Ee][Ss][Tt].*/ OR data_win_eventdata_commandLine:/.*[Nn][Ee][Tt]\.[Ww][Ee][Bb][Cc][Ll][Ii][Ee][Nn][Tt].*/ OR data_win_eventdata_commandLine:/.*[Ss][Tt][Aa][Rr][Tt]-[Bb][Ii][Tt][Ss][Tt][Rr][Aa][Nn][Ss][Ff][Ee][Rr].*/ OR data_win_eventdata_commandLine:/.*[Ii][Ww][Rr] .*/ OR data_win_eventdata_commandLine:/.*[Cc][Uu][Rr][Ll] .*/ OR data_win_eventdata_commandLine:/.*[Ww][Gg][Ee][Tt] .*/)'
-      pivot_on: [host]
-      window: 1h
+  # Behaviour-targeted hunts the engine runs around the alert (not a sweep).
+  - name: Reverse-tunnel / port-forwarding tooling staged on this host
+    query: (data_win_system_eventID:"1" AND (data_win_eventdata_image:/.*(\\[Pp][Ll][Ii][Nn][Kk]\.[Ee][Xx][Ee]|\\[Ss][Ss][Hh]\.[Ee][Xx][Ee]|\\[Nn][Gg][Rr][Oo][Kk]\.[Ee][Xx][Ee]|\\[Cc][Hh][Ii][Ss][Ee][Ll]\.[Ee][Xx][Ee]|\\[Ff][Rr][Pp][Cc]\.[Ee][Xx][Ee]|\\[Cc][Ll][Oo][Uu][Dd][Ff][Ll][Aa][Rr][Ee][Dd]\.[Ee][Xx][Ee]|\\[Ii][Oo][Xx]\.[Ee][Xx][Ee])/ OR data_win_eventdata_commandLine:/.*([Pp][Oo][Rr][Tt][Pp][Rr][Oo][Xx][Yy]|:3389|=3389).*/))
+    pivot_on:
+    - host
+    window: 2h
+  - name: Native RDP enablement, firewall-open and portproxy setup on this host
+    query: (data_win_eventdata_commandLine:/.*[Ff][Dd][Ee][Nn][Yy][Tt][Ss][Cc][Oo][Nn][Nn][Ee][Cc][Tt][Ii][Oo][Nn][Ss].*/ OR data_win_eventdata_commandLine:/.*[Pp][Oo][Rr][Tt][Pp][Rr][Oo][Xx][Yy].*/ OR data_win_eventdata_commandLine:/.*[Aa][Dd][Vv][Ff][Ii][Rr][Ee][Ww][Aa][Ll][Ll].*3389.*/ OR data_win_eventdata_commandLine:/.*[Rr][Dd][Pp]-[Tt][Cc][Pp].*[Pp][Oo][Rr][Tt][Nn][Uu][Mm][Bb][Ee][Rr].*/ OR ((data_win_system_eventID:"13" OR data_win_system_eventID:"12" OR data_win_system_eventID:"14") AND (data_win_eventdata_targetObject:/.*[Ff][Dd][Ee][Nn][Yy][Tt][Ss][Cc][Oo][Nn][Nn][Ee][Cc][Tt][Ii][Oo][Nn][Ss].*/ OR data_win_eventdata_targetObject:/.*[Pp][Oo][Rr][Tt][Pp][Rr][Oo][Xx][Yy].*/)))
+    pivot_on:
+    - host
+    window: 6h
+  - name: LSASS access and credential-dump tooling on this host
+    query: ((data_win_system_eventID:"10" AND data_win_eventdata_targetImage:/.*\\[Ll][Ss][Aa][Ss][Ss]\.[Ee][Xx][Ee]/) OR (data_win_system_eventID:"1" AND (data_win_eventdata_image:/.*(\\[Mm][Ii][Mm][Ii][Kk][Aa][Tt][Zz]\.[Ee][Xx][Ee]|\\[Pp][Rr][Oo][Cc][Dd][Uu][Mm][Pp]\.[Ee][Xx][Ee]|\\[Pp][Rr][Oo][Cc][Dd][Uu][Mm][Pp]64\.[Ee][Xx][Ee])/ OR data_win_eventdata_commandLine:/.*([Ss][Ee][Kk][Uu][Rr][Ll][Ss][Aa]|[Mm][Ii][Nn][Ii][Dd][Uu][Mm][Pp]|[Cc][Oo][Mm][Ss][Vv][Cc][Ss]\.[Dd][Ll][Ll]).*/)))
+    pivot_on:
+    - host
+    window: 6h
+  - name: Lateral-movement and RDP-session follow-on from this host
+    query: (data_win_system_eventID:"1" AND (data_win_eventdata_image:/.*(\\[Mm][Ss][Tt][Ss][Cc]\.[Ee][Xx][Ee]|\\[Tt][Ss][Cc][Oo][Nn]\.[Ee][Xx][Ee]|\\[Pp][Ss][Ee][Xx][Ee][Cc]\.[Ee][Xx][Ee]|\\[Pp][Ss][Ee][Xx][Ee][Ss][Vv][Cc]\.[Ee][Xx][Ee]|\\[Ww][Mm][Ii][Cc]\.[Ee][Xx][Ee]|\\[Ww][Ii][Nn][Rr][Ss]\.[Ee][Xx][Ee])/ OR (data_win_eventdata_image:/.*(\\[Pp][Oo][Ww][Ee][Rr][Ss][Hh][Ee][Ll][Ll]\.[Ee][Xx][Ee]|\\[Pp][Ww][Ss][Hh]\.[Ee][Xx][Ee])/ AND data_win_eventdata_commandLine:/.*([Ee][Nn][Tt][Ee][Rr]-[Pp][Ss][Ss][Ee][Ss][Ss][Ii][Oo][Nn]|[Ii][Nn][Vv][Oo][Kk][Ee]-[Cc][Oo][Mm][Mm][Aa][Nn][Dd]|[Nn][Ee][Ww]-[Pp][Ss][Ss][Ee][Ss][Ss][Ii][Oo][Nn]).*/)))
+    pivot_on:
+    - host
+    window: 2h
+  - name: Other internal hosts relaying RDP to the same destination (campaign)
+    query: (data_win_system_eventID:"3" AND data_win_eventdata_initiated:/[Tt][Rr][Uu][Ee]/ AND (data_win_eventdata_sourcePort:"3389" OR data_win_eventdata_destinationPort:"3389"))
+    pivot_on:
+    - ip
+    window: 24h

@@ -112,62 +112,58 @@ graylog:
   query: data_win_system_eventID:"10" AND data_win_eventdata_targetImage:/.*\\\\winlogon\.exe.*/ AND data_win_eventdata_grantedAccess:"0x1040"
 
 correlation:
-  # Authored by the correlation engine for review. Related CoPilot Searches to run
-  # around an alert from this rule, scoped to the same host/user/IP within the window.
+  # Authored per-rule (behaviour-researched) for the correlation engine. Related CoPilot
+  # Searches + telemetry pivots to run around an alert, scoped to its host/user/ip/domain.
   related_rules:
-    - id: 2452e632-9e0d-11eb-bacd-acde48001122
-      name: "DNS Exfiltration Using Nslookup App"
-      reason: "same analytic story: Compromised Windows Host"
-    - id: cc316032-924a-11eb-91a2-acde48001122
-      name: "DSQuery Domain Discovery"
-      reason: "same analytic story: Compromised Windows Host"
-    - id: 9b3af1e6-5b68-11eb-ae93-0242ac130002
-      name: "Detect MSHTA Url in Command Line"
-      reason: "same analytic story: Compromised Windows Host"
-    - id: 72170ec5-f7d2-42f5-aefb-2b8be6aad15f
-      name: "Detect Regasm Spawning a Process"
-      reason: "same analytic story: Compromised Windows Host"
-    - id: bc477b57-5c21-4ab6-9c33-668772e7f114
-      name: "Detect Regsvcs Spawning a Process"
-      reason: "same analytic story: Compromised Windows Host"
-    - id: 070e9b80-6252-11eb-ae93-0242ac130002
-      name: "Detect Regsvr32 Application Control Bypass"
-      reason: "same analytic story: Compromised Windows Host"
-    - id: a0873b32-5b68-11eb-ae93-0242ac130002
-      name: "Detect mshta inline hta execution"
-      reason: "same analytic story: Compromised Windows Host"
-    - id: 8943b567-f14d-4ee8-a0bb-2121d4ce3184
-      name: "Dump LSASS via comsvcs DLL"
-      reason: "same analytic story: Compromised Windows Host"
-    - id: 26f86252-1549-45e1-a212-eb26840e86bc
-      name: "File Download or Read to Pipe Execution"
-      reason: "same analytic story: Compromised Windows Host"
-    - id: 909f8fd8-7ac8-11eb-a1f3-acde48001122
-      name: "FodHelper UAC Bypass"
-      reason: "same analytic story: Compromised Windows Host"
-    - id: 6e5a3ae4-90a3-462d-9aa6-0119f638c0f1
-      name: "Hiding Files And Directories With Attrib exe"
-      reason: "same analytic story: Compromised Windows Host"
-    - id: cf8d753e-a8fe-11eb-8f58-acde48001122
-      name: "Icacls Deny Command"
-      reason: "same analytic story: Compromised Windows Host"
+  - id: windows-access-token-manipulation-sedebugprivilege-001
+    name: Windows Access Token Manipulation SeDebugPrivilege
+    reason: 'Required precursor: opening winlogon.exe (a protected SYSTEM process) with PROCESS_DUP_HANDLE needs SeDebugPrivilege enabled in the source token first. A 4703 enabling SeDebugPrivilege on this host moments before the winlogon access is the token-privilege step that makes this duplication possible, and both rules explicitly name Brute Ratel C4.'
+  - id: 6309645e-122d-4c5b-bb2b-22e4f9c2fa42
+    name: HackTool - Potential CobaltStrike Process Injection
+    reason: 'Likely origin of the code that stole the token: Cobalt Strike / Brute Ratel run getsystem from an injected, unbacked beacon rather than a disk binary. A CS remote-thread injection on this host in-window points to the beacon that then duplicated winlogon''s SYSTEM token.'
+  - id: d5601f8c-b26f-4ab0-9035-69e11a8d4ad2
+    name: CobaltStrike Named Pipe
+    reason: 'Corroborates the beacon from a second telemetry angle: a default Cobalt Strike named pipe (postex_/msagent_/status_) on this host confirms an active beacon is the process that issued the winlogon token-duplication this alert caught, matching this rule''s Brute Ratel C4 / Compromised Windows Host story.'
+  - id: ecbc5e16-58e0-4521-9c60-eb9a7ea4ad34
+    name: Meterpreter or Cobalt Strike Getsystem Service Installation - Security
+    reason: 'Sibling getsystem technique with the same T1134.001 goal: getsystem can also reach SYSTEM by installing a service that impersonates a named pipe instead of duplicating winlogon''s token. A 4697 getsystem service install on this host means the operator tried the service route too, the same SYSTEM escalation from another path.'
+  - id: 9bd04a79-dabe-4f1f-a5ff-92430265c96b
+    name: Privilege Escalation via Named Pipe Impersonation
+    reason: 'Sibling getsystem technique: cmd/powershell writing to \\.\pipe\ then impersonating the connecting SYSTEM client is the other classic route to SYSTEM. Seen on this host alongside the winlogon token theft, it shows the operator cycling through impersonation/token tricks to win SYSTEM.'
+  - id: 02f7c9c1-1ae8-4c6a-8add-04693807f92f
+    name: Potential Access Token Abuse
+    reason: 'Confirmation the stolen token was used, not just opened: impersonating a duplicated token produces a 4624 Logon Type 9 (NewCredentials) via Advapi. This logon-side artifact on the host proves winlogon''s SYSTEM token was actually assumed after the handle was duplicated.'
+  - id: a18dd26b-6450-46de-8c91-9659150cf088
+    name: Potentially Suspicious GrantedAccess Flags On LSASS
+    reason: 'Immediate follow-on once SYSTEM is held: with winlogon''s token the operator can now read LSASS. Suspicious GrantedAccess to lsass.exe on this host in-window is the credential-dumping step that typically follows a successful getsystem.'
+  - id: b1bd3a59-c1fd-4860-9f40-4dd161a7d1f5
+    name: HackTool - HandleKatz Duplicating LSASS Handle
+    reason: 'Co-occurring use of the same evasive primitive: HandleKatz duplicates a handle to LSASS (PROCESS_DUP_HANDLE, 0x1440) exactly as this rule catches it against winlogon (0x1040). Both on one host reveal an operator leaning on handle duplication to touch protected processes while evading EDR open-handle hooks.'
   window: 1h
   enrichment_searches:
-  # Rule-specific telemetry pivots the engine runs around an alert from this rule,
-  # scoped to the alert's host/user/IP within the window (behaviour-targeted, not a sweep).
-    - name: "UAC-bypass / token-manipulation binaries on this host"
-      query: 'data_win_system_eventID:"1" AND (data_win_eventdata_image:/.*(\\[Ff][Oo][Dd][Hh][Ee][Ll][Pp][Ee][Rr]\.[Ee][Xx][Ee]|\\[Ee][Vv][Ee][Nn][Tt][Vv][Ww][Rr]\.[Ee][Xx][Ee]|\\[Ss][Dd][Cc][Ll][Tt]\.[Ee][Xx][Ee]|\\[Cc][Oo][Mm][Pp][Uu][Tt][Ee][Rr][Dd][Ee][Ff][Aa][Uu][Ll][Tt][Ss]\.[Ee][Xx][Ee]|\\[Ss][Ll][Uu][Ii]\.[Ee][Xx][Ee]|\\[Ww][Ss][Rr][Ee][Ss][Ee][Tt]\.[Ee][Xx][Ee])/ OR data_win_eventdata_parentImage:/.*(\\[Ff][Oo][Dd][Hh][Ee][Ll][Pp][Ee][Rr]\.[Ee][Xx][Ee]|\\[Ee][Vv][Ee][Nn][Tt][Vv][Ww][Rr]\.[Ee][Xx][Ee]|\\[Ss][Dd][Cc][Ll][Tt]\.[Ee][Xx][Ee]|\\[Cc][Oo][Mm][Pp][Uu][Tt][Ee][Rr][Dd][Ee][Ff][Aa][Uu][Ll][Tt][Ss]\.[Ee][Xx][Ee]|\\[Ss][Ll][Uu][Ii]\.[Ee][Xx][Ee]|\\[Ww][Ss][Rr][Ee][Ss][Ee][Tt]\.[Ee][Xx][Ee])/)'
-      pivot_on: [host]
-      window: 2h
-    - name: "Memory/credential-dump creation & LSASS access on this host"
-      query: '((data_win_system_eventID:"1" AND data_win_eventdata_image:/.*(\\[Pp][Rr][Oo][Cc][Dd][Uu][Mm][Pp]\.[Ee][Xx][Ee]|\\[Pp][Rr][Oo][Cc][Dd][Uu][Mm][Pp]64\.[Ee][Xx][Ee]|\\[Ss][Qq][Ll][Dd][Uu][Mm][Pp][Ee][Rr]\.[Ee][Xx][Ee]|\\[Cc][Rr][Ee][Aa][Tt][Ee][Dd][Uu][Mm][Pp]\.[Ee][Xx][Ee]|\\[Rr][Dd][Rr][Ll][Ee][Aa][Kk][Dd][Ii][Aa][Gg]\.[Ee][Xx][Ee]|\\[Dd][Uu][Mm][Pp][Ee][Rr][Tt]\.[Ee][Xx][Ee]|\\[Nn][Aa][Nn][Oo][Dd][Uu][Mm][Pp]\.[Ee][Xx][Ee]|\\[Aa][Vv][Dd][Uu][Mm][Pp]\.[Ee][Xx][Ee])/) OR (data_win_system_eventID:"1" AND (data_win_eventdata_commandLine:/.*[Cc][Oo][Mm][Ss][Vv][Cc][Ss]\.[Dd][Ll][Ll].*/ OR data_win_eventdata_commandLine:/.*[Mm][Ii][Nn][Ii][Dd][Uu][Mm][Pp].*/ OR data_win_eventdata_commandLine:/.*[Dd][Uu][Mm][Pp][Ee][Rr][Tt].*/ OR data_win_eventdata_commandLine:/.*[Nn][Aa][Nn][Oo][Dd][Uu][Mm][Pp].*/ OR data_win_eventdata_commandLine:/.*[Ll][Ss][Aa][Ss][Ss].*/ OR data_win_eventdata_commandLine:/.*[Ss][Ee][Kk][Uu][Rr][Ll][Ss][Aa].*/ OR data_win_eventdata_commandLine:/.*[Nn][Tt][Dd][Ss]\.[Dd][Ii][Tt].*/ OR data_win_eventdata_commandLine:/.*[Nn][Tt][Dd][Ss][Uu][Tt][Ii][Ll].*/)) OR (data_win_system_eventID:"10" AND data_win_eventdata_targetImage:/.*(\\[Ll][Ss][Aa][Ss][Ss]\.[Ee][Xx][Ee])/))'
-      pivot_on: [host]
-      window: 1h
-    - name: "Process injection / remote-thread & LSASS access on this host"
-      query: '((data_win_system_eventID:"8") OR (data_win_system_eventID:"10" AND data_win_eventdata_targetImage:/.*(\\[Ll][Ss][Aa][Ss][Ss]\.[Ee][Xx][Ee])/) OR (data_win_system_eventID:"1" AND (data_win_eventdata_commandLine:/.*[Cc][Rr][Ee][Aa][Tt][Ee][Rr][Ee][Mm][Oo][Tt][Ee][Tt][Hh][Rr][Ee][Aa][Dd].*/ OR data_win_eventdata_commandLine:/.*[Vv][Ii][Rr][Tt][Uu][Aa][Ll][Aa][Ll][Ll][Oo][Cc][Ee][Xx].*/ OR data_win_eventdata_commandLine:/.*[Ww][Rr][Ii][Tt][Ee][Pp][Rr][Oo][Cc][Ee][Ss][Ss][Mm][Ee][Mm][Oo][Rr][Yy].*/)))'
-      pivot_on: [host]
-      window: 1h
-    - name: "Follow-on LOLBin / signed-binary-proxy execution on this host"
-      query: 'data_win_system_eventID:"1" AND data_win_eventdata_image:/.*(\\[Rr][Uu][Nn][Dd][Ll][Ll]32\.[Ee][Xx][Ee]|\\[Rr][Ee][Gg][Ss][Vv][Rr]32\.[Ee][Xx][Ee]|\\[Mm][Ss][Hh][Tt][Aa]\.[Ee][Xx][Ee]|\\[Ii][Nn][Ss][Tt][Aa][Ll][Ll][Uu][Tt][Ii][Ll]\.[Ee][Xx][Ee]|\\[Rr][Ee][Gg][Aa][Ss][Mm]\.[Ee][Xx][Ee]|\\[Rr][Ee][Gg][Ss][Vv][Cc][Ss]\.[Ee][Xx][Ee]|\\[Mm][Ss][Bb][Uu][Ii][Ll][Dd]\.[Ee][Xx][Ee]|\\[Cc][Ee][Rr][Tt][Uu][Tt][Ii][Ll]\.[Ee][Xx][Ee]|\\[Bb][Ii][Tt][Ss][Aa][Dd][Mm][Ii][Nn]\.[Ee][Xx][Ee]|\\[Ww][Mm][Ii][Cc]\.[Ee][Xx][Ee]|\\[Cc][Mm][Ss][Tt][Pp]\.[Ee][Xx][Ee]|\\[Oo][Dd][Bb][Cc][Cc][Oo][Nn][Ff]\.[Ee][Xx][Ee]|\\[Ff][Oo][Rr][Ff][Ii][Ll][Ee][Ss]\.[Ee][Xx][Ee]|\\[Pp][Cc][Aa][Ll][Uu][Aa]\.[Ee][Xx][Ee]|\\[Mm][Aa][Vv][Ii][Nn][Jj][Ee][Cc][Tt]\.[Ee][Xx][Ee]|\\[Ss][Cc][Rr][Ii][Pp][Tt][Rr][Uu][Nn][Nn][Ee][Rr]\.[Ee][Xx][Ee])/'
-      pivot_on: [host]
-      window: 1h
+  # Behaviour-targeted hunts the engine runs around the alert (not a sweep).
+  - name: Other SYSTEM-token / protected-process handle duplication on this host
+    query: data_win_system_eventID:"10" AND (data_win_eventdata_targetImage:/.*\\[Ww][Ii][Nn][Ll][Oo][Gg][Oo][Nn]\.[Ee][Xx][Ee]/ OR data_win_eventdata_targetImage:/.*\\[Ll][Ss][Aa][Ss][Ss]\.[Ee][Xx][Ee]/ OR data_win_eventdata_targetImage:/.*\\[Ss][Ee][Rr][Vv][Ii][Cc][Ee][Ss]\.[Ee][Xx][Ee]/ OR data_win_eventdata_targetImage:/.*\\[Cc][Ss][Rr][Ss][Ss]\.[Ee][Xx][Ee]/) AND (data_win_eventdata_grantedAccess:/0[Xx]1040/ OR data_win_eventdata_grantedAccess:/0[Xx]1440/ OR data_win_eventdata_grantedAccess:/0[Xx]1410/ OR data_win_eventdata_grantedAccess:/0[Xx]143[Aa]/ OR data_win_eventdata_grantedAccess:/0[Xx]10[Cc]0/)
+    pivot_on:
+    - host
+    window: 1h
+  - name: SeDebugPrivilege enablement on this host (token-privilege precursor)
+    query: data_win_system_eventID:"4703" AND data_win_eventdata_enabledPrivilegeList:/.*[Ss][Ee][Dd][Ee][Bb][Uu][Gg][Pp][Rr][Ii][Vv][Ii][Ll][Ee][Gg][Ee].*/
+    pivot_on:
+    - host
+    window: 2h
+  - name: SYSTEM token-impersonation logon on this host (getsystem artifact)
+    query: data_win_system_eventID:"4624" AND data_win_eventdata_logonType:"9" AND data_win_eventdata_logonProcessName:/.*[Aa][Dd][Vv][Aa][Pp][Ii].*/
+    pivot_on:
+    - host
+    window: 2h
+  - name: Credential dumping - LSASS access and dump tooling on this host
+    query: (data_win_system_eventID:"10" AND data_win_eventdata_targetImage:/.*\\[Ll][Ss][Aa][Ss][Ss]\.[Ee][Xx][Ee]/ AND (data_win_eventdata_grantedAccess:/0[Xx]1410/ OR data_win_eventdata_grantedAccess:/0[Xx]143[Aa]/ OR data_win_eventdata_grantedAccess:/0[Xx]1438/ OR data_win_eventdata_grantedAccess:/0[Xx]1440/ OR data_win_eventdata_grantedAccess:/0[Xx]1[Ff]0[Ff][Ff][Ff]/)) OR (data_win_system_eventID:"1" AND (data_win_eventdata_commandLine:/.*[Cc][Oo][Mm][Ss][Vv][Cc][Ss]\.[Dd][Ll][Ll].*/ OR data_win_eventdata_commandLine:/.*[Mm][Ii][Nn][Ii][Dd][Uu][Mm][Pp].*/ OR data_win_eventdata_commandLine:/.*[Ss][Ee][Kk][Uu][Rr][Ll][Ss][Aa].*/ OR data_win_eventdata_commandLine:/.*[Ll][Oo][Gg][Oo][Nn][Pp][Aa][Ss][Ss][Ww][Oo][Rr][Dd][Ss].*/))
+    pivot_on:
+    - host
+    window: 1h
+  - name: C2 beacon origin - remote-thread injection and Cobalt Strike / Brute Ratel named pipes on this host
+    query: (data_win_system_eventID:"8") OR ((data_win_system_eventID:"17" OR data_win_system_eventID:"18") AND (data_win_eventdata_pipeName:/.*\\[Mm][Ss][Ss][Ee]-.*/ OR data_win_eventdata_pipeName:/.*\\[Pp][Oo][Ss][Tt][Ee][Xx]_.*/ OR data_win_eventdata_pipeName:/.*\\[Ss][Tt][Aa][Tt][Uu][Ss]_.*/ OR data_win_eventdata_pipeName:/.*\\[Mm][Ss][Aa][Gg][Ee][Nn][Tt]_.*/ OR data_win_eventdata_pipeName:/.*\\[Ii][Nn][Tt][Ee][Rr][Pp][Rr][Oo][Cc][Ee][Ss][Ss]_.*/))
+    pivot_on:
+    - host
+    window: 2h

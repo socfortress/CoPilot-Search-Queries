@@ -147,48 +147,58 @@ graylog:
   query: data_win_system_eventID:"3" AND data_win_eventdata_image:/.*\\[Nn][Oo][Tt][Ee][Pp][Aa][Dd]\.[Ee][Xx][Ee]/ AND _exists_:data_win_eventdata_destinationPort AND NOT (data_win_eventdata_destinationPort:"9100")
 
 correlation:
-  # Authored by the correlation engine for review. Related CoPilot Searches to run
-  # around an alert from this rule, scoped to the same host/user/IP within the window.
+  # Authored per-rule (behaviour-researched) for the correlation engine. Related CoPilot
+  # Searches + telemetry pivots to run around an alert, scoped to its host/user/ip/domain.
   related_rules:
-    - id: ec570e53-4c76-45a9-804d-dc3f355ff7a7
-      name: "7Zip Compressing Dump Files"
-      reason: "next kill-chain tactic: Collection"
-    - id: 0a1255c5-d732-4b62-ac02-b5152d34fb83
-      name: "ADExplorer Writing Complete AD Snapshot Into .dat File"
-      reason: "next kill-chain tactic: Discovery"
-    - id: 1ea13e8c-03ea-409b-877d-ce5c3d2c1cb3
-      name: "ADFS Database Named Pipe Connection By Uncommon Tool"
-      reason: "next kill-chain tactic: Collection"
-    - id: 75bf09fa-1dd7-4d18-9af9-dd9e492562eb
-      name: "ADSI-Cache File Creation By Uncommon Tool"
-      reason: "next kill-chain tactic: Command and Control"
-    - id: 33a2d1dd-f3b0-40bd-8baf-7974468927cc
-      name: "APT PRIVATELOG Image Load Pattern"
-      reason: "next kill-chain tactic: Privilege Escalation"
-    - id: 03e2746e-2b31-42f1-ab7a-eb39365b2422
-      name: "APT31 Judgement Panda Activity"
-      reason: "next kill-chain tactic: Credential Access"
+  - id: 5adbc5f1-9a2f-41c1-a810-f37e015f8179
+    name: Notepad with no Command Line Arguments
+    reason: 'Direct precursor and the tightest link: Sliver/Cobalt Strike spawn a bare notepad.exe (no file argument) specifically as a sacrificial injection target, then VirtualAllocEx/WriteProcessMemory/CreateRemoteThread shellcode into it. That spawn fires seconds before the injected notepad egresses - this rule IS the ''concurrent network egress'' that confirms the injection took hold.'
+  - id: 6309645e-122d-4c5b-bb2b-22e4f9c2fa42
+    name: HackTool - Potential CobaltStrike Process Injection
+    reason: 'The injection step itself: a CreateRemoteThread carrying Cobalt Strike''s characteristic beacon start-address offsets. This is the mechanism that plants the C2 code inside the sacrificial process; when that process is notepad, it fires immediately before notepad beacons out.'
+  - id: a1a144b7-5c9b-4853-a559-2172be8d4a03
+    name: Remote Thread Creation In Uncommon Target Image
+    reason: Generic form of the same precursor - a remote thread created into an uncommon target image whose target list explicitly includes notepad.exe. Catches the injection into notepad even when the injector is not CS-specific, directly preceding the outbound connection.
+  - id: a7c3d773-caef-227e-a7e7-c2f13c622329
+    name: Bad Opsec Defaults Sacrificial Processes With Improper Arguments
+    reason: 'Explains WHY a benign Microsoft-signed binary is on the network: C2 frameworks spawn a sacrificial process with default/improper arguments to inject a capability into it. A notepad launched this way and then beaconing is the realized version of that tradecraft.'
+  - id: 20384606-a124-4fec-acbb-8bd373728613
+    name: Suspicious Network Connection Binary No CommandLine
+    reason: 'Sibling egress detection: an argument-less signed binary (rundll32/regsvr32/dllhost) initiating a connection - the identical inject-into-sacrificial-process beacon pattern as notepad. A beacon rotating its spawnto trips both on the same host, corroborating that the egress is injected code, not the app.'
+  - id: d5601f8c-b26f-4ab0-9035-69e11a8d4ad2
+    name: CobaltStrike Named Pipe
+    reason: 'Co-occurring beacon artifact: a live Cobalt Strike beacon inside notepad opens its named pipe (msagent_/MSSE-/postex_) on the same host. Seeing it alongside the notepad egress confirms the connection is a CS beacon rather than a one-off anomaly.'
+  - id: f356a9c4-effd-4608-bbf8-408afd5cd006
+    name: Suspicious Cobalt Strike DNS Beaconing - Sysmon
+    reason: 'The same beacon''s alternate C2 channel: Cobalt Strike DNS beaconing from the same host runs in parallel with, or as a fallback to, the TCP egress notepad just made. Confirms sustained C2 and helps pin the beacon''s infrastructure.'
+  - id: 9f5c1d59-33be-4e60-bcab-85d2f566effd
+    name: Suspicious Process Access to LSASS with Dbgcore/Dbghelp DLLs
+    reason: 'Likely follow-on: once the beacon in notepad has execution, the most common next action is credential theft via LSASS memory access. Finding LSASS access on the same host shortly after escalates this from a lone injection indicator to an active hands-on-keyboard intrusion.'
   window: 1h
   enrichment_searches:
-  # Rule-specific telemetry pivots the engine runs around an alert from this rule,
-  # scoped to the alert's host/user/IP within the window (behaviour-targeted, not a sweep).
-    - name: "Process injection / remote-thread & LSASS access on this host"
-      query: '((data_win_system_eventID:"8") OR (data_win_system_eventID:"10" AND data_win_eventdata_targetImage:/.*(\\[Ll][Ss][Aa][Ss][Ss]\.[Ee][Xx][Ee])/) OR (data_win_system_eventID:"1" AND (data_win_eventdata_commandLine:/.*[Cc][Rr][Ee][Aa][Tt][Ee][Rr][Ee][Mm][Oo][Tt][Ee][Tt][Hh][Rr][Ee][Aa][Dd].*/ OR data_win_eventdata_commandLine:/.*[Vv][Ii][Rr][Tt][Uu][Aa][Ll][Aa][Ll][Ll][Oo][Cc][Ee][Xx].*/ OR data_win_eventdata_commandLine:/.*[Ww][Rr][Ii][Tt][Ee][Pp][Rr][Oo][Cc][Ee][Ss][Ss][Mm][Ee][Mm][Oo][Rr][Yy].*/)))'
-      pivot_on: [host]
-      window: 1h
-    - name: "Other executions of this tool-set on this host (any arguments)"
-      query: 'data_win_system_eventID:"1" AND data_win_eventdata_image:/.*(\\[Nn][Oo][Tt][Ee][Pp][Aa][Dd]\.[Ee][Xx][Ee])/'
-      pivot_on: [host]
-      window: 2h
-    - name: "Archive / staging & outbound-transfer tooling on this host"
-      query: '(((data_win_system_eventID:"1" AND data_win_eventdata_image:/.*(\\7[Zz]\.[Ee][Xx][Ee]|\\7[Zz][Aa]\.[Ee][Xx][Ee]|\\7[Zz][Rr]\.[Ee][Xx][Ee]|\\[Rr][Aa][Rr]\.[Ee][Xx][Ee]|\\[Ww][Ii][Nn][Rr][Aa][Rr]\.[Ee][Xx][Ee]|\\[Ww][Zz][Zz][Ii][Pp]\.[Ee][Xx][Ee]|\\[Mm][Aa][Kk][Ee][Cc][Aa][Bb]\.[Ee][Xx][Ee])/) OR (data_win_eventdata_commandLine:/.*[Cc][Oo][Mm][Pp][Rr][Ee][Ss][Ss]-[Aa][Rr][Cc][Hh][Ii][Vv][Ee].*/ OR data_win_eventdata_commandLine:/.*\.7[Zz].*/ OR data_win_eventdata_commandLine:/.*\.[Rr][Aa][Rr].*/ OR data_win_eventdata_commandLine:/.* -[Hh][Pp].*/)) OR (((data_win_system_eventID:"1" AND data_win_eventdata_image:/.*(\\[Rr][Cc][Ll][Oo][Nn][Ee]\.[Ee][Xx][Ee]|\\[Cc][Uu][Rr][Ll]\.[Ee][Xx][Ee]|\\[Ww][Gg][Ee][Tt]\.[Ee][Xx][Ee]|\\[Ww][Ii][Nn][Ss][Cc][Pp]\.[Ee][Xx][Ee]|\\[Pp][Ss][Cc][Pp]\.[Ee][Xx][Ee]|\\[Mm][Ee][Gg][Aa][Cc][Mm][Dd]\.[Ee][Xx][Ee]|\\[Mm][Ee][Gg][Aa][Ss][Yy][Nn][Cc]\.[Ee][Xx][Ee])/) OR ((data_win_eventdata_commandLine:/.*[Ii][Nn][Vv][Oo][Kk][Ee]-[Rr][Ee][Ss][Tt][Mm][Ee][Tt][Hh][Oo][Dd].*/ OR data_win_eventdata_commandLine:/.*[Ss][Tt][Aa][Rr][Tt]-[Bb][Ii][Tt][Ss][Tt][Rr][Aa][Nn][Ss][Ff][Ee][Rr].*/ OR data_win_eventdata_commandLine:/.*[Rr][Cc][Ll][Oo][Nn][Ee].*/ OR data_win_eventdata_commandLine:/.*[Tt][Rr][Aa][Nn][Ss][Ff][Ee][Rr]\.[Ss][Hh].*/ OR data_win_eventdata_commandLine:/.*[Aa][Nn][Oo][Nn][Ff][Ii][Ll][Ee][Ss].*/ OR data_win_eventdata_commandLine:/.*[Pp][Aa][Ss][Tt][Ee][Bb][Ii][Nn].*/ OR data_win_eventdata_commandLine:/.*[Mm][Ee][Gg][Aa]\.[Nn][Zz].*/ OR data_win_eventdata_commandLine:/.*-[Oo][Uu][Tt][Ff][Ii][Ll][Ee].*/ OR data_win_eventdata_commandLine:/.*[Uu][Pp][Ll][Oo][Aa][Dd][Ff][Ii][Ll][Ee].*/)))))'
-      pivot_on: [host]
-      window: 2h
-    - name: "Other hosts connecting to the same destination address (campaign)"
-      query: '(data_win_system_eventID:"22" OR data_win_system_eventID:"3")'
-      pivot_on: [ip]
-      window: 24h
-    - name: "Downloader / C2 tooling executed on this host"
-      query: '(data_win_system_eventID:"1" AND data_win_eventdata_image:/.*(\\[Cc][Ee][Rr][Tt][Uu][Tt][Ii][Ll]\.[Ee][Xx][Ee]|\\[Bb][Ii][Tt][Ss][Aa][Dd][Mm][Ii][Nn]\.[Ee][Xx][Ee]|\\[Cc][Uu][Rr][Ll]\.[Ee][Xx][Ee]|\\[Ww][Gg][Ee][Tt]\.[Ee][Xx][Ee])/) OR (data_win_eventdata_commandLine:/.*[Dd][Oo][Ww][Nn][Ll][Oo][Aa][Dd][Ss][Tt][Rr][Ii][Nn][Gg].*/ OR data_win_eventdata_commandLine:/.*[Dd][Oo][Ww][Nn][Ll][Oo][Aa][Dd][Ff][Ii][Ll][Ee].*/ OR data_win_eventdata_commandLine:/.*[Ii][Nn][Vv][Oo][Kk][Ee]-[Ww][Ee][Bb][Rr][Ee][Qq][Uu][Ee][Ss][Tt].*/ OR data_win_eventdata_commandLine:/.*[Nn][Ee][Tt]\.[Ww][Ee][Bb][Cc][Ll][Ii][Ee][Nn][Tt].*/ OR data_win_eventdata_commandLine:/.*[Ss][Tt][Aa][Rr][Tt]-[Bb][Ii][Tt][Ss][Tt][Rr][Aa][Nn][Ss][Ff][Ee][Rr].*/ OR data_win_eventdata_commandLine:/.*[Ii][Ww][Rr] .*/ OR data_win_eventdata_commandLine:/.*[Cc][Uu][Rr][Ll] .*/ OR data_win_eventdata_commandLine:/.*[Ww][Gg][Ee][Tt] .*/)'
-      pivot_on: [host]
-      window: 1h
+  # Behaviour-targeted hunts the engine runs around the alert (not a sweep).
+  - name: Remote-thread / handle injection targeting notepad on this host
+    query: (data_win_system_eventID:"8" OR data_win_system_eventID:"10") AND data_win_eventdata_targetImage:/.*\\[Nn][Oo][Tt][Ee][Pp][Aa][Dd]\.[Ee][Xx][Ee]/
+    pivot_on:
+    - host
+    window: 1h
+  - name: notepad.exe process creation - reveals injector parent and missing file argument
+    query: data_win_system_eventID:"1" AND data_win_eventdata_image:/.*\\[Nn][Oo][Tt][Ee][Pp][Aa][Dd]\.[Ee][Xx][Ee]/
+    pivot_on:
+    - host
+    window: 1h
+  - name: Other sacrificial / LOLBIN processes initiating connections on this host (beacon spawnto rotation)
+    query: data_win_system_eventID:"3" AND data_win_eventdata_initiated:/[Tt][Rr][Uu][Ee]/ AND data_win_eventdata_image:/.*\\([Rr][Uu][Nn][Dd][Ll][Ll]32|[Rr][Ee][Gg][Ss][Vv][Rr]32|[Dd][Ll][Ll][Hh][Oo][Ss][Tt]|[Mm][Ss][Hh][Tt][Aa]|[Ww][Ee][Rr][Ff][Aa][Uu][Ll][Tt]|[Ss][Ee][Aa][Rr][Cc][Hh][Pp][Rr][Oo][Tt][Oo][Cc][Oo][Ll][Hh][Oo][Ss][Tt]|[Gg][Pp][Uu][Pp][Dd][Aa][Tt][Ee]|[Ww][Uu][Aa][Uu][Cc][Ll][Tt])\.[Ee][Xx][Ee]/
+    pivot_on:
+    - host
+    window: 2h
+  - name: C2 framework named-pipe artifacts on this host (Cobalt Strike / Sliver defaults)
+    query: (data_win_system_eventID:"17" OR data_win_system_eventID:"18") AND (data_win_eventdata_pipeName:/.*[Mm][Ss][Aa][Gg][Ee][Nn][Tt].*/ OR data_win_eventdata_pipeName:/.*[Mm][Ss][Ss][Ee]-.*/ OR data_win_eventdata_pipeName:/.*[Pp][Oo][Ss][Tt][Ee][Xx].*/ OR data_win_eventdata_pipeName:/.*[Ss][Tt][Aa][Tt][Uu][Ss]_.*/ OR data_win_eventdata_pipeName:/.*[Ss][Ll][Ii][Vv][Ee][Rr].*/)
+    pivot_on:
+    - host
+    window: 1h
+  - name: Other hosts talking to the same C2 destination (campaign / beacon spread)
+    query: (data_win_system_eventID:"3" OR data_win_system_eventID:"22")
+    pivot_on:
+    - ip
+    window: 24h
