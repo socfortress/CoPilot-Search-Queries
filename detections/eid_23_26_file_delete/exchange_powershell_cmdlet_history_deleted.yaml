@@ -145,19 +145,58 @@ graylog:
   query: (data_win_system_eventID:"23" OR data_win_system_eventID:"26") AND data_win_eventdata_targetFilename:/\\[Ll][Oo][Gg][Gg][Ii][Nn][Gg]\\[Cc][Mm][Dd][Ll][Ee][Tt][Ii][Nn][Ff][Rr][Aa]\\[Ll][Oo][Cc][Aa][Ll][Pp][Oo][Ww][Ee][Rr][Ss][Hh][Ee][Ll][Ll]\\[Cc][Mm][Dd][Ll][Ee][Tt]\\.*/ AND data_win_eventdata_targetFilename:/.*_[Cc][Mm][Dd][Ll][Ee][Tt]_.*/
 
 correlation:
-  # Authored by the correlation engine for review.
+  # Authored per-rule (behaviour-researched) for the correlation engine. Related CoPilot
+  # Searches + telemetry pivots to run around an alert, scoped to its host/user/ip/domain.
+  related_rules:
+  - id: bd1212e5-78da-431e-95fa-c58e3237a8e6
+    name: Suspicious ASPX File Drop by Exchange
+    reason: 'Precursor foothold: w3wp.exe writing an .aspx/.ashx web shell into Exchange''s FrontEnd\HttpProxy or aspnet_client is how the attacker gained server code execution to run EMS cmdlets and then erase their cmdlet-history record.'
+  - id: bbb2dedd-a0e3-46ab-ba6c-6c82ae7a9aa7
+    name: HAFNIUM Exchange Exploitation Activity
+    reason: 'Precursor tradecraft: the ProxyLogon-era on-prem Exchange playbook (hiding web shells via attrib +h +s, scheduled tasks) that precedes the EMS abuse and cmdlet-log destruction seen here.'
+  - id: 25676e10-2121-446e-80a4-71ff8506af47
+    name: Exchange PowerShell Snap-Ins Usage
+    reason: 'The very activity the deleted logs recorded: Add-PSSnapin Microsoft.Exchange.Management.PowerShell.SnapIn is the Exchange Management Shell session whose \CmdletInfra\ history this alert shows being wiped.'
+  - id: 889719ef-dd62-43df-86c3-768fb08dc7c0
+    name: Suspicious PowerShell Mailbox Export to Share
+    reason: 'The incriminating cmdlet being hidden: New-MailboxExportRequest mailbox exfil (ProxyShell) is exactly the kind of EMS command logged under \CmdletInfra\Cmdlet; it shares the m365internals Exchange-log hunting reference with this rule.'
+  - id: 83809e84-4475-4b69-bc3e-4aad8568612f
+    name: MSExchange Transport Agent Installation
+    reason: 'Another EMS action being erased: Install-TransportAgent mail-interception persistence is recorded in the cmdlet history, so deleting that history hides the backdoor''s installation.'
+  - id: 3eb8c339-a765-48cc-a150-4364c04652bf
+    name: IIS WebServer Access Logs Deleted
+    reason: 'Co-occurring evidence destruction: Exchange rides on IIS, so the same actor also deletes inetpub\logs access logs that record the web-shell HTTP hits - one anti-forensic sweep on this host.'
+  - id: 63c779ba-f638-40a0-a593-ddd45e8b1ddc
+    name: EventLog EVTX File Deleted
+    reason: 'Co-occurring evidence destruction: deletion of Windows .evtx files in the same window extends the same anti-forensic sweep beyond the Exchange cmdlet logs.'
+  - id: cc36992a-4671-4f21-a91d-6c2b72a2edf5
+    name: Suspicious Eventlog Clearing or Configuration Change Activity
+    reason: 'Follow-on evidence destruction: clearing Windows event logs via wevtutil cl / Clear-EventLog is the next track-covering step after wiping the Exchange cmdlet history.'
+  window: 4h
   enrichment_searches:
-  # Rule-specific telemetry pivots the engine runs around an alert from this rule,
-  # scoped to the alert's host/user/IP within the window (behaviour-targeted, not a sweep).
-    - name: "Log-clearing / anti-forensic activity on this host"
-      query: '(((data_win_eventdata_commandLine:/.*[Ww][Ee][Vv][Tt][Uu][Tt][Ii][Ll] [Cc][Ll].*/ OR data_win_eventdata_commandLine:/.*[Cc][Ll][Ee][Aa][Rr]-[Ee][Vv][Ee][Nn][Tt][Ll][Oo][Gg].*/ OR data_win_eventdata_commandLine:/.*[Ff][Ss][Uu][Tt][Ii][Ll] [Uu][Ss][Nn] [Dd][Ee][Ll][Ee][Tt][Ee][Jj][Oo][Uu][Rr][Nn][Aa][Ll].*/ OR data_win_eventdata_commandLine:/.*[Vv][Ss][Ss][Aa][Dd][Mm][Ii][Nn] [Dd][Ee][Ll][Ee][Tt][Ee].*/ OR data_win_eventdata_commandLine:/.*[Ww][Ee][Vv][Tt][Uu][Tt][Ii][Ll] [Cc][Ll][Ee][Aa][Rr]-[Ll][Oo][Gg].*/)) OR ((data_win_system_eventID:"1102" OR data_win_system_eventID:"104")))'
-      pivot_on: [host]
-      window: 2h
-    - name: "Execution of programs from user-writable paths on this host"
-      query: 'data_win_system_eventID:"1" AND (data_win_eventdata_image:/.*\\[Uu][Ss][Ee][Rr][Ss]\\.*/ OR data_win_eventdata_image:/.*\\[Pp][Rr][Oo][Gg][Rr][Aa][Mm][Dd][Aa][Tt][Aa]\\.*/ OR data_win_eventdata_image:/.*\\[Ww][Ii][Nn][Dd][Oo][Ww][Ss]\\[Tt][Ee][Mm][Pp]\\.*/ OR data_win_eventdata_image:/.*\\[Aa][Pp][Pp][Dd][Aa][Tt][Aa]\\.*/ OR data_win_eventdata_image:/.*\\[Pp][Uu][Bb][Ll][Ii][Cc]\\.*/ OR data_win_eventdata_image:/.*\\\$[Rr][Ee][Cc][Yy][Cc][Ll][Ee].*/)'
-      pivot_on: [host]
-      window: 1h
-    - name: "Autostart persistence written on this host"
-      query: '(data_win_system_eventID:"12" OR data_win_system_eventID:"13") AND (data_win_eventdata_targetObject:/.*[Cc][Uu][Rr][Rr][Ee][Nn][Tt][Vv][Ee][Rr][Ss][Ii][Oo][Nn]\\[Rr][Uu][Nn].*/ OR data_win_eventdata_targetObject:/.*[Cc][Uu][Rr][Rr][Ee][Nn][Tt][Vv][Ee][Rr][Ss][Ii][Oo][Nn]\\[Rr][Uu][Nn][Oo][Nn][Cc][Ee].*/ OR data_win_eventdata_targetObject:/.*[Cc][Uu][Rr][Rr][Ee][Nn][Tt][Cc][Oo][Nn][Tt][Rr][Oo][Ll][Ss][Ee][Tt]\\[Ss][Ee][Rr][Vv][Ii][Cc][Ee][Ss]\\.*/ OR data_win_eventdata_targetObject:/.*[Ii][Mm][Aa][Gg][Ee] [Ff][Ii][Ll][Ee] [Ee][Xx][Ee][Cc][Uu][Tt][Ii][Oo][Nn] [Oo][Pp][Tt][Ii][Oo][Nn][Ss]\\.*/ OR data_win_eventdata_targetObject:/.*[Ww][Ii][Nn][Ll][Oo][Gg][Oo][Nn]\\[Ss][Hh][Ee][Ll][Ll].*/ OR data_win_eventdata_targetObject:/.*[Ww][Ii][Nn][Ll][Oo][Gg][Oo][Nn]\\[Uu][Ss][Ee][Rr][Ii][Nn][Ii][Tt].*/ OR data_win_eventdata_targetObject:/.*[Cc][Uu][Rr][Rr][Ee][Nn][Tt][Vv][Ee][Rr][Ss][Ii][Oo][Nn]\\[Ee][Xx][Pp][Ll][Oo][Rr][Ee][Rr]\\[Rr][Uu][Nn].*/ OR data_win_eventdata_targetObject:/.*[Pp][Oo][Ll][Ii][Cc][Ii][Ee][Ss]\\[Ee][Xx][Pp][Ll][Oo][Rr][Ee][Rr]\\[Rr][Uu][Nn].*/ OR data_win_eventdata_targetObject:/.*[Cc][Uu][Rr][Rr][Ee][Nn][Tt][Vv][Ee][Rr][Ss][Ii][Oo][Nn]\\[Ww][Ii][Nn][Dd][Oo][Ww][Ss]\\[Ll][Oo][Aa][Dd].*/)'
-      pivot_on: [host]
-      window: 2h
+  # Behaviour-targeted hunts the engine runs around the alert (not a sweep).
+  - name: Exchange IIS worker (w3wp) spawning a shell or recon tool on this host
+    query: data_win_system_eventID:"1" AND (data_win_eventdata_parentImage:/.*\\[Ww]3[Ww][Pp]\.[Ee][Xx][Ee].*/ OR data_win_eventdata_parentImage:/.*\\[Uu][Mm][Ww][Oo][Rr][Kk][Ee][Rr][Pp][Rr][Oo][Cc][Ee][Ss][Ss]\.[Ee][Xx][Ee].*/) AND data_win_eventdata_image:/.*(\\[Cc][Mm][Dd]\.[Ee][Xx][Ee]|\\[Pp][Oo][Ww][Ee][Rr][Ss][Hh][Ee][Ll][Ll]\.[Ee][Xx][Ee]|\\[Pp][Ww][Ss][Hh]\.[Ee][Xx][Ee]|\\[Cc][Ss][Cc][Rr][Ii][Pp][Tt]\.[Ee][Xx][Ee]|\\[Ww][Ss][Cc][Rr][Ii][Pp][Tt]\.[Ee][Xx][Ee]|\\[Nn][Ee][Tt]\.[Ee][Xx][Ee]|\\[Nn][Ee][Tt]1\.[Ee][Xx][Ee]|\\[Ww][Hh][Oo][Aa][Mm][Ii]\.[Ee][Xx][Ee]|\\[Hh][Oo][Ss][Tt][Nn][Aa][Mm][Ee]\.[Ee][Xx][Ee]|\\[Ii][Pp][Cc][Oo][Nn][Ff][Ii][Gg]\.[Ee][Xx][Ee]|\\[Ss][Yy][Ss][Tt][Ee][Mm][Ii][Nn][Ff][Oo]\.[Ee][Xx][Ee]|\\[Tt][Aa][Ss][Kk][Ll][Ii][Ss][Tt]\.[Ee][Xx][Ee]|\\[Rr][Ee][Gg]\.[Ee][Xx][Ee]|\\[Nn][Ll][Tt][Ee][Ss][Tt]\.[Ee][Xx][Ee]|\\[Aa][Rr][Pp]\.[Ee][Xx][Ee]|\\[Qq][Uu][Ee][Rr][Yy]\.[Ee][Xx][Ee]|\\[Cc][Ee][Rr][Tt][Uu][Tt][Ii][Ll]\.[Ee][Xx][Ee]|\\[Bb][Ii][Tt][Ss][Aa][Dd][Mm][Ii][Nn]\.[Ee][Xx][Ee])/
+    pivot_on:
+    - host
+    window: 4h
+  - name: Exchange Management Shell mailbox / role / transport cmdlets executed on this host
+    query: (data_win_eventdata_commandLine:/.*([Nn][Ee][Ww]-[Mm][Aa][Ii][Ll][Bb][Oo][Xx][Ee][Xx][Pp][Oo][Rr][Tt][Rr][Ee][Qq][Uu][Ee][Ss][Tt]|[Nn][Ee][Ww]-[Mm][Aa][Nn][Aa][Gg][Ee][Mm][Ee][Nn][Tt][Rr][Oo][Ll][Ee][Aa][Ss][Ss][Ii][Gg][Nn][Mm][Ee][Nn][Tt]|[Nn][Ee][Ww]-[Mm][Aa][Ii][Ll][Bb][Oo][Xx][Ss][Ee][Aa][Rr][Cc][Hh]|[Ss][Ee][Aa][Rr][Cc][Hh]-[Mm][Aa][Ii][Ll][Bb][Oo][Xx]|[Ii][Nn][Ss][Tt][Aa][Ll][Ll]-[Tt][Rr][Aa][Nn][Ss][Pp][Oo][Rr][Tt][Aa][Gg][Ee][Nn][Tt]|[Nn][Ee][Ww]-[Ii][Nn][Bb][Oo][Xx][Rr][Uu][Ll][Ee]|[Ss][Ee][Tt]-[Oo][Aa][Bb][Vv][Ii][Rr][Tt][Uu][Aa][Ll][Dd][Ii][Rr][Ee][Cc][Tt][Oo][Rr][Yy]|[Mm][Ii][Cc][Rr][Oo][Ss][Oo][Ff][Tt]\.[Ee][Xx][Cc][Hh][Aa][Nn][Gg][Ee]\.[Mm][Aa][Nn][Aa][Gg][Ee][Mm][Ee][Nn][Tt]\.[Pp][Oo][Ww][Ee][Rr][Ss][Hh][Ee][Ll][Ll]\.[Ss][Nn][Aa][Pp][Ii][Nn]).*/ OR data_win_eventdata_scriptBlockText:/.*([Nn][Ee][Ww]-[Mm][Aa][Ii][Ll][Bb][Oo][Xx][Ee][Xx][Pp][Oo][Rr][Tt][Rr][Ee][Qq][Uu][Ee][Ss][Tt]|[Nn][Ee][Ww]-[Mm][Aa][Nn][Aa][Gg][Ee][Mm][Ee][Nn][Tt][Rr][Oo][Ll][Ee][Aa][Ss][Ss][Ii][Gg][Nn][Mm][Ee][Nn][Tt]|[Nn][Ee][Ww]-[Mm][Aa][Ii][Ll][Bb][Oo][Xx][Ss][Ee][Aa][Rr][Cc][Hh]|[Ss][Ee][Aa][Rr][Cc][Hh]-[Mm][Aa][Ii][Ll][Bb][Oo][Xx]|[Ii][Nn][Ss][Tt][Aa][Ll][Ll]-[Tt][Rr][Aa][Nn][Ss][Pp][Oo][Rr][Tt][Aa][Gg][Ee][Nn][Tt]|[Nn][Ee][Ww]-[Ii][Nn][Bb][Oo][Xx][Rr][Uu][Ll][Ee]|[Ss][Ee][Tt]-[Oo][Aa][Bb][Vv][Ii][Rr][Tt][Uu][Aa][Ll][Dd][Ii][Rr][Ee][Cc][Tt][Oo][Rr][Yy]|[Mm][Ii][Cc][Rr][Oo][Ss][Oo][Ff][Tt]\.[Ee][Xx][Cc][Hh][Aa][Nn][Gg][Ee]\.[Mm][Aa][Nn][Aa][Gg][Ee][Mm][Ee][Nn][Tt]\.[Pp][Oo][Ww][Ee][Rr][Ss][Hh][Ee][Ll][Ll]\.[Ss][Nn][Aa][Pp][Ii][Nn]).*/)
+    pivot_on:
+    - host
+    window: 4h
+  - name: Web-shell ASPX/ASHX written into Exchange IIS directories on this host
+    query: data_win_system_eventID:"11" AND (data_win_eventdata_targetFilename:/.*\.[Aa][Ss][Pp][Xx].*/ OR data_win_eventdata_targetFilename:/.*\.[Aa][Ss][Hh][Xx].*/ OR data_win_eventdata_targetFilename:/.*\.[Aa][Ss][Pp].*/) AND (data_win_eventdata_targetFilename:/.*[Ff][Rr][Oo][Nn][Tt][Ee][Nn][Dd]\\[Hh][Tt][Tt][Pp][Pp][Rr][Oo][Xx][Yy]\\.*/ OR data_win_eventdata_targetFilename:/.*\\[Aa][Ss][Pp][Nn][Ee][Tt]_[Cc][Ll][Ii][Ee][Nn][Tt]\\.*/ OR data_win_eventdata_targetFilename:/.*\\[Ii][Nn][Ee][Tt][Pp][Uu][Bb]\\[Ww][Ww][Ww][Rr][Oo][Oo][Tt]\\.*/ OR data_win_eventdata_image:/.*\\[Ww]3[Ww][Pp]\.[Ee][Xx][Ee].*/)
+    pivot_on:
+    - host
+    window: 4h
+  - name: Further anti-forensic log / shadow-copy destruction on this host
+    query: ((data_win_eventdata_commandLine:/.*[Ww][Ee][Vv][Tt][Uu][Tt][Ii][Ll] [Cc][Ll].*/ OR data_win_eventdata_commandLine:/.*[Cc][Ll][Ee][Aa][Rr]-[Ee][Vv][Ee][Nn][Tt][Ll][Oo][Gg].*/ OR data_win_eventdata_commandLine:/.*[Rr][Ee][Mm][Oo][Vv][Ee]-[Ee][Vv][Ee][Nn][Tt][Ll][Oo][Gg].*/ OR data_win_eventdata_commandLine:/.*[Vv][Ss][Ss][Aa][Dd][Mm][Ii][Nn] [Dd][Ee][Ll][Ee][Tt][Ee] [Ss][Hh][Aa][Dd][Oo][Ww][Ss].*/ OR data_win_eventdata_commandLine:/.*[Ff][Ss][Uu][Tt][Ii][Ll] [Uu][Ss][Nn] [Dd][Ee][Ll][Ee][Tt][Ee][Jj][Oo][Uu][Rr][Nn][Aa][Ll].*/ OR data_win_eventdata_commandLine:/.*[Ww][Bb][Aa][Dd][Mm][Ii][Nn] [Dd][Ee][Ll][Ee][Tt][Ee] [Cc][Aa][Tt][Aa][Ll][Oo][Gg].*/) OR (data_win_system_eventID:"1102" OR data_win_system_eventID:"104"))
+    pivot_on:
+    - host
+    window: 4h
+  - name: Sibling forensic-log file deletions on this host (evtx, IIS, PSReadLine, Exchange logging)
+    query: (data_win_system_eventID:"23" OR data_win_system_eventID:"26") AND (data_win_eventdata_targetFilename:/.*\.[Ee][Vv][Tt][Xx].*/ OR data_win_eventdata_targetFilename:/.*\\[Ii][Nn][Ee][Tt][Pp][Uu][Bb]\\[Ll][Oo][Gg][Ss]\\.*/ OR data_win_eventdata_targetFilename:/.*[Cc][Oo][Nn][Ss][Oo][Ll][Ee][Hh][Oo][Ss][Tt]_[Hh][Ii][Ss][Tt][Oo][Rr][Yy]\.[Tt][Xx][Tt].*/ OR data_win_eventdata_targetFilename:/.*\\[Ll][Oo][Gg][Gg][Ii][Nn][Gg]\\.*/)
+    pivot_on:
+    - host
+    window: 2h

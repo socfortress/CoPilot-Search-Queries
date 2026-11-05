@@ -129,23 +129,58 @@ graylog:
   query: data_audit_key:/[Ss][Uu][Ss][Pp]_[Aa][Cc][Tt][Ii][Vv][Ii][Tt][Yy]/
 
 correlation:
-  # Authored by the correlation engine for review.
+  # Authored per-rule (behaviour-researched) for the correlation engine. Related CoPilot
+  # Searches + telemetry pivots to run around an alert, scoped to its host/user/ip/domain.
+  related_rules:
+  - id: a2d9e2f3-0f43-4c7a-bcd9-9acfc0d723aa
+    name: Suspicious Download and Execute Pattern via Curl/Wget
+    reason: 'Confirms intent for the curl/wget hits this rule watches: it fires when that same curl/wget writes into /tmp or /dev/shm and is immediately run via ''sh -c''. A co-hit on the host turns a dual-use fetch logged under susp_activity into a confirmed malicious stager / ingress-tool-transfer, not an admin download.'
+  - id: 7f734ed0-4f47-46c0-837f-6ee62505abd9
+    name: Potential Netcat Reverse Shell Execution
+    reason: 'The C2 payoff for the nc/netcat/ncat commands in this rule''s list: it fires on ''nc -e/-c <shell>'', which upgrades a bare susp_activity netcat execution into a confirmed reverse shell with an attacker callback. Strongest confirmation that the tooling opened a live C2 channel.'
+  - id: 999c3b12-0a8c-40b6-8e13-dd7d62b75c7a
+    name: Potentially Suspicious Named Pipe Created Via Mkfifo
+    reason: 'Exposes the backpipe primitive this rule cannot see directly: when nc or socat (both in this rule''s list) lack -e, operators build ''mkfifo /tmp/f; cat /tmp/f|/bin/sh|nc host port >/tmp/f''. An mkfifo-in-/tmp on the same host is the other half of the netcat/socat reverse shell logged under susp_activity.'
+  - id: ba592c6d-6888-43c3-b8c6-689b8fe47337
+    name: Linux Base64 Encoded Pipe to Shell
+    reason: 'Confirms intent for the base64 command this rule watches: it fires on ''base64 ... | sh'', revealing that the susp_activity base64 execution was obfuscated payload decoding piped straight to a shell (T1140) rather than benign encoding.'
+  - id: cf610c15-ed71-46e1-bdf8-2bd1a99de6c4
+    name: Download File To Potentially Suspicious Directory Via Wget
+    reason: 'The download half of the same wget behaviour: ''wget -O/--output-document'' writing into /tmp. When it co-fires with this rule''s wget hit it confirms the fetch landed a payload in a world-writable directory (T1105), the staging step before chmod+execute.'
+  - id: cb39d16b-b3b6-4a7a-8222-1cf24b686ffc
+    name: Data Exfiltration with Wget
+    reason: 'Egress direction of the same wget tool, from the same auditd telemetry: it fires on ''wget --post-file='' uploading a file (e.g. /etc/shadow via sudo misconfig). A co-hit shows the susp_activity wget was used to exfiltrate data (T1048.003), not to pull tooling.'
+  - id: 0cf7a157-8879-41a2-8f55-388dd23746b7
+    name: Linux Recon Indicators
+    reason: 'The hands-on-keyboard recon that frames C2 tooling: SUID (''find -perm -4000'') and .htpasswd/secret hunting is what an operator runs right after an interactive shell connects back. nmap is itself in this rule''s command list, so network+host discovery firing on the same host marks a live operator, not a script.'
+  - id: 1543ae20-cbdf-4ec1-8d12-7664d667a825
+    name: Suspicious Commands Linux
+    reason: Sibling broad auditd suspicious-command detection (same Florian Roth auditd config, same data source) catching 'chmod 777', 'chmod u+s' and 'cp /bin/sh' on the same host. It is the natural co-firing neighbour in a single hands-on session and often records the chmod/SUID step that follows a dropped C2 payload.
+  window: 2h
   enrichment_searches:
-  # Rule-specific telemetry pivots the engine runs around an alert from this rule,
-  # scoped to the alert's host/user/IP within the window (behaviour-targeted, not a sweep).
-    - name: "Outbound-transfer / upload tooling on this host"
-      query: '((data_process_exec_process_binary:/.*(\/[Cc][Uu][Rr][Ll]|\/[Ww][Gg][Ee][Tt]|\/[Tt][Ff][Tt][Pp])/) OR (data_process_exec_process_binary:/.*(\/[Ss][Cc][Pp]|\/[Rr][Ss][Yy][Nn][Cc]|\/[Rr][Cc][Ll][Oo][Nn][Ee]|\/[Cc][Uu][Rr][Ll])/))'
-      pivot_on: [host]
-      window: 2h
-    - name: "Shell / interpreter execution on this host"
-      query: '((data_process_exec_process_binary:/.*(\/[Bb][Aa][Ss][Hh]|\/[Ss][Hh]|\/[Dd][Aa][Ss][Hh]|\/[Zz][Ss][Hh]|\/[Kk][Ss][Hh]|\/[Aa][Ss][Hh]|\/[Bb][Uu][Ss][Yy][Bb][Oo][Xx])/) OR (data_process_exec_process_binary:/.*(\/[Pp][Yy][Tt][Hh][Oo][Nn]|\/[Pp][Yy][Tt][Hh][Oo][Nn]3|\/[Pp][Ee][Rr][Ll]|\/[Rr][Uu][Bb][Yy]|\/[Pp][Hh][Pp]|\/[Nn][Oo][Dd][Ee]|\/[Ll][Uu][Aa]|\/[Aa][Ww][Kk])/))'
-      pivot_on: [host]
-      window: 1h
-    - name: "Reconnaissance commands on this host"
-      query: 'data_process_exec_process_binary:/.*(\/[Ww][Hh][Oo][Aa][Mm][Ii]|\/[Ii][Dd]|\/[Uu][Nn][Aa][Mm][Ee]|\/[Hh][Oo][Ss][Tt][Nn][Aa][Mm][Ee]|\/[Hh][Oo][Ss][Tt][Nn][Aa][Mm][Ee][Cc][Tt][Ll]|\/[Ss][Ss]|\/[Nn][Ee][Tt][Ss][Tt][Aa][Tt]|\/[Ii][Ff][Cc][Oo][Nn][Ff][Ii][Gg]|\/[Aa][Rr][Pp]|\/[Ww]|\/[Ww][Hh][Oo]|\/[Ll][Aa][Ss][Tt]|\/[Ll][Ss][Oo][Ff]|\/[Nn][Mm][Aa][Pp]|\/[Dd][Ii][Gg]|\/[Ff][Ii][Nn][Dd])/'
-      pivot_on: [host]
-      window: 1h
-    - name: "Downloader / reverse-shell tooling on this host"
-      query: '((data_process_exec_process_binary:/.*(\/[Cc][Uu][Rr][Ll]|\/[Ww][Gg][Ee][Tt]|\/[Tt][Ff][Tt][Pp])/) OR (((data_process_exec_process_binary:/.*(\/[Nn][Cc]|\/[Nn][Cc][Aa][Tt]|\/[Nn][Ee][Tt][Cc][Aa][Tt]|\/[Ss][Oo][Cc][Aa][Tt])/) OR (data_process_exec_process_arguments:/.*\/[Dd][Ee][Vv]\/[Tt][Cc][Pp]\/.*/) OR (data_process_exec_process_arguments:/.*[Bb][Aa][Ss][Hh] -[Ii].*/) OR (data_process_exec_process_arguments:/.*[Ss][Hh] -[Ii].*/) OR (data_process_exec_process_arguments:/.*[Mm][Kk][Ff][Ii][Ff][Oo].*/))))'
-      pivot_on: [host]
-      window: 1h
+  # Behaviour-targeted hunts the engine runs around the alert (not a sweep).
+  - name: 'Download-and-execute: curl/wget fetch into /tmp or /dev/shm, chmod, or a payload run from there'
+    query: ((data_process_exec_process_binary:/.*(\/[Cc][Uu][Rr][Ll]|\/[Ww][Gg][Ee][Tt]|\/[Tt][Ff][Tt][Pp])/ AND (data_process_exec_process_arguments:/.*\/[Tt][Mm][Pp]\/.*/ OR data_process_exec_process_arguments:/.*\/[Dd][Ee][Vv]\/[Ss][Hh][Mm]\/.*/)) OR (data_process_exec_process_binary:/.*\/[Cc][Hh][Mm][Oo][Dd]/ AND (data_process_exec_process_arguments:/.*\/[Tt][Mm][Pp]\/.*/ OR data_process_exec_process_arguments:/.*\/[Dd][Ee][Vv]\/[Ss][Hh][Mm]\/.*/)) OR data_process_exec_process_binary:/\/[Tt][Mm][Pp]\/.*/ OR data_process_exec_process_binary:/\/[Dd][Ee][Vv]\/[Ss][Hh][Mm]\/.*/)
+    pivot_on:
+    - host
+    window: 2h
+  - name: 'Reverse shell / C2 channel: nc/ncat/socat -e/-c, /dev/tcp redirection, mkfifo backpipe, or pty.spawn'
+    query: ((data_process_exec_process_binary:/.*(\/[Nn][Cc]|\/[Nn][Cc][Aa][Tt]|\/[Nn][Ee][Tt][Cc][Aa][Tt]|\/[Ss][Oo][Cc][Aa][Tt])/ AND (data_process_exec_process_arguments:/.* -[Ee] .*/ OR data_process_exec_process_arguments:/.* -[Cc] .*/)) OR data_process_exec_process_arguments:/.*\/[Dd][Ee][Vv]\/[Tt][Cc][Pp]\/.*/ OR data_process_exec_process_arguments:/.*\/[Dd][Ee][Vv]\/[Uu][Dd][Pp]\/.*/ OR (data_process_exec_process_binary:/.*\/[Mm][Kk][Ff][Ii][Ff][Oo]/ AND data_process_exec_process_arguments:/.* \/[Tt][Mm][Pp]\/.*/) OR data_process_exec_process_arguments:/.*[Pp][Tt][Yy]\.[Ss][Pp][Aa][Ww][Nn].*/)
+    pivot_on:
+    - host
+    window: 1h
+  - name: base64 decoded and piped straight to a shell on this host
+    query: data_process_exec_process_arguments:/.*[Bb][Aa][Ss][Ee]64.*/ AND (data_process_exec_process_arguments:/.*\|[ ]*[Bb][Aa][Ss][Hh].*/ OR data_process_exec_process_arguments:/.*\|[ ]*[Ss][Hh].*/)
+    pivot_on:
+    - host
+    window: 1h
+  - name: 'Post-foothold reconnaissance: identity, host and network discovery (whoami/id/uname/ss/netstat/ip/arp/nmap/dig)'
+    query: data_process_exec_process_binary:/.*(\/[Ww][Hh][Oo][Aa][Mm][Ii]|\/[Ii][Dd]|\/[Uu][Nn][Aa][Mm][Ee]|\/[Hh][Oo][Ss][Tt][Nn][Aa][Mm][Ee]|\/[Ss][Ss]|\/[Nn][Ee][Tt][Ss][Tt][Aa][Tt]|\/[Ii][Pp]|\/[Aa][Rr][Pp]|\/[Nn][Mm][Aa][Pp]|\/[Pp][Nn][Ss][Cc][Aa][Nn]|\/[Dd][Ii][Gg])/
+    pivot_on:
+    - host
+    window: 1h
+  - name: Persistence established after the C2 tooling (cron, systemd, SSH authorized_keys, rc.local, shell profiles)
+    query: (data_process_exec_process_binary:/.*(\/[Cc][Rr][Oo][Nn][Tt][Aa][Bb]|\/[Ss][Yy][Ss][Tt][Ee][Mm][Cc][Tt][Ll]|\/[Aa][Tt])/) OR data_process_exec_process_arguments:/.*\/[Ee][Tt][Cc]\/[Cc][Rr][Oo][Nn].*/ OR data_process_exec_process_arguments:/.*\/[Ee][Tt][Cc]\/[Ss][Yy][Ss][Tt][Ee][Mm][Dd]\/.*/ OR data_process_exec_process_arguments:/.*[Rr][Cc]\.[Ll][Oo][Cc][Aa][Ll].*/ OR data_process_exec_process_arguments:/.*\.[Bb][Aa][Ss][Hh][Rr][Cc].*/ OR data_process_exec_process_arguments:/.*[Aa][Uu][Tt][Hh][Oo][Rr][Ii][Zz][Ee][Dd]_[Kk][Ee][Yy][Ss].*/
+    pivot_on:
+    - host
+    window: 4h

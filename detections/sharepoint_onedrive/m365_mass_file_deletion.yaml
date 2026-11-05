@@ -92,43 +92,58 @@ aggregation:
   condition: ">"
 
 correlation:
-  # Authored by the correlation engine for review. Related CoPilot Searches to run
-  # around an alert from this rule, scoped to the same host/user/IP within the window.
+  # Authored per-rule (behaviour-researched) for the correlation engine. Related CoPilot
+  # Searches + telemetry pivots to run around an alert, scoped to its host/user/ip/domain.
   related_rules:
-    - id: ccad96d7-a48c-4f13-8b9c-9f6a31cba454
-      name: "Detect Remote Access Software Usage FileInfo"
-      reason: "same analytic story: Insider Threat"
-    - id: M365_Mass_External_Sharing
-      name: "M365 Mass External Sharing"
-      reason: "same analytic story: Insider Threat"
-    - id: M365_Mass_File_Download
-      name: "M365 Mass File Download"
-      reason: "same analytic story: Insider Threat"
-    - id: M365_Suspicious_File_Deletion
-      name: "M365 Suspicious File Deletion"
-      reason: "same analytic story: Office 365 Data Destruction"
-    - id: windows-wpdbusenum-registry-usb-device-001
-      name: "Windows WPDBusEnum Registry Key Modification - USB Device Detection"
-      reason: "same analytic story: Insider Threat"
-    - id: bd132164-884a-48f1-aa2d-c6d646b04c69
-      name: "Microsoft 365 - Potential Ransomware Activity"
-      reason: "next kill-chain tactic: Impact"
-    - id: 78a34b67-3c39-4886-8fb4-61c46dc18ecd
-      name: "Microsoft 365 - Unusual Volume of File Deletion"
-      reason: "next kill-chain tactic: Impact"
-  window: 1h
+  - id: M365_Suspicious_File_Deletion
+    name: M365 Suspicious File Deletion
+    reason: Lower-threshold sibling that shares the identical base query (FileRecycled, same SHAREPOINT\system and OneDrive/SkyDrive-sync exclusions); this high-volume tier is a strict superset, so the same user's deletion burst fires both. Co-firing confirms the mass-recycle is real user-driven destruction and not a threshold artefact.
+  - id: 78a34b67-3c39-4886-8fb4-61c46dc18ecd
+    name: Microsoft 365 - Unusual Volume of File Deletion
+    reason: Independent MCAS/Defender detection of the same behaviour (one user deleting an unusual volume of files). Cross-engine agreement on the same UserId raises confidence from 'our count threshold tripped' to 'two sources see mass deletion'.
+  - id: bd132164-884a-48f1-aa2d-c6d646b04c69
+    name: Microsoft 365 - Potential Ransomware Activity
+    reason: MCAS ransomware heuristic on mass file operations. If the recycle burst is the trailing half of an encrypt-then-delete ransomware run on the account, both fire together; its presence reclassifies the incident from a plain data wipe to active ransomware (Impact).
+  - id: M365_Mass_File_Download
+    name: M365 Mass File Download
+    reason: 'Classic steal-then-wipe precursor: the same user bulk-downloads files (exfil/staging) immediately before recycling them. If this preceded the deletion it upgrades the incident from pure destruction to exfiltration followed by destruction.'
+  - id: M365_Mass_External_Sharing
+    name: M365 Mass External Sharing
+    reason: 'Alternate exfil-before-destroy channel: the same user pushes data out via anonymous/guest sharing links before wiping the originals. Together with mass deletion this is the insider/takeover pattern of exposing corporate data then removing the local copy.'
+  - id: M365_Mass_Email_Deletion_Evidence_Wipe
+    name: M365 Mass Email Deletion - Evidence Wipe
+    reason: 'Parallel destruction in a second workload by the same account: bulk mailbox deletion is the anti-forensics counterpart to SharePoint/OneDrive wiping. Co-firing widens the blast radius from files to the whole mailbox and signals deliberate evidence destruction after a takeover.'
+  - id: d7eab125-5f94-43df-8710-795b80fa1189
+    name: Microsoft 365 - Impossible Travel Activity
+    reason: 'Account-takeover root-cause precursor: a risky impossible-travel sign-in by the same user shortly before the deletion burst points to a compromised account driving the destruction rather than a reckless-but-legitimate user. Resolves the compromise branch of ''why did this fire''.'
+  - id: 2e669ed8-742e-4fe5-b3c4-5a59b486c2ee
+    name: Activity Performed by Terminated User
+    reason: 'Insider root-cause precursor: if the destroying account belongs to a terminated/offboarded user, mass deletion is a near-certain malicious-insider or offboarding-failure case rather than external compromise. Resolves the insider branch of ''why did this fire''.'
+  window: 2h
   enrichment_searches:
-  # Rule-specific telemetry pivots the engine runs around an alert from this rule,
-  # scoped to the alert's host/user/IP within the window (behaviour-targeted, not a sweep).
-    - name: "File access / download operations by this user"
-      query: '(data_office365_Operation:/.*[Ff][Ii][Ll][Ee][Dd][Oo][Ww][Nn][Ll][Oo][Aa][Dd][Ee][Dd].*/ OR data_office365_Operation:/.*[Ff][Ii][Ll][Ee][Aa][Cc][Cc][Ee][Ss][Ss][Ee][Dd].*/ OR data_office365_Operation:/.*[Ff][Ii][Ll][Ee][Ss][Yy][Nn][Cc][Dd][Oo][Ww][Nn][Ll][Oo][Aa][Dd][Ee][Dd][Ff][Uu][Ll][Ll].*/ OR data_office365_Operation:/.*[Ff][Ii][Ll][Ee][Aa][Cc][Cc][Ee][Ss][Ss][Ee][Dd][Ee][Xx][Tt][Ee][Nn][Dd][Ee][Dd].*/)'
-      pivot_on: [user]
-      window: 6h
-    - name: "Sharing / anonymous-link / permission changes by this user"
-      query: '(data_office365_Operation:/.*[Ss][Hh][Aa][Rr][Ii][Nn][Gg][Ss][Ee][Tt].*/ OR data_office365_Operation:/.*[Aa][Nn][Oo][Nn][Yy][Mm][Oo][Uu][Ss][Ll][Ii][Nn][Kk][Cc][Rr][Ee][Aa][Tt][Ee][Dd].*/ OR data_office365_Operation:/.*[Aa][Nn][Oo][Nn][Yy][Mm][Oo][Uu][Ss][Ll][Ii][Nn][Kk][Uu][Ss][Ee][Dd].*/ OR data_office365_Operation:/.*[Aa][Dd][Dd][Ee][Dd][Tt][Oo][Ss][Ee][Cc][Uu][Rr][Ee][Ll][Ii][Nn][Kk].*/ OR data_office365_Operation:/.*[Ss][Hh][Aa][Rr][Ii][Nn][Gg][Ii][Nn][Vv][Ii][Tt][Aa][Tt][Ii][Oo][Nn][Cc][Rr][Ee][Aa][Tt][Ee][Dd].*/ OR data_office365_Operation:/.*[Cc][Oo][Mm][Pp][Aa][Nn][Yy][Ll][Ii][Nn][Kk][Cc][Rr][Ee][Aa][Tt][Ee][Dd].*/)'
-      pivot_on: [user]
-      window: 24h
-    - name: "Mailbox-rule / app-consent persistence by this user"
-      query: '(((data_office365_Operation:/.*[Nn][Ee][Ww]-[Ii][Nn][Bb][Oo][Xx][Rr][Uu][Ll][Ee].*/ OR data_office365_Operation:/.*[Ss][Ee][Tt]-[Ii][Nn][Bb][Oo][Xx][Rr][Uu][Ll][Ee].*/ OR data_office365_Operation:/.*[Ss][Ee][Tt]-[Mm][Aa][Ii][Ll][Bb][Oo][Xx].*/ OR data_office365_Operation:/.*[Nn][Ee][Ww]-[Tt][Rr][Aa][Nn][Ss][Pp][Oo][Rr][Tt][Rr][Uu][Ll][Ee].*/ OR data_office365_Operation:/.*[Ss][Ee][Tt]-[Tt][Rr][Aa][Nn][Ss][Pp][Oo][Rr][Tt][Rr][Uu][Ll][Ee].*/ OR data_office365_Operation:/.*[Aa][Dd][Dd]-[Mm][Aa][Ii][Ll][Bb][Oo][Xx][Pp][Ee][Rr][Mm][Ii][Ss][Ss][Ii][Oo][Nn].*/ OR data_office365_Operation:/.*[Aa][Dd][Dd]-[Rr][Ee][Cc][Ii][Pp][Ii][Ee][Nn][Tt][Pp][Ee][Rr][Mm][Ii][Ss][Ss][Ii][Oo][Nn].*/)) OR ((data_office365_Operation:/.*[Cc][Oo][Nn][Ss][Ee][Nn][Tt] [Tt][Oo] [Aa][Pp][Pp][Ll][Ii][Cc][Aa][Tt][Ii][Oo][Nn].*/ OR data_office365_Operation:/.*[Aa][Dd][Dd] [Dd][Ee][Ll][Ee][Gg][Aa][Tt][Ee][Dd] [Pp][Ee][Rr][Mm][Ii][Ss][Ss][Ii][Oo][Nn] [Gg][Rr][Aa][Nn][Tt].*/ OR data_office365_Operation:/.*[Aa][Dd][Dd] [Aa][Pp][Pp] [Rr][Oo][Ll][Ee] [Aa][Ss][Ss][Ii][Gg][Nn][Mm][Ee][Nn][Tt] [Gg][Rr][Aa][Nn][Tt] [Tt][Oo] [Uu][Ss][Ee][Rr].*/ OR data_office365_Operation:/.*[Aa][Dd][Dd] [Oo][Aa][Uu][Tt][Hh]2[Pp][Ee][Rr][Mm][Ii][Ss][Ss][Ii][Oo][Nn][Gg][Rr][Aa][Nn][Tt].*/)))'
-      pivot_on: [user]
-      window: 24h
+  # Behaviour-targeted hunts the engine runs around the alert (not a sweep).
+  - name: Bulk file download / sync-down by this user (steal-before-wipe exfil)
+    query: data_office365_Operation:("FileDownloaded" OR "FileSyncDownloadedFull" OR "FileSyncDownloadedPartial")
+    pivot_on:
+    - user
+    window: 6h
+  - name: Anonymous / external sharing-link creation by this user (exfil before destruction)
+    query: data_office365_Operation:("AnonymousLinkCreated" OR "AnonymousLinkUsed" OR "SharingSet" OR "AddedToSecureLink" OR "SharingInvitationCreated")
+    pivot_on:
+    - user
+    window: 24h
+  - name: Mailbox soft/hard deletion by this user (parallel evidence wipe)
+    query: data_office365_Operation:("SoftDelete" OR "HardDelete" OR "MoveToDeletedItems")
+    pivot_on:
+    - user
+    window: 24h
+  - name: MCAS account-risk / takeover alerts for this user (is this a compromise?)
+    query: data_office365_eventName:/.*([Ii]mpossible [Tt]ravel|[Aa]nonymous [Ii][Pp]|[Ii]nfrequent [Cc]ountry|[Rr]isky [Ii][Pp]|[Tt]erminated [Uu]ser).*/
+    pivot_on:
+    - user
+    window: 24h
+  - name: Destructive / exfil operations from this client IP across all users (blast radius)
+    query: data_office365_Operation:("FileRecycled" OR "FileDeleted" OR "FileDownloaded" OR "SoftDelete" OR "HardDelete" OR "AnonymousLinkCreated")
+    pivot_on:
+    - ip
+    window: 6h

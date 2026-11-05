@@ -143,23 +143,58 @@ graylog:
   query: data_process_exec_process_binary:/.*\/[Tt][Oo][Uu][Cc][Hh]/ AND data_process_exec_process_arguments:/.* -[Tt] .*/ AND data_process_exec_process_arguments:/.*\.[Ss][Ee][Rr][Vv][Ii][Cc][Ee]/
 
 correlation:
-  # Authored by the correlation engine for review.
+  # Authored per-rule (behaviour-researched) for the correlation engine. Related CoPilot
+  # Searches + telemetry pivots to run around an alert, scoped to its host/user/ip/domain.
+  related_rules:
+  - id: linux-service-file-created-in-systemd-directory-001
+    name: Linux Service File Created In Systemd Directory
+    reason: 'Direct precursor and the whole reason this alert exists: that rule fires when a .service unit is written under /etc/systemd, /lib/systemd or ~/.config/systemd, and this touch -t backdates that very unit''s timestamps so the freshly-planted service blends in with OS-shipped units. A systemd-unit creation on the host just before the timestomp pins down exactly which persistence the attacker is hiding.'
+  - id: b3c8e2d1-4f1a-4b7c-9a22-91a6f2c4e8de
+    name: Linux Init Script Persistence Detection
+    reason: 'Parallel boot-persistence anchor: it catches writes to /etc/init.d, /etc/rc.d and /etc/rc.local, the SysV-init sibling of a systemd .service. Operators establishing boot persistence routinely drop both and timestomp each, so an init-script write on the same host widens this single-unit timestomp into a full persistence sweep.'
+  - id: 34979410-e4b5-4e5d-8cfb-389fdff05c12
+    name: Remove Immutable File Attribute
+    reason: 'Enabling precursor and companion file-attribute tampering: OS-shipped unit files and their directories can carry the immutable bit, so the attacker runs chattr -i to overwrite the unit before timestomping it (and often chattr +i afterwards to lock the backdated unit). chattr on the host in the window is the same make-it-look-native manipulation as the touch -t.'
+  - id: 6b14bac8-3e3a-4324-8109-42f0546a347f
+    name: Scheduled Cron Task/Job - Linux
+    reason: 'Redundant-persistence co-occurrence (a mutual link - that rule''s own block cites this one): attackers rarely rely on a single mechanism, so a crontab installed from /tmp on the same host alongside a timestomped .service signals a deliberate multi-vector systemd+cron foothold to root out together.'
+  - id: 6a50f16c-3b7b-42d1-b081-0fdd3ba70a73
+    name: User Added To Root/Sudoers Group Using Usermod
+    reason: 'Privilege-escalation precursor: writing a unit into /etc/systemd/system and successfully running touch -t against a root-owned system file both require root. usermod -aG root/sudoers on the host shortly before is how that root - and a persistent admin foothold - was obtained.'
+  - id: bed26dea-4525-47f4-b24a-76e30e44ffb0
+    name: Audit Rules Deleted Via Auditctl
+    reason: 'Same anti-forensics phase: the timestomp is defense evasion, and auditctl -D wipes the kernel audit ruleset so the unit install, the systemctl enable and the timestomp itself go unrecorded. Blinding auditd in the window confirms a deliberate cover-tracks sequence around the persistence, not a stray admin touch.'
+  - id: 80915f59-9b56-4616-9de0-fd0dea6c12fe
+    name: Linux Logs Clearing Attempts
+    reason: 'Co-occurring cover-tracks action: after installing and backdating the unit the operator deletes /var/log entries (rm/shred/unlink) that recorded the systemctl and file-write activity. Log destruction in the window is the evidence-removal half of the same defense-evasion effort this timestomp belongs to.'
+  - id: 1182f3b3-e716-4efa-99ab-d2685d04360f
+    name: History File Deletion
+    reason: 'Co-occurring cover-tracks action in the same interactive session: wiping ~/.bash_history erases the cp/vi/systemctl and the touch -t ... .service command lines themselves. A history wipe on the host near this alert places a live hands-on operator cleaning up after planting the service.'
+  window: 2h
   enrichment_searches:
-  # Rule-specific telemetry pivots the engine runs around an alert from this rule,
-  # scoped to the alert's host/user/IP within the window (behaviour-targeted, not a sweep).
-    - name: "Log-tampering / anti-forensic tooling on this host"
-      query: '((data_process_exec_process_binary:/.*(\/[Cc][Hh][Aa][Tt][Tt][Rr]|\/[Ss][Hh][Rr][Ee][Dd]|\/[Aa][Uu][Dd][Ii][Tt][Cc][Tt][Ll]|\/[Ss][Ee][Tt][Ee][Nn][Ff][Oo][Rr][Cc][Ee])/) OR (data_process_exec_process_arguments:/.*[Hh][Ii][Ss][Tt][Oo][Rr][Yy] -[Cc].*/) OR (data_process_exec_process_arguments:/.*\/[Vv][Aa][Rr]\/[Ll][Oo][Gg].*/) OR (data_process_exec_process_arguments:/.*[Ii][Pp][Tt][Aa][Bb][Ll][Ee][Ss] -[Ff].*/))'
-      pivot_on: [host]
-      window: 2h
-    - name: "Other executions of this tool-set on this host (any arguments)"
-      query: 'data_process_exec_process_binary:/.*(\/[Tt][Oo][Uu][Cc][Hh])/'
-      pivot_on: [host]
-      window: 2h
-    - name: "Shell / interpreter execution on this host"
-      query: '((data_process_exec_process_binary:/.*(\/[Bb][Aa][Ss][Hh]|\/[Ss][Hh]|\/[Dd][Aa][Ss][Hh]|\/[Zz][Ss][Hh]|\/[Kk][Ss][Hh]|\/[Aa][Ss][Hh]|\/[Bb][Uu][Ss][Yy][Bb][Oo][Xx])/) OR (data_process_exec_process_binary:/.*(\/[Pp][Yy][Tt][Hh][Oo][Nn]|\/[Pp][Yy][Tt][Hh][Oo][Nn]3|\/[Pp][Ee][Rr][Ll]|\/[Rr][Uu][Bb][Yy]|\/[Pp][Hh][Pp]|\/[Nn][Oo][Dd][Ee]|\/[Ll][Uu][Aa]|\/[Aa][Ww][Kk])/))'
-      pivot_on: [host]
-      window: 1h
-    - name: "Reconnaissance commands on this host"
-      query: 'data_process_exec_process_binary:/.*(\/[Ww][Hh][Oo][Aa][Mm][Ii]|\/[Ii][Dd]|\/[Uu][Nn][Aa][Mm][Ee]|\/[Hh][Oo][Ss][Tt][Nn][Aa][Mm][Ee]|\/[Hh][Oo][Ss][Tt][Nn][Aa][Mm][Ee][Cc][Tt][Ll]|\/[Ss][Ss]|\/[Nn][Ee][Tt][Ss][Tt][Aa][Tt]|\/[Ii][Ff][Cc][Oo][Nn][Ff][Ii][Gg]|\/[Aa][Rr][Pp]|\/[Ww]|\/[Ww][Hh][Oo]|\/[Ll][Aa][Ss][Tt]|\/[Ll][Ss][Oo][Ff]|\/[Nn][Mm][Aa][Pp]|\/[Dd][Ii][Gg]|\/[Ff][Ii][Nn][Dd])/'
-      pivot_on: [host]
-      window: 1h
+  # Behaviour-targeted hunts the engine runs around the alert (not a sweep).
+  - name: Systemd persistence installed or enabled on this host (the unit being hidden)
+    query: ((data_process_exec_process_binary:/.*\/[Ss][Yy][Ss][Tt][Ee][Mm][Cc][Tt][Ll]/ AND data_process_exec_process_arguments:/.*([Ee][Nn][Aa][Bb][Ll][Ee]|[Dd][Aa][Ee][Mm][Oo][Nn]-[Rr][Ee][Ll][Oo][Aa][Dd]|[Ss][Tt][Aa][Rr][Tt]).*/) OR ((data_process_exec_process_binary:/.*\/([Cc][Pp]|[Mm][Vv]|[Tt][Ee][Ee]|[Vv][Ii]|[Vv][Ii][Mm]|[Nn][Aa][Nn][Oo]|[Ll][Nn])/) AND data_process_exec_process_arguments:/.*\/([Ee][Tt][Cc]|[Rr][Uu][Nn]|[Ll][Ii][Bb]|[Uu][Ss][Rr]\/[Ll][Ii][Bb])\/[Ss][Yy][Ss][Tt][Ee][Mm][Dd]\/.*/))
+    pivot_on:
+    - host
+    window: 2h
+  - name: Other timestomping or system-clock manipulation on this host
+    query: ((data_process_exec_process_binary:/.*\/[Tt][Oo][Uu][Cc][Hh]/ AND data_process_exec_process_arguments:/.* -[AaMmRrTtDd] .*/) OR (data_process_exec_process_binary:/.*\/[Ff][Aa][Kk][Ee][Tt][Ii][Mm][Ee]/) OR (data_process_exec_process_binary:/.*\/[Dd][Aa][Tt][Ee]/ AND data_process_exec_process_arguments:/.* -[Ss] .*/))
+    pivot_on:
+    - host
+    window: 2h
+  - name: Service payload staged in or executing from a world-writable location on this host
+    query: ((data_process_exec_process_binary:/\/[Tt][Mm][Pp]\/.*/ OR data_process_exec_process_binary:/\/[Vv][Aa][Rr]\/[Tt][Mm][Pp]\/.*/ OR data_process_exec_process_binary:/\/[Dd][Ee][Vv]\/[Ss][Hh][Mm]\/.*/) OR ((data_process_exec_process_binary:/.*\/[Ww][Gg][Ee][Tt]/ OR data_process_exec_process_binary:/.*\/[Cc][Uu][Rr][Ll]/) AND data_process_exec_process_arguments:/.*\/([Tt][Mm][Pp]|[Dd][Ee][Vv]\/[Ss][Hh][Mm]|[Oo][Pp][Tt]|[Uu][Ss][Rr]\/[Ll][Oo][Cc][Aa][Ll])\/.*/))
+    pivot_on:
+    - host
+    window: 6h
+  - name: Anti-forensic log, history, audit and immutability tampering on this host
+    query: ((data_process_exec_process_binary:/.*\/[Aa][Uu][Dd][Ii][Tt][Cc][Tt][Ll]/ AND data_process_exec_process_arguments:/.* -[Dd].*/) OR (data_process_exec_process_binary:/.*\/[Cc][Hh][Aa][Tt][Tt][Rr]/) OR (data_process_exec_process_binary:/.*\/[Jj][Oo][Uu][Rr][Nn][Aa][Ll][Cc][Tt][Ll]/ AND data_process_exec_process_arguments:/.*--[Vv][Aa][Cc][Uu][Uu][Mm].*/) OR ((data_process_exec_process_binary:/.*\/[Rr][Mm]/ OR data_process_exec_process_binary:/.*\/[Ss][Hh][Rr][Ee][Dd]/ OR data_process_exec_process_binary:/.*\/[Uu][Nn][Ll][Ii][Nn][Kk]/ OR data_process_exec_process_binary:/.*\/[Tt][Rr][Uu][Nn][Cc][Aa][Tt][Ee]/) AND data_process_exec_process_arguments:/.*(\/[Vv][Aa][Rr]\/[Ll][Oo][Gg]|[Bb][Aa][Ss][Hh]_[Hh][Ii][Ss][Tt][Oo][Rr][Yy]|[Zz][Ss][Hh]_[Hh][Ii][Ss][Tt][Oo][Rr][Yy]).*/))
+    pivot_on:
+    - host
+    window: 2h
+  - name: Privilege escalation to root preceding this activity on this host
+    query: (data_process_exec_process_binary:/.*\/[Ss][Uu][Dd][Oo]/ OR data_process_exec_process_binary:/.*\/[Ss][Uu]/ OR data_process_exec_process_binary:/.*\/[Pp][Kk][Ee][Xx][Ee][Cc]/ OR data_process_exec_process_binary:/.*\/[Dd][Oo][Aa][Ss]/ OR data_process_exec_process_arguments:/.*\/[Ee][Tt][Cc]\/[Ss][Uu][Dd][Oo][Ee][Rr][Ss].*/)
+    pivot_on:
+    - host
+    window: 2h

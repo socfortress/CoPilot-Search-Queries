@@ -67,19 +67,58 @@ graylog:
   query: data_office365_eventSource:/[Ss][Ee][Cc][Uu][Rr][Ii][Tt][Yy][Cc][Oo][Mm][Pp][Ll][Ii][Aa][Nn][Cc][Ee][Cc][Ee][Nn][Tt][Ee][Rr]/ AND data_office365_eventName:/[Ss][Uu][Ss][Pp][Ii][Cc][Ii][Oo][Uu][Ss] [Oo][Aa][Uu][Tt][Hh] [Aa][Pp][Pp] [Ff][Ii][Ll][Ee] [Dd][Oo][Ww][Nn][Ll][Oo][Aa][Dd] [Aa][Cc][Tt][Ii][Vv][Ii][Tt][Ii][Ee][Ss]/ AND data_office365_status:/[Ss][Uu][Cc][Cc][Ee][Ss][Ss]/
 
 correlation:
-  # Authored by the correlation engine for review.
+  # Authored per-rule (behaviour-researched) for the correlation engine. Related CoPilot
+  # Searches + telemetry pivots to run around an alert, scoped to its host/user/ip/domain.
+  related_rules:
+  - id: 2b669496-d215-47d8-bd9a-f4a45bf07cda
+    name: Data Exfiltration to Unsanctioned Apps
+    reason: 'Co-occurring, same campaign: both are Defender for Cloud Apps (SecurityComplianceCenter) anomalies on the same user. The attacker-consented OAuth app IS the unsanctioned app, so this alert and the mass-download alert routinely fire together during one consent-abuse exfiltration.'
+  - id: M365_Mass_File_Download
+    name: M365 Mass File Download
+    reason: 'Co-occurring confirmation: the raw FileDownloaded-operation counterpart to this MCAS heuristic. It fires on the actual high-volume SharePoint/OneDrive download by the same user, corroborating the anomaly with concrete operation counts and the files pulled.'
+  - id: c191e2fa-f9d6-4ccf-82af-4f2aba08359f
+    name: Logon from a Risky IP Address
+    reason: 'Precursor: the account access that authorizes the illicit OAuth consent and drives the app download commonly originates from a risky IP. Flags the compromised session on the same user that set up the exfiltration.'
+  - id: d7eab125-5f94-43df-8710-795b80fa1189
+    name: Microsoft 365 - Impossible Travel Activity
+    reason: 'Precursor: impossible-travel on the same user indicates stolen-token or AiTM session compromise, the typical entry that precedes an attacker-driven OAuth app consent and the subsequent mass file download.'
+  - id: d8b0a4fe-07a8-41be-bd39-b14afa025d95
+    name: Activity from Anonymous IP Addresses
+    reason: 'Precursor: a Tor/anonymizer-proxy sign-in by the same user corroborates an attacker-controlled session as the origin of the OAuth consent grant and the file exfiltration that followed.'
+  - id: M365_Mass_External_Sharing
+    name: M365 Mass External Sharing
+    reason: 'Follow-on / alternate exfil: after bulk-downloading through the OAuth app, a compromised account frequently creates anonymous or guest sharing links to egress the same documents a second way - same user, same data store.'
+  - id: M365_Inbox_Rule_Created
+    name: M365 Inbox Rule Created
+    reason: 'Follow-on persistence: an account compromised enough to consent to a data-harvesting OAuth app is typically used in the same session to plant New-InboxRule forward/hide rules, sustaining collection and burying security mail (BEC playbook).'
+  - id: M365_Email_Forwarding_Created
+    name: M365 Email Forwarding Created
+    reason: 'Follow-on exfil persistence: Set-Mailbox external forwarding is chained with OAuth file exfiltration in the same compromise to keep siphoning the user''s mail after the file dump.'
+  window: 1h
   enrichment_searches:
-  # Rule-specific telemetry pivots the engine runs around an alert from this rule,
-  # scoped to the alert's host/user/IP within the window (behaviour-targeted, not a sweep).
-    - name: "Operations from this client address"
-      query: '_exists_:data_office365_UserId'
-      pivot_on: [ip]
-      window: 6h
-    - name: "Sign-in activity by this user"
-      query: '(data_office365_Operation:/.*[Uu][Ss][Ee][Rr][Ll][Oo][Gg][Gg][Ee][Dd][Ii][Nn].*/ OR data_office365_Operation:/.*[Uu][Ss][Ee][Rr][Ll][Oo][Gg][Ii][Nn][Ff][Aa][Ii][Ll][Ee][Dd].*/)'
-      pivot_on: [user]
-      window: 6h
-    - name: "Mass download / forwarding by this user"
-      query: '(((data_office365_Operation:/.*[Ff][Ii][Ll][Ee][Dd][Oo][Ww][Nn][Ll][Oo][Aa][Dd][Ee][Dd].*/ OR data_office365_Operation:/.*[Ff][Ii][Ll][Ee][Aa][Cc][Cc][Ee][Ss][Ss][Ee][Dd].*/ OR data_office365_Operation:/.*[Ff][Ii][Ll][Ee][Ss][Yy][Nn][Cc][Dd][Oo][Ww][Nn][Ll][Oo][Aa][Dd][Ee][Dd][Ff][Uu][Ll][Ll].*/ OR data_office365_Operation:/.*[Ff][Ii][Ll][Ee][Aa][Cc][Cc][Ee][Ss][Ss][Ee][Dd][Ee][Xx][Tt][Ee][Nn][Dd][Ee][Dd].*/)) OR ((data_office365_Operation:/.*[Nn][Ee][Ww]-[Ii][Nn][Bb][Oo][Xx][Rr][Uu][Ll][Ee].*/ OR data_office365_Operation:/.*[Ss][Ee][Tt]-[Ii][Nn][Bb][Oo][Xx][Rr][Uu][Ll][Ee].*/ OR data_office365_Operation:/.*[Ss][Ee][Tt]-[Mm][Aa][Ii][Ll][Bb][Oo][Xx].*/ OR data_office365_Operation:/.*[Nn][Ee][Ww]-[Tt][Rr][Aa][Nn][Ss][Pp][Oo][Rr][Tt][Rr][Uu][Ll][Ee].*/ OR data_office365_Operation:/.*[Ss][Ee][Tt]-[Tt][Rr][Aa][Nn][Ss][Pp][Oo][Rr][Tt][Rr][Uu][Ll][Ee].*/ OR data_office365_Operation:/.*[Aa][Dd][Dd]-[Mm][Aa][Ii][Ll][Bb][Oo][Xx][Pp][Ee][Rr][Mm][Ii][Ss][Ss][Ii][Oo][Nn].*/ OR data_office365_Operation:/.*[Aa][Dd][Dd]-[Rr][Ee][Cc][Ii][Pp][Ii][Ee][Nn][Tt][Pp][Ee][Rr][Mm][Ii][Ss][Ss][Ii][Oo][Nn].*/)))'
-      pivot_on: [user]
-      window: 24h
+  # Behaviour-targeted hunts the engine runs around the alert (not a sweep).
+  - name: OAuth app consent / permission grant by this user
+    query: (data_office365_Operation:/.*[Cc][Oo][Nn][Ss][Ee][Nn][Tt] [Tt][Oo] [Aa][Pp][Pp][Ll][Ii][Cc][Aa][Tt][Ii][Oo][Nn].*/ OR data_office365_Operation:/.*[Aa][Dd][Dd] [Dd][Ee][Ll][Ee][Gg][Aa][Tt][Ee][Dd] [Pp][Ee][Rr][Mm][Ii][Ss][Ss][Ii][Oo][Nn] [Gg][Rr][Aa][Nn][Tt].*/ OR data_office365_Operation:/.*[Aa][Dd][Dd] [Aa][Pp][Pp] [Rr][Oo][Ll][Ee] [Aa][Ss][Ss][Ii][Gg][Nn][Mm][Ee][Nn][Tt] [Gg][Rr][Aa][Nn][Tt] [Tt][Oo] [Uu][Ss][Ee][Rr].*/ OR data_office365_Operation:/.*[Aa][Dd][Dd] [Oo][Aa][Uu][Tt][Hh]2[Pp][Ee][Rr][Mm][Ii][Ss][Ss][Ii][Oo][Nn][Gg][Rr][Aa][Nn][Tt].*/ OR data_office365_Operation:/.*[Aa][Dd][Dd] [Ss][Ee][Rr][Vv][Ii][Cc][Ee] [Pp][Rr][Ii][Nn][Cc][Ii][Pp][Aa][Ll].*/)
+    pivot_on:
+    - user
+    window: 24h
+  - name: Mass file download / sync by this user
+    query: (data_office365_Operation:/.*[Ff][Ii][Ll][Ee][Dd][Oo][Ww][Nn][Ll][Oo][Aa][Dd][Ee][Dd].*/ OR data_office365_Operation:/.*[Ff][Ii][Ll][Ee][Ss][Yy][Nn][Cc][Dd][Oo][Ww][Nn][Ll][Oo][Aa][Dd][Ee][Dd][Ff][Uu][Ll][Ll].*/ OR data_office365_Operation:/.*[Ff][Ii][Ll][Ee][Aa][Cc][Cc][Ee][Ss][Ss][Ee][Dd].*/ OR data_office365_Operation:/.*[Ff][Ii][Ll][Ee][Aa][Cc][Cc][Ee][Ss][Ss][Ee][Dd][Ee][Xx][Tt][Ee][Nn][Dd][Ee][Dd].*/)
+    pivot_on:
+    - user
+    window: 6h
+  - name: Anomalous or failed sign-ins by this user
+    query: (data_office365_Operation:/.*[Uu][Ss][Ee][Rr][Ll][Oo][Gg][Gg][Ee][Dd][Ii][Nn].*/ OR data_office365_Operation:/.*[Uu][Ss][Ee][Rr][Ll][Oo][Gg][Ii][Nn][Ff][Aa][Ii][Ll][Ee][Dd].*/)
+    pivot_on:
+    - user
+    window: 6h
+  - name: External / anonymous-link sharing by this user
+    query: (data_office365_Operation:/.*[Ss][Hh][Aa][Rr][Ii][Nn][Gg][Ss][Ee][Tt].*/ OR data_office365_Operation:/.*[Aa][Nn][Oo][Nn][Yy][Mm][Oo][Uu][Ss][Ll][Ii][Nn][Kk][Cc][Rr][Ee][Aa][Tt][Ee][Dd].*/ OR data_office365_Operation:/.*[Aa][Nn][Oo][Nn][Yy][Mm][Oo][Uu][Ss][Ll][Ii][Nn][Kk][Uu][Ss][Ee][Dd].*/ OR data_office365_Operation:/.*[Aa][Dd][Dd][Ee][Dd][Tt][Oo][Ss][Ee][Cc][Uu][Rr][Ee][Ll][Ii][Nn][Kk].*/ OR data_office365_Operation:/.*[Ss][Hh][Aa][Rr][Ii][Nn][Gg][Ii][Nn][Vv][Ii][Tt][Aa][Tt][Ii][Oo][Nn][Cc][Rr][Ee][Aa][Tt][Ee][Dd].*/ OR data_office365_Operation:/.*[Cc][Oo][Mm][Pp][Aa][Nn][Yy][Ll][Ii][Nn][Kk][Cc][Rr][Ee][Aa][Tt][Ee][Dd].*/)
+    pivot_on:
+    - user
+    window: 6h
+  - name: Inbox-rule / mailbox-forwarding persistence by this user
+    query: (data_office365_Operation:/.*[Nn][Ee][Ww]-[Ii][Nn][Bb][Oo][Xx][Rr][Uu][Ll][Ee].*/ OR data_office365_Operation:/.*[Ss][Ee][Tt]-[Ii][Nn][Bb][Oo][Xx][Rr][Uu][Ll][Ee].*/ OR data_office365_Operation:/.*[Ss][Ee][Tt]-[Mm][Aa][Ii][Ll][Bb][Oo][Xx].*/ OR data_office365_Operation:/.*[Nn][Ee][Ww]-[Tt][Rr][Aa][Nn][Ss][Pp][Oo][Rr][Tt][Rr][Uu][Ll][Ee].*/ OR data_office365_Operation:/.*[Ss][Ee][Tt]-[Tt][Rr][Aa][Nn][Ss][Pp][Oo][Rr][Tt][Rr][Uu][Ll][Ee].*/ OR data_office365_Operation:/.*[Aa][Dd][Dd]-[Mm][Aa][Ii][Ll][Bb][Oo][Xx][Pp][Ee][Rr][Mm][Ii][Ss][Ss][Ii][Oo][Nn].*/ OR data_office365_Operation:/.*[Aa][Dd][Dd]-[Rr][Ee][Cc][Ii][Pp][Ii][Ee][Nn][Tt][Pp][Ee][Rr][Mm][Ii][Ss][Ss][Ii][Oo][Nn].*/)
+    pivot_on:
+    - user
+    window: 24h

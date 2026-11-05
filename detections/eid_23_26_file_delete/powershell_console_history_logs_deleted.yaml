@@ -139,19 +139,55 @@ graylog:
   query: (data_win_system_eventID:"23" OR data_win_system_eventID:"26") AND data_win_eventdata_targetFilename:/.*\\[Pp][Ss][Rr][Ee][Aa][Dd][Ll][Ii][Nn][Ee]\\[Cc][Oo][Nn][Ss][Oo][Ll][Ee][Hh][Oo][Ss][Tt]_[Hh][Ii][Ss][Tt][Oo][Rr][Yy]\.[Tt][Xx][Tt]/
 
 correlation:
-  # Authored by the correlation engine for review.
+  # Authored per-rule (behaviour-researched) for the correlation engine. Related CoPilot
+  # Searches + telemetry pivots to run around an alert, scoped to its host/user/ip/domain.
+  related_rules:
+  - id: bde47d4b-9987-405c-94c7-b080410e8ea7
+    name: Clearing Windows Console History
+    reason: 'EID-4104 scriptblock twin of this exact action: its query matches Remove-Item/rm of ConsoleHost_history.txt (and (Get-PSReadLineOption).HistorySavePath) and Clear-History. If the operator deleted the history via PowerShell, this fires on the same command the file-delete sensor sees as a filesystem event, confirming the deletion was deliberate operator cleanup, not an app.'
+  - id: 602f5669-6927-4688-84db-0d4b7afb2150
+    name: Disable Powershell Command History
+    reason: Same operator blinding command auditing by a different mechanism (Remove-Module PSReadLine) so new commands are never recorded. Disabling and then deleting the PSReadLine history commonly happen in the same hands-on session; co-occurrence strengthens the anti-forensic intent.
+  - id: a55349d8-9588-4c5a-8e3b-1925fe2a4ffe
+    name: Exchange PowerShell Cmdlet History Deleted
+    reason: 'Sibling artifact of the identical wipe-my-PowerShell-trail behaviour: deletion of the Exchange Management Shell cmdlet history via the same Sysmon FileDelete (23/26) sensor. Relevant when the host runs Exchange, where an operator erasing console history would also erase the EMS cmdlet log.'
+  - id: 63c779ba-f638-40a0-a593-ddd45e8b1ddc
+    name: EventLog EVTX File Deleted
+    reason: 'The next evidence-destruction step on the same host and same FileDelete sensor: deleting .evtx files under System32\winevt\Logs. If it co-fires with the history deletion it escalates isolated clean-up into a deliberate destruction of the Windows event record.'
+  - id: cc36992a-4671-4f21-a91d-6c2b72a2edf5
+    name: Suspicious Eventlog Clearing or Configuration Change Activity
+    reason: 'Canonical follow-on after wiping the command trail: wevtutil cl / Clear-EventLog / Clear-WinEvent / wmic cleareventlog seen from the same operator. Clearing the event logs is the process-creation counterpart to deleting the history file in the same anti-forensic sequence.'
+  - id: 0a1f9d29-6465-4776-b091-7f43b26e4c89
+    name: Prefetch File Deleted
+    reason: 'Another forensic artifact wiped in the same clean-up pass, same FileDelete sensor: deleting .pf prefetch files destroys the record of which binaries executed during the hidden session, complementing the erasure of what was typed.'
+  - id: 6ddab845-b1b8-49c2-bbf7-1a11967f64bc
+    name: File Deleted Via Sysinternals SDelete
+    reason: SDelete securely overwrites files (renaming to .AAA/.ZZZ as it wipes) so artifacts cannot be recovered. Its use on the same host in the same window is deliberate anti-forensic tooling alongside the history deletion, indicating an operator making evidence unrecoverable rather than casually removing a file.
+  window: 2h
   enrichment_searches:
-  # Rule-specific telemetry pivots the engine runs around an alert from this rule,
-  # scoped to the alert's host/user/IP within the window (behaviour-targeted, not a sweep).
-    - name: "Log-clearing / anti-forensic activity on this host"
-      query: '(((data_win_eventdata_commandLine:/.*[Ww][Ee][Vv][Tt][Uu][Tt][Ii][Ll] [Cc][Ll].*/ OR data_win_eventdata_commandLine:/.*[Cc][Ll][Ee][Aa][Rr]-[Ee][Vv][Ee][Nn][Tt][Ll][Oo][Gg].*/ OR data_win_eventdata_commandLine:/.*[Ff][Ss][Uu][Tt][Ii][Ll] [Uu][Ss][Nn] [Dd][Ee][Ll][Ee][Tt][Ee][Jj][Oo][Uu][Rr][Nn][Aa][Ll].*/ OR data_win_eventdata_commandLine:/.*[Vv][Ss][Ss][Aa][Dd][Mm][Ii][Nn] [Dd][Ee][Ll][Ee][Tt][Ee].*/ OR data_win_eventdata_commandLine:/.*[Ww][Ee][Vv][Tt][Uu][Tt][Ii][Ll] [Cc][Ll][Ee][Aa][Rr]-[Ll][Oo][Gg].*/)) OR ((data_win_system_eventID:"1102" OR data_win_system_eventID:"104")))'
-      pivot_on: [host]
-      window: 2h
-    - name: "Execution of programs from user-writable paths on this host"
-      query: 'data_win_system_eventID:"1" AND (data_win_eventdata_image:/.*\\[Uu][Ss][Ee][Rr][Ss]\\.*/ OR data_win_eventdata_image:/.*\\[Pp][Rr][Oo][Gg][Rr][Aa][Mm][Dd][Aa][Tt][Aa]\\.*/ OR data_win_eventdata_image:/.*\\[Ww][Ii][Nn][Dd][Oo][Ww][Ss]\\[Tt][Ee][Mm][Pp]\\.*/ OR data_win_eventdata_image:/.*\\[Aa][Pp][Pp][Dd][Aa][Tt][Aa]\\.*/ OR data_win_eventdata_image:/.*\\[Pp][Uu][Bb][Ll][Ii][Cc]\\.*/ OR data_win_eventdata_image:/.*\\\$[Rr][Ee][Cc][Yy][Cc][Ll][Ee].*/)'
-      pivot_on: [host]
-      window: 1h
-    - name: "Autostart persistence written on this host"
-      query: '(data_win_system_eventID:"12" OR data_win_system_eventID:"13") AND (data_win_eventdata_targetObject:/.*[Cc][Uu][Rr][Rr][Ee][Nn][Tt][Vv][Ee][Rr][Ss][Ii][Oo][Nn]\\[Rr][Uu][Nn].*/ OR data_win_eventdata_targetObject:/.*[Cc][Uu][Rr][Rr][Ee][Nn][Tt][Vv][Ee][Rr][Ss][Ii][Oo][Nn]\\[Rr][Uu][Nn][Oo][Nn][Cc][Ee].*/ OR data_win_eventdata_targetObject:/.*[Cc][Uu][Rr][Rr][Ee][Nn][Tt][Cc][Oo][Nn][Tt][Rr][Oo][Ll][Ss][Ee][Tt]\\[Ss][Ee][Rr][Vv][Ii][Cc][Ee][Ss]\\.*/ OR data_win_eventdata_targetObject:/.*[Ii][Mm][Aa][Gg][Ee] [Ff][Ii][Ll][Ee] [Ee][Xx][Ee][Cc][Uu][Tt][Ii][Oo][Nn] [Oo][Pp][Tt][Ii][Oo][Nn][Ss]\\.*/ OR data_win_eventdata_targetObject:/.*[Ww][Ii][Nn][Ll][Oo][Gg][Oo][Nn]\\[Ss][Hh][Ee][Ll][Ll].*/ OR data_win_eventdata_targetObject:/.*[Ww][Ii][Nn][Ll][Oo][Gg][Oo][Nn]\\[Uu][Ss][Ee][Rr][Ii][Nn][Ii][Tt].*/ OR data_win_eventdata_targetObject:/.*[Cc][Uu][Rr][Rr][Ee][Nn][Tt][Vv][Ee][Rr][Ss][Ii][Oo][Nn]\\[Ee][Xx][Pp][Ll][Oo][Rr][Ee][Rr]\\[Rr][Uu][Nn].*/ OR data_win_eventdata_targetObject:/.*[Pp][Oo][Ll][Ii][Cc][Ii][Ee][Ss]\\[Ee][Xx][Pp][Ll][Oo][Rr][Ee][Rr]\\[Rr][Uu][Nn].*/ OR data_win_eventdata_targetObject:/.*[Cc][Uu][Rr][Rr][Ee][Nn][Tt][Vv][Ee][Rr][Ss][Ii][Oo][Nn]\\[Ww][Ii][Nn][Dd][Oo][Ww][Ss]\\[Ll][Oo][Aa][Dd].*/)'
-      pivot_on: [host]
-      window: 2h
+  # Behaviour-targeted hunts the engine runs around the alert (not a sweep).
+  - name: Obfuscated or download-cradle PowerShell on this host (the interactive session being erased)
+    query: data_win_system_eventID:"4104" AND (data_win_eventdata_scriptBlockText:/.*[Dd][Oo][Ww][Nn][Ll][Oo][Aa][Dd][Ss][Tt][Rr][Ii][Nn][Gg].*/ OR data_win_eventdata_scriptBlockText:/.*[Dd][Oo][Ww][Nn][Ll][Oo][Aa][Dd][Ff][Ii][Ll][Ee].*/ OR data_win_eventdata_scriptBlockText:/.*[Ii][Nn][Vv][Oo][Kk][Ee]-[Ww][Ee][Bb][Rr][Ee][Qq][Uu][Ee][Ss][Tt].*/ OR data_win_eventdata_scriptBlockText:/.*[Nn][Ee][Tt]\.[Ww][Ee][Bb][Cc][Ll][Ii][Ee][Nn][Tt].*/ OR data_win_eventdata_scriptBlockText:/.*[Ff][Rr][Oo][Mm][Bb][Aa][Ss][Ee]64[Ss][Tt][Rr][Ii][Nn][Gg].*/ OR data_win_eventdata_scriptBlockText:/.*[Ii][Nn][Vv][Oo][Kk][Ee]-[Ee][Xx][Pp][Rr][Ee][Ss][Ss][Ii][Oo][Nn].*/ OR data_win_eventdata_scriptBlockText:/.*-[Ee][Nn][Cc][Oo][Dd][Ee][Dd][Cc][Oo][Mm][Mm][Aa][Nn][Dd].*/ OR data_win_eventdata_scriptBlockText:/.*[Rr][Ee][Ff][Ll][Ee][Cc][Tt][Ii][Oo][Nn]\.[Aa][Ss][Ss][Ee][Mm][Bb][Ll][Yy].*/ OR data_win_eventdata_scriptBlockText:/.*[Aa][Mm][Ss][Ii][Uu][Tt][Ii][Ll][Ss].*/ OR data_win_eventdata_scriptBlockText:/.*[Ss][Tt][Aa][Rr][Tt]-[Bb][Ii][Tt][Ss][Tt][Rr][Aa][Nn][Ss][Ff][Ee][Rr].*/)
+    pivot_on:
+    - host
+    window: 6h
+  - name: Event-log clearing and recovery-artifact destruction on this host (the rest of the clean-up spree)
+    query: ((data_win_eventdata_commandLine:/.*[Ww][Ee][Vv][Tt][Uu][Tt][Ii][Ll] [Cc][Ll].*/ OR data_win_eventdata_commandLine:/.*[Cc][Ll][Ee][Aa][Rr]-[Ee][Vv][Ee][Nn][Tt][Ll][Oo][Gg].*/ OR data_win_eventdata_commandLine:/.*[Cc][Ll][Ee][Aa][Rr]-[Ww][Ii][Nn][Ee][Vv][Ee][Nn][Tt].*/ OR data_win_eventdata_commandLine:/.*[Rr][Ee][Mm][Oo][Vv][Ee]-[Ee][Vv][Ee][Nn][Tt][Ll][Oo][Gg].*/ OR data_win_eventdata_commandLine:/.*[Vv][Ss][Ss][Aa][Dd][Mm][Ii][Nn] [Dd][Ee][Ll][Ee][Tt][Ee].*/ OR data_win_eventdata_commandLine:/.*[Ww][Bb][Aa][Dd][Mm][Ii][Nn] [Dd][Ee][Ll][Ee][Tt][Ee].*/ OR data_win_eventdata_commandLine:/.*[Ff][Ss][Uu][Tt][Ii][Ll] [Uu][Ss][Nn] [Dd][Ee][Ll][Ee][Tt][Ee][Jj][Oo][Uu][Rr][Nn][Aa][Ll].*/) OR (data_win_system_eventID:"1102" OR data_win_system_eventID:"104"))
+    pivot_on:
+    - host
+    window: 2h
+  - name: LSASS memory dumping or SAM/SECURITY hive theft on this host (the credential-access objective)
+    query: (data_win_eventdata_commandLine:/.*[Cc][Oo][Mm][Ss][Vv][Cc][Ss]\.[Dd][Ll][Ll].*/ AND data_win_eventdata_commandLine:/.*[Mm][Ii][Nn][Ii][Dd][Uu][Mm][Pp].*/) OR (data_win_eventdata_commandLine:/.*[Pp][Rr][Oo][Cc][Dd][Uu][Mm][Pp].*/ AND data_win_eventdata_commandLine:/.*[Ll][Ss][Aa][Ss][Ss].*/) OR data_win_eventdata_commandLine:/.*[Ss][Ee][Kk][Uu][Rr][Ll][Ss][Aa].*/ OR (data_win_eventdata_commandLine:/.* [Ss][Aa][Vv][Ee] .*/ AND (data_win_eventdata_commandLine:/.*[Ss][Aa][Mm].*/ OR data_win_eventdata_commandLine:/.*[Ss][Ee][Cc][Uu][Rr][Ii][Tt][Yy].*/)) OR data_win_eventdata_scriptBlockText:/.*[Ii][Nn][Vv][Oo][Kk][Ee]-[Mm][Ii][Mm][Ii][Kk][Aa][Tt][Zz].*/ OR data_win_eventdata_scriptBlockText:/.*[Oo][Uu][Tt]-[Mm][Ii][Nn][Ii][Dd][Uu][Mm][Pp].*/ OR data_win_eventdata_scriptBlockText:/.*[Ss][Ee][Kk][Uu][Rr][Ll][Ss][Aa].*/
+    pivot_on:
+    - host
+    window: 6h
+  - name: Hands-on-keyboard discovery burst on this host (the interactive recon that filled the deleted history)
+    query: (data_win_eventdata_commandLine:/.*[Ww][Hh][Oo][Aa][Mm][Ii].*/ AND (data_win_eventdata_commandLine:/.*[Aa][Ll][Ll].*/ OR data_win_eventdata_commandLine:/.*[Gg][Rr][Oo][Uu][Pp][Ss].*/)) OR data_win_eventdata_commandLine:/.*[Nn][Ee][Tt] [Gg][Rr][Oo][Uu][Pp] .*/ OR data_win_eventdata_commandLine:/.*[Nn][Ee][Tt] [Ll][Oo][Cc][Aa][Ll][Gg][Rr][Oo][Uu][Pp] .*/ OR data_win_eventdata_commandLine:/.*[Nn][Ll][Tt][Ee][Ss][Tt].*/ OR data_win_eventdata_commandLine:/.*[Nn][Ee][Tt] [Vv][Ii][Ee][Ww].*/ OR data_win_eventdata_commandLine:/.*[Qq][Uu][Ss][Ee][Rr].*/ OR data_win_eventdata_scriptBlockText:/.*[Gg][Ee][Tt]-[Aa][Dd][Cc][Oo][Mm][Pp][Uu][Tt][Ee][Rr].*/ OR data_win_eventdata_scriptBlockText:/.*[Gg][Ee][Tt]-[Aa][Dd][Uu][Ss][Ee][Rr].*/ OR data_win_eventdata_scriptBlockText:/.*[Gg][Ee][Tt]-[Aa][Dd][Gg][Rr][Oo][Uu][Pp].*/
+    pivot_on:
+    - host
+    window: 4h
+  - name: Persistence planted on this host before clean-up (autostart registry, service or scheduled task)
+    query: ((data_win_system_eventID:"13" OR data_win_system_eventID:"12") AND (data_win_eventdata_targetObject:/.*\\[Cc][Uu][Rr][Rr][Ee][Nn][Tt][Vv][Ee][Rr][Ss][Ii][Oo][Nn]\\[Rr][Uu][Nn].*/ OR data_win_eventdata_targetObject:/.*[Ii][Mm][Aa][Gg][Ee] [Ff][Ii][Ll][Ee] [Ee][Xx][Ee][Cc][Uu][Tt][Ii][Oo][Nn] [Oo][Pp][Tt][Ii][Oo][Nn][Ss].*/ OR data_win_eventdata_targetObject:/.*\\[Ss][Ee][Rr][Vv][Ii][Cc][Ee][Ss]\\.*/ OR data_win_eventdata_targetObject:/.*\\[Ww][Ii][Nn][Ll][Oo][Gg][Oo][Nn]\\.*/)) OR (data_win_system_eventID:"1" AND ((data_win_eventdata_commandLine:/.*[Ss][Cc][Hh][Tt][Aa][Ss][Kk][Ss].*/ AND data_win_eventdata_commandLine:/.*[Cc][Rr][Ee][Aa][Tt][Ee].*/) OR data_win_eventdata_commandLine:/.*[Nn][Ee][Ww]-[Ss][Cc][Hh][Ee][Dd][Uu][Ll][Ee][Dd][Tt][Aa][Ss][Kk].*/ OR data_win_eventdata_commandLine:/.*[Ss][Cc]\.[Ee][Xx][Ee] [Cc][Rr][Ee][Aa][Tt][Ee].*/ OR data_win_eventdata_commandLine:/.*[Nn][Ee][Ww]-[Ss][Ee][Rr][Vv][Ii][Cc][Ee].*/))
+    pivot_on:
+    - host
+    window: 6h

@@ -165,23 +165,58 @@ graylog:
   query: data_audit_type:/[Pp][Aa][Tt][Hh]/ AND (data_audit_file_name:/.*\/[Ss][Yy][Ss][Rr][Qq]/ OR data_audit_file_name:/.*\/[Ss][Yy][Ss][Cc][Tt][Ll]\.[Cc][Oo][Nn][Ff]/ OR data_audit_file_name:/.*\/[Ss][Yy][Ss][Rr][Qq]-[Tt][Rr][Ii][Gg][Gg][Ee][Rr]/)
 
 correlation:
-  # Authored by the correlation engine for review.
+  # Authored per-rule (behaviour-researched) for the correlation engine. Related CoPilot
+  # Searches + telemetry pivots to run around an alert, scoped to its host/user/ip/domain.
+  related_rules:
+  - id: linux-system-reboot-via-sysrq-001
+    name: Linux System Reboot Via System Request Key
+    reason: 'Confirming sibling: this detection catches the auditd PATH write to /proc/sysrq-trigger, while this rule catches the matching ''echo b > /proc/sysrq-trigger'' reboot command in process/full_log telemetry. Seeing both proves a forced AwfulShred-style reboot rather than an admin reading the file.'
+  - id: linux-unix-shell-enable-all-sysrq-functions-001
+    name: Linux Unix Shell Enable All SysRq Functions
+    reason: 'Direct precursor: writing 1 to /proc/sys/kernel/sysrq enables all SysRq functions, which must happen before the trigger can crash or reboot the host. Its appearance just before this PATH event is the attacker arming the Magic SysRq key.'
+  - id: linux-auditd-data-destruction-command-001
+    name: Linux Auditd Data Destruction Command
+    reason: 'Co-occurring wiper payload: AwfulShred corrupts files with ''rm -rf --no-preserve-root'' and then reboots via SysRq. Finding this on the same host turns a lone /proc write into a confirmed data-destruction incident.'
+  - id: linux-dd-file-overwrite-001
+    name: Linux DD File Overwrite
+    reason: 'Co-occurring wiper primitive: dd overwriting devices or files from /dev/zero or /dev/urandom is the destructive action a SysRq crash is meant to finalise and hide (AwfulShred / Industroyer2).'
+  - id: a3b7c9d2-4f5e-4b6d-8c1a-2d3f4e5b6c7a
+    name: Linux Critical Directory Deletion
+    reason: 'Co-occurring impact: rm -rf of /boot, /var/log, /etc or /dev destroys boot, config and log data; a SysRq reboot right after wiping /boot leaves an unbootable host, which is the wiper''s goal.'
+  - id: linux-stop-services-001
+    name: Linux Stop Services
+    reason: 'Preceding impact (T1489): wipers stop databases, backup and security services (systemctl stop / SERVICE_STOP) to unlock files and disable defences before destroying data and forcing the SysRq reboot.'
+  - id: 80915f59-9b56-4616-9de0-fd0dea6c12fe
+    name: Linux Logs Clearing Attempts
+    reason: 'Co-occurring anti-forensics: this rule''s own premise is SysRq used to disrupt forensic analysis, so rm/shred/unlink of log files on the same host is the complementary track-covering before the crash.'
+  - id: bed26dea-4525-47f4-b24a-76e30e44ffb0
+    name: Audit Rules Deleted Via Auditctl
+    reason: 'Co-occurring anti-forensics that blinds this very detection: ''auditctl -D'' deletes the audit rules that generate these PATH events, so its presence near a SysRq write means the attacker is going dark on the same sensor.'
+  window: 1h
   enrichment_searches:
-  # Rule-specific telemetry pivots the engine runs around an alert from this rule,
-  # scoped to the alert's host/user/IP within the window (behaviour-targeted, not a sweep).
-    - name: "Shell / interpreter execution on this host"
-      query: '((data_process_exec_process_binary:/.*(\/[Bb][Aa][Ss][Hh]|\/[Ss][Hh]|\/[Dd][Aa][Ss][Hh]|\/[Zz][Ss][Hh]|\/[Kk][Ss][Hh]|\/[Aa][Ss][Hh]|\/[Bb][Uu][Ss][Yy][Bb][Oo][Xx])/) OR (data_process_exec_process_binary:/.*(\/[Pp][Yy][Tt][Hh][Oo][Nn]|\/[Pp][Yy][Tt][Hh][Oo][Nn]3|\/[Pp][Ee][Rr][Ll]|\/[Rr][Uu][Bb][Yy]|\/[Pp][Hh][Pp]|\/[Nn][Oo][Dd][Ee]|\/[Ll][Uu][Aa]|\/[Aa][Ww][Kk])/))'
-      pivot_on: [host]
-      window: 1h
-    - name: "Persistence via cron / systemd / shell profiles on this host"
-      query: '((data_process_exec_process_binary:/.*(\/[Cc][Rr][Oo][Nn][Tt][Aa][Bb]|\/[Ss][Yy][Ss][Tt][Ee][Mm][Cc][Tt][Ll]|\/[Aa][Tt]|\/[Uu][Pp][Dd][Aa][Tt][Ee]-[Rr][Cc]\.[Dd])/) OR (data_process_exec_process_arguments:/.*\/[Ee][Tt][Cc]\/[Cc][Rr][Oo][Nn].*/) OR (data_process_exec_process_arguments:/.*\/[Ee][Tt][Cc]\/[Ss][Yy][Ss][Tt][Ee][Mm][Dd].*/) OR (data_process_exec_process_arguments:/.*[Rr][Cc]\.[Ll][Oo][Cc][Aa][Ll].*/) OR (data_process_exec_process_arguments:/.*\.[Bb][Aa][Ss][Hh][Rr][Cc].*/) OR (data_process_exec_process_arguments:/.*\.[Bb][Aa][Ss][Hh]_[Pp][Rr][Oo][Ff][Ii][Ll][Ee].*/) OR (data_process_exec_process_arguments:/.*\/[Ee][Tt][Cc]\/[Pp][Rr][Oo][Ff][Ii][Ll][Ee].*/) OR (data_process_exec_process_arguments:/.*[Aa][Uu][Tt][Hh][Oo][Rr][Ii][Zz][Ee][Dd]_[Kk][Ee][Yy][Ss].*/) OR (data_process_exec_process_arguments:/.*\/[Ee][Tt][Cc]\/[Ii][Nn][Ii][Tt]\.[Dd].*/))'
-      pivot_on: [host]
-      window: 4h
-    - name: "Reconnaissance commands on this host"
-      query: 'data_process_exec_process_binary:/.*(\/[Ww][Hh][Oo][Aa][Mm][Ii]|\/[Ii][Dd]|\/[Uu][Nn][Aa][Mm][Ee]|\/[Hh][Oo][Ss][Tt][Nn][Aa][Mm][Ee]|\/[Hh][Oo][Ss][Tt][Nn][Aa][Mm][Ee][Cc][Tt][Ll]|\/[Ss][Ss]|\/[Nn][Ee][Tt][Ss][Tt][Aa][Tt]|\/[Ii][Ff][Cc][Oo][Nn][Ff][Ii][Gg]|\/[Aa][Rr][Pp]|\/[Ww]|\/[Ww][Hh][Oo]|\/[Ll][Aa][Ss][Tt]|\/[Ll][Ss][Oo][Ff]|\/[Nn][Mm][Aa][Pp]|\/[Dd][Ii][Gg]|\/[Ff][Ii][Nn][Dd])/'
-      pivot_on: [host]
-      window: 1h
-    - name: "Destructive tooling on this host"
-      query: '((data_process_exec_process_binary:/.*(\/[Dd][Dd]|\/[Mm][Kk][Ff][Ss]|\/[Ww][Ii][Pp][Ee][Ff][Ss]|\/[Ss][Hh][Rr][Ee][Dd]|\/[Cc][Rr][Yy][Pp][Tt][Ss][Ee][Tt][Uu][Pp])/) OR (data_process_exec_process_arguments:/.*[Rr][Mm] -[Rr][Ff].*/) OR (data_process_exec_process_arguments:/.*--[Nn][Oo]-[Pp][Rr][Ee][Ss][Ee][Rr][Vv][Ee]-[Rr][Oo][Oo][Tt].*/))'
-      pivot_on: [host]
-      window: 2h
+  # Behaviour-targeted hunts the engine runs around the alert (not a sweep).
+  - name: Disk and file wiper tooling on this host
+    query: ((data_process_exec_process_binary:/.*\/([Dd][Dd]|[Ww][Ii][Pp][Ee][Ff][Ss]|[Ss][Hh][Rr][Ee][Dd]|[Cc][Rr][Yy][Pp][Tt][Ss][Ee][Tt][Uu][Pp])/) OR (data_process_exec_process_binary:/.*\/[Mm][Kk][Ff][Ss].*/) OR (data_process_exec_process_arguments:/.*of=\/.*/) OR (full_log:/.*no-preserve-root.*/) OR (full_log:/.*\/[Dd][Ee][Vv]\/([Zz][Ee][Rr][Oo]|[Uu][Rr][Aa][Nn][Dd][Oo][Mm]).*/))
+    pivot_on:
+    - host
+    window: 2h
+  - name: Service and daemon termination on this host
+    query: ((full_log:/.*SERVICE_STOP.*/) OR (full_log:/.*[Ss][Yy][Ss][Tt][Ee][Mm][Cc][Tt][Ll].*(stop|disable|mask).*/) OR (data_process_exec_process_binary:/.*\/([Kk][Ii][Ll][Ll][Aa][Ll][Ll]|[Pp][Kk][Ii][Ll][Ll])/) OR (data_process_exec_process_arguments:/.*[Ss][Ee][Rr][Vv][Ii][Cc][Ee].*(stop|disable).*/))
+    pivot_on:
+    - host
+    window: 2h
+  - name: System shutdown or reboot commands on this host
+    query: ((data_process_exec_process_binary:/.*\/([Rr][Ee][Bb][Oo][Oo][Tt]|[Ss][Hh][Uu][Tt][Dd][Oo][Ww][Nn]|[Hh][Aa][Ll][Tt]|[Pp][Oo][Ww][Ee][Rr][Oo][Ff][Ff]|[Tt][Ee][Ll][Ii][Nn][Ii][Tt])/) OR (data_process_exec_process_arguments:/.*[Ss][Yy][Ss][Tt][Ee][Mm][Cc][Tt][Ll].*(reboot|poweroff|halt).*/) OR (full_log:/.*[Ss][Hh][Uu][Tt][Dd][Oo][Ww][Nn].*/))
+    pivot_on:
+    - host
+    window: 1h
+  - name: Log, journal and shell-history tampering on this host
+    query: ((data_process_exec_process_arguments:/.*\/[Vv][Aa][Rr]\/[Ll][Oo][Gg].*/) OR (full_log:/.*\/[Vv][Aa][Rr]\/[Ll][Oo][Gg].*/) OR (data_process_exec_process_arguments:/.*\.[Bb][Aa][Ss][Hh]_[Hh][Ii][Ss][Tt][Oo][Rr][Yy].*/) OR (full_log:/.*[Jj][Oo][Uu][Rr][Nn][Aa][Ll][Cc][Tt][Ll].*(vacuum|rotate).*/) OR (data_process_exec_process_arguments:/.*[Hh][Ii][Ss][Tt][Oo][Rr][Yy].*-[Cc].*/))
+    pivot_on:
+    - host
+    window: 2h
+  - name: Kernel parameter and module tampering on this host
+    query: ((data_process_exec_process_binary:/.*\/([Ss][Yy][Ss][Cc][Tt][Ll]|[Ii][Nn][Ss][Mm][Oo][Dd]|[Mm][Oo][Dd][Pp][Rr][Oo][Bb][Ee]|[Rr][Mm][Mm][Oo][Dd])/) OR (data_process_exec_process_arguments:/.*\/[Pp][Rr][Oo][Cc]\/[Ss][Yy][Ss]\/[Kk][Ee][Rr][Nn][Ee][Ll].*/) OR (full_log:/.*\/[Pp][Rr][Oo][Cc]\/[Ss][Yy][Ss]\/[Kk][Ee][Rr][Nn][Ee][Ll].*/) OR (data_process_exec_process_arguments:/.*[Kk][Ee][Rr][Nn][Ee][Ll]\.[Ss][Yy][Ss][Rr][Qq].*/))
+    pivot_on:
+    - host
+    window: 4h

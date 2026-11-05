@@ -199,19 +199,58 @@ graylog:
   query: ((data_audit_type:/[Ee][Xx][Ee][Cc][Vv][Ee]/ AND data_audit_execve_a0:/[Ii][Pp][Tt][Aa][Bb][Ll][Ee][Ss]/ AND data_audit_execve_a1:/.*[Dd][Rr][Oo][Pp].*/) OR (data_audit_type:/[Ee][Xx][Ee][Cc][Vv][Ee]/ AND data_audit_execve_a0:/[Ff][Ii][Rr][Ee][Ww][Aa][Ll][Ll]-[Cc][Mm][Dd]/ AND data_audit_execve_a1:/.*[Rr][Ee][Mm][Oo][Vv][Ee].*/) OR (data_audit_type:/[Ee][Xx][Ee][Cc][Vv][Ee]/ AND data_audit_execve_a0:/[Uu][Ff][Ww]/ AND data_audit_execve_a1:/.*[Dd][Ee][Ll][Ee][Tt][Ee].*/) OR (data_audit_type:/[Ee][Xx][Ee][Cc][Vv][Ee]/ AND data_audit_execve_a0:/[Nn][Ff][Tt]/ AND (data_audit_execve_a1:/.*[Dd][Ee][Ll][Ee][Tt][Ee].*/ OR data_audit_execve_a1:/.*[Ff][Ll][Uu][Ss][Hh].*/)))
 
 correlation:
-  # Authored by the correlation engine for review.
+  # Authored per-rule (behaviour-researched) for the correlation engine. Related CoPilot
+  # Searches + telemetry pivots to run around an alert, scoped to its host/user/ip/domain.
+  related_rules:
+  - id: 3be619f4-d9ec-4ea8-a173-18fdd01996ab
+    name: Flush Iptables Ufw Chain
+    reason: 'Same host-firewall teardown seen by Tetragon: ''iptables -F/-Z/-X'' flushing whole chains is the mass-wipe form of the DROP-rule deletion this auditd rule catches. If both fire on the host within the window the teardown is real intrusion activity, not a one-off admin edit.'
+  - id: 84c9e83c-599a-458a-a0cb-0ecce44e807a
+    name: UFW Disable Attempt
+    reason: Complementary firewall-off action this rule is explicitly built to pair with - its own description notes disable-only detections miss rule modification. 'ufw disable' / 'ufw-init stop' flipping the box wide open alongside a rule deletion completes the firewall takedown.
+  - id: linux-disable-modify-system-firewall-001
+    name: Linux Disable Or Modify System Firewall
+    reason: 'Cross-source sibling of this exact detection (reads auth.log + Tetragon + auditd via full_log): the same ufw/firewalld/iptables modification observed through a second pipeline corroborates the auditd EXECVE hit and catches the sudo-logged variant this rule cannot see.'
+  - id: bed26dea-4525-47f4-b24a-76e30e44ffb0
+    name: Audit Rules Deleted Via Auditctl
+    reason: 'Blinds the very sensor behind this alert: ''auditctl -D'' wipes all audit rules, so an actor opening the firewall then deleting audit rules is removing the EXECVE logging that produced this detection - a classic unblock-the-network-then-blind-the-logs pair on one host.'
+  - id: e3a8a052-111f-4606-9aee-f28ebeb76776
+    name: Disabling Security Tools
+    reason: 'Concurrent defense impairment on the same host (setenforce 0, stop/kill EDR, disable firewalld): weakening the firewall rules is one move inside the same cluster of turning host protections off before the real objective runs.'
+  - id: f7158a64-6204-4d6d-868a-6e6378b467e0
+    name: Suspicious C2 Activities
+    reason: 'Direct payoff of opening the firewall, through the same auditd pipeline: the susp_activity key fires on nc/netcat/ncat/socat/curl/wget/ssh - the outbound C2 and transfer tooling the firewall-rule deletion just cleared the egress path for.'
+  - id: 9069ea3c-b213-4c52-be13-86506a227ab1
+    name: Linux Crypto Mining Indicators
+    reason: 'Common end-goal driving the teardown (TeamTNT-style, per this rule''s container-attack reference): miners delete or flush firewall DROP rules to guarantee mining-pool egress, so miner command-line indicators on the same host confirm the impact motive behind the change.'
+  - id: linux-sudo-or-su-execution-001
+    name: Linux Sudo Or Su Execution
+    reason: Expected precursor - editing iptables/nft/ufw/firewalld rules needs root (CAP_NET_ADMIN). A sudo/su elevation on the same host/user shortly before this fires is the escalation that made the firewall change possible, reconstructing the privilege-to-impairment step.
+  window: 2h
   enrichment_searches:
-  # Rule-specific telemetry pivots the engine runs around an alert from this rule,
-  # scoped to the alert's host/user/IP within the window (behaviour-targeted, not a sweep).
-    - name: "Shell / interpreter execution on this host"
-      query: '((data_process_exec_process_binary:/.*(\/[Bb][Aa][Ss][Hh]|\/[Ss][Hh]|\/[Dd][Aa][Ss][Hh]|\/[Zz][Ss][Hh]|\/[Kk][Ss][Hh]|\/[Aa][Ss][Hh]|\/[Bb][Uu][Ss][Yy][Bb][Oo][Xx])/) OR (data_process_exec_process_binary:/.*(\/[Pp][Yy][Tt][Hh][Oo][Nn]|\/[Pp][Yy][Tt][Hh][Oo][Nn]3|\/[Pp][Ee][Rr][Ll]|\/[Rr][Uu][Bb][Yy]|\/[Pp][Hh][Pp]|\/[Nn][Oo][Dd][Ee]|\/[Ll][Uu][Aa]|\/[Aa][Ww][Kk])/))'
-      pivot_on: [host]
-      window: 1h
-    - name: "Reconnaissance commands on this host"
-      query: 'data_process_exec_process_binary:/.*(\/[Ww][Hh][Oo][Aa][Mm][Ii]|\/[Ii][Dd]|\/[Uu][Nn][Aa][Mm][Ee]|\/[Hh][Oo][Ss][Tt][Nn][Aa][Mm][Ee]|\/[Hh][Oo][Ss][Tt][Nn][Aa][Mm][Ee][Cc][Tt][Ll]|\/[Ss][Ss]|\/[Nn][Ee][Tt][Ss][Tt][Aa][Tt]|\/[Ii][Ff][Cc][Oo][Nn][Ff][Ii][Gg]|\/[Aa][Rr][Pp]|\/[Ww]|\/[Ww][Hh][Oo]|\/[Ll][Aa][Ss][Tt]|\/[Ll][Ss][Oo][Ff]|\/[Nn][Mm][Aa][Pp]|\/[Dd][Ii][Gg]|\/[Ff][Ii][Nn][Dd])/'
-      pivot_on: [host]
-      window: 1h
-    - name: "Privilege-escalation tooling executed on this host"
-      query: 'data_process_exec_process_binary:/.*(\/[Ss][Uu][Dd][Oo]|\/[Ss][Uu]|\/[Pp][Kk][Ee][Xx][Ee][Cc]|\/[Dd][Oo][Aa][Ss]|\/[Ss][Ee][Tt][Cc][Aa][Pp]|\/[Cc][Hh][Ss][Hh]|\/[Nn][Ee][Ww][Gg][Rr][Pp])/'
-      pivot_on: [host]
-      window: 2h
+  # Behaviour-targeted hunts the engine runs around the alert (not a sweep).
+  - name: Additional firewall / packet-filter rule changes on this host
+    query: (data_audit_exe:/.*(\/[Ii][Pp][Tt][Aa][Bb][Ll][Ee][Ss]|\/[Ii][Pp]6[Tt][Aa][Bb][Ll][Ee][Ss]|\/[Nn][Ff][Tt]|\/[Uu][Ff][Ww]|\/[Ff][Ii][Rr][Ee][Ww][Aa][Ll][Ll]-[Cc][Mm][Dd]|\/[Xx][Tt][Aa][Bb][Ll][Ee][Ss]-[Ll][Ee][Gg][Aa][Cc][Yy]-[Mm][Uu][Ll][Tt][Ii])/ OR data_audit_execve_a0:/([Ii][Pp][Tt][Aa][Bb][Ll][Ee][Ss]|[Ii][Pp]6[Tt][Aa][Bb][Ll][Ee][Ss]|[Nn][Ff][Tt]|[Uu][Ff][Ww]|[Ff][Ii][Rr][Ee][Ww][Aa][Ll][Ll]-[Cc][Mm][Dd])/)
+    pivot_on:
+    - host
+    window: 2h
+  - name: Security controls / audit / EDR being disabled on this host
+    query: ((data_audit_exe:/.*(\/[Ss][Ee][Tt][Ee][Nn][Ff][Oo][Rr][Cc][Ee]|\/[Aa][Aa]-[Dd][Ii][Ss][Aa][Bb][Ll][Ee]|\/[Aa][Aa]-[Tt][Ee][Aa][Rr][Dd][Oo][Ww][Nn]|\/[Aa][Uu][Dd][Ii][Tt][Cc][Tt][Ll])/) OR (data_audit_exe:/.*(\/[Ss][Yy][Ss][Tt][Ee][Mm][Cc][Tt][Ll]|\/[Ss][Ee][Rr][Vv][Ii][Cc][Ee])/ AND (data_audit_execve_a1:/.*([Ff][Ii][Rr][Ee][Ww][Aa][Ll][Ll][Dd]|[Aa][Uu][Dd][Ii][Tt][Dd]|[Ff][Aa][Ll][Cc][Oo][Nn]-[Ss][Ee][Nn][Ss][Oo][Rr]|[Ww][Aa][Zz][Uu][Hh]|[Cc][Ll][Aa][Mm][Aa][Vv]|[Aa][Pp][Pp][Aa][Rr][Mm][Oo][Rr]).*/ OR data_audit_execve_a2:/.*([Ff][Ii][Rr][Ee][Ww][Aa][Ll][Ll][Dd]|[Aa][Uu][Dd][Ii][Tt][Dd]|[Ff][Aa][Ll][Cc][Oo][Nn]-[Ss][Ee][Nn][Ss][Oo][Rr]|[Ww][Aa][Zz][Uu][Hh]|[Cc][Ll][Aa][Mm][Aa][Vv]|[Aa][Pp][Pp][Aa][Rr][Mm][Oo][Rr]).*/)))
+    pivot_on:
+    - host
+    window: 2h
+  - name: C2 / reverse-shell / egress tooling on this host
+    query: ((data_audit_exe:/.*(\/[Nn][Cc]|\/[Nn][Cc][Aa][Tt]|\/[Nn][Ee][Tt][Cc][Aa][Tt]|\/[Ss][Oo][Cc][Aa][Tt]|\/[Cc][Uu][Rr][Ll]|\/[Ww][Gg][Ee][Tt])/) OR (data_audit_execve_a1:/.*\/[Dd][Ee][Vv]\/[Tt][Cc][Pp]\/.*/ OR data_audit_execve_a2:/.*\/[Dd][Ee][Vv]\/[Tt][Cc][Pp]\/.*/) OR (data_audit_execve_a1:/.*([Ss][Oo][Cc][Kk][Ee][Tt]\.[Ss][Oo][Cc][Kk][Ee][Tt]|[Pp][Tt][Yy]\.[Ss][Pp][Aa][Ww][Nn]).*/ OR data_audit_execve_a2:/.*([Ss][Oo][Cc][Kk][Ee][Tt]\.[Ss][Oo][Cc][Kk][Ee][Tt]|[Pp][Tt][Yy]\.[Ss][Pp][Aa][Ww][Nn]).*/))
+    pivot_on:
+    - host
+    window: 4h
+  - name: Payload download-and-stage into tmp / dev-shm on this host
+    query: ((data_audit_exe:/.*(\/[Cc][Uu][Rr][Ll]|\/[Ww][Gg][Ee][Tt]|\/[Tt][Ff][Tt][Pp])/ AND (data_audit_execve_a1:/.*(\/[Tt][Mm][Pp]\/|\/[Dd][Ee][Vv]\/[Ss][Hh][Mm]\/|\/[Vv][Aa][Rr]\/[Tt][Mm][Pp]\/).*/ OR data_audit_execve_a2:/.*(\/[Tt][Mm][Pp]\/|\/[Dd][Ee][Vv]\/[Ss][Hh][Mm]\/|\/[Vv][Aa][Rr]\/[Tt][Mm][Pp]\/).*/)) OR data_audit_exe:/.*(\/[Tt][Mm][Pp]\/|\/[Dd][Ee][Vv]\/[Ss][Hh][Mm]\/|\/[Vv][Aa][Rr]\/[Tt][Mm][Pp]\/).*/)
+    pivot_on:
+    - host
+    window: 2h
+  - name: Privilege-escalation binaries executed on this host
+    query: data_audit_exe:/.*(\/[Ss][Uu][Dd][Oo]|\/[Ss][Uu]|\/[Pp][Kk][Ee][Xx][Ee][Cc]|\/[Dd][Oo][Aa][Ss])/
+    pivot_on:
+    - host
+    window: 2h

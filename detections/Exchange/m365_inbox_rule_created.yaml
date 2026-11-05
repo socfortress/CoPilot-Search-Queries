@@ -78,50 +78,58 @@ graylog:
   query: data_office365_Operation:"New-InboxRule"
 
 correlation:
-  # Authored by the correlation engine for review. Related CoPilot Searches to run
-  # around an alert from this rule, scoped to the same host/user/IP within the window.
+  # Authored per-rule (behaviour-researched) for the correlation engine. Related CoPilot
+  # Searches + telemetry pivots to run around an alert, scoped to its host/user/ip/domain.
   related_rules:
-    - id: M365_Email_Forwarding_Created
-      name: "M365 Email Forwarding Created"
-      reason: "same analytic story: Office 365 Persistence"
-    - id: M365_Mass_Email_Deletion_Evidence_Wipe
-      name: "M365 Mass Email Deletion - Evidence Wipe"
-      reason: "same analytic story: Business Email Compromise"
-    - id: d8b0a4fe-07a8-41be-bd39-b14afa025d95
-      name: "Activity from Anonymous IP Addresses"
-      reason: "next kill-chain tactic: Command and Control"
-    - id: 0f2468a2-5055-4212-a368-7321198ee706
-      name: "Activity from Infrequent Country"
-      reason: "next kill-chain tactic: Command and Control"
-    - id: 2b669496-d215-47d8-bd9a-f4a45bf07cda
-      name: "Data Exfiltration to Unsanctioned Apps"
-      reason: "next kill-chain tactic: Exfiltration"
-    - id: M365_Mass_External_Sharing
-      name: "M365 Mass External Sharing"
-      reason: "next kill-chain tactic: Collection"
-    - id: M365_Mass_File_Deletion
-      name: "M365 Mass File Deletion"
-      reason: "next kill-chain tactic: Impact"
-    - id: M365_Mass_File_Download
-      name: "M365 Mass File Download"
-      reason: "next kill-chain tactic: Collection"
+  - id: M365_Email_Forwarding_Created
+    name: M365 Email Forwarding Created
+    reason: 'The same mail-exfiltration goal by a second mechanism: a BEC actor who creates a forwarding inbox rule commonly also sets mailbox-level ForwardingSmtpAddress (Set-Mailbox) on the same mailbox. Both auto-copy incoming mail to an attacker address; seeing them together on this user confirms deliberate exfiltration over benign mail organisation.'
+  - id: M365_Mass_Email_Deletion_Evidence_Wipe
+    name: M365 Mass Email Deletion - Evidence Wipe
+    reason: 'The evidence-wipe a hiding inbox rule sets up: the rule shunts NDRs, security notices and victim replies to Deleted Items, then the attacker bulk-purges them (Soft/HardDelete) to cover the fraud. Mass deletion on the same mailbox around the rule is the cover-up half of the same BEC.'
+  - id: ff246f56-7f24-402a-baca-b86540e3925c
+    name: Microsoft 365 - User Restricted from Sending Email
+    reason: Microsoft throttled this mailbox for exceeding send limits - hard confirmation the account is compromised and being used to blast phishing/fraud mail. The hiding inbox rule exists precisely to route the resulting bounces and victim replies out of the Inbox so the owner never notices; same user.
+  - id: d7eab125-5f94-43df-8710-795b80fa1189
+    name: Microsoft 365 - Impossible Travel Activity
+    reason: 'The account-takeover precursor: an impossible-travel sign-in on the same user is how the attacker reached the mailbox before dropping the rule. Pairing a credential-compromise signal with the persistence action turns a possibly-benign rule into a confirmed BEC.'
+  - id: d8b0a4fe-07a8-41be-bd39-b14afa025d95
+    name: Activity from Anonymous IP Addresses
+    reason: BEC operators create inbox rules from behind Tor/VPN/anonymising proxies to mask origin; an anonymous-IP session by the same user around the rule corroborates attacker control rather than the legitimate owner filing their own mail.
+  - id: 13f2d3f5-6497-44a7-bf5f-dc13ffafe5dc
+    name: Azure Login Bypassing Conditional Access Policies
+    reason: A stolen-token / Conditional-Access-bypass sign-in (TokenSmith via the Intune Company Portal app) is a common way the attacker reached the mailbox without tripping MFA, immediately preceding the persistence rule on the same user.
+  - id: 60de9b57-dc4d-48b9-a6a0-b39e0469f876
+    name: Disabling Multi Factor Authentication
+    reason: 'Co-occurring identity entrenchment: an attacker who plants a mailbox-persistence rule frequently also disables Strong Authentication on the same identity to keep access. Both land in the same takeover session and reinforce that this is an intruder, not the owner.'
+  - id: 6897cd82-6664-11ed-9022-0242ac120002
+    name: PST Export Alert Using New-ComplianceSearchAction
+    reason: 'The back-catalogue theft that pairs with the rule: where the forwarding/hiding rule drips new mail going forward, a New-ComplianceSearchAction -Export PST exfiltrates the mailbox''s existing contents. Both are mailbox collection by the same compromised user.'
   window: 1h
   enrichment_searches:
-  # Rule-specific telemetry pivots the engine runs around an alert from this rule,
-  # scoped to the alert's host/user/IP within the window (behaviour-targeted, not a sweep).
-    - name: "Mailbox-rule / hiding operations by this user"
-      query: '(data_office365_Operation:/.*[Nn][Ee][Ww]-[Ii][Nn][Bb][Oo][Xx][Rr][Uu][Ll][Ee].*/ OR data_office365_Operation:/.*[Ss][Ee][Tt]-[Ii][Nn][Bb][Oo][Xx][Rr][Uu][Ll][Ee].*/ OR data_office365_Operation:/.*[Ss][Ee][Tt]-[Mm][Aa][Ii][Ll][Bb][Oo][Xx].*/ OR data_office365_Operation:/.*[Nn][Ee][Ww]-[Tt][Rr][Aa][Nn][Ss][Pp][Oo][Rr][Tt][Rr][Uu][Ll][Ee].*/ OR data_office365_Operation:/.*[Ss][Ee][Tt]-[Tt][Rr][Aa][Nn][Ss][Pp][Oo][Rr][Tt][Rr][Uu][Ll][Ee].*/ OR data_office365_Operation:/.*[Aa][Dd][Dd]-[Mm][Aa][Ii][Ll][Bb][Oo][Xx][Pp][Ee][Rr][Mm][Ii][Ss][Ss][Ii][Oo][Nn].*/ OR data_office365_Operation:/.*[Aa][Dd][Dd]-[Rr][Ee][Cc][Ii][Pp][Ii][Ee][Nn][Tt][Pp][Ee][Rr][Mm][Ii][Ss][Ss][Ii][Oo][Nn].*/)'
-      pivot_on: [user]
-      window: 24h
-    - name: "Mail access / rules / forwarding by this user"
-      query: '(((data_office365_Operation:/.*[Mm][Aa][Ii][Ll][Ii][Tt][Ee][Mm][Ss][Aa][Cc][Cc][Ee][Ss][Ss][Ee][Dd].*/ OR data_office365_Operation:/.*[Ss][Ee][Nn][Dd].*/ OR data_office365_Operation:/.*[Ss][Ee][Nn][Dd][Aa][Ss].*/ OR data_office365_Operation:/.*[Ss][Ee][Nn][Dd][Oo][Nn][Bb][Ee][Hh][Aa][Ll][Ff].*/ OR data_office365_Operation:/.*[Mm][Aa][Ii][Ll][Bb][Oo][Xx][Ll][Oo][Gg][Ii][Nn].*/)) OR ((data_office365_Operation:/.*[Nn][Ee][Ww]-[Ii][Nn][Bb][Oo][Xx][Rr][Uu][Ll][Ee].*/ OR data_office365_Operation:/.*[Ss][Ee][Tt]-[Ii][Nn][Bb][Oo][Xx][Rr][Uu][Ll][Ee].*/ OR data_office365_Operation:/.*[Ss][Ee][Tt]-[Mm][Aa][Ii][Ll][Bb][Oo][Xx].*/ OR data_office365_Operation:/.*[Nn][Ee][Ww]-[Tt][Rr][Aa][Nn][Ss][Pp][Oo][Rr][Tt][Rr][Uu][Ll][Ee].*/ OR data_office365_Operation:/.*[Ss][Ee][Tt]-[Tt][Rr][Aa][Nn][Ss][Pp][Oo][Rr][Tt][Rr][Uu][Ll][Ee].*/ OR data_office365_Operation:/.*[Aa][Dd][Dd]-[Mm][Aa][Ii][Ll][Bb][Oo][Xx][Pp][Ee][Rr][Mm][Ii][Ss][Ss][Ii][Oo][Nn].*/ OR data_office365_Operation:/.*[Aa][Dd][Dd]-[Rr][Ee][Cc][Ii][Pp][Ii][Ee][Nn][Tt][Pp][Ee][Rr][Mm][Ii][Ss][Ss][Ii][Oo][Nn].*/)))'
-      pivot_on: [user]
-      window: 6h
-    - name: "Mass download / forwarding by this user"
-      query: '(((data_office365_Operation:/.*[Ff][Ii][Ll][Ee][Dd][Oo][Ww][Nn][Ll][Oo][Aa][Dd][Ee][Dd].*/ OR data_office365_Operation:/.*[Ff][Ii][Ll][Ee][Aa][Cc][Cc][Ee][Ss][Ss][Ee][Dd].*/ OR data_office365_Operation:/.*[Ff][Ii][Ll][Ee][Ss][Yy][Nn][Cc][Dd][Oo][Ww][Nn][Ll][Oo][Aa][Dd][Ee][Dd][Ff][Uu][Ll][Ll].*/ OR data_office365_Operation:/.*[Ff][Ii][Ll][Ee][Aa][Cc][Cc][Ee][Ss][Ss][Ee][Dd][Ee][Xx][Tt][Ee][Nn][Dd][Ee][Dd].*/)) OR ((data_office365_Operation:/.*[Nn][Ee][Ww]-[Ii][Nn][Bb][Oo][Xx][Rr][Uu][Ll][Ee].*/ OR data_office365_Operation:/.*[Ss][Ee][Tt]-[Ii][Nn][Bb][Oo][Xx][Rr][Uu][Ll][Ee].*/ OR data_office365_Operation:/.*[Ss][Ee][Tt]-[Mm][Aa][Ii][Ll][Bb][Oo][Xx].*/ OR data_office365_Operation:/.*[Nn][Ee][Ww]-[Tt][Rr][Aa][Nn][Ss][Pp][Oo][Rr][Tt][Rr][Uu][Ll][Ee].*/ OR data_office365_Operation:/.*[Ss][Ee][Tt]-[Tt][Rr][Aa][Nn][Ss][Pp][Oo][Rr][Tt][Rr][Uu][Ll][Ee].*/ OR data_office365_Operation:/.*[Aa][Dd][Dd]-[Mm][Aa][Ii][Ll][Bb][Oo][Xx][Pp][Ee][Rr][Mm][Ii][Ss][Ss][Ii][Oo][Nn].*/ OR data_office365_Operation:/.*[Aa][Dd][Dd]-[Rr][Ee][Cc][Ii][Pp][Ii][Ee][Nn][Tt][Pp][Ee][Rr][Mm][Ii][Ss][Ss][Ii][Oo][Nn].*/)))'
-      pivot_on: [user]
-      window: 24h
-    - name: "Mailbox rule / forwarding / permission changes by this user"
-      query: '(data_office365_Operation:/.*[Nn][Ee][Ww]-[Ii][Nn][Bb][Oo][Xx][Rr][Uu][Ll][Ee].*/ OR data_office365_Operation:/.*[Ss][Ee][Tt]-[Ii][Nn][Bb][Oo][Xx][Rr][Uu][Ll][Ee].*/ OR data_office365_Operation:/.*[Ss][Ee][Tt]-[Mm][Aa][Ii][Ll][Bb][Oo][Xx].*/ OR data_office365_Operation:/.*[Nn][Ee][Ww]-[Tt][Rr][Aa][Nn][Ss][Pp][Oo][Rr][Tt][Rr][Uu][Ll][Ee].*/ OR data_office365_Operation:/.*[Ss][Ee][Tt]-[Tt][Rr][Aa][Nn][Ss][Pp][Oo][Rr][Tt][Rr][Uu][Ll][Ee].*/ OR data_office365_Operation:/.*[Aa][Dd][Dd]-[Mm][Aa][Ii][Ll][Bb][Oo][Xx][Pp][Ee][Rr][Mm][Ii][Ss][Ss][Ii][Oo][Nn].*/ OR data_office365_Operation:/.*[Aa][Dd][Dd]-[Rr][Ee][Cc][Ii][Pp][Ii][Ee][Nn][Tt][Pp][Ee][Rr][Mm][Ii][Ss][Ss][Ii][Oo][Nn].*/)'
-      pivot_on: [user]
-      window: 24h
+  # Behaviour-targeted hunts the engine runs around the alert (not a sweep).
+  - name: Additional mailbox rule, forwarding and delegate-permission changes by this user
+    query: (data_office365_Operation:/.*[Nn][Ee][Ww]-[Ii][Nn][Bb][Oo][Xx][Rr][Uu][Ll][Ee].*/ OR data_office365_Operation:/.*[Ss][Ee][Tt]-[Ii][Nn][Bb][Oo][Xx][Rr][Uu][Ll][Ee].*/ OR data_office365_Operation:/.*[Ss][Ee][Tt]-[Mm][Aa][Ii][Ll][Bb][Oo][Xx].*/ OR data_office365_Operation:/.*[Nn][Ee][Ww]-[Tt][Rr][Aa][Nn][Ss][Pp][Oo][Rr][Tt][Rr][Uu][Ll][Ee].*/ OR data_office365_Operation:/.*[Ss][Ee][Tt]-[Tt][Rr][Aa][Nn][Ss][Pp][Oo][Rr][Tt][Rr][Uu][Ll][Ee].*/ OR data_office365_Operation:/.*[Aa][Dd][Dd]-[Mm][Aa][Ii][Ll][Bb][Oo][Xx][Pp][Ee][Rr][Mm][Ii][Ss][Ss][Ii][Oo][Nn].*/ OR data_office365_Operation:/.*[Aa][Dd][Dd]-[Rr][Ee][Cc][Ii][Pp][Ii][Ee][Nn][Tt][Pp][Ee][Rr][Mm][Ii][Ss][Ss][Ii][Oo][Nn].*/)
+    pivot_on:
+    - user
+    window: 24h
+  - name: Sign-ins and failed logins by this user
+    query: (data_office365_Operation:/.*[Uu][Ss][Ee][Rr][Ll][Oo][Gg][Gg][Ee][Dd][Ii][Nn].*/ OR data_office365_Operation:/.*[Uu][Ss][Ee][Rr][Ll][Oo][Gg][Ii][Nn][Ff][Aa][Ii][Ll][Ee][Dd].*/)
+    pivot_on:
+    - user
+    window: 6h
+  - name: Mailbox access and outbound send operations by this user
+    query: (data_office365_Operation:/.*[Mm][Aa][Ii][Ll][Ii][Tt][Ee][Mm][Ss][Aa][Cc][Cc][Ee][Ss][Ss][Ee][Dd].*/ OR data_office365_Operation:/.*[Ss][Ee][Nn][Dd].*/ OR data_office365_Operation:/.*[Ss][Ee][Nn][Dd][Aa][Ss].*/ OR data_office365_Operation:/.*[Ss][Ee][Nn][Dd][Oo][Nn][Bb][Ee][Hh][Aa][Ll][Ff].*/ OR data_office365_Operation:/.*[Mm][Aa][Ii][Ll][Bb][Oo][Xx][Ll][Oo][Gg][Ii][Nn].*/)
+    pivot_on:
+    - user
+    window: 6h
+  - name: Mailbox item deletion / evidence-wipe operations by this user
+    query: (data_office365_Operation:/.*[Ss][Oo][Ff][Tt][Dd][Ee][Ll][Ee][Tt][Ee].*/ OR data_office365_Operation:/.*[Hh][Aa][Rr][Dd][Dd][Ee][Ll][Ee][Tt][Ee].*/ OR data_office365_Operation:/.*[Mm][Oo][Vv][Ee][Tt][Oo][Dd][Ee][Ll][Ee][Tt][Ee][Dd][Ii][Tt][Ee][Mm][Ss].*/)
+    pivot_on:
+    - user
+    window: 6h
+  - name: Inbox-rule, forwarding and sign-in operations from the rule's source IP
+    query: (data_office365_Operation:/.*[Nn][Ee][Ww]-[Ii][Nn][Bb][Oo][Xx][Rr][Uu][Ll][Ee].*/ OR data_office365_Operation:/.*[Ss][Ee][Tt]-[Mm][Aa][Ii][Ll][Bb][Oo][Xx].*/ OR data_office365_Operation:/.*[Aa][Dd][Dd]-[Mm][Aa][Ii][Ll][Bb][Oo][Xx][Pp][Ee][Rr][Mm][Ii][Ss][Ss][Ii][Oo][Nn].*/ OR data_office365_Operation:/.*[Uu][Ss][Ee][Rr][Ll][Oo][Gg][Gg][Ee][Dd][Ii][Nn].*/ OR data_office365_Operation:/.*[Uu][Ss][Ee][Rr][Ll][Oo][Gg][Ii][Nn][Ff][Aa][Ii][Ll][Ee][Dd].*/)
+    pivot_on:
+    - ip
+    window: 6h

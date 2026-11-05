@@ -149,19 +149,58 @@ graylog:
   query: data_win_system_eventID:"5007" AND (data_win_eventdata_newValue:/.*\\[Ww][Ii][Nn][Dd][Oo][Ww][Ss] [Dd][Ee][Ff][Ee][Nn][Dd][Ee][Rr]\\[Dd][Ii][Ss][Aa][Bb][Ll][Ee][Aa][Nn][Tt][Ii][Ss][Pp][Yy][Ww][Aa][Rr][Ee] .*/ OR data_win_eventdata_newValue:/.*\\[Ww][Ii][Nn][Dd][Oo][Ww][Ss] [Dd][Ee][Ff][Ee][Nn][Dd][Ee][Rr]\\[Ss][Cc][Aa][Nn]\\[Dd][Ii][Ss][Aa][Bb][Ll][Ee][Rr][Ee][Mm][Oo][Vv][Aa][Bb][Ll][Ee][Dd][Rr][Ii][Vv][Ee][Ss][Cc][Aa][Nn][Nn][Ii][Nn][Gg] .*/ OR data_win_eventdata_newValue:/.*\\[Ww][Ii][Nn][Dd][Oo][Ww][Ss] [Dd][Ee][Ff][Ee][Nn][Dd][Ee][Rr]\\[Ss][Cc][Aa][Nn]\\[Dd][Ii][Ss][Aa][Bb][Ll][Ee][Ss][Cc][Aa][Nn][Nn][Ii][Nn][Gg][Mm][Aa][Pp][Pp][Ee][Dd][Nn][Ee][Tt][Ww][Oo][Rr][Kk][Dd][Rr][Ii][Vv][Ee][Ss][Ff][Oo][Rr][Ff][Uu][Ll][Ll][Ss][Cc][Aa][Nn] .*/ OR data_win_eventdata_newValue:/.*\\[Ww][Ii][Nn][Dd][Oo][Ww][Ss] [Dd][Ee][Ff][Ee][Nn][Dd][Ee][Rr]\\[Ss][Pp][Yy][Nn][Ee][Tt]\\[Dd][Ii][Ss][Aa][Bb][Ll][Ee][Bb][Ll][Oo][Cc][Kk][Aa][Tt][Ff][Ii][Rr][Ss][Tt][Ss][Ee][Ee][Nn] .*/ OR data_win_eventdata_newValue:/.*\\[Rr][Ee][Aa][Ll]-[Tt][Ii][Mm][Ee] [Pp][Rr][Oo][Tt][Ee][Cc][Tt][Ii][Oo][Nn]\\[Ss][Pp][Yy][Nn][Ee][Tt][Rr][Ee][Pp][Oo][Rr][Tt][Ii][Nn][Gg] .*/)
 
 correlation:
-  # Authored by the correlation engine for review.
+  # Authored per-rule (behaviour-researched) for the correlation engine. Related CoPilot
+  # Searches + telemetry pivots to run around an alert, scoped to its host/user/ip/domain.
+  related_rules:
+  - id: 452bce90-6fb0-43cc-97a5-affc283139b3
+    name: Suspicious Windows Defender Registry Key Tampering Via Reg.EXE
+    reason: Event 5007 records that a Defender policy value flipped but not who did it; reg.exe writing the HKLM Windows Defender policy keys is the proximate cause of this exact event and names the process/command line behind it.
+  - id: c6fb44c6-71f5-49e6-9462-1425d328aee3
+    name: Powershell Base64 Encoded MpPreference Cmdlet
+    reason: Base64-encoded Set-MpPreference run via PowerShell is a primary way these protection values get disabled (it generates this 5007); the obfuscation marks it as deliberate tampering rather than an admin GUI change.
+  - id: Windows_DisableAntiSpyware_Registry
+    name: Windows DisableAntiSpyware Registry
+    reason: 'Second-sensor twin of this rule''s headline match: the same DisableAntiSpyware value seen by Sysmon EID 13 set to DWORD 1, the hardest confirmation that the AV engine was actually switched off on this host.'
+  - id: 1321dc4e-a1fe-481d-a016-52c45f0c8b4f
+    name: Windows Defender Exclusions Added
+    reason: 'Same Event 5007 log source: carving an exclusion path/process is the classic companion to disabling scanning - together they blind-spot a staged payload, so an exclusion add near this alert signals where the next file will drop.'
+  - id: 49e5bc24-8b86-49f1-b743-535f332c2856
+    name: Microsoft Defender Tamper Protection Trigger
+    reason: Event 5013 means Tamper Protection BLOCKED an attempt to flip Defender settings; seeing it beside a succeeded 5007 on the same host shows the attacker persistently fighting Defender - the blocked and succeeded toggles are one campaign.
+  - id: b28e58e4-2a72-4fae-bdee-0fbe904db642
+    name: Windows Defender Real-time Protection Disabled
+    reason: Event 5001; switching off real-time protection is the natural next toggle after disabling the anti-spyware engine and cloud reporting - a sibling event in the same blind-the-AV sequence on the same host.
+  - id: 0eb46774-f1ab-4a74-8238-1155855f2263
+    name: Disable Windows Defender Functionalities Via Registry Keys
+    reason: Registry-write-layer (Sysmon EID 13) view of the broader family of Defender-disable keys, covering the removable-drive, mapped-drive and SpyNet toggles this rule also matches, and surfacing the writing process when reg.exe/PowerShell attribution is ambiguous.
+  - id: a0a278fe-2c0e-4de2-ac3c-c68b08a9ba98
+    name: LSASS Access Detected via Attack Surface Reduction
+    reason: 'Common follow-on: with cloud and real-time protection down, credential theft is the next step; ASR (Event 1121) still logs LSASS access, so a hit here right after this alert escalates it from defense impairment to active credential access.'
+  window: 1h
   enrichment_searches:
-  # Rule-specific telemetry pivots the engine runs around an alert from this rule,
-  # scoped to the alert's host/user/IP within the window (behaviour-targeted, not a sweep).
-    - name: "Process injection / LSASS access on this host"
-      query: '((data_win_system_eventID:"8") OR (data_win_system_eventID:"10" AND data_win_eventdata_targetImage:/.*(\\[Ll][Ss][Aa][Ss][Ss]\.[Ee][Xx][Ee])/) OR (data_win_system_eventID:"1" AND (data_win_eventdata_commandLine:/.*[Cc][Rr][Ee][Aa][Tt][Ee][Rr][Ee][Mm][Oo][Tt][Ee][Tt][Hh][Rr][Ee][Aa][Dd].*/ OR data_win_eventdata_commandLine:/.*[Vv][Ii][Rr][Tt][Uu][Aa][Ll][Aa][Ll][Ll][Oo][Cc][Ee][Xx].*/ OR data_win_eventdata_commandLine:/.*[Ww][Rr][Ii][Tt][Ee][Pp][Rr][Oo][Cc][Ee][Ss][Ss][Mm][Ee][Mm][Oo][Rr][Yy].*/)))'
-      pivot_on: [host]
-      window: 1h
-    - name: "Follow-on LOLBin / signed-binary-proxy execution on this host"
-      query: 'data_win_system_eventID:"1" AND data_win_eventdata_image:/.*(\\[Rr][Uu][Nn][Dd][Ll][Ll]32\.[Ee][Xx][Ee]|\\[Rr][Ee][Gg][Ss][Vv][Rr]32\.[Ee][Xx][Ee]|\\[Mm][Ss][Hh][Tt][Aa]\.[Ee][Xx][Ee]|\\[Ii][Nn][Ss][Tt][Aa][Ll][Ll][Uu][Tt][Ii][Ll]\.[Ee][Xx][Ee]|\\[Rr][Ee][Gg][Aa][Ss][Mm]\.[Ee][Xx][Ee]|\\[Rr][Ee][Gg][Ss][Vv][Cc][Ss]\.[Ee][Xx][Ee]|\\[Mm][Ss][Bb][Uu][Ii][Ll][Dd]\.[Ee][Xx][Ee]|\\[Cc][Ee][Rr][Tt][Uu][Tt][Ii][Ll]\.[Ee][Xx][Ee]|\\[Bb][Ii][Tt][Ss][Aa][Dd][Mm][Ii][Nn]\.[Ee][Xx][Ee]|\\[Ww][Mm][Ii][Cc]\.[Ee][Xx][Ee]|\\[Cc][Mm][Ss][Tt][Pp]\.[Ee][Xx][Ee]|\\[Oo][Dd][Bb][Cc][Cc][Oo][Nn][Ff]\.[Ee][Xx][Ee]|\\[Ff][Oo][Rr][Ff][Ii][Ll][Ee][Ss]\.[Ee][Xx][Ee]|\\[Pp][Cc][Aa][Ll][Uu][Aa]\.[Ee][Xx][Ee]|\\[Mm][Aa][Vv][Ii][Nn][Jj][Ee][Cc][Tt]\.[Ee][Xx][Ee]|\\[Ss][Cc][Rr][Ii][Pp][Tt][Rr][Uu][Nn][Nn][Ee][Rr]\.[Ee][Xx][Ee])/'
-      pivot_on: [host]
-      window: 1h
-    - name: "Memory/credential-dump creation & LSASS access on this host"
-      query: '((data_win_system_eventID:"1" AND data_win_eventdata_image:/.*(\\[Pp][Rr][Oo][Cc][Dd][Uu][Mm][Pp]\.[Ee][Xx][Ee]|\\[Pp][Rr][Oo][Cc][Dd][Uu][Mm][Pp]64\.[Ee][Xx][Ee]|\\[Ss][Qq][Ll][Dd][Uu][Mm][Pp][Ee][Rr]\.[Ee][Xx][Ee]|\\[Cc][Rr][Ee][Aa][Tt][Ee][Dd][Uu][Mm][Pp]\.[Ee][Xx][Ee]|\\[Rr][Dd][Rr][Ll][Ee][Aa][Kk][Dd][Ii][Aa][Gg]\.[Ee][Xx][Ee]|\\[Dd][Uu][Mm][Pp][Ee][Rr][Tt]\.[Ee][Xx][Ee]|\\[Nn][Aa][Nn][Oo][Dd][Uu][Mm][Pp]\.[Ee][Xx][Ee]|\\[Aa][Vv][Dd][Uu][Mm][Pp]\.[Ee][Xx][Ee])/) OR (data_win_system_eventID:"1" AND (data_win_eventdata_commandLine:/.*[Cc][Oo][Mm][Ss][Vv][Cc][Ss]\.[Dd][Ll][Ll].*/ OR data_win_eventdata_commandLine:/.*[Mm][Ii][Nn][Ii][Dd][Uu][Mm][Pp].*/ OR data_win_eventdata_commandLine:/.*[Dd][Uu][Mm][Pp][Ee][Rr][Tt].*/ OR data_win_eventdata_commandLine:/.*[Nn][Aa][Nn][Oo][Dd][Uu][Mm][Pp].*/ OR data_win_eventdata_commandLine:/.*[Ll][Ss][Aa][Ss][Ss].*/ OR data_win_eventdata_commandLine:/.*[Ss][Ee][Kk][Uu][Rr][Ll][Ss][Aa].*/ OR data_win_eventdata_commandLine:/.*[Nn][Tt][Dd][Ss]\.[Dd][Ii][Tt].*/ OR data_win_eventdata_commandLine:/.*[Nn][Tt][Dd][Ss][Uu][Tt][Ii][Ll].*/)) OR (data_win_system_eventID:"10" AND data_win_eventdata_targetImage:/.*(\\[Ll][Ss][Aa][Ss][Ss]\.[Ee][Xx][Ee])/))'
-      pivot_on: [host]
-      window: 1h
+  # Behaviour-targeted hunts the engine runs around the alert (not a sweep).
+  - name: Defender-tamper command behind this change (Set-MpPreference / reg.exe Defender policy / sc stop WinDefend) on this host
+    query: data_win_system_eventID:"1" AND (data_win_eventdata_commandLine:/.*[Mm][Pp][Pp][Rr][Ee][Ff][Ee][Rr][Ee][Nn][Cc][Ee].*/ OR data_win_eventdata_commandLine:/.*[Dd][Ii][Ss][Aa][Bb][Ll][Ee][Rr][Ee][Aa][Ll][Tt][Ii][Mm][Ee][Mm][Oo][Nn][Ii][Tt][Oo][Rr][Ii][Nn][Gg].*/ OR data_win_eventdata_commandLine:/.*[Dd][Ii][Ss][Aa][Bb][Ll][Ee][Ii][Oo][Aa][Vv][Pp][Rr][Oo][Tt][Ee][Cc][Tt][Ii][Oo][Nn].*/ OR data_win_eventdata_commandLine:/.*[Dd][Ii][Ss][Aa][Bb][Ll][Ee][Bb][Ee][Hh][Aa][Vv][Ii][Oo][Rr][Mm][Oo][Nn][Ii][Tt][Oo][Rr][Ii][Nn][Gg].*/ OR data_win_eventdata_commandLine:/.*[Dd][Ii][Ss][Aa][Bb][Ll][Ee][Aa][Nn][Tt][Ii][Ss][Pp][Yy][Ww][Aa][Rr][Ee].*/ OR data_win_eventdata_commandLine:/.*[Dd][Ii][Ss][Aa][Bb][Ll][Ee][Bb][Ll][Oo][Cc][Kk][Aa][Tt][Ff][Ii][Rr][Ss][Tt][Ss][Ee][Ee][Nn].*/ OR data_win_eventdata_commandLine:/.*[Ss][Pp][Yy][Nn][Ee][Tt][Rr][Ee][Pp][Oo][Rr][Tt][Ii][Nn][Gg].*/ OR (data_win_eventdata_image:/.*\\[Rr][Ee][Gg]\.[Ee][Xx][Ee]/ AND data_win_eventdata_commandLine:/.*[Ww][Ii][Nn][Dd][Oo][Ww][Ss] [Dd][Ee][Ff][Ee][Nn][Dd][Ee][Rr].*/ AND data_win_eventdata_commandLine:/.*[Dd][Ii][Ss][Aa][Bb][Ll][Ee].*/) OR ((data_win_eventdata_image:/.*\\[Ss][Cc]\.[Ee][Xx][Ee]/ OR data_win_eventdata_image:/.*\\[Nn][Ee][Tt]\.[Ee][Xx][Ee]/ OR data_win_eventdata_image:/.*\\[Nn][Ee][Tt]1\.[Ee][Xx][Ee]/) AND data_win_eventdata_commandLine:/.*([Ww][Ii][Nn][Dd][Ee][Ff][Ee][Nn][Dd]|[Ww][Dd][Nn][Ii][Ss][Ss][Vv][Cc]|[Ss][Ee][Nn][Ss][Ee]|[Ww][Dd][Ff][Ii][Ll][Tt][Ee][Rr]).*/))
+    pivot_on:
+    - host
+    window: 1h
+  - name: Defender exclusion carve-out (payload path/process/extension whitelisted) on this host
+    query: (data_win_system_eventID:"1" AND (data_win_eventdata_commandLine:/.*[Ee][Xx][Cc][Ll][Uu][Ss][Ii][Oo][Nn][Pp][Aa][Tt][Hh].*/ OR data_win_eventdata_commandLine:/.*[Ee][Xx][Cc][Ll][Uu][Ss][Ii][Oo][Nn][Pp][Rr][Oo][Cc][Ee][Ss][Ss].*/ OR data_win_eventdata_commandLine:/.*[Ee][Xx][Cc][Ll][Uu][Ss][Ii][Oo][Nn][Ee][Xx][Tt][Ee][Nn][Ss][Ii][Oo][Nn].*/ OR (data_win_eventdata_commandLine:/.*[Ww][Ii][Nn][Dd][Oo][Ww][Ss] [Dd][Ee][Ff][Ee][Nn][Dd][Ee][Rr].*/ AND data_win_eventdata_commandLine:/.*[Ee][Xx][Cc][Ll][Uu][Ss][Ii][Oo][Nn][Ss].*/))) OR (data_win_system_eventID:"13" AND data_win_eventdata_targetObject:/.*[Ww][Ii][Nn][Dd][Oo][Ww][Ss] [Dd][Ee][Ff][Ee][Nn][Dd][Ee][Rr]\\[Ee][Xx][Cc][Ll][Uu][Ss][Ii][Oo][Nn][Ss].*/)
+    pivot_on:
+    - host
+    window: 2h
+  - name: Registry-layer confirmation of Defender disable keys written (Sysmon EID 13) on this host
+    query: data_win_system_eventID:"13" AND (data_win_eventdata_targetObject:/.*[Ww][Ii][Nn][Dd][Oo][Ww][Ss] [Dd][Ee][Ff][Ee][Nn][Dd][Ee][Rr]\\[Dd][Ii][Ss][Aa][Bb][Ll][Ee][Aa][Nn][Tt][Ii][Ss][Pp][Yy][Ww][Aa][Rr][Ee].*/ OR data_win_eventdata_targetObject:/.*[Ww][Ii][Nn][Dd][Oo][Ww][Ss] [Dd][Ee][Ff][Ee][Nn][Dd][Ee][Rr]\\[Dd][Ii][Ss][Aa][Bb][Ll][Ee][Aa][Nn][Tt][Ii][Vv][Ii][Rr][Uu][Ss].*/ OR data_win_eventdata_targetObject:/.*[Rr][Ee][Aa][Ll]-[Tt][Ii][Mm][Ee] [Pp][Rr][Oo][Tt][Ee][Cc][Tt][Ii][Oo][Nn]\\[Dd][Ii][Ss][Aa][Bb][Ll][Ee].*/ OR data_win_eventdata_targetObject:/.*[Ss][Pp][Yy][Nn][Ee][Tt]\\[Dd][Ii][Ss][Aa][Bb][Ll][Ee].*/ OR data_win_eventdata_targetObject:/.*[Ss][Pp][Yy][Nn][Ee][Tt][Rr][Ee][Pp][Oo][Rr][Tt][Ii][Nn][Gg].*/ OR data_win_eventdata_targetObject:/.*[Ss][Cc][Aa][Nn]\\[Dd][Ii][Ss][Aa][Bb][Ll][Ee].*/)
+    pivot_on:
+    - host
+    window: 1h
+  - name: Payload pulled in once Defender was blinded (LOLBin + PowerShell download) on this host
+    query: data_win_system_eventID:"1" AND ((data_win_eventdata_image:/.*\\[Cc][Ee][Rr][Tt][Uu][Tt][Ii][Ll]\.[Ee][Xx][Ee]/ AND (data_win_eventdata_commandLine:/.*[Uu][Rr][Ll][Cc][Aa][Cc][Hh][Ee].*/ OR data_win_eventdata_commandLine:/.*-[Dd][Ee][Cc][Oo][Dd][Ee].*/)) OR (data_win_eventdata_image:/.*\\[Bb][Ii][Tt][Ss][Aa][Dd][Mm][Ii][Nn]\.[Ee][Xx][Ee]/ AND data_win_eventdata_commandLine:/.*[Tt][Rr][Aa][Nn][Ss][Ff][Ee][Rr].*/) OR data_win_eventdata_image:/.*\\[Cc][Uu][Rr][Ll]\.[Ee][Xx][Ee]/ OR data_win_eventdata_image:/.*\\[Ww][Gg][Ee][Tt]\.[Ee][Xx][Ee]/ OR data_win_eventdata_commandLine:/.*[Dd][Oo][Ww][Nn][Ll][Oo][Aa][Dd][Ss][Tt][Rr][Ii][Nn][Gg].*/ OR data_win_eventdata_commandLine:/.*[Dd][Oo][Ww][Nn][Ll][Oo][Aa][Dd][Ff][Ii][Ll][Ee].*/ OR data_win_eventdata_commandLine:/.*[Ii][Nn][Vv][Oo][Kk][Ee]-[Ww][Ee][Bb][Rr][Ee][Qq][Uu][Ee][Ss][Tt].*/ OR data_win_eventdata_commandLine:/.*[Ss][Tt][Aa][Rr][Tt]-[Bb][Ii][Tt][Ss][Tt][Rr][Aa][Nn][Ss][Ff][Ee][Rr].*/ OR (data_win_eventdata_image:/.*\\[Mm][Ss][Hh][Tt][Aa]\.[Ee][Xx][Ee]/ AND data_win_eventdata_commandLine:/.*[Hh][Tt][Tt][Pp].*/))
+    pivot_on:
+    - host
+    window: 2h
+  - name: 'Follow-on credential access: LSASS process-access or memory dump on this host'
+    query: (data_win_system_eventID:"10" AND data_win_eventdata_targetImage:/.*\\[Ll][Ss][Aa][Ss][Ss]\.[Ee][Xx][Ee]/) OR (data_win_system_eventID:"1" AND (data_win_eventdata_image:/.*(\\[Pp][Rr][Oo][Cc][Dd][Uu][Mm][Pp]\.[Ee][Xx][Ee]|\\[Pp][Rr][Oo][Cc][Dd][Uu][Mm][Pp]64\.[Ee][Xx][Ee]|\\[Rr][Dd][Rr][Ll][Ee][Aa][Kk][Dd][Ii][Aa][Gg]\.[Ee][Xx][Ee]|\\[Cc][Rr][Ee][Aa][Tt][Ee][Dd][Uu][Mm][Pp]\.[Ee][Xx][Ee]|\\[Nn][Aa][Nn][Oo][Dd][Uu][Mm][Pp]\.[Ee][Xx][Ee])/ OR data_win_eventdata_commandLine:/.*[Cc][Oo][Mm][Ss][Vv][Cc][Ss]\.[Dd][Ll][Ll].*[Mm][Ii][Nn][Ii][Dd][Uu][Mm][Pp].*/ OR data_win_eventdata_commandLine:/.*[Ss][Ee][Kk][Uu][Rr][Ll][Ss][Aa].*/ OR data_win_eventdata_commandLine:/.*[Mm][Ii][Mm][Ii][Kk][Aa][Tt][Zz].*/))
+    pivot_on:
+    - host
+    window: 2h

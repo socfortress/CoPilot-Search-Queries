@@ -149,19 +149,58 @@ graylog:
   query: data_audit_type:/[Pp][Aa][Tt][Hh]/ AND (data_audit_file_name:/\/[Ee][Tt][Cc]\/[Aa][Uu][Dd][Ii][Tt]\/.*/ OR data_audit_file_name:/\/[Ee][Tt][Cc]\/[Ll][Ii][Bb][Aa][Uu][Dd][Ii][Tt]\.[Cc][Oo][Nn][Ff]/ OR data_audit_file_name:/\/[Ee][Tt][Cc]\/[Aa][Uu][Dd][Ii][Ss][Pp]\/.*/)
 
 correlation:
-  # Authored by the correlation engine for review.
+  # Authored per-rule (behaviour-researched) for the correlation engine. Related CoPilot
+  # Searches + telemetry pivots to run around an alert, scoped to its host/user/ip/domain.
+  related_rules:
+  - id: bed26dea-4525-47f4-b24a-76e30e44ffb0
+    name: Audit Rules Deleted Via Auditctl
+    reason: 'Runtime complement of the same blinding act: this alert is someone editing the auditd config/rules files on disk, while ''auditctl -D'' flushes the ruleset already loaded in the running kernel. Attackers routinely do both - gut audit.rules then reload/flush - so a near-simultaneous auditctl -D on the host confirms a deliberate takedown of auditing rather than a benign config touch.'
+  - id: c830f15d-6f6e-430f-8074-6f73d6807841
+    name: Logging Configuration Changes on Linux Host
+    reason: 'Its exact sibling (same author and query structure) for the other host-logging channel: after gutting auditd the operator silences syslog/rsyslog/syslog-ng so no daemon records what comes next. Both config-tamper alerts firing on the host in the window means the attacker is methodically switching off every logging source, not touching one file.'
+  - id: a5b977d6-8a81-4475-91b9-49dbfcd941f7
+    name: Remove Immutable File Attribute - Auditd
+    reason: 'Enabling precursor: hardened hosts set chattr +i on /etc/audit/audit.rules and auditd.conf, so any write fails with ''Operation not permitted'' until the immutable bit is cleared. A ''chattr -i'' on the host immediately before this alert is the step that made the audit config writable in the first place.'
+  - id: de25eeb8-3655-4643-ac3a-b662d3f26b6b
+    name: Disable Or Stop Services
+    reason: 'Immediate follow-on: a weakened config only takes effect once auditd is restarted, and the blunter move is ''systemctl stop/disable auditd'' to kill logging outright. This rule catches that auditd service teardown via Tetragon, which keeps reporting after the daemon is gone.'
+  - id: e3a8a052-111f-4606-9aee-f28ebeb76776
+    name: Disabling Security Tools
+    reason: 'Same hands-on defense-impairment phase: an operator tampering with auditd config usually also stops the firewall/EDR/other security tooling in the same minutes, so a co-occurring hit distinguishes a deliberate blinding sweep from a single stray admin edit.'
+  - id: 80915f59-9b56-4616-9de0-fd0dea6c12fe
+    name: Linux Logs Clearing Attempts
+    reason: 'Cover-tracks follow-on: with auditing disabled the attacker deletes the /var/log/audit records already written (rm/shred/unlink) to erase what was captured before the blinding - the evidence-destruction half of the same anti-forensic act that began with editing the audit config.'
+  - id: 3fcc9b35-39e4-44c0-a2ad-9e82b6902b31
+    name: Syslog Clearing or Removal Via System Utilities
+    reason: 'Parallel log destruction: attackers who blind auditd also purge syslog (truncate/cat/echo/mv) to remove the second on-disk record of their activity. Emptying syslog in the same window as this auditd config change signals systematic removal of every logging channel on the host.'
+  - id: 1182f3b3-e716-4efa-99ab-d2685d04360f
+    name: History File Deletion
+    reason: 'Co-occurring interactive cover-tracks: operators who weaken auditing routinely wipe ~/.bash_history in the same session to hide the exact commands they ran, which places a live human on the host rather than an automated job and raises confidence that the config edit was malicious.'
+  window: 2h
   enrichment_searches:
-  # Rule-specific telemetry pivots the engine runs around an alert from this rule,
-  # scoped to the alert's host/user/IP within the window (behaviour-targeted, not a sweep).
-    - name: "Shell / interpreter execution on this host"
-      query: '((data_process_exec_process_binary:/.*(\/[Bb][Aa][Ss][Hh]|\/[Ss][Hh]|\/[Dd][Aa][Ss][Hh]|\/[Zz][Ss][Hh]|\/[Kk][Ss][Hh]|\/[Aa][Ss][Hh]|\/[Bb][Uu][Ss][Yy][Bb][Oo][Xx])/) OR (data_process_exec_process_binary:/.*(\/[Pp][Yy][Tt][Hh][Oo][Nn]|\/[Pp][Yy][Tt][Hh][Oo][Nn]3|\/[Pp][Ee][Rr][Ll]|\/[Rr][Uu][Bb][Yy]|\/[Pp][Hh][Pp]|\/[Nn][Oo][Dd][Ee]|\/[Ll][Uu][Aa]|\/[Aa][Ww][Kk])/))'
-      pivot_on: [host]
-      window: 1h
-    - name: "Reconnaissance commands on this host"
-      query: 'data_process_exec_process_binary:/.*(\/[Ww][Hh][Oo][Aa][Mm][Ii]|\/[Ii][Dd]|\/[Uu][Nn][Aa][Mm][Ee]|\/[Hh][Oo][Ss][Tt][Nn][Aa][Mm][Ee]|\/[Hh][Oo][Ss][Tt][Nn][Aa][Mm][Ee][Cc][Tt][Ll]|\/[Ss][Ss]|\/[Nn][Ee][Tt][Ss][Tt][Aa][Tt]|\/[Ii][Ff][Cc][Oo][Nn][Ff][Ii][Gg]|\/[Aa][Rr][Pp]|\/[Ww]|\/[Ww][Hh][Oo]|\/[Ll][Aa][Ss][Tt]|\/[Ll][Ss][Oo][Ff]|\/[Nn][Mm][Aa][Pp]|\/[Dd][Ii][Gg]|\/[Ff][Ii][Nn][Dd])/'
-      pivot_on: [host]
-      window: 1h
-    - name: "Privilege-escalation tooling executed on this host"
-      query: 'data_process_exec_process_binary:/.*(\/[Ss][Uu][Dd][Oo]|\/[Ss][Uu]|\/[Pp][Kk][Ee][Xx][Ee][Cc]|\/[Dd][Oo][Aa][Ss]|\/[Ss][Ee][Tt][Cc][Aa][Pp]|\/[Cc][Hh][Ss][Hh]|\/[Nn][Ee][Ww][Gg][Rr][Pp])/'
-      pivot_on: [host]
-      window: 2h
+  # Behaviour-targeted hunts the engine runs around the alert (not a sweep).
+  - name: Editor or stream tool writing to the auditd configuration on this host
+    query: ((data_process_exec_process_binary:/.*\/[Vv][Ii]/ OR data_process_exec_process_binary:/.*\/[Vv][Ii][Mm]/ OR data_process_exec_process_binary:/.*\/[Nn][Aa][Nn][Oo]/ OR data_process_exec_process_binary:/.*\/[Ee][Mm][Aa][Cc][Ss]/ OR data_process_exec_process_binary:/.*\/[Ss][Ee][Dd]/ OR data_process_exec_process_binary:/.*\/[Tt][Ee][Ee]/ OR data_process_exec_process_binary:/.*\/[Dd][Dd]/ OR data_process_exec_process_binary:/.*\/[Cc][Pp]/ OR data_process_exec_process_binary:/.*\/[Mm][Vv]/) AND (data_process_exec_process_arguments:/.*\/[Ee][Tt][Cc]\/[Aa][Uu][Dd][Ii][Tt].*/ OR data_process_exec_process_arguments:/.*\/[Ee][Tt][Cc]\/[Aa][Uu][Dd][Ii][Ss][Pp].*/ OR data_process_exec_process_arguments:/.*[Ll][Ii][Bb][Aa][Uu][Dd][Ii][Tt]\.[Cc][Oo][Nn][Ff].*/))
+    pivot_on:
+    - host
+    window: 1h
+  - name: Audit daemon disabled, rules reloaded, or service restarted/stopped on this host
+    query: ((data_process_exec_process_binary:/.*\/[Aa][Uu][Dd][Ii][Tt][Cc][Tt][Ll]/ AND (data_process_exec_process_arguments:/.*-[Dd].*/ OR data_process_exec_process_arguments:/.*-[Ee] [012].*/)) OR data_process_exec_process_binary:/.*\/[Aa][Uu][Gg][Ee][Nn][Rr][Uu][Ll][Ee][Ss]/ OR ((data_process_exec_process_binary:/.*\/[Ss][Yy][Ss][Tt][Ee][Mm][Cc][Tt][Ll]/ OR data_process_exec_process_binary:/.*\/[Ss][Ee][Rr][Vv][Ii][Cc][Ee]/ OR data_process_exec_process_binary:/.*\/[Pp][Kk][Ii][Ll][Ll]/ OR data_process_exec_process_binary:/.*\/[Kk][Ii][Ll][Ll][Aa][Ll][Ll]/) AND data_process_exec_process_arguments:/.*[Aa][Uu][Dd][Ii][Tt][Dd].*/))
+    pivot_on:
+    - host
+    window: 2h
+  - name: Immutable attribute cleared on audit or log paths on this host
+    query: (data_process_exec_process_binary:/.*\/[Cc][Hh][Aa][Tt][Tt][Rr]/ AND data_process_exec_process_arguments:/.*-[Ii].*/ AND (data_process_exec_process_arguments:/.*\/[Ee][Tt][Cc]\/[Aa][Uu][Dd][Ii][Tt].*/ OR data_process_exec_process_arguments:/.*\/[Ee][Tt][Cc]\/[Aa][Uu][Dd][Ii][Ss][Pp].*/ OR data_process_exec_process_arguments:/.*[Ll][Ii][Bb][Aa][Uu][Dd][Ii][Tt]\.[Cc][Oo][Nn][Ff].*/ OR data_process_exec_process_arguments:/.*\/[Vv][Aa][Rr]\/[Ll][Oo][Gg].*/))
+    pivot_on:
+    - host
+    window: 1h
+  - name: Privilege escalation to root preceding this activity on this host
+    query: data_process_exec_process_binary:/.*\/[Ss][Uu][Dd][Oo]/ OR data_process_exec_process_binary:/.*\/[Ss][Uu]/ OR data_process_exec_process_binary:/.*\/[Pp][Kk][Ee][Xx][Ee][Cc]/ OR data_process_exec_process_binary:/.*\/[Dd][Oo][Aa][Ss]/
+    pivot_on:
+    - host
+    window: 2h
+  - name: Audit and authentication logs truncated, overwritten, or deleted on this host
+    query: (data_process_exec_process_binary:/.*\/[Rr][Mm]/ OR data_process_exec_process_binary:/.*\/[Ss][Hh][Rr][Ee][Dd]/ OR data_process_exec_process_binary:/.*\/[Uu][Nn][Ll][Ii][Nn][Kk]/ OR data_process_exec_process_binary:/.*\/[Tt][Rr][Uu][Nn][Cc][Aa][Tt][Ee]/ OR data_process_exec_process_binary:/.*\/[Dd][Dd]/ OR data_process_exec_process_binary:/.*\/[Tt][Ee][Ee]/ OR data_process_exec_process_binary:/.*\/[Cc][Pp]/) AND (data_process_exec_process_arguments:/.*\/[Vv][Aa][Rr]\/[Ll][Oo][Gg]\/[Aa][Uu][Dd][Ii][Tt].*/ OR data_process_exec_process_arguments:/.*\/[Vv][Aa][Rr]\/[Ll][Oo][Gg]\/[Ss][Ee][Cc][Uu][Rr][Ee].*/ OR data_process_exec_process_arguments:/.*\/[Vv][Aa][Rr]\/[Ll][Oo][Gg]\/[Aa][Uu][Tt][Hh]\.[Ll][Oo][Gg].*/ OR data_process_exec_process_arguments:/.*[Ww][Tt][Mm][Pp].*/ OR data_process_exec_process_arguments:/.*[Bb][Tt][Mm][Pp].*/)
+    pivot_on:
+    - host
+    window: 2h

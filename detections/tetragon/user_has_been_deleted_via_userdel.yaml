@@ -138,35 +138,58 @@ graylog:
   query: data_process_exec_process_binary:/.*\/[Uu][Ss][Ee][Rr][Dd][Ee][Ll]/
 
 correlation:
-  # Authored by the correlation engine for review. Related CoPilot Searches to run
-  # around an alert from this rule, scoped to the same host/user/IP within the window.
+  # Authored per-rule (behaviour-researched) for the correlation engine. Related CoPilot
+  # Searches + telemetry pivots to run around an alert, scoped to its host/user/ip/domain.
   related_rules:
-    - id: de25eeb8-3655-4643-ac3a-b662d3f26b6b
-      name: "Disable Or Stop Services"
-      reason: "next kill-chain tactic: Impact"
-    - id: 2992ac4d-31e9-4325-99f2-b18a73221bb2
-      name: "ESXi VM Kill Via ESXCLI"
-      reason: "next kill-chain tactic: Impact"
-    - id: 8a46f16c-8c4c-82d1-b121-0fdd3ba70a84
-      name: "Group Has Been Deleted Via Groupdel"
-      reason: "next kill-chain tactic: Impact"
-  window: 1h
+  - id: 8a46f16c-8c4c-82d1-b121-0fdd3ba70a84
+    name: Group Has Been Deleted Via Groupdel
+    reason: 'Twin command on the same host: userdel removes the account while groupdel removes its primary/created group. Run together they are the account-plus-group teardown that marks either a rogue-account cleanup or a destructive lock-out of legitimate users, so a groupdel in the window is the other half of this deletion.'
+  - id: 6a50f16c-3b7b-42d1-b081-0fdd3ba70a73
+    name: User Added To Root/Sudoers Group Using Usermod
+    reason: The account being deleted was most likely the one earlier granted root/sudoers membership; usermod -aG root/sudoers then userdel is the create-privilege-use-destroy lifecycle of a backdoor account, so a prior usermod on this host names the privileged account this userdel is now erasing.
+  - id: 759d0d51-bc99-4b5e-9add-8f5b2c8e7512
+    name: Creation Of An User Account
+    reason: userdel is the matching bookend to useradd/ADD_USER. An account created hours earlier and now deleted is the signature of a disposable rogue account used for the intrusion and removed afterward; this auditd detection tells you whether and when the deleted account was created on the same host.
+  - id: a1b2c3d4-e5f6-7890-abcd-ef1234567890
+    name: Linux User Account Creation Detection
+    reason: Same create-then-delete precursor, caught from Wazuh/syslog full_log (useradd/adduser) rather than auditd. On a host where auditd account events are absent this is the detection that reveals the rogue account's creation that this userdel is undoing.
+  - id: 1182f3b3-e716-4efa-99ab-d2685d04360f
+    name: History File Deletion
+    reason: userdel's stated purpose here is covering tracks; wiping ~/.bash_history in the same root session erases the commands run as or against the deleted account, so a history deletion alongside this alert turns an isolated userdel into a deliberate anti-forensic cleanup rather than routine offboarding.
+  - id: 80915f59-9b56-4616-9de0-fd0dea6c12fe
+    name: Linux Logs Clearing Attempts
+    reason: Clearing /var/log (and the /var/spool/mail spool that userdel -r also removes) is the companion evidence-destruction step; log removal on the same host in the window reframes the account deletion as post-compromise track-covering, not admin maintenance.
+  - id: 3fcc9b35-39e4-44c0-a2ad-9e82b6902b31
+    name: Syslog Clearing or Removal Via System Utilities
+    reason: syslog carries the authpriv entries that useradd/userdel themselves emit; emptying /var/log/syslog in the same window destroys the very record of the account's creation and deletion, a targeted cover-tracks move that pairs directly with this userdel.
+  - id: bed26dea-4525-47f4-b24a-76e30e44ffb0
+    name: Audit Rules Deleted Via Auditctl
+    reason: auditctl -D wipes the audit ruleset that would have recorded the account change; deleting audit rules in the same window as the userdel is the blind-the-host step that confirms the deletion is deliberate evasion rather than benign administration.
+  window: 2h
   enrichment_searches:
-  # Rule-specific telemetry pivots the engine runs around an alert from this rule,
-  # scoped to the alert's host/user/IP within the window (behaviour-targeted, not a sweep).
-    - name: "Other executions of this tool-set on this host (any arguments)"
-      query: 'data_process_exec_process_binary:/.*(\/[Uu][Ss][Ee][Rr][Dd][Ee][Ll])/'
-      pivot_on: [host]
-      window: 2h
-    - name: "Shell / interpreter execution on this host"
-      query: '((data_process_exec_process_binary:/.*(\/[Bb][Aa][Ss][Hh]|\/[Ss][Hh]|\/[Dd][Aa][Ss][Hh]|\/[Zz][Ss][Hh]|\/[Kk][Ss][Hh]|\/[Aa][Ss][Hh]|\/[Bb][Uu][Ss][Yy][Bb][Oo][Xx])/) OR (data_process_exec_process_binary:/.*(\/[Pp][Yy][Tt][Hh][Oo][Nn]|\/[Pp][Yy][Tt][Hh][Oo][Nn]3|\/[Pp][Ee][Rr][Ll]|\/[Rr][Uu][Bb][Yy]|\/[Pp][Hh][Pp]|\/[Nn][Oo][Dd][Ee]|\/[Ll][Uu][Aa]|\/[Aa][Ww][Kk])/))'
-      pivot_on: [host]
-      window: 1h
-    - name: "Reconnaissance commands on this host"
-      query: 'data_process_exec_process_binary:/.*(\/[Ww][Hh][Oo][Aa][Mm][Ii]|\/[Ii][Dd]|\/[Uu][Nn][Aa][Mm][Ee]|\/[Hh][Oo][Ss][Tt][Nn][Aa][Mm][Ee]|\/[Hh][Oo][Ss][Tt][Nn][Aa][Mm][Ee][Cc][Tt][Ll]|\/[Ss][Ss]|\/[Nn][Ee][Tt][Ss][Tt][Aa][Tt]|\/[Ii][Ff][Cc][Oo][Nn][Ff][Ii][Gg]|\/[Aa][Rr][Pp]|\/[Ww]|\/[Ww][Hh][Oo]|\/[Ll][Aa][Ss][Tt]|\/[Ll][Ss][Oo][Ff]|\/[Nn][Mm][Aa][Pp]|\/[Dd][Ii][Gg]|\/[Ff][Ii][Nn][Dd])/'
-      pivot_on: [host]
-      window: 1h
-    - name: "Destructive tooling on this host"
-      query: '((data_process_exec_process_binary:/.*(\/[Dd][Dd]|\/[Mm][Kk][Ff][Ss]|\/[Ww][Ii][Pp][Ee][Ff][Ss]|\/[Ss][Hh][Rr][Ee][Dd]|\/[Cc][Rr][Yy][Pp][Tt][Ss][Ee][Tt][Uu][Pp])/) OR (data_process_exec_process_arguments:/.*[Rr][Mm] -[Rr][Ff].*/) OR (data_process_exec_process_arguments:/.*--[Nn][Oo]-[Pp][Rr][Ee][Ss][Ee][Rr][Vv][Ee]-[Rr][Oo][Oo][Tt].*/))'
-      pivot_on: [host]
-      window: 2h
+  # Behaviour-targeted hunts the engine runs around the alert (not a sweep).
+  - name: Account and group management tooling on this host (full lifecycle around the deletion)
+    query: data_process_exec_process_binary:/.*\/([Uu][Ss][Ee][Rr][Aa][Dd][Dd]|[Aa][Dd][Dd][Uu][Ss][Ee][Rr]|[Uu][Ss][Ee][Rr][Dd][Ee][Ll]|[Dd][Ee][Ll][Uu][Ss][Ee][Rr]|[Uu][Ss][Ee][Rr][Mm][Oo][Dd]|[Gg][Rr][Oo][Uu][Pp][Aa][Dd][Dd]|[Gg][Rr][Oo][Uu][Pp][Mm][Oo][Dd]|[Gg][Rr][Oo][Uu][Pp][Dd][Ee][Ll]|[Gg][Pp][Aa][Ss][Ss][Ww][Dd]|[Aa][Dd][Dd][Gg][Rr][Oo][Uu][Pp]|[Dd][Ee][Ll][Gg][Rr][Oo][Uu][Pp]|[Pp][Aa][Ss][Ss][Ww][Dd]|[Cc][Hh][Pp][Aa][Ss][Ss][Ww][Dd]|[Cc][Hh][Aa][Gg][Ee]|[Nn][Ee][Ww][Uu][Ss][Ee][Rr][Ss])/
+    pivot_on:
+    - host
+    window: 6h
+  - name: Direct edit or read of the account and credential databases on this host
+    query: (data_process_exec_process_arguments:/.*\/[Ee][Tt][Cc]\/([Pp][Aa][Ss][Ss][Ww][Dd]|[Ss][Hh][Aa][Dd][Oo][Ww]|[Gg][Rr][Oo][Uu][Pp]|[Gg][Ss][Hh][Aa][Dd][Oo][Ww]|[Ss][Uu][Dd][Oo][Ee][Rr][Ss]).*/) OR (data_process_exec_process_binary:/.*\/([Vv][Ii][Pp][Ww]|[Vv][Ii][Gg][Rr])/)
+    pivot_on:
+    - host
+    window: 4h
+  - name: 'Anti-forensic cleanup accompanying the deletion: history, log and audit destruction on this host'
+    query: ((data_process_exec_process_binary:/.*\/([Ss][Hh][Rr][Ee][Dd]|[Tt][Rr][Uu][Nn][Cc][Aa][Tt][Ee])/) OR (data_process_exec_process_binary:/.*\/[Aa][Uu][Dd][Ii][Tt][Cc][Tt][Ll]/ AND data_process_exec_process_arguments:/.*-[Dd].*/) OR (data_process_exec_process_binary:/.*\/[Jj][Oo][Uu][Rr][Nn][Aa][Ll][Cc][Tt][Ll]/ AND data_process_exec_process_arguments:/.*[Vv][Aa][Cc][Uu][Uu][Mm].*/) OR (data_process_exec_process_arguments:/.*(\.[Bb][Aa][Ss][Hh]_[Hh][Ii][Ss][Tt][Oo][Rr][Yy]|\.[Zz][Ss][Hh]_[Hh][Ii][Ss][Tt][Oo][Rr][Yy]|\/[Vv][Aa][Rr]\/[Ll][Oo][Gg]).*/))
+    pivot_on:
+    - host
+    window: 2h
+  - name: Removal of the deleted account's home directory, mail spool and cron on this host
+    query: (data_process_exec_process_binary:/.*\/([Rr][Mm]|[Ss][Hh][Rr][Ee][Dd]|[Uu][Nn][Ll][Ii][Nn][Kk]|[Rr][Mm][Dd][Ii][Rr])/) AND (data_process_exec_process_arguments:/.*\/[Hh][Oo][Mm][Ee]\/.*/ OR data_process_exec_process_arguments:/.*\/[Vv][Aa][Rr]\/[Ss][Pp][Oo][Oo][Ll]\/[Mm][Aa][Ii][Ll].*/ OR data_process_exec_process_arguments:/.*\/[Vv][Aa][Rr]\/[Mm][Aa][Ii][Ll].*/ OR data_process_exec_process_arguments:/.*\/[Vv][Aa][Rr]\/[Ss][Pp][Oo][Oo][Ll]\/[Cc][Rr][Oo][Nn].*/)
+    pivot_on:
+    - host
+    window: 2h
+  - name: Privilege escalation to root preceding the account deletion on this host
+    query: data_process_exec_process_binary:/.*\/[Ss][Uu][Dd][Oo]/ OR data_process_exec_process_binary:/.*\/[Ss][Uu]/ OR data_process_exec_process_binary:/.*\/[Pp][Kk][Ee][Xx][Ee][Cc]/ OR data_process_exec_process_binary:/.*\/[Dd][Oo][Aa][Ss]/
+    pivot_on:
+    - host
+    window: 2h

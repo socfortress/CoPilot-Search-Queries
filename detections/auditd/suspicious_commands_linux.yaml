@@ -183,19 +183,58 @@ graylog:
   query: ((data_audit_type:/[Ee][Xx][Ee][Cc][Vv][Ee]/ AND data_audit_execve_a0:/[Cc][Hh][Mm][Oo][Dd]/ AND data_audit_execve_a1:"777") OR (data_audit_type:/[Ee][Xx][Ee][Cc][Vv][Ee]/ AND data_audit_execve_a0:/[Cc][Hh][Mm][Oo][Dd]/ AND data_audit_execve_a1:/[Uu]\+[Ss]/) OR (data_audit_type:/[Ee][Xx][Ee][Cc][Vv][Ee]/ AND data_audit_execve_a0:/[Cc][Pp]/ AND data_audit_execve_a1:/\/[Bb][Ii][Nn]\/[Kk][Ss][Hh]/) OR (data_audit_type:/[Ee][Xx][Ee][Cc][Vv][Ee]/ AND data_audit_execve_a0:/[Cc][Pp]/ AND data_audit_execve_a1:/\/[Bb][Ii][Nn]\/[Ss][Hh]/))
 
 correlation:
-  # Authored by the correlation engine for review.
+  # Authored per-rule (behaviour-researched) for the correlation engine. Related CoPilot
+  # Searches + telemetry pivots to run around an alert, scoped to its host/user/ip/domain.
+  related_rules:
+  - id: linux-setuid-using-chmod-utility-001
+    name: Linux Setuid Using Chmod Utility
+    reason: This rule's own 'chmod u+s' branch is exactly the setuid-bit set this detects; it widens the net to g+s/4755/4777, so the same privilege-escalation command trips both and confirms a SUID shell/backdoor is being armed rather than a benign chmod.
+  - id: linux-setuid-using-setcap-utility-001
+    name: Linux Setuid Using Setcap Utility
+    reason: Granting cap_setuid via setcap is the capability-based equivalent of 'chmod u+s' - the same 'make this binary run as root' step by a different primitive, so an attacker arming a root-capable binary often uses it alongside or instead of the chmod this caught.
+  - id: e2f3g4h5-6789-1011-1213-141516171819
+    name: Linux File Permission Modification Detection
+    reason: Broadens this rule's narrow literal 'chmod 777' to 755/754/+x - the same 'make the dropped payload executable' step done with an adjacent mode, catching arming of a file this rule's exact-match 777 branch would miss.
+  - id: a39d7fa7-3fbd-4dc2-97e1-d87f546b1bbc
+    name: Program Executions in Suspicious Folders
+    reason: 'Same auditd EXECVE/SYSCALL telemetry on the same host: the file just made world-executable, or the copied shell, actually running from /tmp, /var/www or a web root - the execution that follows the arming this rule caught.'
+  - id: 2fade0b6-7423-4835-9d4f-335b39b83867
+    name: Shell Execution Of Process Located In Tmp Directory
+    reason: 'Direct follow-on to the ''cp /bin/sh''/''cp /bin/ksh'' branch: a shell binary copied into /tmp and then executed is the staged SUID/root shell being used after it was placed.'
+  - id: a2d9e2f3-0f43-4c7a-bcd9-9acfc0d723aa
+    name: Suspicious Download and Execute Pattern via Curl/Wget
+    reason: The download->chmod->execute chain this 'chmod 777' sits in the middle of; shows how the payload reached the host (curl/wget into /tmp or /dev/shm) immediately before it was armed and run.
+  - id: 7f734ed0-4f47-46c0-837f-6ee62505abd9
+    name: Potential Netcat Reverse Shell Execution
+    reason: The shell this rule copies/arms is frequently wired to a 'nc -e /bin/sh' callback - the follow-on that turns a staged local shell into interactive C2 / hands-on-keyboard access.
+  - id: linux-sudo-or-su-execution-001
+    name: Linux Sudo Or Su Execution
+    reason: The privilege elevation the whole 'cp /bin/sh' + 'chmod u+s' sequence builds toward; a sudo/su on the same host within the window corroborates a low-privilege-to-root transition rather than isolated file activity.
+  window: 2h
   enrichment_searches:
-  # Rule-specific telemetry pivots the engine runs around an alert from this rule,
-  # scoped to the alert's host/user/IP within the window (behaviour-targeted, not a sweep).
-    - name: "Shell / interpreter execution on this host"
-      query: '((data_process_exec_process_binary:/.*(\/[Bb][Aa][Ss][Hh]|\/[Ss][Hh]|\/[Dd][Aa][Ss][Hh]|\/[Zz][Ss][Hh]|\/[Kk][Ss][Hh]|\/[Aa][Ss][Hh]|\/[Bb][Uu][Ss][Yy][Bb][Oo][Xx])/) OR (data_process_exec_process_binary:/.*(\/[Pp][Yy][Tt][Hh][Oo][Nn]|\/[Pp][Yy][Tt][Hh][Oo][Nn]3|\/[Pp][Ee][Rr][Ll]|\/[Rr][Uu][Bb][Yy]|\/[Pp][Hh][Pp]|\/[Nn][Oo][Dd][Ee]|\/[Ll][Uu][Aa]|\/[Aa][Ww][Kk])/))'
-      pivot_on: [host]
-      window: 1h
-    - name: "Persistence via cron / systemd / shell profiles on this host"
-      query: '((data_process_exec_process_binary:/.*(\/[Cc][Rr][Oo][Nn][Tt][Aa][Bb]|\/[Ss][Yy][Ss][Tt][Ee][Mm][Cc][Tt][Ll]|\/[Aa][Tt]|\/[Uu][Pp][Dd][Aa][Tt][Ee]-[Rr][Cc]\.[Dd])/) OR (data_process_exec_process_arguments:/.*\/[Ee][Tt][Cc]\/[Cc][Rr][Oo][Nn].*/) OR (data_process_exec_process_arguments:/.*\/[Ee][Tt][Cc]\/[Ss][Yy][Ss][Tt][Ee][Mm][Dd].*/) OR (data_process_exec_process_arguments:/.*[Rr][Cc]\.[Ll][Oo][Cc][Aa][Ll].*/) OR (data_process_exec_process_arguments:/.*\.[Bb][Aa][Ss][Hh][Rr][Cc].*/) OR (data_process_exec_process_arguments:/.*\.[Bb][Aa][Ss][Hh]_[Pp][Rr][Oo][Ff][Ii][Ll][Ee].*/) OR (data_process_exec_process_arguments:/.*\/[Ee][Tt][Cc]\/[Pp][Rr][Oo][Ff][Ii][Ll][Ee].*/) OR (data_process_exec_process_arguments:/.*[Aa][Uu][Tt][Hh][Oo][Rr][Ii][Zz][Ee][Dd]_[Kk][Ee][Yy][Ss].*/) OR (data_process_exec_process_arguments:/.*\/[Ee][Tt][Cc]\/[Ii][Nn][Ii][Tt]\.[Dd].*/))'
-      pivot_on: [host]
-      window: 4h
-    - name: "Reconnaissance commands on this host"
-      query: 'data_process_exec_process_binary:/.*(\/[Ww][Hh][Oo][Aa][Mm][Ii]|\/[Ii][Dd]|\/[Uu][Nn][Aa][Mm][Ee]|\/[Hh][Oo][Ss][Tt][Nn][Aa][Mm][Ee]|\/[Hh][Oo][Ss][Tt][Nn][Aa][Mm][Ee][Cc][Tt][Ll]|\/[Ss][Ss]|\/[Nn][Ee][Tt][Ss][Tt][Aa][Tt]|\/[Ii][Ff][Cc][Oo][Nn][Ff][Ii][Gg]|\/[Aa][Rr][Pp]|\/[Ww]|\/[Ww][Hh][Oo]|\/[Ll][Aa][Ss][Tt]|\/[Ll][Ss][Oo][Ff]|\/[Nn][Mm][Aa][Pp]|\/[Dd][Ii][Gg]|\/[Ff][Ii][Nn][Dd])/'
-      pivot_on: [host]
-      window: 1h
+  # Behaviour-targeted hunts the engine runs around the alert (not a sweep).
+  - name: SUID / capability enumeration via find or getcap on this host
+    query: ((data_process_exec_process_binary:/.*\/[Ff][Ii][Nn][Dd]/ AND (data_process_exec_process_arguments:/.*\-[Pp][Ee][Rr][Mm].*/ OR data_process_exec_process_arguments:/.*4000.*/ OR data_process_exec_process_arguments:/.*[Uu]\+[Ss].*/)) OR (data_process_exec_process_binary:/.*\/[Gg][Ee][Tt][Cc][Aa][Pp]/))
+    pivot_on:
+    - host
+    window: 4h
+  - name: Ingress tool transfer via wget / curl / tftp on this host
+    query: data_process_exec_process_binary:/.*\/([Ww][Gg][Ee][Tt]|[Cc][Uu][Rr][Ll]|[Tt][Ff][Tt][Pp])/
+    pivot_on:
+    - host
+    window: 4h
+  - name: Process executing from /tmp, /var/tmp or shared memory on this host
+    query: data_process_exec_process_binary:/\/([Tt][Mm][Pp]|[Vv][Aa][Rr]\/[Tt][Mm][Pp]|[Dd][Ee][Vv]\/[Ss][Hh][Mm]|[Rr][Uu][Nn]\/[Ss][Hh][Mm])\/.*/
+    pivot_on:
+    - host
+    window: 2h
+  - name: Reverse shell / C2 callback indicators on this host
+    query: ((data_process_exec_process_binary:/.*\/([Nn][Cc]|[Nn][Cc][Aa][Tt]|[Nn][Ee][Tt][Cc][Aa][Tt])/ AND data_process_exec_process_arguments:/.*\-[Ee].*/) OR (data_process_exec_process_arguments:/.*\/[Dd][Ee][Vv]\/[Tt][Cc][Pp]\/.*/) OR (data_process_exec_process_binary:/.*\/[Mm][Kk][Ff][Ii][Ff][Oo]/))
+    pivot_on:
+    - host
+    window: 1h
+  - name: Persistence install via cron / systemd / authorized_keys / ld.so.preload on this host
+    query: ((data_process_exec_process_binary:/.*\/([Cc][Rr][Oo][Nn][Tt][Aa][Bb]|[Ss][Yy][Ss][Tt][Ee][Mm][Cc][Tt][Ll]|[Aa][Tt])/) OR (data_process_exec_process_arguments:/.*\/[Ee][Tt][Cc]\/[Cc][Rr][Oo][Nn].*/) OR (data_process_exec_process_arguments:/.*\/[Ee][Tt][Cc]\/[Ss][Yy][Ss][Tt][Ee][Mm][Dd]\/.*/) OR (data_process_exec_process_arguments:/.*[Aa][Uu][Tt][Hh][Oo][Rr][Ii][Zz][Ee][Dd]_[Kk][Ee][Yy][Ss].*/) OR (data_process_exec_process_arguments:/.*[Ll][Dd]\.[Ss][Oo]\.[Pp][Rr][Ee][Ll][Oo][Aa][Dd].*/))
+    pivot_on:
+    - host
+    window: 6h

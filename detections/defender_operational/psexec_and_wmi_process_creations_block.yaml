@@ -139,41 +139,58 @@ graylog:
   query: data_win_system_eventID:"1121" AND (data_win_eventdata_processName:/.*\\[Ww][Mm][Ii][Pp][Rr][Vv][Ss][Ee]\.[Ee][Xx][Ee]/ OR data_win_eventdata_processName:/.*\\[Pp][Ss][Ee][Xx][Ee][Ss][Vv][Cc]\.[Ee][Xx][Ee]/)
 
 correlation:
-  # Authored by the correlation engine for review. Related CoPilot Searches to run
-  # around an alert from this rule, scoped to the same host/user/IP within the window.
+  # Authored per-rule (behaviour-researched) for the correlation engine. Related CoPilot
+  # Searches + telemetry pivots to run around an alert, scoped to its host/user/ip/domain.
   related_rules:
-    - id: 0255a820-e564-4e40-af2b-6ac61160335c
-      name: "A New Trust Was Created To A Domain"
-      reason: "next kill-chain tactic: Persistence"
-    - id: 35ba1d85-724d-42a3-889f-2e2362bcaf23
-      name: "AD Privileged Users or Groups Reconnaissance"
-      reason: "next kill-chain tactic: Discovery"
-    - id: 9eb99343-d336-4020-a3cd-67f3819e68ee
-      name: "Account Tampering - Suspicious Failed Logon Reasons"
-      reason: "next kill-chain tactic: Persistence"
-    - id: 17d619c1-e020-4347-957e-1d1207455c93
-      name: "Active Directory Replication from Non Machine Account"
-      reason: "next kill-chain tactic: Credential Access"
-    - id: 300bac00-e041-4ee2-9c36-e262656a6ecc
-      name: "Active Directory User Backdoors"
-      reason: "next kill-chain tactic: Persistence"
+  - id: 42c575ea-e41e-41f1-b248-8093c3e82a28
+    name: PsExec Service Installation
+    reason: PsExec drops the PSEXESVC service (SCM 7045) on the target just before psexesvc.exe spawns the child this ASR rule blocks - the service-install precursor on the same host, confirming the PsExec half of the block.
+  - id: 6fb63b40-e02a-403e-9ffd-3bcc1d749442
+    name: Metasploit Or Impacket Service Installation Via SMB PsExec
+    reason: Adversary PsExec tooling (Metasploit smb/psexec, Impacket psexec.py) installs a random-named service via SMB (4697) on this host - the tool-driven form of the PsExec execution ASR just blocked, separating a real intrusion from legitimate Sysinternals use.
+  - id: 32d56ea1-417f-44ff-822b-882873f5f43b
+    name: Impacket PsExec Execution
+    reason: RemCom_stdin/stdout/stderr pipes over IPC$ (5145) are the on-the-wire landing of an Impacket/RemCom PsExec session on this host - the inbound session that drove the child process the ASR rule blocked.
+  - id: d21374ff-f574-44a7-9998-4a8c8bf33d7d
+    name: WmiPrvSE Spawned A Process
+    reason: WmiPrvSE.exe spawning a non-system child is exactly the WMI remote-execution behaviour this ASR rule blocks; a sibling invocation that was not blocked fires here, confirming the WMI half on the same host.
+  - id: 692f0bec-83ba-4d04-af7e-e884a96059b6
+    name: Potential WMI Lateral Movement WmiPrvSE Spawned PowerShell
+    reason: WmiPrvSE spawning PowerShell is the most common WMI lateral-movement payload (Invoke-WmiMethod/Invoke-CimMethod) - narrows the blocked WMI execution to a PowerShell payload on this host.
+  - id: d6e464e4-5c6a-474e-82d2-aed616a3a492
+    name: Impacket Lateral Movement WMIExec Commandline Parameters
+    reason: The canonical wmiexec.py signature (WmiPrvSE spawning cmd.exe /Q /c with a 127.0.0.1 UNC and __<timestamp> output) - high-fidelity proof the WMI side of the block was Impacket wmiexec, and points at the source session to hunt.
+  - id: a0a278fe-2c0e-4de2-ac3c-c68b08a9ba98
+    name: LSASS Access Detected via Attack Surface Reduction
+    reason: 'Likely next step on the same host: having landed via PsExec/WMI the actor dumps LSASS for credentials to keep moving - a sister ASR (event 1121) detection that co-occurs with this block in real intrusions.'
+  - id: 51cbac1e-eee3-4a90-b1b7-358efb81fa0a
+    name: Potential Windows Defender Tampering Via Wmic.EXE
+    reason: 'The attacker''s reaction to being blocked: use WMIC (the same WMI surface already in play) to add a Defender exclusion or disable protection on this host before retrying the execution the ASR rule just stopped.'
   window: 1h
   enrichment_searches:
-  # Rule-specific telemetry pivots the engine runs around an alert from this rule,
-  # scoped to the alert's host/user/IP within the window (behaviour-targeted, not a sweep).
-    - name: "WMI process execution on this host"
-      query: '((data_win_system_eventID:"1" AND data_win_eventdata_image:/.*(\\[Ww][Mm][Ii][Cc]\.[Ee][Xx][Ee])/ AND (data_win_eventdata_commandLine:/.*[Pp][Rr][Oo][Cc][Ee][Ss][Ss] [Cc][Aa][Ll][Ll] [Cc][Rr][Ee][Aa][Tt][Ee].*/ OR data_win_eventdata_commandLine:/.*\/[Nn][Oo][Dd][Ee]:.*/)) OR (data_win_system_eventID:"1" AND data_win_eventdata_parentImage:/.*(\\[Ww][Mm][Ii][Pp][Rr][Vv][Ss][Ee]\.[Ee][Xx][Ee])/) OR (data_win_system_eventID:"1" AND data_win_eventdata_image:/.*(\\[Pp][Oo][Ww][Ee][Rr][Ss][Hh][Ee][Ll][Ll]\.[Ee][Xx][Ee]|\\[Pp][Ww][Ss][Hh]\.[Ee][Xx][Ee])/ AND (data_win_eventdata_commandLine:/.*[Ii][Nn][Vv][Oo][Kk][Ee]-[Ww][Mm][Ii][Mm][Ee][Tt][Hh][Oo][Dd].*/ OR data_win_eventdata_commandLine:/.*[Gg][Ee][Tt]-[Ww][Mm][Ii][Oo][Bb][Jj][Ee][Cc][Tt].*/ OR data_win_eventdata_commandLine:/.*[Ii][Nn][Vv][Oo][Kk][Ee]-[Cc][Ii][Mm][Mm][Ee][Tt][Hh][Oo][Dd].*/)))'
-      pivot_on: [host]
-      window: 2h
-    - name: "Service execution on this host"
-      query: '((data_win_system_eventID:"7045") OR (data_win_system_eventID:"1" AND data_win_eventdata_image:/.*(\\[Ss][Cc]\.[Ee][Xx][Ee])/ AND (data_win_eventdata_commandLine:/.*[Cc][Rr][Ee][Aa][Tt][Ee].*/ OR data_win_eventdata_commandLine:/.*[Cc][Oo][Nn][Ff][Ii][Gg].*/ OR data_win_eventdata_commandLine:/.*[Bb][Ii][Nn][Pp][Aa][Tt][Hh].*/ OR data_win_eventdata_commandLine:/.*[Bb][Ii][Nn][Pp][Aa][Tt][Hh].*/)))'
-      pivot_on: [host]
-      window: 4h
-    - name: "Memory/credential-dump creation & LSASS access on this host"
-      query: '((data_win_system_eventID:"1" AND data_win_eventdata_image:/.*(\\[Pp][Rr][Oo][Cc][Dd][Uu][Mm][Pp]\.[Ee][Xx][Ee]|\\[Pp][Rr][Oo][Cc][Dd][Uu][Mm][Pp]64\.[Ee][Xx][Ee]|\\[Ss][Qq][Ll][Dd][Uu][Mm][Pp][Ee][Rr]\.[Ee][Xx][Ee]|\\[Cc][Rr][Ee][Aa][Tt][Ee][Dd][Uu][Mm][Pp]\.[Ee][Xx][Ee]|\\[Rr][Dd][Rr][Ll][Ee][Aa][Kk][Dd][Ii][Aa][Gg]\.[Ee][Xx][Ee]|\\[Dd][Uu][Mm][Pp][Ee][Rr][Tt]\.[Ee][Xx][Ee]|\\[Nn][Aa][Nn][Oo][Dd][Uu][Mm][Pp]\.[Ee][Xx][Ee]|\\[Aa][Vv][Dd][Uu][Mm][Pp]\.[Ee][Xx][Ee])/) OR (data_win_system_eventID:"1" AND (data_win_eventdata_commandLine:/.*[Cc][Oo][Mm][Ss][Vv][Cc][Ss]\.[Dd][Ll][Ll].*/ OR data_win_eventdata_commandLine:/.*[Mm][Ii][Nn][Ii][Dd][Uu][Mm][Pp].*/ OR data_win_eventdata_commandLine:/.*[Dd][Uu][Mm][Pp][Ee][Rr][Tt].*/ OR data_win_eventdata_commandLine:/.*[Nn][Aa][Nn][Oo][Dd][Uu][Mm][Pp].*/ OR data_win_eventdata_commandLine:/.*[Ll][Ss][Aa][Ss][Ss].*/ OR data_win_eventdata_commandLine:/.*[Ss][Ee][Kk][Uu][Rr][Ll][Ss][Aa].*/ OR data_win_eventdata_commandLine:/.*[Nn][Tt][Dd][Ss]\.[Dd][Ii][Tt].*/ OR data_win_eventdata_commandLine:/.*[Nn][Tt][Dd][Ss][Uu][Tt][Ii][Ll].*/)) OR (data_win_system_eventID:"10" AND data_win_eventdata_targetImage:/.*(\\[Ll][Ss][Aa][Ss][Ss]\.[Ee][Xx][Ee])/))'
-      pivot_on: [host]
-      window: 1h
-    - name: "Process injection / LSASS access on this host"
-      query: '((data_win_system_eventID:"8") OR (data_win_system_eventID:"10" AND data_win_eventdata_targetImage:/.*(\\[Ll][Ss][Aa][Ss][Ss]\.[Ee][Xx][Ee])/) OR (data_win_system_eventID:"1" AND (data_win_eventdata_commandLine:/.*[Cc][Rr][Ee][Aa][Tt][Ee][Rr][Ee][Mm][Oo][Tt][Ee][Tt][Hh][Rr][Ee][Aa][Dd].*/ OR data_win_eventdata_commandLine:/.*[Vv][Ii][Rr][Tt][Uu][Aa][Ll][Aa][Ll][Ll][Oo][Cc][Ee][Xx].*/ OR data_win_eventdata_commandLine:/.*[Ww][Rr][Ii][Tt][Ee][Pp][Rr][Oo][Cc][Ee][Ss][Ss][Mm][Ee][Mm][Oo][Rr][Yy].*/)))'
-      pivot_on: [host]
-      window: 1h
+  # Behaviour-targeted hunts the engine runs around the alert (not a sweep).
+  - name: WMI remote execution on this host
+    query: (data_win_system_eventID:"1" AND data_win_eventdata_parentImage:/.*\\[Ww][Mm][Ii][Pp][Rr][Vv][Ss][Ee]\.[Ee][Xx][Ee]/) OR (data_win_system_eventID:"1" AND data_win_eventdata_image:/.*\\[Ww][Mm][Ii][Cc]\.[Ee][Xx][Ee]/ AND (data_win_eventdata_commandLine:/.*[Pp][Rr][Oo][Cc][Ee][Ss][Ss] [Cc][Aa][Ll][Ll] [Cc][Rr][Ee][Aa][Tt][Ee].*/ OR data_win_eventdata_commandLine:/.*\/[Nn][Oo][Dd][Ee]:.*/)) OR (data_win_system_eventID:"1" AND data_win_eventdata_image:/.*(\\[Pp][Oo][Ww][Ee][Rr][Ss][Hh][Ee][Ll][Ll]\.[Ee][Xx][Ee]|\\[Pp][Ww][Ss][Hh]\.[Ee][Xx][Ee])/ AND (data_win_eventdata_commandLine:/.*[Ii][Nn][Vv][Oo][Kk][Ee]-[Ww][Mm][Ii][Mm][Ee][Tt][Hh][Oo][Dd].*/ OR data_win_eventdata_commandLine:/.*[Ii][Nn][Vv][Oo][Kk][Ee]-[Cc][Ii][Mm][Mm][Ee][Tt][Hh][Oo][Dd].*/))
+    pivot_on:
+    - host
+    window: 2h
+  - name: PsExec / PAExec service landing on this host
+    query: (data_win_system_eventID:"7045" AND (data_win_eventdata_serviceName:/.*[Pp][Ss][Ee][Xx][Ee][Ss][Vv][Cc].*/ OR data_win_eventdata_imagePath:/.*\\[Pp][Ss][Ee][Xx][Ee][Ss][Vv][Cc]\.[Ee][Xx][Ee]/ OR data_win_eventdata_imagePath:/.*\\[Pp][Aa][Ee][Xx][Ee][Cc].*\.[Ee][Xx][Ee]/)) OR (data_win_system_eventID:"1" AND data_win_eventdata_image:/.*(\\[Pp][Ss][Ee][Xx][Ee][Ss][Vv][Cc]\.[Ee][Xx][Ee]|\\[Pp][Ss][Ee][Xx][Ee][Cc]\.[Ee][Xx][Ee]|\\[Pp][Aa][Ee][Xx][Ee][Cc]\.[Ee][Xx][Ee])/)
+    pivot_on:
+    - host
+    window: 4h
+  - name: Inbound remote session and admin-share access to this host
+    query: (data_win_system_eventID:"4624" AND data_win_eventdata_logonType:"3") OR ((data_win_system_eventID:"5140" OR data_win_system_eventID:"5145") AND (data_win_eventdata_shareName:/.*[Ii][Pp][Cc]\$/ OR data_win_eventdata_shareName:/.*[Aa][Dd][Mm][Ii][Nn]\$/ OR data_win_eventdata_shareName:/.*\\[Cc]\$/))
+    pivot_on:
+    - host
+    window: 2h
+  - name: Credential theft on this host (LSASS access / dump)
+    query: (data_win_system_eventID:"10" AND data_win_eventdata_targetImage:/.*\\[Ll][Ss][Aa][Ss][Ss]\.[Ee][Xx][Ee]/) OR (data_win_system_eventID:"1121" AND data_win_eventdata_path:/.*\\[Ll][Ss][Aa][Ss][Ss]\.[Ee][Xx][Ee]/) OR (data_win_system_eventID:"1" AND (data_win_eventdata_commandLine:/.*[Cc][Oo][Mm][Ss][Vv][Cc][Ss]\.[Dd][Ll][Ll].*[Mm][Ii][Nn][Ii][Dd][Uu][Mm][Pp].*/ OR data_win_eventdata_commandLine:/.*[Ss][Ee][Kk][Uu][Rr][Ll][Ss][Aa].*/ OR data_win_eventdata_commandLine:/.*[Ll][Ss][Aa][Ss][Ss].*[Dd][Uu][Mm][Pp].*/ OR data_win_eventdata_image:/.*(\\[Pp][Rr][Oo][Cc][Dd][Uu][Mm][Pp].*\.[Ee][Xx][Ee]|\\[Nn][Aa][Nn][Oo][Dd][Uu][Mm][Pp]\.[Ee][Xx][Ee])/))
+    pivot_on:
+    - host
+    window: 1h
+  - name: Defender / ASR tampering on this host (reaction to the block)
+    query: data_win_system_eventID:"1" AND (data_win_eventdata_commandLine:/.*[Ss][Ee][Tt]-[Mm][Pp][Pp][Rr][Ee][Ff][Ee][Rr][Ee][Nn][Cc][Ee].*/ OR data_win_eventdata_commandLine:/.*[Aa][Dd][Dd]-[Mm][Pp][Pp][Rr][Ee][Ff][Ee][Rr][Ee][Nn][Cc][Ee].*[Ee][Xx][Cc][Ll][Uu][Ss][Ii][Oo][Nn].*/ OR data_win_eventdata_commandLine:/.*[Dd][Ii][Ss][Aa][Bb][Ll][Ee][Rr][Ee][Aa][Ll][Tt][Ii][Mm][Ee][Mm][Oo][Nn][Ii][Tt][Oo][Rr][Ii][Nn][Gg].*/ OR data_win_eventdata_commandLine:/.*\\[Rr][Oo][Oo][Tt]\\[Mm][Ii][Cc][Rr][Oo][Ss][Oo][Ff][Tt]\\[Ww][Ii][Nn][Dd][Oo][Ww][Ss]\\[Dd][Ee][Ff][Ee][Nn][Dd][Ee][Rr].*/ OR data_win_eventdata_commandLine:/.*[Aa][Tt][Tt][Aa][Cc][Kk][Ss][Uu][Rr][Ff][Aa][Cc][Ee][Rr][Ee][Dd][Uu][Cc][Tt][Ii][Oo][Nn].*/ OR data_win_eventdata_commandLine:/.*[Mm][Pp][Cc][Mm][Dd][Rr][Uu][Nn].*/)
+    pivot_on:
+    - host
+    window: 2h

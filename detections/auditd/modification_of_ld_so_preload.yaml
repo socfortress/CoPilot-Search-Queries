@@ -139,23 +139,58 @@ graylog:
   query: data_audit_type:/[Pp][Aa][Tt][Hh]/ AND data_audit_file_name:/\/[Ee][Tt][Cc]\/[Ll][Dd]\.[Ss][Oo]\.[Pp][Rr][Ee][Ll][Oo][Aa][Dd]/
 
 correlation:
-  # Authored by the correlation engine for review.
+  # Authored per-rule (behaviour-researched) for the correlation engine. Related CoPilot
+  # Searches + telemetry pivots to run around an alert, scoped to its host/user/ip/domain.
+  related_rules:
+  - id: linux-preload-hijack-via-preload-file-001
+    name: Linux Preload Hijack Via Preload File
+    reason: Detects the exact same /etc/ld.so.preload modification from Tetragon/auth.log telemetry instead of auditd PATH events; a match on the same host corroborates this alert with a second independent sensor and often captures the command that wrote the file.
+  - id: linux-auditd-preload-hijack-library-calls-001
+    name: Linux Auditd Preload Hijack Library Calls
+    reason: The LD_PRELOAD environment-variable form of the same T1574.006 shared-object injection; attackers commonly test the libc hook with LD_PRELOAD before persisting it in /etc/ld.so.preload, making this the immediate precursor or companion of this file change.
+  - id: linux-medusa-rootkit-001
+    name: Linux Medusa Rootkit
+    reason: Medusa is a userland LD_PRELOAD rootkit (UNC3886/VoidLink) that installs via /etc/ld.so.preload and backs the original loader up as backup_ld.so; its file-creation indicators on this host would confirm the preload entry points at a known rootkit.
+  - id: 49aae26c-450e-448b-911d-b3c13d178dfc
+    name: Linux Keylogging with Pam.d
+    reason: Symbiote/Medusa-class preload rootkits hook authentication to harvest credentials; PAM system-auth/password-auth modification or TTY-input auditing on the same host is the credential-theft payload this preload injection exists to deliver.
+  - id: a5b977d6-8a81-4475-91b9-49dbfcd941f7
+    name: Remove Immutable File Attribute - Auditd
+    reason: chattr -i unlocks a protected /etc/ld.so.preload so it can be edited, and chattr +i then locks the malicious loader and .so against removal; immutable-attribute changes on this host directly bracket this modification.
+  - id: 106d7cbd-80ff-4985-b682-a7043e5acb72
+    name: Loading of Kernel Module via Insmod
+    reason: A loadable kernel module is the kernel-mode alternative to a userland preload rootkit; an insmod on the same host indicates the actor is laying a second, lower-level rootkit foothold alongside this preload injection.
+  - id: linux-pkexec-privilege-escalation-001
+    name: Linux pkexec Privilege Escalation
+    reason: Writing /etc/ld.so.preload requires root; PwnKit (CVE-2021-4034) via pkexec is a common non-interactive root-gaining exploit and a likely privilege-escalation precursor that enabled this modification.
+  - id: linux-ingress-tool-transfer-hunting-001
+    name: Linux Ingress Tool Transfer Hunting
+    reason: The malicious shared object named in the preload entry must first reach disk; curl/wget ingress on this host shortly before the change is the probable payload-delivery precursor.
+  window: 2h
   enrichment_searches:
-  # Rule-specific telemetry pivots the engine runs around an alert from this rule,
-  # scoped to the alert's host/user/IP within the window (behaviour-targeted, not a sweep).
-    - name: "Credential / secret-file access on this host"
-      query: '((data_process_exec_process_arguments:/.*\/[Ee][Tt][Cc]\/[Ss][Hh][Aa][Dd][Oo][Ww].*/) OR (data_process_exec_process_arguments:/.*\/[Ee][Tt][Cc]\/[Pp][Aa][Ss][Ss][Ww][Dd].*/) OR (data_process_exec_process_arguments:/.*\/[Ee][Tt][Cc]\/[Ss][Uu][Dd][Oo][Ee][Rr][Ss].*/) OR (data_process_exec_process_arguments:/.*[Ii][Dd]_[Rr][Ss][Aa].*/) OR (data_process_exec_process_arguments:/.*\.[Ss][Ss][Hh]\/.*/) OR (data_process_exec_process_arguments:/.*\/[Ee][Tt][Cc]\/[Gg][Ss][Hh][Aa][Dd][Oo][Ww].*/))'
-      pivot_on: [host]
-      window: 2h
-    - name: "Shell / interpreter execution on this host"
-      query: '((data_process_exec_process_binary:/.*(\/[Bb][Aa][Ss][Hh]|\/[Ss][Hh]|\/[Dd][Aa][Ss][Hh]|\/[Zz][Ss][Hh]|\/[Kk][Ss][Hh]|\/[Aa][Ss][Hh]|\/[Bb][Uu][Ss][Yy][Bb][Oo][Xx])/) OR (data_process_exec_process_binary:/.*(\/[Pp][Yy][Tt][Hh][Oo][Nn]|\/[Pp][Yy][Tt][Hh][Oo][Nn]3|\/[Pp][Ee][Rr][Ll]|\/[Rr][Uu][Bb][Yy]|\/[Pp][Hh][Pp]|\/[Nn][Oo][Dd][Ee]|\/[Ll][Uu][Aa]|\/[Aa][Ww][Kk])/))'
-      pivot_on: [host]
-      window: 1h
-    - name: "Reconnaissance commands on this host"
-      query: 'data_process_exec_process_binary:/.*(\/[Ww][Hh][Oo][Aa][Mm][Ii]|\/[Ii][Dd]|\/[Uu][Nn][Aa][Mm][Ee]|\/[Hh][Oo][Ss][Tt][Nn][Aa][Mm][Ee]|\/[Hh][Oo][Ss][Tt][Nn][Aa][Mm][Ee][Cc][Tt][Ll]|\/[Ss][Ss]|\/[Nn][Ee][Tt][Ss][Tt][Aa][Tt]|\/[Ii][Ff][Cc][Oo][Nn][Ff][Ii][Gg]|\/[Aa][Rr][Pp]|\/[Ww]|\/[Ww][Hh][Oo]|\/[Ll][Aa][Ss][Tt]|\/[Ll][Ss][Oo][Ff]|\/[Nn][Mm][Aa][Pp]|\/[Dd][Ii][Gg]|\/[Ff][Ii][Nn][Dd])/'
-      pivot_on: [host]
-      window: 1h
-    - name: "Privilege-escalation tooling executed on this host"
-      query: 'data_process_exec_process_binary:/.*(\/[Ss][Uu][Dd][Oo]|\/[Ss][Uu]|\/[Pp][Kk][Ee][Xx][Ee][Cc]|\/[Dd][Oo][Aa][Ss]|\/[Ss][Ee][Tt][Cc][Aa][Pp]|\/[Cc][Hh][Ss][Hh]|\/[Nn][Ee][Ww][Gg][Rr][Pp])/'
-      pivot_on: [host]
-      window: 2h
+  # Behaviour-targeted hunts the engine runs around the alert (not a sweep).
+  - name: Preload file / LD_PRELOAD / preload-rootkit artifact referenced on this host
+    query: (data_process_exec_process_arguments:/.*[Ll][Dd]\.[Ss][Oo]\.[Pp][Rr][Ee][Ll][Oo][Aa][Dd].*/ OR data_process_exec_process_arguments:/.*[Ll][Dd]_[Pp][Rr][Ee][Ll][Oo][Aa][Dd].*/ OR data_process_exec_process_arguments:/.*[Bb][Aa][Cc][Kk][Uu][Pp]_[Ll][Dd]\.[Ss][Oo].*/ OR data_audit_command:/.*[Ll][Dd]\.[Ss][Oo]\.[Pp][Rr][Ee][Ll][Oo][Aa][Dd].*/)
+    pivot_on:
+    - host
+    window: 2h
+  - name: Shared object (.so) staged in a world-writable or temp directory
+    query: (data_process_exec_process_arguments:/.*\/[Tt][Mm][Pp]\/.*\.[Ss][Oo].*/ OR data_process_exec_process_arguments:/.*\/[Dd][Ee][Vv]\/[Ss][Hh][Mm]\/.*\.[Ss][Oo].*/ OR data_process_exec_process_arguments:/.*\/[Vv][Aa][Rr]\/[Tt][Mm][Pp]\/.*\.[Ss][Oo].*/ OR data_process_exec_process_arguments:/.*\/[Rr][Uu][Nn]\/.*\.[Ss][Oo].*/)
+    pivot_on:
+    - host
+    window: 2h
+  - name: Download tool fetching a shared object or dropping into a world-writable path
+    query: ((data_process_exec_process_binary:/.*\/[Cc][Uu][Rr][Ll]/ OR data_process_exec_process_binary:/.*\/[Ww][Gg][Ee][Tt]/ OR data_process_exec_process_binary:/.*\/[Ss][Cc][Pp]/ OR data_process_exec_process_binary:/.*\/[Tt][Ff][Tt][Pp]/) AND (data_process_exec_process_arguments:/.*\.[Ss][Oo].*/ OR data_process_exec_process_arguments:/.*\/[Tt][Mm][Pp]\/.*/ OR data_process_exec_process_arguments:/.*\/[Dd][Ee][Vv]\/[Ss][Hh][Mm]\/.*/ OR data_process_exec_process_arguments:/.*\/[Vv][Aa][Rr]\/[Tt][Mm][Pp]\/.*/))
+    pivot_on:
+    - host
+    window: 4h
+  - name: Immutable-attribute (chattr) change on this host
+    query: (data_process_exec_process_binary:/.*\/[Cc][Hh][Aa][Tt][Tt][Rr]/ OR data_audit_execve_a0:/.*[Cc][Hh][Aa][Tt][Tt][Rr].*/ OR data_audit_command:/.*[Cc][Hh][Aa][Tt][Tt][Rr].*/)
+    pivot_on:
+    - host
+    window: 2h
+  - name: Kernel module load (insmod/modprobe/kmod) on this host
+    query: (data_process_exec_process_binary:/.*\/[Ii][Nn][Ss][Mm][Oo][Dd]/ OR data_process_exec_process_binary:/.*\/[Mm][Oo][Dd][Pp][Rr][Oo][Bb][Ee]/ OR data_process_exec_process_binary:/.*\/[Kk][Mm][Oo][Dd]/ OR data_audit_command:/.*[Ii][Nn][Ss][Mm][Oo][Dd].*/ OR data_audit_command:/.*[Mm][Oo][Dd][Pp][Rr][Oo][Bb][Ee].*/)
+    pivot_on:
+    - host
+    window: 24h

@@ -153,19 +153,58 @@ graylog:
   query: (data_win_system_eventID:"3002" OR data_win_system_eventID:"3007") AND _exists_:data_win_eventdata_feature_Name AND _exists_:data_win_eventdata_reason AND NOT (data_win_eventdata_feature_Name:"%%886" AND (data_win_eventdata_reason:"%%892" OR data_win_eventdata_reason:"%%858"))
 
 correlation:
-  # Authored by the correlation engine for review.
+  # Authored per-rule (behaviour-researched) for the correlation engine. Related CoPilot
+  # Searches + telemetry pivots to run around an alert, scoped to its host/user/ip/domain.
+  related_rules:
+  - id: b28e58e4-2a72-4fae-bdee-0fbe904db642
+    name: Windows Defender Real-time Protection Disabled
+    reason: A clean 'RTP turned off' event (Defender 5001) on the same host in the window shows the failure/restart was induced, not a benign engine crash - the deliberate-off counterpart to this failure signal.
+  - id: 49e5bc24-8b86-49f1-b743-535f332c2856
+    name: Microsoft Defender Tamper Protection Trigger
+    reason: A blocked attempt (event 5013) to flip DisableRealtimeMonitoring/DisableBehaviorMonitoring dates an active attack on Defender's settings to this window - direct evidence the RTP outage is adversarial.
+  - id: 801bd44f-ceed-4eb6-887c-11544633c0aa
+    name: Windows Defender Configuration Changes
+    reason: 'Defender policy being rewritten (event 5007: DisableAntiSpyware/SpyNet) around the restart distinguishes a malicious reconfigure from an update-driven restart (the main benign cause this rule warns about).'
+  - id: 6c0a7755-6d31-44fa-80e1-133e57752680
+    name: Windows Defender Threat Detection Service Disabled
+    reason: SCM event 7036 showing the Defender Antivirus Service entering 'stopped' is a direct cause of RTP going down - it explains the 3002 failure / 3007 restart as a deliberate service stop.
+  - id: e1aa95de-610a-427d-b9e7-9b46cfafbe6a
+    name: Windows Defender Service Disabled - Registry
+    reason: Setting WinDefend\Start to 4 (disabled) via the registry is the persistence mechanism that keeps RTP from coming back after the restart - the cause behind a recurring failure.
+  - id: 14c71865-6cd3-44ae-adaa-1db923fae5f2
+    name: Tamper Windows Defender - ScriptBlockLogging
+    reason: PowerShell scriptblock capturing Set-MpPreference -DisableRealtimeMonitoring is the exact command that turns RTP off - the precursor that produced the failure/restart event.
+  - id: 57b649ef-ff42-4fb0-8bf6-62da243a1708
+    name: Windows Defender Threat Detected
+    reason: A Defender malware detection (1006/1116/1117) in the same window tells the analyst whether a payload was executing while RTP was impaired - what the blinding was meant to hide.
+  - id: ea9bf0fa-edec-4fb8-8b78-b119f2528186
+    name: Windows Defender AMSI Trigger Detected
+    reason: AMSI (event 1116, source AMSI) scans script content in-process, so it can still catch a malicious script while RTP file-scanning is down - an AMSI hit during the outage flags the payload being deployed.
+  window: 2h
   enrichment_searches:
-  # Rule-specific telemetry pivots the engine runs around an alert from this rule,
-  # scoped to the alert's host/user/IP within the window (behaviour-targeted, not a sweep).
-    - name: "Process injection / LSASS access on this host"
-      query: '((data_win_system_eventID:"8") OR (data_win_system_eventID:"10" AND data_win_eventdata_targetImage:/.*(\\[Ll][Ss][Aa][Ss][Ss]\.[Ee][Xx][Ee])/) OR (data_win_system_eventID:"1" AND (data_win_eventdata_commandLine:/.*[Cc][Rr][Ee][Aa][Tt][Ee][Rr][Ee][Mm][Oo][Tt][Ee][Tt][Hh][Rr][Ee][Aa][Dd].*/ OR data_win_eventdata_commandLine:/.*[Vv][Ii][Rr][Tt][Uu][Aa][Ll][Aa][Ll][Ll][Oo][Cc][Ee][Xx].*/ OR data_win_eventdata_commandLine:/.*[Ww][Rr][Ii][Tt][Ee][Pp][Rr][Oo][Cc][Ee][Ss][Ss][Mm][Ee][Mm][Oo][Rr][Yy].*/)))'
-      pivot_on: [host]
-      window: 1h
-    - name: "Follow-on LOLBin / signed-binary-proxy execution on this host"
-      query: 'data_win_system_eventID:"1" AND data_win_eventdata_image:/.*(\\[Rr][Uu][Nn][Dd][Ll][Ll]32\.[Ee][Xx][Ee]|\\[Rr][Ee][Gg][Ss][Vv][Rr]32\.[Ee][Xx][Ee]|\\[Mm][Ss][Hh][Tt][Aa]\.[Ee][Xx][Ee]|\\[Ii][Nn][Ss][Tt][Aa][Ll][Ll][Uu][Tt][Ii][Ll]\.[Ee][Xx][Ee]|\\[Rr][Ee][Gg][Aa][Ss][Mm]\.[Ee][Xx][Ee]|\\[Rr][Ee][Gg][Ss][Vv][Cc][Ss]\.[Ee][Xx][Ee]|\\[Mm][Ss][Bb][Uu][Ii][Ll][Dd]\.[Ee][Xx][Ee]|\\[Cc][Ee][Rr][Tt][Uu][Tt][Ii][Ll]\.[Ee][Xx][Ee]|\\[Bb][Ii][Tt][Ss][Aa][Dd][Mm][Ii][Nn]\.[Ee][Xx][Ee]|\\[Ww][Mm][Ii][Cc]\.[Ee][Xx][Ee]|\\[Cc][Mm][Ss][Tt][Pp]\.[Ee][Xx][Ee]|\\[Oo][Dd][Bb][Cc][Cc][Oo][Nn][Ff]\.[Ee][Xx][Ee]|\\[Ff][Oo][Rr][Ff][Ii][Ll][Ee][Ss]\.[Ee][Xx][Ee]|\\[Pp][Cc][Aa][Ll][Uu][Aa]\.[Ee][Xx][Ee]|\\[Mm][Aa][Vv][Ii][Nn][Jj][Ee][Cc][Tt]\.[Ee][Xx][Ee]|\\[Ss][Cc][Rr][Ii][Pp][Tt][Rr][Uu][Nn][Nn][Ee][Rr]\.[Ee][Xx][Ee])/'
-      pivot_on: [host]
-      window: 1h
-    - name: "Memory/credential-dump creation & LSASS access on this host"
-      query: '((data_win_system_eventID:"1" AND data_win_eventdata_image:/.*(\\[Pp][Rr][Oo][Cc][Dd][Uu][Mm][Pp]\.[Ee][Xx][Ee]|\\[Pp][Rr][Oo][Cc][Dd][Uu][Mm][Pp]64\.[Ee][Xx][Ee]|\\[Ss][Qq][Ll][Dd][Uu][Mm][Pp][Ee][Rr]\.[Ee][Xx][Ee]|\\[Cc][Rr][Ee][Aa][Tt][Ee][Dd][Uu][Mm][Pp]\.[Ee][Xx][Ee]|\\[Rr][Dd][Rr][Ll][Ee][Aa][Kk][Dd][Ii][Aa][Gg]\.[Ee][Xx][Ee]|\\[Dd][Uu][Mm][Pp][Ee][Rr][Tt]\.[Ee][Xx][Ee]|\\[Nn][Aa][Nn][Oo][Dd][Uu][Mm][Pp]\.[Ee][Xx][Ee]|\\[Aa][Vv][Dd][Uu][Mm][Pp]\.[Ee][Xx][Ee])/) OR (data_win_system_eventID:"1" AND (data_win_eventdata_commandLine:/.*[Cc][Oo][Mm][Ss][Vv][Cc][Ss]\.[Dd][Ll][Ll].*/ OR data_win_eventdata_commandLine:/.*[Mm][Ii][Nn][Ii][Dd][Uu][Mm][Pp].*/ OR data_win_eventdata_commandLine:/.*[Dd][Uu][Mm][Pp][Ee][Rr][Tt].*/ OR data_win_eventdata_commandLine:/.*[Nn][Aa][Nn][Oo][Dd][Uu][Mm][Pp].*/ OR data_win_eventdata_commandLine:/.*[Ll][Ss][Aa][Ss][Ss].*/ OR data_win_eventdata_commandLine:/.*[Ss][Ee][Kk][Uu][Rr][Ll][Ss][Aa].*/ OR data_win_eventdata_commandLine:/.*[Nn][Tt][Dd][Ss]\.[Dd][Ii][Tt].*/ OR data_win_eventdata_commandLine:/.*[Nn][Tt][Dd][Ss][Uu][Tt][Ii][Ll].*/)) OR (data_win_system_eventID:"10" AND data_win_eventdata_targetImage:/.*(\\[Ll][Ss][Aa][Ss][Ss]\.[Ee][Xx][Ee])/))'
-      pivot_on: [host]
-      window: 1h
+  # Behaviour-targeted hunts the engine runs around the alert (not a sweep).
+  - name: Windows Defender service or process stopped/killed on this host
+    query: data_win_system_eventID:"1" AND (data_win_eventdata_commandLine:/.*[Ww][Ii][Nn][Dd][Ee][Ff][Ee][Nn][Dd].*/ OR data_win_eventdata_commandLine:/.*[Ww][Dd][Nn][Ii][Ss][Ss][Vv][Cc].*/ OR data_win_eventdata_commandLine:/.*[Ww][Dd][Ff][Ii][Ll][Tt][Ee][Rr].*/ OR data_win_eventdata_commandLine:/.*[Mm][Ss][Mm][Pp][Ee][Nn][Gg].*/ OR data_win_eventdata_commandLine:/.*[Ss][Ee][Cc][Uu][Rr][Ii][Tt][Yy][Hh][Ee][Aa][Ll][Tt][Hh][Ss][Ee][Rr][Vv][Ii][Cc][Ee].*/) AND (data_win_eventdata_commandLine:/.*[Ss][Tt][Oo][Pp].*/ OR data_win_eventdata_commandLine:/.*[Dd][Ii][Ss][Aa][Bb][Ll][Ee][Dd].*/ OR data_win_eventdata_commandLine:/.*[Tt][Aa][Ss][Kk][Kk][Ii][Ll][Ll].*/ OR data_win_eventdata_commandLine:/.*[Dd][Ee][Ll][Ee][Tt][Ee].*/ OR data_win_eventdata_commandLine:/.*[Cc][Oo][Nn][Ff][Ii][Gg].*/)
+    pivot_on:
+    - host
+    window: 1h
+  - name: Defender tampering command via PowerShell/DISM on this host
+    query: data_win_system_eventID:"1" AND (data_win_eventdata_commandLine:/.*[Ss][Ee][Tt]-[Mm][Pp][Pp][Rr][Ee][Ff][Ee][Rr][Ee][Nn][Cc][Ee].*/ OR data_win_eventdata_commandLine:/.*[Aa][Dd][Dd]-[Mm][Pp][Pp][Rr][Ee][Ff][Ee][Rr][Ee][Nn][Cc][Ee].*/ OR data_win_eventdata_commandLine:/.*[Dd][Ii][Ss][Aa][Bb][Ll][Ee][Rr][Ee][Aa][Ll][Tt][Ii][Mm][Ee][Mm][Oo][Nn][Ii][Tt][Oo][Rr][Ii][Nn][Gg].*/ OR data_win_eventdata_commandLine:/.*[Dd][Ii][Ss][Aa][Bb][Ll][Ee][Aa][Nn][Tt][Ii][Ss][Pp][Yy][Ww][Aa][Rr][Ee].*/ OR data_win_eventdata_commandLine:/.*[Dd][Ii][Ss][Aa][Bb][Ll][Ee][Bb][Ee][Hh][Aa][Vv][Ii][Oo][Rr][Mm][Oo][Nn][Ii][Tt][Oo][Rr][Ii][Nn][Gg].*/ OR data_win_eventdata_commandLine:/.*[Dd][Ii][Ss][Aa][Bb][Ll][Ee][Ii][Oo][Aa][Vv][Pp][Rr][Oo][Tt][Ee][Cc][Tt][Ii][Oo][Nn].*/ OR data_win_eventdata_commandLine:/.*[Uu][Nn][Ii][Nn][Ss][Tt][Aa][Ll][Ll]-[Ww][Ii][Nn][Dd][Oo][Ww][Ss][Ff][Ee][Aa][Tt][Uu][Rr][Ee].*/ OR data_win_eventdata_commandLine:/.*[Dd][Ii][Ss][Aa][Bb][Ll][Ee]-[Ww][Ii][Nn][Dd][Oo][Ww][Ss][Oo][Pp][Tt][Ii][Oo][Nn][Aa][Ll][Ff][Ee][Aa][Tt][Uu][Rr][Ee].*/)
+    pivot_on:
+    - host
+    window: 1h
+  - name: Service or kernel driver installed from a user-writable path on this host
+    query: data_win_system_eventID:"7045" AND (data_win_eventdata_imagePath:/.*\\[Tt][Ee][Mm][Pp]\\.*/ OR data_win_eventdata_imagePath:/.*\\[Uu][Ss][Ee][Rr][Ss]\\.*/ OR data_win_eventdata_imagePath:/.*\\[Pp][Rr][Oo][Gg][Rr][Aa][Mm][Dd][Aa][Tt][Aa]\\.*/ OR data_win_eventdata_imagePath:/.*\\[Aa][Pp][Pp][Dd][Aa][Tt][Aa]\\.*/ OR data_win_eventdata_imagePath:/.*\\[Pp][Ee][Rr][Ff][Ll][Oo][Gg][Ss]\\.*/)
+    pivot_on:
+    - host
+    window: 2h
+  - name: Payload execution from a user-writable path or encoded PowerShell on this host
+    query: data_win_system_eventID:"1" AND ((data_win_eventdata_image:/.*\\[Tt][Ee][Mm][Pp]\\.*/ OR data_win_eventdata_image:/.*\\[Aa][Pp][Pp][Dd][Aa][Tt][Aa]\\.*/ OR data_win_eventdata_image:/.*\\[Pp][Rr][Oo][Gg][Rr][Aa][Mm][Dd][Aa][Tt][Aa]\\.*/ OR data_win_eventdata_image:/.*\\[Uu][Ss][Ee][Rr][Ss]\\[Pp][Uu][Bb][Ll][Ii][Cc]\\.*/) OR data_win_eventdata_commandLine:/.*-[Ee][Nn][Cc][Oo][Dd][Ee][Dd][Cc][Oo][Mm][Mm][Aa][Nn][Dd].*/ OR data_win_eventdata_commandLine:/.*-[Ee][Nn][Cc] .*/ OR data_win_eventdata_commandLine:/.*[Ff][Rr][Oo][Mm][Bb][Aa][Ss][Ee]64[Ss][Tt][Rr][Ii][Nn][Gg].*/ OR data_win_eventdata_commandLine:/.*-[Ww] [Hh][Ii][Dd][Dd][Ee][Nn].*/ OR data_win_eventdata_commandLine:/.*[Ww][Ii][Nn][Dd][Oo][Ww][Ss][Tt][Yy][Ll][Ee] [Hh][Ii][Dd][Dd][Ee][Nn].*/ OR data_win_eventdata_commandLine:/.*[Dd][Oo][Ww][Nn][Ll][Oo][Aa][Dd][Ss][Tt][Rr][Ii][Nn][Gg].*/)
+    pivot_on:
+    - host
+    window: 2h
+  - name: LSASS access or credential dumping on this host
+    query: (data_win_system_eventID:"10" AND data_win_eventdata_targetImage:/.*\\[Ll][Ss][Aa][Ss][Ss]\.[Ee][Xx][Ee]/) OR (data_win_system_eventID:"1" AND (data_win_eventdata_commandLine:/.*[Cc][Oo][Mm][Ss][Vv][Cc][Ss]\.[Dd][Ll][Ll].*[Mm][Ii][Nn][Ii][Dd][Uu][Mm][Pp].*/ OR data_win_eventdata_commandLine:/.*[Pp][Rr][Oo][Cc][Dd][Uu][Mm][Pp].*[Ll][Ss][Aa][Ss][Ss].*/ OR data_win_eventdata_commandLine:/.*[Rr][Uu][Nn][Dd][Ll][Ll]32.*[Ll][Ss][Aa][Ss][Ss].*/ OR data_win_eventdata_commandLine:/.*[Rr][Ee][Gg].*[Ss][Aa][Vv][Ee].*[Hh][Kk][Ll][Mm].*[Ss][Aa][Mm].*/ OR data_win_eventdata_commandLine:/.*[Ss][Ee][Kk][Uu][Rr][Ll][Ss][Aa].*/ OR data_win_eventdata_commandLine:/.*[Nn][Aa][Nn][Oo][Dd][Uu][Mm][Pp].*/))
+    pivot_on:
+    - host
+    window: 2h

@@ -72,44 +72,58 @@ graylog:
   query: data_office365_Operation:/[Uu][Ss][Ee][Rr][Ll][Oo][Gg][Gg][Ee][Dd][Ii][Nn]/ AND data_office365_ApplicationId:/9[Bb][Aa]1[Aa]5[Cc]7-[Ff]17[Aa]-4[Dd][Ee]9-[Aa]1[Ff]1-6178[Cc]8[Dd]51223/ AND data_office365_ResultStatus:/[Ss][Uu][Cc][Cc][Ee][Ss][Ss]/ AND data_office365_RequestType:/[Cc][Mm][Ss][Ii]:[Cc][Mm][Ss][Ii]/ AND _exists_:data_office365_ObjectId AND NOT (data_office365_ObjectId:/0000000[Aa]-0000-0000-[Cc]000-000000000000/)
 
 correlation:
-  # Authored by the correlation engine for review. Related CoPilot Searches to run
-  # around an alert from this rule, scoped to the same host/user/IP within the window.
+  # Authored per-rule (behaviour-researched) for the correlation engine. Related CoPilot
+  # Searches + telemetry pivots to run around an alert, scoped to its host/user/ip/domain.
   related_rules:
-    - id: d8b0a4fe-07a8-41be-bd39-b14afa025d95
-      name: "Activity from Anonymous IP Addresses"
-      reason: "next kill-chain tactic: Command and Control"
-    - id: 0f2468a2-5055-4212-a368-7321198ee706
-      name: "Activity from Infrequent Country"
-      reason: "next kill-chain tactic: Command and Control"
-    - id: 2b669496-d215-47d8-bd9a-f4a45bf07cda
-      name: "Data Exfiltration to Unsanctioned Apps"
-      reason: "next kill-chain tactic: Exfiltration"
-    - id: 60de9b57-dc4d-48b9-a6a0-b39e0469f876
-      name: "Disabling Multi Factor Authentication"
-      reason: "next kill-chain tactic: Persistence"
-    - id: c191e2fa-f9d6-4ccf-82af-4f2aba08359f
-      name: "Logon from a Risky IP Address"
-      reason: "next kill-chain tactic: Initial Access"
-    - id: M365_Email_Forwarding_Created
-      name: "M365 Email Forwarding Created"
-      reason: "next kill-chain tactic: Collection"
-  window: 1h
+  - id: c191e2fa-f9d6-4ccf-82af-4f2aba08359f
+    name: Logon from a Risky IP Address
+    reason: The TokenSmith token is minted on top of an already-compromised sign-in; an MCAS risky-IP logon for the same UserId in the window is the likely source authentication the attacker exchanged to obtain the Intune Company Portal token.
+  - id: d7eab125-5f94-43df-8710-795b80fa1189
+    name: Microsoft 365 - Impossible Travel Activity
+    reason: 'Impossible travel for the same UserId is direct account-takeover corroboration: the legitimate user and the attacker signing in from geographically incompatible locations around the CA-bypass event.'
+  - id: d8b0a4fe-07a8-41be-bd39-b14afa025d95
+    name: Activity from Anonymous IP Addresses
+    reason: TokenSmith/AiTM operators typically relay through Tor, VPN or anonymizing proxies; an anonymous-IP anomaly on the same UserId points at the non-compliant attacker device the CA bypass just admitted.
+  - id: 0f2468a2-5055-4212-a368-7321198ee706
+    name: Activity from Infrequent Country
+    reason: A first-seen country for the same UserId in the window marks where the attacker, not the user, is operating from after waving past the device-compliance CA control.
+  - id: 60de9b57-dc4d-48b9-a6a0-b39e0469f876
+    name: Disabling Multi Factor Authentication
+    reason: 'Classic post-takeover persistence: having defeated the device-trust CA, the attacker disables strong authentication on the account so future logins no longer trip MFA; same UserId.'
+  - id: 58f88172-a73d-442b-94c9-95eaed3cbb36
+    name: New Federated Domain Added
+    reason: Durable tenant-wide persistence escalation after identity compromise - a rogue federated domain lets the attacker forge SAML tokens for any user, the logical next step once CA no longer constrains them.
+  - id: M365_Email_Forwarding_Created
+    name: M365 Email Forwarding Created
+    reason: 'Primary BEC objective once mailbox access is granted: a Set-Mailbox auto-forwarding rule silently exfiltrates the compromised user''s mail; same UserId and near-term window.'
+  - id: 2b669496-d215-47d8-bd9a-f4a45bf07cda
+    name: Data Exfiltration to Unsanctioned Apps
+    reason: The CA bypass exists to let a non-compliant device reach tenant data; an unsanctioned-app exfiltration anomaly on the same UserId is that objective being carried out.
+  window: 2h
   enrichment_searches:
-  # Rule-specific telemetry pivots the engine runs around an alert from this rule,
-  # scoped to the alert's host/user/IP within the window (behaviour-targeted, not a sweep).
-    - name: "Sign-in activity by this user"
-      query: '(data_office365_Operation:/.*[Uu][Ss][Ee][Rr][Ll][Oo][Gg][Gg][Ee][Dd][Ii][Nn].*/ OR data_office365_Operation:/.*[Uu][Ss][Ee][Rr][Ll][Oo][Gg][Ii][Nn][Ff][Aa][Ii][Ll][Ee][Dd].*/)'
-      pivot_on: [user]
-      window: 6h
-    - name: "Mailbox-rule / app-consent persistence by this user"
-      query: '(((data_office365_Operation:/.*[Nn][Ee][Ww]-[Ii][Nn][Bb][Oo][Xx][Rr][Uu][Ll][Ee].*/ OR data_office365_Operation:/.*[Ss][Ee][Tt]-[Ii][Nn][Bb][Oo][Xx][Rr][Uu][Ll][Ee].*/ OR data_office365_Operation:/.*[Ss][Ee][Tt]-[Mm][Aa][Ii][Ll][Bb][Oo][Xx].*/ OR data_office365_Operation:/.*[Nn][Ee][Ww]-[Tt][Rr][Aa][Nn][Ss][Pp][Oo][Rr][Tt][Rr][Uu][Ll][Ee].*/ OR data_office365_Operation:/.*[Ss][Ee][Tt]-[Tt][Rr][Aa][Nn][Ss][Pp][Oo][Rr][Tt][Rr][Uu][Ll][Ee].*/ OR data_office365_Operation:/.*[Aa][Dd][Dd]-[Mm][Aa][Ii][Ll][Bb][Oo][Xx][Pp][Ee][Rr][Mm][Ii][Ss][Ss][Ii][Oo][Nn].*/ OR data_office365_Operation:/.*[Aa][Dd][Dd]-[Rr][Ee][Cc][Ii][Pp][Ii][Ee][Nn][Tt][Pp][Ee][Rr][Mm][Ii][Ss][Ss][Ii][Oo][Nn].*/)) OR ((data_office365_Operation:/.*[Cc][Oo][Nn][Ss][Ee][Nn][Tt] [Tt][Oo] [Aa][Pp][Pp][Ll][Ii][Cc][Aa][Tt][Ii][Oo][Nn].*/ OR data_office365_Operation:/.*[Aa][Dd][Dd] [Dd][Ee][Ll][Ee][Gg][Aa][Tt][Ee][Dd] [Pp][Ee][Rr][Mm][Ii][Ss][Ss][Ii][Oo][Nn] [Gg][Rr][Aa][Nn][Tt].*/ OR data_office365_Operation:/.*[Aa][Dd][Dd] [Aa][Pp][Pp] [Rr][Oo][Ll][Ee] [Aa][Ss][Ss][Ii][Gg][Nn][Mm][Ee][Nn][Tt] [Gg][Rr][Aa][Nn][Tt] [Tt][Oo] [Uu][Ss][Ee][Rr].*/ OR data_office365_Operation:/.*[Aa][Dd][Dd] [Oo][Aa][Uu][Tt][Hh]2[Pp][Ee][Rr][Mm][Ii][Ss][Ss][Ii][Oo][Nn][Gg][Rr][Aa][Nn][Tt].*/)))'
-      pivot_on: [user]
-      window: 24h
-    - name: "Directory / role / app-consent changes by this user"
-      query: '(data_office365_Operation:/.*[Aa][Dd][Dd] [Mm][Ee][Mm][Bb][Ee][Rr] [Tt][Oo] [Rr][Oo][Ll][Ee].*/ OR data_office365_Operation:/.*[Cc][Oo][Nn][Ss][Ee][Nn][Tt] [Tt][Oo] [Aa][Pp][Pp][Ll][Ii][Cc][Aa][Tt][Ii][Oo][Nn].*/ OR data_office365_Operation:/.*[Aa][Dd][Dd] [Ss][Ee][Rr][Vv][Ii][Cc][Ee] [Pp][Rr][Ii][Nn][Cc][Ii][Pp][Aa][Ll].*/ OR data_office365_Operation:/.*[Aa][Dd][Dd] [Aa][Pp][Pp][Ll][Ii][Cc][Aa][Tt][Ii][Oo][Nn].*/ OR data_office365_Operation:/.*[Aa][Dd][Dd] [Dd][Ee][Ll][Ee][Gg][Aa][Tt][Ee][Dd] [Pp][Ee][Rr][Mm][Ii][Ss][Ss][Ii][Oo][Nn] [Gg][Rr][Aa][Nn][Tt].*/ OR data_office365_Operation:/.*[Ss][Ee][Tt] [Ff][Ee][Dd][Ee][Rr][Aa][Tt][Ii][Oo][Nn] [Ss][Ee][Tt][Tt][Ii][Nn][Gg][Ss].*/)'
-      pivot_on: [user]
-      window: 24h
-    - name: "Role / admin changes by this user"
-      query: '(data_office365_Operation:/.*[Aa][Dd][Dd] [Mm][Ee][Mm][Bb][Ee][Rr] [Tt][Oo] [Rr][Oo][Ll][Ee].*/ OR data_office365_Operation:/.*[Cc][Oo][Nn][Ss][Ee][Nn][Tt] [Tt][Oo] [Aa][Pp][Pp][Ll][Ii][Cc][Aa][Tt][Ii][Oo][Nn].*/ OR data_office365_Operation:/.*[Aa][Dd][Dd] [Ss][Ee][Rr][Vv][Ii][Cc][Ee] [Pp][Rr][Ii][Nn][Cc][Ii][Pp][Aa][Ll].*/ OR data_office365_Operation:/.*[Aa][Dd][Dd] [Aa][Pp][Pp][Ll][Ii][Cc][Aa][Tt][Ii][Oo][Nn].*/ OR data_office365_Operation:/.*[Aa][Dd][Dd] [Dd][Ee][Ll][Ee][Gg][Aa][Tt][Ee][Dd] [Pp][Ee][Rr][Mm][Ii][Ss][Ss][Ii][Oo][Nn] [Gg][Rr][Aa][Nn][Tt].*/ OR data_office365_Operation:/.*[Ss][Ee][Tt] [Ff][Ee][Dd][Ee][Rr][Aa][Tt][Ii][Oo][Nn] [Ss][Ee][Tt][Tt][Ii][Nn][Gg][Ss].*/)'
-      pivot_on: [user]
-      window: 24h
+  # Behaviour-targeted hunts the engine runs around the alert (not a sweep).
+  - name: Sign-in successes and failures by this user
+    query: (data_office365_Operation:/[Uu][Ss][Ee][Rr][Ll][Oo][Gg][Gg][Ee][Dd][Ii][Nn]/ OR data_office365_Operation:/[Uu][Ss][Ee][Rr][Ll][Oo][Gg][Ii][Nn][Ff][Aa][Ii][Ll][Ee][Dd]/)
+    pivot_on:
+    - user
+    window: 6h
+  - name: Other accounts authenticated from the same source IP
+    query: data_office365_Operation:/[Uu][Ss][Ee][Rr][Ll][Oo][Gg][Gg][Ee][Dd][Ii][Nn]/
+    pivot_on:
+    - ip
+    window: 6h
+  - name: MFA, security-info and device-trust changes by this user
+    query: (data_office365_Operation:/.*[Rr][Ee][Gg][Ii][Ss][Tt][Ee][Rr][Ee][Dd] [Ss][Ee][Cc][Uu][Rr][Ii][Tt][Yy] [Ii][Nn][Ff][Oo].*/ OR data_office365_Operation:/.*[Ss][Ee][Cc][Uu][Rr][Ii][Tt][Yy] [Ii][Nn][Ff][Oo] [Rr][Ee][Gg][Ii][Ss][Tt][Rr][Aa][Tt][Ii][Oo][Nn].*/ OR data_office365_Operation:/.*[Dd][Ii][Ss][Aa][Bb][Ll][Ee] [Ss][Tt][Rr][Oo][Nn][Gg] [Aa][Uu][Tt][Hh][Ee][Nn][Tt][Ii][Cc][Aa][Tt][Ii][Oo][Nn].*/ OR data_office365_Operation:/.*[Rr][Ee][Gg][Ii][Ss][Tt][Ee][Rr].*[Dd][Ee][Vv][Ii][Cc][Ee].*/ OR data_office365_Operation:/.*[Aa][Dd][Dd] [Rr][Ee][Gg][Ii][Ss][Tt][Ee][Rr][Ee][Dd] [Oo][Ww][Nn][Ee][Rr] [Tt][Oo] [Dd][Ee][Vv][Ii][Cc][Ee].*/)
+    pivot_on:
+    - user
+    window: 24h
+  - name: Mailbox forwarding and inbox-rule creation by this user
+    query: (data_office365_Operation:/[Nn][Ee][Ww]-[Ii][Nn][Bb][Oo][Xx][Rr][Uu][Ll][Ee]/ OR data_office365_Operation:/[Ss][Ee][Tt]-[Ii][Nn][Bb][Oo][Xx][Rr][Uu][Ll][Ee]/ OR data_office365_Operation:/[Ss][Ee][Tt]-[Mm][Aa][Ii][Ll][Bb][Oo][Xx]/ OR data_office365_Operation:/[Aa][Dd][Dd]-[Mm][Aa][Ii][Ll][Bb][Oo][Xx][Pp][Ee][Rr][Mm][Ii][Ss][Ss][Ii][Oo][Nn]/)
+    pivot_on:
+    - user
+    window: 24h
+  - name: OAuth consent, service-principal and role grants by this user
+    query: (data_office365_Operation:/.*[Cc][Oo][Nn][Ss][Ee][Nn][Tt] [Tt][Oo] [Aa][Pp][Pp][Ll][Ii][Cc][Aa][Tt][Ii][Oo][Nn].*/ OR data_office365_Operation:/.*[Aa][Dd][Dd] [Oo][Aa][Uu][Tt][Hh]2[Pp][Ee][Rr][Mm][Ii][Ss][Ss][Ii][Oo][Nn][Gg][Rr][Aa][Nn][Tt].*/ OR data_office365_Operation:/.*[Aa][Dd][Dd] [Aa][Pp][Pp] [Rr][Oo][Ll][Ee] [Aa][Ss][Ss][Ii][Gg][Nn][Mm][Ee][Nn][Tt] [Gg][Rr][Aa][Nn][Tt] [Tt][Oo] [Uu][Ss][Ee][Rr].*/ OR data_office365_Operation:/.*[Aa][Dd][Dd] [Ss][Ee][Rr][Vv][Ii][Cc][Ee] [Pp][Rr][Ii][Nn][Cc][Ii][Pp][Aa][Ll].*/ OR data_office365_Operation:/.*[Aa][Dd][Dd] [Mm][Ee][Mm][Bb][Ee][Rr] [Tt][Oo] [Rr][Oo][Ll][Ee].*/)
+    pivot_on:
+    - user
+    window: 24h

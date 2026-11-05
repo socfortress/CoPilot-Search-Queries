@@ -146,23 +146,58 @@ graylog:
   query: ((data_audit_type:/[Ss][Yy][Ss][Cc][Aa][Ll][Ll]/ AND data_audit_exe:/.*\/[Uu][Ss][Ee][Rr][Aa][Dd][Dd]/) OR data_audit_type:/[Aa][Dd][Dd]_[Uu][Ss][Ee][Rr]/)
 
 correlation:
-  # Authored by the correlation engine for review.
+  # Authored per-rule (behaviour-researched) for the correlation engine. Related CoPilot
+  # Searches + telemetry pivots to run around an alert, scoped to its host/user/ip/domain.
+  related_rules:
+  - id: linux-auditd-add-user-001
+    name: Linux Auditd Add User
+    reason: Fires on the same type=ADD_USER auditd record this rule keys on, but matched from the raw full_log rather than the parsed data_audit_* fields; co-occurrence on the same host and second confirms the creation is a real event, not a field-parsing artifact.
+  - id: a1b2c3d4-e5f6-7890-abcd-ef1234567890
+    name: Linux User Account Creation Detection
+    reason: Detects the same creation from syslog full_log for both useradd and the adduser wrapper; it corroborates this auditd detection across data sources and catches the adduser path, which this rule's useradd/ADD_USER-only query can miss.
+  - id: 6a50f16c-3b7b-42d1-b081-0fdd3ba70a73
+    name: User Added To Root/Sudoers Group Using Usermod
+    reason: 'The canonical next step after creating an account: usermod -aG root/sudo promotes the fresh account to privileged. A creation followed within the session by this is the rogue-admin persistence pattern, not routine onboarding.'
+  - id: a1b2c3d4-5e6f-7a8b-9c0d-e1f2a3b4c5d6
+    name: Linux Sudoers File Access
+    reason: 'The alternative privilege grant: adding the new user to /etc/sudoers, often with NOPASSWD, gives passwordless root without touching group membership. Seen right after the creation it converts the account into a hidden admin.'
+  - id: d4e5f6a7-8b9c-4d1e-a2b3-5f6e7a8b9c1d
+    name: Linux SSH Configuration Access
+    reason: 'Remote-access provisioning for the new account: editing sshd_config or dropping an authorized_keys file under /etc/ssh gives the created account durable key-based login, the usual way an operator reaches a persistence account.'
+  - id: linux-sudo-or-su-execution-001
+    name: Linux Sudo Or Su Execution
+    reason: useradd requires root; sudo or su execution shortly before the creation is the privilege context the attacker used to run it, linking the escalation to the persistence action in one session.
+  - id: linux-pkexec-privilege-escalation-001
+    name: Linux pkexec Privilege Escalation
+    reason: PwnKit (CVE-2021-4034) pkexec abuse yields root, exactly the capability a rogue useradd needs; firing just before the creation it explains how an unprivileged foothold gained the rights to add a user.
+  - id: f74107df-b6c6-4e80-bf00-4170b658162b
+    name: Sudo Privilege Escalation CVE-2019-14287
+    reason: A sudo runas-restriction bypass to root; if it fires shortly before the account creation it is the likely escalation path that gave the attacker the privileges to create the persistence account.
+  window: 4h
   enrichment_searches:
-  # Rule-specific telemetry pivots the engine runs around an alert from this rule,
-  # scoped to the alert's host/user/IP within the window (behaviour-targeted, not a sweep).
-    - name: "Local account / group creation on this host"
-      query: '((data_process_exec_process_binary:/.*(\/[Uu][Ss][Ee][Rr][Aa][Dd][Dd]|\/[Aa][Dd][Dd][Uu][Ss][Ee][Rr]|\/[Gg][Rr][Oo][Uu][Pp][Aa][Dd][Dd]|\/[Uu][Ss][Ee][Rr][Mm][Oo][Dd]|\/[Pp][Aa][Ss][Ss][Ww][Dd]|\/[Cc][Hh][Aa][Gg][Ee])/) OR (data_process_exec_process_arguments:/.*\/[Ee][Tt][Cc]\/[Pp][Aa][Ss][Ss][Ww][Dd].*/) OR (data_process_exec_process_arguments:/.*\/[Ee][Tt][Cc]\/[Gg][Rr][Oo][Uu][Pp].*/))'
-      pivot_on: [host]
-      window: 6h
-    - name: "Shell / interpreter execution on this host"
-      query: '((data_process_exec_process_binary:/.*(\/[Bb][Aa][Ss][Hh]|\/[Ss][Hh]|\/[Dd][Aa][Ss][Hh]|\/[Zz][Ss][Hh]|\/[Kk][Ss][Hh]|\/[Aa][Ss][Hh]|\/[Bb][Uu][Ss][Yy][Bb][Oo][Xx])/) OR (data_process_exec_process_binary:/.*(\/[Pp][Yy][Tt][Hh][Oo][Nn]|\/[Pp][Yy][Tt][Hh][Oo][Nn]3|\/[Pp][Ee][Rr][Ll]|\/[Rr][Uu][Bb][Yy]|\/[Pp][Hh][Pp]|\/[Nn][Oo][Dd][Ee]|\/[Ll][Uu][Aa]|\/[Aa][Ww][Kk])/))'
-      pivot_on: [host]
-      window: 1h
-    - name: "Reconnaissance commands on this host"
-      query: 'data_process_exec_process_binary:/.*(\/[Ww][Hh][Oo][Aa][Mm][Ii]|\/[Ii][Dd]|\/[Uu][Nn][Aa][Mm][Ee]|\/[Hh][Oo][Ss][Tt][Nn][Aa][Mm][Ee]|\/[Hh][Oo][Ss][Tt][Nn][Aa][Mm][Ee][Cc][Tt][Ll]|\/[Ss][Ss]|\/[Nn][Ee][Tt][Ss][Tt][Aa][Tt]|\/[Ii][Ff][Cc][Oo][Nn][Ff][Ii][Gg]|\/[Aa][Rr][Pp]|\/[Ww]|\/[Ww][Hh][Oo]|\/[Ll][Aa][Ss][Tt]|\/[Ll][Ss][Oo][Ff]|\/[Nn][Mm][Aa][Pp]|\/[Dd][Ii][Gg]|\/[Ff][Ii][Nn][Dd])/'
-      pivot_on: [host]
-      window: 1h
-    - name: "Persistence via cron / systemd / shell profiles on this host"
-      query: '((data_process_exec_process_binary:/.*(\/[Cc][Rr][Oo][Nn][Tt][Aa][Bb]|\/[Ss][Yy][Ss][Tt][Ee][Mm][Cc][Tt][Ll]|\/[Aa][Tt]|\/[Uu][Pp][Dd][Aa][Tt][Ee]-[Rr][Cc]\.[Dd])/) OR (data_process_exec_process_arguments:/.*\/[Ee][Tt][Cc]\/[Cc][Rr][Oo][Nn].*/) OR (data_process_exec_process_arguments:/.*\/[Ee][Tt][Cc]\/[Ss][Yy][Ss][Tt][Ee][Mm][Dd].*/) OR (data_process_exec_process_arguments:/.*[Rr][Cc]\.[Ll][Oo][Cc][Aa][Ll].*/) OR (data_process_exec_process_arguments:/.*\.[Bb][Aa][Ss][Hh][Rr][Cc].*/) OR (data_process_exec_process_arguments:/.*\.[Bb][Aa][Ss][Hh]_[Pp][Rr][Oo][Ff][Ii][Ll][Ee].*/) OR (data_process_exec_process_arguments:/.*\/[Ee][Tt][Cc]\/[Pp][Rr][Oo][Ff][Ii][Ll][Ee].*/) OR (data_process_exec_process_arguments:/.*[Aa][Uu][Tt][Hh][Oo][Rr][Ii][Zz][Ee][Dd]_[Kk][Ee][Yy][Ss].*/) OR (data_process_exec_process_arguments:/.*\/[Ee][Tt][Cc]\/[Ii][Nn][Ii][Tt]\.[Dd].*/))'
-      pivot_on: [host]
-      window: 4h
+  # Behaviour-targeted hunts the engine runs around the alert (not a sweep).
+  - name: New account granted privileges via usermod, gpasswd, visudo or a sudoers edit on this host
+    query: ((data_process_exec_process_binary:/.*\/([Uu][Ss][Ee][Rr][Mm][Oo][Dd]|[Gg][Pp][Aa][Ss][Ss][Ww][Dd]|[Vv][Ii][Ss][Uu][Dd][Oo])/) OR (data_audit_exe:/.*\/([Uu][Ss][Ee][Rr][Mm][Oo][Dd]|[Gg][Pp][Aa][Ss][Ss][Ww][Dd]|[Vv][Ii][Ss][Uu][Dd][Oo])/) OR (data_process_exec_process_arguments:/.*\/[Ee][Tt][Cc]\/[Ss][Uu][Dd][Oo][Ee][Rr][Ss].*/))
+    pivot_on:
+    - host
+    window: 6h
+  - name: Password set for an account via passwd, chpasswd or an /etc/shadow edit on this host
+    query: ((data_process_exec_process_binary:/.*\/([Pp][Aa][Ss][Ss][Ww][Dd]|[Cc][Hh][Pp][Aa][Ss][Ss][Ww][Dd])/) OR (data_audit_exe:/.*\/([Pp][Aa][Ss][Ss][Ww][Dd]|[Cc][Hh][Pp][Aa][Ss][Ss][Ww][Dd])/) OR (data_process_exec_process_arguments:/.*\/[Ee][Tt][Cc]\/[Ss][Hh][Aa][Dd][Oo][Ww].*/))
+    pivot_on:
+    - host
+    window: 6h
+  - name: SSH remote access provisioned for the account (authorized_keys, sshd_config, ssh-keygen) on this host
+    query: ((data_process_exec_process_binary:/.*\/[Ss][Ss][Hh]-[Kk][Ee][Yy][Gg][Ee][Nn]/) OR (data_audit_exe:/.*\/[Ss][Ss][Hh]-[Kk][Ee][Yy][Gg][Ee][Nn]/) OR (data_process_exec_process_arguments:/.*[Aa][Uu][Tt][Hh][Oo][Rr][Ii][Zz][Ee][Dd]_[Kk][Ee][Yy][Ss].*/) OR (data_process_exec_process_arguments:/.*\/[Ee][Tt][Cc]\/[Ss][Ss][Hh]\/.*/) OR (data_process_exec_process_arguments:/.*[Ss][Ss][Hh][Dd]_[Cc][Oo][Nn][Ff][Ii][Gg].*/))
+    pivot_on:
+    - host
+    window: 6h
+  - name: Privilege escalation around the creation (sudo, su, pkexec, doas) on this host
+    query: ((data_process_exec_process_binary:/.*\/([Ss][Uu][Dd][Oo]|[Ss][Uu]|[Pp][Kk][Ee][Xx][Ee][Cc]|[Dd][Oo][Aa][Ss])/) OR (data_audit_exe:/.*\/([Ss][Uu][Dd][Oo]|[Ss][Uu]|[Pp][Kk][Ee][Xx][Ee][Cc]|[Dd][Oo][Aa][Ss])/))
+    pivot_on:
+    - host
+    window: 2h
+  - name: Direct account-database tampering (groupadd, vipw, vigr, /etc/passwd, /etc/group) on this host
+    query: ((data_process_exec_process_binary:/.*\/([Gg][Rr][Oo][Uu][Pp][Aa][Dd][Dd]|[Vv][Ii][Pp][Ww]|[Vv][Ii][Gg][Rr])/) OR (data_audit_exe:/.*\/([Gg][Rr][Oo][Uu][Pp][Aa][Dd][Dd]|[Vv][Ii][Pp][Ww]|[Vv][Ii][Gg][Rr])/) OR (data_process_exec_process_arguments:/.*\/[Ee][Tt][Cc]\/[Pp][Aa][Ss][Ss][Ww][Dd].*/) OR (data_process_exec_process_arguments:/.*\/[Ee][Tt][Cc]\/[Gg][Rr][Oo][Uu][Pp].*/))
+    pivot_on:
+    - host
+    window: 6h

@@ -199,44 +199,58 @@ graylog:
   query: (data_win_system_eventID:"23" OR data_win_system_eventID:"26") AND (data_win_eventdata_image:/.*\\[Cc][Mm][Dd]\.[Ee][Xx][Ee]/ OR data_win_eventdata_image:/.*\\[Pp][Oo][Ww][Ee][Rr][Ss][Hh][Ee][Ll][Ll]\.[Ee][Xx][Ee]/ OR data_win_eventdata_image:/.*\\[Pp][Ww][Ss][Hh]\.[Ee][Xx][Ee]/ OR data_win_eventdata_image:/.*\\[Ww][Tt]\.[Ee][Xx][Ee]/ OR data_win_eventdata_image:/.*\\[Rr][Uu][Nn][Dd][Ll][Ll]32\.[Ee][Xx][Ee]/ OR data_win_eventdata_image:/.*\\[Rr][Ee][Gg][Ss][Vv][Rr]32\.[Ee][Xx][Ee]/) AND (data_win_eventdata_targetFilename:/.*\.[Vv][Hh][Dd]/ OR data_win_eventdata_targetFilename:/.*\.[Bb][Aa][Cc]/ OR data_win_eventdata_targetFilename:/.*\.[Bb][Aa][Kk]/ OR data_win_eventdata_targetFilename:/.*\.[Ww][Bb][Cc][Aa][Tt]/ OR data_win_eventdata_targetFilename:/.*\.[Bb][Kk][Ff]/ OR data_win_eventdata_targetFilename:/.*\.[Ss][Ee][Tt]/ OR data_win_eventdata_targetFilename:/.*\.[Ww][Ii][Nn]/ OR data_win_eventdata_targetFilename:/.*\.[Dd][Ss][Kk]/)
 
 correlation:
-  # Authored by the correlation engine for review. Related CoPilot Searches to run
-  # around an alert from this rule, scoped to the same host/user/IP within the window.
+  # Authored per-rule (behaviour-researched) for the correlation engine. Related CoPilot
+  # Searches + telemetry pivots to run around an alert, scoped to its host/user/ip/domain.
   related_rules:
-    - id: 639c9081-f482-47d3-a0bd-ddee3d4ecd76
-      name: "All Backups Deleted Via Wbadmin.EXE"
-      reason: "next kill-chain tactic: Impact"
-    - id: 1444443e-6757-43e4-9ea4-c8fc705f79a2
-      name: "Boot Configuration Tampering Via Bcdedit.EXE"
-      reason: "next kill-chain tactic: Impact"
-    - id: c73124a7-3e89-44a3-bdc1-25fe4df754b1
-      name: "Copy From VolumeShadowCopy Via Cmd.EXE"
-      reason: "next kill-chain tactic: Impact"
-    - id: 220457c1-1c9f-4c2e-afe6-9598926222c1
-      name: "Delete All Scheduled Tasks"
-      reason: "next kill-chain tactic: Impact"
-    - id: dbc1f800-0fe0-4bc0-9c66-292c2abe3f78
-      name: "Delete Important Scheduled Task"
-      reason: "next kill-chain tactic: Impact"
-    - id: 5ee2bcd0-b2ff-11eb-bb34-acde48001122
-      name: "Delete ShadowCopy With PowerShell"
-      reason: "next kill-chain tactic: Impact"
-  window: 1h
+  - id: c947b146-0abc-4c87-9c64-b17e9d7274a2
+    name: Shadow Copies Deletion Using Operating Systems Utilities
+    reason: 'The near-simultaneous VSS twin of this behaviour: ransomware runs ''vssadmin delete shadows'' / ''wmic shadowcopy delete'' in the same pre-encryption burst that deletes these .bak/.bkf/.vhd files, closing the other local restore path. If both fire on the host within minutes, inhibit-system-recovery is confirmed.'
+  - id: 5ee2bcd0-b2ff-11eb-bb34-acde48001122
+    name: Delete ShadowCopy With PowerShell
+    reason: The PowerShell/WMI route to the same shadow-copy destruction. This rule's deleting image is often powershell.exe/pwsh.exe, and that same session typically enumerates and removes Win32_ShadowCopy objects moments before or after wiping the backup files.
+  - id: 639c9081-f482-47d3-a0bd-ddee3d4ecd76
+    name: All Backups Deleted Via Wbadmin.EXE
+    reason: 'Same destroy-the-backups goal reached with a different tool: ''wbadmin delete catalog/systemstatebackup -keepVersions:0''. On servers it is frequently scripted in the very same batch that file-deletes these backup extensions.'
+  - id: 9703792d-fd9a-456d-a672-ff92efe4806a
+    name: Backup Catalog Deleted
+    reason: 'An independent witness to the same event: Windows-Backup Application-log ID 524 fires when the backup catalog is destroyed, corroborating this Sysmon file-delete from a second telemetry source rather than overlapping tags.'
+  - id: 1444443e-6757-43e4-9ea4-c8fc705f79a2
+    name: Boot Configuration Tampering Via Bcdedit.EXE
+    reason: 'The boot-recovery half of T1490: ''bcdedit /set recoveryenabled no'' and ''bootstatuspolicy ignoreallfailures'' kill automatic repair in the same inhibit-recovery sequence, usually from the same shell seconds apart.'
+  - id: db1c21e4-cd66-4b4e-85ca-590f0780529c
+    name: Windows Recovery Environment Disabled Via Reagentc
+    reason: '''reagentc /disable'' tears down the Windows Recovery Environment (WinRE) - yet another restore path the operator closes right beside deleting backups, completing the recovery-inhibition set.'
+  - id: 4b046706-5789-4673-b111-66f25fe99534
+    name: Deleted Data Overwritten Via Cipher.EXE
+    reason: 'The destructive follow-through: ''cipher /w'' overwrites free space so the backup files this rule just caught being deleted cannot be forensically carved back, ensuring the destruction is irreversible.'
+  - id: 8f3a614f-6b98-4f7d-82dd-d0df38452a8b
+    name: Windows Excessive Service Stop Attempt
+    reason: Ransomware stops backup-agent, database and AV services (net/sc stop|delete) so their open backup files unlock and become deletable and defenses drop - this service-takedown typically brackets the backup-file deletion.
+  window: 2h
   enrichment_searches:
-  # Rule-specific telemetry pivots the engine runs around an alert from this rule,
-  # scoped to the alert's host/user/IP within the window (behaviour-targeted, not a sweep).
-    - name: "Backup / shadow-copy deletion on this host"
-      query: '(data_win_eventdata_commandLine:/.*[Vv][Ss][Ss][Aa][Dd][Mm][Ii][Nn].*/ OR data_win_eventdata_commandLine:/.*[Ss][Hh][Aa][Dd][Oo][Ww][Cc][Oo][Pp][Yy].*/ OR data_win_eventdata_commandLine:/.*[Bb][Cc][Dd][Ee][Dd][Ii][Tt].*/ OR data_win_eventdata_commandLine:/.*[Ww][Bb][Aa][Dd][Mm][Ii][Nn].*/ OR data_win_eventdata_commandLine:/.*[Cc][Ii][Pp][Hh][Ee][Rr] \/[Ww].*/ OR data_win_eventdata_commandLine:/.*[Ww][Mm][Ii][Cc] [Ss][Hh][Aa][Dd][Oo][Ww][Cc][Oo][Pp][Yy] [Dd][Ee][Ll][Ee][Tt][Ee].*/) OR (data_win_system_eventID:"1" AND data_win_eventdata_image:/.*(\\[Vv][Ss][Ss][Aa][Dd][Mm][Ii][Nn]\.[Ee][Xx][Ee]|\\[Ww][Bb][Aa][Dd][Mm][Ii][Nn]\.[Ee][Xx][Ee])/)'
-      pivot_on: [host]
-      window: 2h
-    - name: "Other executions of this tool-set on this host (any arguments)"
-      query: 'data_win_system_eventID:"1" AND data_win_eventdata_image:/.*(\\[Ww][Tt]\.[Ee][Xx][Ee])/'
-      pivot_on: [host]
-      window: 2h
-    - name: "Execution of programs from user-writable paths on this host"
-      query: 'data_win_system_eventID:"1" AND (data_win_eventdata_image:/.*\\[Uu][Ss][Ee][Rr][Ss]\\.*/ OR data_win_eventdata_image:/.*\\[Pp][Rr][Oo][Gg][Rr][Aa][Mm][Dd][Aa][Tt][Aa]\\.*/ OR data_win_eventdata_image:/.*\\[Ww][Ii][Nn][Dd][Oo][Ww][Ss]\\[Tt][Ee][Mm][Pp]\\.*/ OR data_win_eventdata_image:/.*\\[Aa][Pp][Pp][Dd][Aa][Tt][Aa]\\.*/ OR data_win_eventdata_image:/.*\\[Pp][Uu][Bb][Ll][Ii][Cc]\\.*/ OR data_win_eventdata_image:/.*\\\$[Rr][Ee][Cc][Yy][Cc][Ll][Ee].*/)'
-      pivot_on: [host]
-      window: 1h
-    - name: "Autostart persistence written on this host"
-      query: '(data_win_system_eventID:"12" OR data_win_system_eventID:"13") AND (data_win_eventdata_targetObject:/.*[Cc][Uu][Rr][Rr][Ee][Nn][Tt][Vv][Ee][Rr][Ss][Ii][Oo][Nn]\\[Rr][Uu][Nn].*/ OR data_win_eventdata_targetObject:/.*[Cc][Uu][Rr][Rr][Ee][Nn][Tt][Vv][Ee][Rr][Ss][Ii][Oo][Nn]\\[Rr][Uu][Nn][Oo][Nn][Cc][Ee].*/ OR data_win_eventdata_targetObject:/.*[Cc][Uu][Rr][Rr][Ee][Nn][Tt][Cc][Oo][Nn][Tt][Rr][Oo][Ll][Ss][Ee][Tt]\\[Ss][Ee][Rr][Vv][Ii][Cc][Ee][Ss]\\.*/ OR data_win_eventdata_targetObject:/.*[Ii][Mm][Aa][Gg][Ee] [Ff][Ii][Ll][Ee] [Ee][Xx][Ee][Cc][Uu][Tt][Ii][Oo][Nn] [Oo][Pp][Tt][Ii][Oo][Nn][Ss]\\.*/ OR data_win_eventdata_targetObject:/.*[Ww][Ii][Nn][Ll][Oo][Gg][Oo][Nn]\\[Ss][Hh][Ee][Ll][Ll].*/ OR data_win_eventdata_targetObject:/.*[Ww][Ii][Nn][Ll][Oo][Gg][Oo][Nn]\\[Uu][Ss][Ee][Rr][Ii][Nn][Ii][Tt].*/ OR data_win_eventdata_targetObject:/.*[Cc][Uu][Rr][Rr][Ee][Nn][Tt][Vv][Ee][Rr][Ss][Ii][Oo][Nn]\\[Ee][Xx][Pp][Ll][Oo][Rr][Ee][Rr]\\[Rr][Uu][Nn].*/ OR data_win_eventdata_targetObject:/.*[Pp][Oo][Ll][Ii][Cc][Ii][Ee][Ss]\\[Ee][Xx][Pp][Ll][Oo][Rr][Ee][Rr]\\[Rr][Uu][Nn].*/ OR data_win_eventdata_targetObject:/.*[Cc][Uu][Rr][Rr][Ee][Nn][Tt][Vv][Ee][Rr][Ss][Ii][Oo][Nn]\\[Ww][Ii][Nn][Dd][Oo][Ww][Ss]\\[Ll][Oo][Aa][Dd].*/)'
-      pivot_on: [host]
-      window: 2h
+  # Behaviour-targeted hunts the engine runs around the alert (not a sweep).
+  - name: Sibling recovery-inhibition commands on this host (shadow copies, wbadmin, bcdedit, reagentc, cipher wipe)
+    query: data_win_system_eventID:"1" AND (data_win_eventdata_commandLine:/.*[Vv][Ss][Ss][Aa][Dd][Mm][Ii][Nn].*[Dd][Ee][Ll][Ee][Tt][Ee].*[Ss][Hh][Aa][Dd][Oo][Ww].*/ OR data_win_eventdata_commandLine:/.*[Ss][Hh][Aa][Dd][Oo][Ww][Cc][Oo][Pp][Yy].*[Dd][Ee][Ll][Ee][Tt][Ee].*/ OR data_win_eventdata_commandLine:/.*[Ww][Bb][Aa][Dd][Mm][Ii][Nn].*[Dd][Ee][Ll][Ee][Tt][Ee].*/ OR data_win_eventdata_commandLine:/.*[Bb][Cc][Dd][Ee][Dd][Ii][Tt].*[Rr][Ee][Cc][Oo][Vv][Ee][Rr][Yy][Ee][Nn][Aa][Bb][Ll][Ee][Dd].*/ OR data_win_eventdata_commandLine:/.*[Bb][Cc][Dd][Ee][Dd][Ii][Tt].*[Bb][Oo][Oo][Tt][Ss][Tt][Aa][Tt][Uu][Ss][Pp][Oo][Ll][Ii][Cc][Yy].*/ OR data_win_eventdata_commandLine:/.*[Rr][Ee][Aa][Gg][Ee][Nn][Tt][Cc].*[Dd][Ii][Ss][Aa][Bb][Ll][Ee].*/ OR data_win_eventdata_commandLine:/.*[Cc][Ii][Pp][Hh][Ee][Rr].* \/[Ww].*/)
+    pivot_on:
+    - host
+    window: 2h
+  - name: Full scope of backup-file deletion on this host - any deleting process (EID 23/26)
+    query: (data_win_system_eventID:"23" OR data_win_system_eventID:"26") AND (data_win_eventdata_targetFilename:/.*\.[Bb][Aa][Kk]/ OR data_win_eventdata_targetFilename:/.*\.[Bb][Kk][Ff]/ OR data_win_eventdata_targetFilename:/.*\.[Vv][Hh][Dd]/ OR data_win_eventdata_targetFilename:/.*\.[Vv][Hh][Dd][Xx]/ OR data_win_eventdata_targetFilename:/.*\.[Ww][Bb][Cc][Aa][Tt]/ OR data_win_eventdata_targetFilename:/.*\.[Bb][Aa][Cc]/ OR data_win_eventdata_targetFilename:/.*\.[Dd][Ss][Kk]/ OR data_win_eventdata_targetFilename:/.*\.[Vv][Bb][Kk]/ OR data_win_eventdata_targetFilename:/.*\.[Vv][Ii][Bb]/ OR data_win_eventdata_targetFilename:/.*\.[Tt][Ii][Bb]/ OR data_win_eventdata_targetFilename:/.*\.[Bb][Kk][Pp]/ OR data_win_eventdata_targetFilename:/.*\.[Gg][Hh][Oo]/)
+    pivot_on:
+    - host
+    window: 2h
+  - name: Backup / database / security service stop or delete on this host
+    query: data_win_system_eventID:"1" AND ((data_win_eventdata_image:/.*\\[Ss][Cc]\.[Ee][Xx][Ee]/ AND data_win_eventdata_commandLine:/.*[Ss][Tt][Oo][Pp].*/) OR (data_win_eventdata_image:/.*\\[Ss][Cc]\.[Ee][Xx][Ee]/ AND data_win_eventdata_commandLine:/.*[Dd][Ee][Ll][Ee][Tt][Ee].*/) OR (data_win_eventdata_image:/.*\\[Nn][Ee][Tt]1?\.[Ee][Xx][Ee]/ AND data_win_eventdata_commandLine:/.*[Ss][Tt][Oo][Pp].*/) OR data_win_eventdata_commandLine:/.*[Ss][Tt][Oo][Pp]-[Ss][Ee][Rr][Vv][Ii][Cc][Ee].*/)
+    pivot_on:
+    - host
+    window: 2h
+  - name: Event-log clearing / USN-journal deletion on this host (anti-forensics)
+    query: data_win_system_eventID:"1" AND (data_win_eventdata_commandLine:/.*[Ww][Ee][Vv][Tt][Uu][Tt][Ii][Ll] ([Cc][Ll]|[Cc][Ll][Ee][Aa][Rr]-[Ll][Oo][Gg]).*/ OR data_win_eventdata_commandLine:/.*[Cc][Ll][Ee][Aa][Rr]-[Ee][Vv][Ee][Nn][Tt][Ll][Oo][Gg].*/ OR data_win_eventdata_commandLine:/.*[Ff][Ss][Uu][Tt][Ii][Ll] [Uu][Ss][Nn] [Dd][Ee][Ll][Ee][Tt][Ee][Jj][Oo][Uu][Rr][Nn][Aa][Ll].*/)
+    pivot_on:
+    - host
+    window: 2h
+  - name: Ransom note written on this host (encryption follow-through)
+    query: data_win_system_eventID:"11" AND (data_win_eventdata_targetFilename:/.*[Rr][Ee][Aa][Dd].?[Mm][Ee].*\.[Tt][Xx][Tt]/ OR data_win_eventdata_targetFilename:/.*[Hh][Oo][Ww].?[Tt][Oo].*[Dd][Ee][Cc][Rr][Yy][Pp][Tt].*/ OR data_win_eventdata_targetFilename:/.*[Dd][Ee][Cc][Rr][Yy][Pp][Tt].*[Ii][Nn][Ss][Tt][Rr][Uu][Cc][Tt][Ii][Oo][Nn].*/ OR data_win_eventdata_targetFilename:/.*[Rr][Ee][Ss][Tt][Oo][Rr][Ee].?[Ff][Ii][Ll][Ee][Ss].*/ OR data_win_eventdata_targetFilename:/.*[Rr][Ee][Cc][Oo][Vv][Ee][Rr].?[Ff][Ii][Ll][Ee][Ss].*/ OR data_win_eventdata_targetFilename:/.*[Uu][Nn][Ll][Oo][Cc][Kk].*\.[Tt][Xx][Tt]/)
+    pivot_on:
+    - host
+    window: 1h

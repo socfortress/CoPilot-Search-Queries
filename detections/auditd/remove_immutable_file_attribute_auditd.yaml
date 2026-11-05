@@ -141,19 +141,58 @@ graylog:
   query: data_audit_type:/[Ee][Xx][Ee][Cc][Vv][Ee]/ AND data_audit_execve_a0:/.*[Cc][Hh][Aa][Tt][Tt][Rr].*/ AND data_audit_execve_a1:/.*-[Ii].*/
 
 correlation:
-  # Authored by the correlation engine for review.
+  # Authored per-rule (behaviour-researched) for the correlation engine. Related CoPilot
+  # Searches + telemetry pivots to run around an alert, scoped to its host/user/ip/domain.
+  related_rules:
+  - id: 34979410-e4b5-4e5d-8cfb-389fdff05c12
+    name: Remove Immutable File Attribute
+    reason: 'Cross-sensor twin of this exact command: this auditd rule sees ''chattr -i'' as an EXECVE record, while that rule sees the same execution via Tetragon process_exec (binary */chattr, args ''* -i *''). Both firing on the host in the window is high-confidence proof the immutable bit was really cleared, not a parsing artefact of one sensor.'
+  - id: a1b2c3d4-5678-9101-1121-314151617181
+    name: Linux File Attribute Modification Detection
+    reason: 'Third independent view of the same ''chattr -i'': it matches the raw Wazuh full_log for *chattr* and *-i* across auditd/syslog rather than the parsed EXECVE argv fields. A co-hit corroborates the unlock and catches it on hosts where the structured auditd EXECVE a0/a1 parsing this rule depends on is incomplete.'
+  - id: 86157017-c2b1-4d4a-8c33-93b8e67e4af4
+    name: Potential Suspicious Change To Sensitive/Critical Files
+    reason: The payoff the unlock exists for. chattr -i is run so a previously-immutable file can finally be written; this rule catches the follow-on edit of /etc/sudoers, /etc/*.conf, cron or /bin/passwd via sed/vi/nano/echo-redirect. An edit of one of those right after the unlock is the exact tamper the immutable bit was protecting against.
+  - id: 4b3cb710-5e83-4715-8c45-8b2b5b3e5751
+    name: Modification of ld.so.preload
+    reason: /etc/ld.so.preload is one of the most commonly chattr +i'd files, so 'chattr -i /etc/ld.so.preload' then writing it is a textbook shared-object-injection persistence chain. This rule is the auditd PATH-write companion on the same sensor; its hit right after the unlock turns this medium alert into a high-severity rootkit-persistence story.
+  - id: 80915f59-9b56-4616-9de0-fd0dea6c12fe
+    name: Linux Logs Clearing Attempts
+    reason: The destructive payoff of the unlock. Hardened hosts protect /var/log with chattr +i, so rm/shred/unlink return 'Operation not permitted' until the immutable bit is dropped; a chattr -i immediately before a log-clearing hit is the step that made the deletion succeed.
+  - id: 1182f3b3-e716-4efa-99ab-d2685d04360f
+    name: History File Deletion
+    reason: Covering-tracks follow-on. ~/.bash_history is sometimes made immutable; chattr -i unlocks it so it can be wiped, and deleting it also erases the exact 'chattr -i ...' command line that triggered this alert. A history wipe shortly after places a live operator cleaning up on the host.
+  - id: 977ef627-4539-4875-adf4-ed8f780c4922
+    name: Auditing Configuration Changes on Linux Host
+    reason: Same defense-impairment phase on the same auditd sensor. Attackers run chattr -i to unlock the immutable /etc/audit rules and config, then edit them to blind auditing; a PATH-write under /etc/audit alongside this unlock is the audit-tampering the immutable flag was guarding.
+  - id: bed26dea-4525-47f4-b24a-76e30e44ffb0
+    name: Audit Rules Deleted Via Auditctl
+    reason: 'Co-occurring blinding in the same hands-on cleanup: ''auditctl -D'' wipes the live audit ruleset while chattr -i strips the immutable flag off the audit log or a persistence file to be tampered next. The two travel together, and that rule''s own correlation block already cites this chattr -i detection as its enabler.'
+  window: 2h
   enrichment_searches:
-  # Rule-specific telemetry pivots the engine runs around an alert from this rule,
-  # scoped to the alert's host/user/IP within the window (behaviour-targeted, not a sweep).
-    - name: "Permission / ownership changes on this host"
-      query: 'data_process_exec_process_binary:/.*(\/[Cc][Hh][Mm][Oo][Dd]|\/[Cc][Hh][Oo][Ww][Nn]|\/[Cc][Hh][Aa][Tt][Tt][Rr]|\/[Ss][Ee][Tt][Ff][Aa][Cc][Ll])/'
-      pivot_on: [host]
-      window: 2h
-    - name: "Shell / interpreter execution on this host"
-      query: '((data_process_exec_process_binary:/.*(\/[Bb][Aa][Ss][Hh]|\/[Ss][Hh]|\/[Dd][Aa][Ss][Hh]|\/[Zz][Ss][Hh]|\/[Kk][Ss][Hh]|\/[Aa][Ss][Hh]|\/[Bb][Uu][Ss][Yy][Bb][Oo][Xx])/) OR (data_process_exec_process_binary:/.*(\/[Pp][Yy][Tt][Hh][Oo][Nn]|\/[Pp][Yy][Tt][Hh][Oo][Nn]3|\/[Pp][Ee][Rr][Ll]|\/[Rr][Uu][Bb][Yy]|\/[Pp][Hh][Pp]|\/[Nn][Oo][Dd][Ee]|\/[Ll][Uu][Aa]|\/[Aa][Ww][Kk])/))'
-      pivot_on: [host]
-      window: 1h
-    - name: "Reconnaissance commands on this host"
-      query: 'data_process_exec_process_binary:/.*(\/[Ww][Hh][Oo][Aa][Mm][Ii]|\/[Ii][Dd]|\/[Uu][Nn][Aa][Mm][Ee]|\/[Hh][Oo][Ss][Tt][Nn][Aa][Mm][Ee]|\/[Hh][Oo][Ss][Tt][Nn][Aa][Mm][Ee][Cc][Tt][Ll]|\/[Ss][Ss]|\/[Nn][Ee][Tt][Ss][Tt][Aa][Tt]|\/[Ii][Ff][Cc][Oo][Nn][Ff][Ii][Gg]|\/[Aa][Rr][Pp]|\/[Ww]|\/[Ww][Hh][Oo]|\/[Ll][Aa][Ss][Tt]|\/[Ll][Ss][Oo][Ff]|\/[Nn][Mm][Aa][Pp]|\/[Dd][Ii][Gg]|\/[Ff][Ii][Nn][Dd])/'
-      pivot_on: [host]
-      window: 1h
+  # Behaviour-targeted hunts the engine runs around the alert (not a sweep).
+  - name: Protected credential, log or forensic file modified or deleted right after the unlock
+    query: ((data_process_exec_process_binary:/.*(\/[Ss][Ee][Dd]|\/[Tt][Ee][Ee]|\/[Vv][Ii]|\/[Vv][Ii][Mm]|\/[Nn][Aa][Nn][Oo]|\/[Dd][Dd]|\/[Tt][Rr][Uu][Nn][Cc][Aa][Tt][Ee]|\/[Rr][Mm]|\/[Ss][Hh][Rr][Ee][Dd]|\/[Uu][Nn][Ll][Ii][Nn][Kk])/) AND (data_process_exec_process_arguments:/.*(\/[Ee][Tt][Cc]\/[Pp][Aa][Ss][Ss][Ww][Dd]|\/[Ee][Tt][Cc]\/[Ss][Hh][Aa][Dd][Oo][Ww]|\/[Ee][Tt][Cc]\/[Gg][Ss][Hh][Aa][Dd][Oo][Ww]|\/[Ee][Tt][Cc]\/[Ss][Uu][Dd][Oo][Ee][Rr][Ss]|\/[Vv][Aa][Rr]\/[Ll][Oo][Gg]|[Bb][Aa][Ss][Hh]_[Hh][Ii][Ss][Tt][Oo][Rr][Yy]|[Ww][Tt][Mm][Pp]|[Bb][Tt][Mm][Pp]|[Ll][Aa][Ss][Tt][Ll][Oo][Gg])/))
+    pivot_on:
+    - host
+    window: 2h
+  - name: Immutable or append-only attribute re-applied via chattr +i/+a to lock attacker files
+    query: (data_process_exec_process_binary:/.*\/[Cc][Hh][Aa][Tt][Tt][Rr]/ AND data_process_exec_process_arguments:/.*\+[AaIi].*/)
+    pivot_on:
+    - host
+    window: 4h
+  - name: Other permission or ownership changes on sensitive paths (chmod/chown/chgrp/setfacl)
+    query: ((data_process_exec_process_binary:/.*(\/[Cc][Hh][Mm][Oo][Dd]|\/[Cc][Hh][Oo][Ww][Nn]|\/[Cc][Hh][Gg][Rr][Pp]|\/[Ss][Ee][Tt][Ff][Aa][Cc][Ll])/) AND (data_process_exec_process_arguments:/.*(\/[Ee][Tt][Cc]\/|\/[Bb][Ii][Nn]\/|\/[Ss][Bb][Ii][Nn]\/|\/[Uu][Ss][Rr]\/[Bb][Ii][Nn]\/|\/[Rr][Oo][Oo][Tt]\/|\/[Vv][Aa][Rr]\/[Ll][Oo][Gg])/))
+    pivot_on:
+    - host
+    window: 2h
+  - name: Privilege escalation to root preceding the unlock (sudo/su/pkexec/doas)
+    query: data_process_exec_process_binary:/.*(\/[Ss][Uu][Dd][Oo]|\/[Ss][Uu]|\/[Pp][Kk][Ee][Xx][Ee][Cc]|\/[Dd][Oo][Aa][Ss])/
+    pivot_on:
+    - host
+    window: 2h
+  - name: Persistence anchors written or enabled after the unlock (cron/systemd/authorized_keys/ld.so.preload)
+    query: ((data_process_exec_process_binary:/.*(\/[Cc][Rr][Oo][Nn][Tt][Aa][Bb]|\/[Ss][Yy][Ss][Tt][Ee][Mm][Cc][Tt][Ll])/) OR (data_process_exec_process_arguments:/.*(\/[Ee][Tt][Cc]\/[Cc][Rr][Oo][Nn]|\/[Ee][Tt][Cc]\/[Ss][Yy][Ss][Tt][Ee][Mm][Dd]\/|\/[Ll][Ii][Bb]\/[Ss][Yy][Ss][Tt][Ee][Mm][Dd]\/|[Aa][Uu][Tt][Hh][Oo][Rr][Ii][Zz][Ee][Dd]_[Kk][Ee][Yy][Ss]|\/[Ee][Tt][Cc]\/[Ll][Dd]\.[Ss][Oo]\.[Pp][Rr][Ee][Ll][Oo][Aa][Dd]|\/[Ee][Tt][Cc]\/[Rr][Cc]\.[Ll][Oo][Cc][Aa][Ll]|\/[Ee][Tt][Cc]\/[Ii][Nn][Ii][Tt]\.[Dd]\/|\/[Ee][Tt][Cc]\/[Pp][Rr][Oo][Ff][Ii][Ll][Ee]\.[Dd]\/)/))
+    pivot_on:
+    - host
+    window: 4h
