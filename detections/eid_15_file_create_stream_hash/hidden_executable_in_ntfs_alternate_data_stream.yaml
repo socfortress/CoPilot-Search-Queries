@@ -146,19 +146,58 @@ graylog:
   query: data_win_system_eventID:"15" AND data_win_eventdata_hash:/.*[Ii][Mm][Pp][Hh][Aa][Ss][Hh]=.*/ AND _exists_:data_win_eventdata_hash AND NOT (data_win_eventdata_hash:/.*[Ii][Mm][Pp][Hh][Aa][Ss][Hh]=00000000000000000000000000000000.*/)
 
 correlation:
-  # Authored by the correlation engine for review.
+  # Authored per-rule (behaviour-researched) for the correlation engine. Related CoPilot
+  # Searches + telemetry pivots to run around an alert, scoped to its host/user/ip/domain.
+  related_rules:
+  - id: windows-alternate-datastream-process-execution-001
+    name: Windows Alternate DataStream - Process Execution
+    reason: 'The direct follow-on: a LOLBin (wmic/forfiles/rundll32/regsvr32/mshta/cscript/wscript/bitsadmin) launching a file straight out of an ADS via the file.ext:stream colon syntax. This is the hidden PE this rule just saw staged actually being executed on the same host.'
+  - id: 7f43c430-5001-4f8b-aaa9-c3b88f18fa5c
+    name: Execute From Alternate Data Streams
+    reason: 'Watches the ADS staging/retrieval primitives (type > txt:stream, makecab/.cab, reg/regedit export, esentutl /y /d /o) that push a payload into or pull it back out of a txt: stream; the command-line counterpart to this FileCreateStreamHash event, showing how the executable was written and is being retrieved on the same host.'
+  - id: 45a594aa-1fbd-4972-a809-ff5a99dd81b8
+    name: Run PowerShell Script from ADS
+    reason: PowerShell-native execution-from-ADS via Get-Content -Stream. If the stashed stream holds a script stager rather than a bare PE, this is how it runs; a high-severity follow-on on the same host meaning the hidden stream is being read back and executed.
+  - id: 573df571-a223-43bc-846e-3f98da481eca
+    name: Creation Of a Suspicious ADS File Outside a Browser Download
+    reason: Same EventID 15 FileCreateStreamHash sensor catching dangerous-extension ADS files written by a non-browser process; corroborates that this host is actively being used to stash payloads in alternate streams beyond this one non-zero-Imphash hit.
+  - id: 0d7a9363-af70-4e7b-a3b7-1a176b7fbe84
+    name: Exports Registry Key To an Alternate Data Stream
+    reason: Same EventID 15 sensor, regedit hiding a registry key in an ADS. Shows the actor's ADS-hiding tradecraft on this host spans artifact types (PE and registry); this rule is listed reciprocally in its block as part of the same stealth-staging picture.
+  - id: a699b30e-d010-46c8-bbd1-ee2e26765fe9
+    name: Powershell Store File In Alternate Data Stream
+    reason: 'A write mechanism: Astaroth-style PowerShell storing a file into an ADS. A likely precursor explaining how the executable reached the stream this rule flagged, on the same host and user.'
+  - id: 4b13db67-0c45-40f1-aba8-66a1a7198a1e
+    name: Suspicious Extrac32 Alternate Data Stream Execution
+    reason: 'Precursor write primitive: the extrac32 LOLBin extracting a cab payload directly into an ADS, a documented way to plant the hidden executable this rule detects without a plain file ever touching disk visibly.'
+  - id: 6b369ced-4b1d-48f1-b427-fdc0de0790bd
+    name: Suspicious Diantz Alternate Data Stream Execution
+    reason: 'Precursor write primitive: the diantz LOLBin compressing a file into an ADS cab stream, the compress-into-stream counterpart to extrac32 for staging the concealed payload on the same host.'
+  window: 4h
   enrichment_searches:
-  # Rule-specific telemetry pivots the engine runs around an alert from this rule,
-  # scoped to the alert's host/user/IP within the window (behaviour-targeted, not a sweep).
-    - name: "Execution of programs from user-writable paths on this host"
-      query: 'data_win_system_eventID:"1" AND (data_win_eventdata_image:/.*\\[Uu][Ss][Ee][Rr][Ss]\\.*/ OR data_win_eventdata_image:/.*\\[Pp][Rr][Oo][Gg][Rr][Aa][Mm][Dd][Aa][Tt][Aa]\\.*/ OR data_win_eventdata_image:/.*\\[Ww][Ii][Nn][Dd][Oo][Ww][Ss]\\[Tt][Ee][Mm][Pp]\\.*/ OR data_win_eventdata_image:/.*\\[Aa][Pp][Pp][Dd][Aa][Tt][Aa]\\.*/ OR data_win_eventdata_image:/.*\\[Pp][Uu][Bb][Ll][Ii][Cc]\\.*/ OR data_win_eventdata_image:/.*\\\$[Rr][Ee][Cc][Yy][Cc][Ll][Ee].*/)'
-      pivot_on: [host]
-      window: 1h
-    - name: "Autostart persistence written on this host"
-      query: '(data_win_system_eventID:"12" OR data_win_system_eventID:"13") AND (data_win_eventdata_targetObject:/.*[Cc][Uu][Rr][Rr][Ee][Nn][Tt][Vv][Ee][Rr][Ss][Ii][Oo][Nn]\\[Rr][Uu][Nn].*/ OR data_win_eventdata_targetObject:/.*[Cc][Uu][Rr][Rr][Ee][Nn][Tt][Vv][Ee][Rr][Ss][Ii][Oo][Nn]\\[Rr][Uu][Nn][Oo][Nn][Cc][Ee].*/ OR data_win_eventdata_targetObject:/.*[Cc][Uu][Rr][Rr][Ee][Nn][Tt][Cc][Oo][Nn][Tt][Rr][Oo][Ll][Ss][Ee][Tt]\\[Ss][Ee][Rr][Vv][Ii][Cc][Ee][Ss]\\.*/ OR data_win_eventdata_targetObject:/.*[Ii][Mm][Aa][Gg][Ee] [Ff][Ii][Ll][Ee] [Ee][Xx][Ee][Cc][Uu][Tt][Ii][Oo][Nn] [Oo][Pp][Tt][Ii][Oo][Nn][Ss]\\.*/ OR data_win_eventdata_targetObject:/.*[Ww][Ii][Nn][Ll][Oo][Gg][Oo][Nn]\\[Ss][Hh][Ee][Ll][Ll].*/ OR data_win_eventdata_targetObject:/.*[Ww][Ii][Nn][Ll][Oo][Gg][Oo][Nn]\\[Uu][Ss][Ee][Rr][Ii][Nn][Ii][Tt].*/ OR data_win_eventdata_targetObject:/.*[Cc][Uu][Rr][Rr][Ee][Nn][Tt][Vv][Ee][Rr][Ss][Ii][Oo][Nn]\\[Ee][Xx][Pp][Ll][Oo][Rr][Ee][Rr]\\[Rr][Uu][Nn].*/ OR data_win_eventdata_targetObject:/.*[Pp][Oo][Ll][Ii][Cc][Ii][Ee][Ss]\\[Ee][Xx][Pp][Ll][Oo][Rr][Ee][Rr]\\[Rr][Uu][Nn].*/ OR data_win_eventdata_targetObject:/.*[Cc][Uu][Rr][Rr][Ee][Nn][Tt][Vv][Ee][Rr][Ss][Ii][Oo][Nn]\\[Ww][Ii][Nn][Dd][Oo][Ww][Ss]\\[Ll][Oo][Aa][Dd].*/)'
-      pivot_on: [host]
-      window: 2h
-    - name: "Memory/credential-dump creation & LSASS access on this host"
-      query: '((data_win_system_eventID:"1" AND data_win_eventdata_image:/.*(\\[Pp][Rr][Oo][Cc][Dd][Uu][Mm][Pp]\.[Ee][Xx][Ee]|\\[Pp][Rr][Oo][Cc][Dd][Uu][Mm][Pp]64\.[Ee][Xx][Ee]|\\[Ss][Qq][Ll][Dd][Uu][Mm][Pp][Ee][Rr]\.[Ee][Xx][Ee]|\\[Cc][Rr][Ee][Aa][Tt][Ee][Dd][Uu][Mm][Pp]\.[Ee][Xx][Ee]|\\[Rr][Dd][Rr][Ll][Ee][Aa][Kk][Dd][Ii][Aa][Gg]\.[Ee][Xx][Ee]|\\[Dd][Uu][Mm][Pp][Ee][Rr][Tt]\.[Ee][Xx][Ee]|\\[Nn][Aa][Nn][Oo][Dd][Uu][Mm][Pp]\.[Ee][Xx][Ee]|\\[Aa][Vv][Dd][Uu][Mm][Pp]\.[Ee][Xx][Ee])/) OR (data_win_system_eventID:"1" AND (data_win_eventdata_commandLine:/.*[Cc][Oo][Mm][Ss][Vv][Cc][Ss]\.[Dd][Ll][Ll].*/ OR data_win_eventdata_commandLine:/.*[Mm][Ii][Nn][Ii][Dd][Uu][Mm][Pp].*/ OR data_win_eventdata_commandLine:/.*[Dd][Uu][Mm][Pp][Ee][Rr][Tt].*/ OR data_win_eventdata_commandLine:/.*[Nn][Aa][Nn][Oo][Dd][Uu][Mm][Pp].*/ OR data_win_eventdata_commandLine:/.*[Ll][Ss][Aa][Ss][Ss].*/ OR data_win_eventdata_commandLine:/.*[Ss][Ee][Kk][Uu][Rr][Ll][Ss][Aa].*/ OR data_win_eventdata_commandLine:/.*[Nn][Tt][Dd][Ss]\.[Dd][Ii][Tt].*/ OR data_win_eventdata_commandLine:/.*[Nn][Tt][Dd][Ss][Uu][Tt][Ii][Ll].*/)) OR (data_win_system_eventID:"10" AND data_win_eventdata_targetImage:/.*(\\[Ll][Ss][Aa][Ss][Ss]\.[Ee][Xx][Ee])/))'
-      pivot_on: [host]
-      window: 1h
+  # Behaviour-targeted hunts the engine runs around the alert (not a sweep).
+  - name: Process image launched directly from an alternate data stream on this host
+    query: data_win_system_eventID:"1" AND data_win_eventdata_image:/.*\..*:[^ \\].*/
+    pivot_on:
+    - host
+    window: 4h
+  - name: ADS-capable LOLBin invoking a stream payload on this host
+    query: data_win_system_eventID:"1" AND (data_win_eventdata_image:/.*\\[Ww][Mm][Ii][Cc]\.[Ee][Xx][Ee]/ OR data_win_eventdata_image:/.*\\[Ff][Oo][Rr][Ff][Ii][Ll][Ee][Ss]\.[Ee][Xx][Ee]/ OR data_win_eventdata_image:/.*\\[Rr][Uu][Nn][Dd][Ll][Ll]32\.[Ee][Xx][Ee]/ OR data_win_eventdata_image:/.*\\[Rr][Ee][Gg][Ss][Vv][Rr]32\.[Ee][Xx][Ee]/ OR data_win_eventdata_image:/.*\\[Mm][Ss][Hh][Tt][Aa]\.[Ee][Xx][Ee]/ OR data_win_eventdata_image:/.*\\[Cc][Oo][Nn][Tt][Rr][Oo][Ll]\.[Ee][Xx][Ee]/ OR data_win_eventdata_image:/.*\\[Cc][Ss][Cc][Rr][Ii][Pp][Tt]\.[Ee][Xx][Ee]/ OR data_win_eventdata_image:/.*\\[Ww][Ss][Cc][Rr][Ii][Pp][Tt]\.[Ee][Xx][Ee]/) AND data_win_eventdata_commandLine:/.*\..*:[^ \\].*/
+    pivot_on:
+    - host
+    window: 4h
+  - name: ADS staging / payload movement primitives on this host
+    query: data_win_system_eventID:"1" AND ((data_win_eventdata_commandLine:/.*\..*:[^ \\].*/ AND (data_win_eventdata_commandLine:/.*[Mm][Aa][Kk][Ee][Cc][Aa][Bb].*/ OR data_win_eventdata_commandLine:/.*[Dd][Ii][Aa][Nn][Tt][Zz].*/ OR data_win_eventdata_commandLine:/.*[Ee][Xx][Tt][Rr][Aa][Cc]32.*/ OR data_win_eventdata_commandLine:/.*[Ee][Ss][Ee][Nn][Tt][Uu][Tt][Ll].*/ OR data_win_eventdata_commandLine:/.*[Tt][Yy][Pp][Ee] .*/)) OR (data_win_eventdata_commandLine:/.*-[Ss][Tt][Rr][Ee][Aa][Mm].*/ AND (data_win_eventdata_commandLine:/.*[Ss][Ee][Tt]-[Cc][Oo][Nn][Tt][Ee][Nn][Tt].*/ OR data_win_eventdata_commandLine:/.*[Aa][Dd][Dd]-[Cc][Oo][Nn][Tt][Ee][Nn][Tt].*/ OR data_win_eventdata_commandLine:/.*[Gg][Ee][Tt]-[Cc][Oo][Nn][Tt][Ee][Nn][Tt].*/)))
+    pivot_on:
+    - host
+    window: 2h
+  - name: Other non-Mark-of-the-Web alternate data streams created on this host
+    query: data_win_system_eventID:"15" AND data_win_eventdata_targetFilename:/.*:[^ \\].*/ AND NOT (data_win_eventdata_targetFilename:/.*:[Zz][Oo][Nn][Ee]\.[Ii][Dd][Ee][Nn][Tt][Ii][Ff][Ii][Ee][Rr]/)
+    pivot_on:
+    - host
+    window: 4h
+  - name: Autostart persistence value pointing at an alternate data stream on this host
+    query: data_win_system_eventID:"13" AND (data_win_eventdata_targetObject:/.*[Cc][Uu][Rr][Rr][Ee][Nn][Tt][Vv][Ee][Rr][Ss][Ii][Oo][Nn]\\[Rr][Uu][Nn].*/ OR data_win_eventdata_targetObject:/.*[Cc][Uu][Rr][Rr][Ee][Nn][Tt][Cc][Oo][Nn][Tt][Rr][Oo][Ll][Ss][Ee][Tt]\\[Ss][Ee][Rr][Vv][Ii][Cc][Ee][Ss]\\.*/ OR data_win_eventdata_targetObject:/.*[Ww][Ii][Nn][Ll][Oo][Gg][Oo][Nn]\\[Ss][Hh][Ee][Ll][Ll].*/) AND data_win_eventdata_details:/.*\..*:[^ \\].*/
+    pivot_on:
+    - host
+    window: 4h

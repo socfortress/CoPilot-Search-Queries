@@ -129,55 +129,55 @@ correlation:
   # Authored per-rule (behaviour-researched) for the correlation engine. Related CoPilot
   # Searches + telemetry pivots to run around an alert, scoped to its host/user/ip/domain.
   related_rules:
-  - id: lnx-doas-001
-    name: Linux doas Execution Detection
-    reason: 'Cross-sensor corroboration of the same doas elevation: this catches it via auditd/syslog full_log while the alerting rule sees it in Tetragon process-exec. Both firing on the host in-window confirm a real doas invocation rather than a single-sensor artifact.'
-  - id: linux-sudo-or-su-execution-001
-    name: Linux Sudo Or Su Execution
-    reason: sudo and su are the dominant elevation helpers; doas is the uncommon alternative. An actor reaching for doas on a host typically also tries sudo/su, so co-occurrence in the window maps the full set of elevation attempts in one session.
-  - id: linux-pkexec-privilege-escalation-001
-    name: Linux pkexec Privilege Escalation
-    reason: pkexec (PwnKit, CVE-2021-4034) is the third SUID elevation helper. doas and pkexec firing together on one host signal an operator probing every available local-privilege-escalation path, not routine administration.
-  - id: 0f79c4d2-4e1f-4683-9c36-b5469a665e06
-    name: Access of Sudoers File Content
-    reason: 'Precursor reconnaissance: reading /etc/sudoers to learn which elevation is permitted is what drives the choice of doas over sudo. Same Tetragon telemetry, so it co-occurs on the host just before the doas attempt.'
   - id: f74107df-b6c6-4e80-bf00-4170b658162b
     name: Sudo Privilege Escalation CVE-2019-14287
-    reason: 'Co-occurring exploitation: an active sudo -u#-1 bypass alongside doas use marks a deliberate root-escalation effort, with the operator trying both the sudo CVE and the doas path on the same host in the same window.'
-  - id: 6a50f16c-3b7b-42d1-b081-0fdd3ba70a73
-    name: User Added To Root/Sudoers Group Using Usermod
-    reason: 'Prime follow-on persistence: once elevated via doas, usermod -aG root/sudoers makes the privilege durable. This escalation-to-persistence pivot is what turns a single doas event into an incident.'
+    reason: 'Sibling escalation binary: doas is the OpenBSD drop-in for sudo, so an operator hunting a root path on this host routinely tries both. A sudo ''-u#-1'' exploit attempt in the same window as this doas invocation points to one deliberate escalation effort across every available setuid helper, not an isolated event (that rule''s own block reciprocally cites this doas detection).'
+  - id: 86157017-c2b1-4d4a-8c33-93b8e67e4af4
+    name: Potential Suspicious Change To Sensitive/Critical Files
+    reason: 'Precursor and payoff: this rule flags editor/redirect writes to /etc/*.conf (which includes /etc/doas.conf) and /etc/sudoers. Planting a ''permit nopass'' line in doas.conf is exactly how an attacker grants the passwordless root that the doas invocation then uses; the same rule also catches post-root tampering with /bin/passwd and /bin/login, so a hit just before or after confirms the escalation was configured, not inherited.'
+  - id: 34979410-e4b5-4e5d-8cfb-389fdff05c12
+    name: Remove Immutable File Attribute
+    reason: 'Enabling precursor: hardened hosts protect /etc/doas.conf (and /etc/sudoers) with chattr +i, so an attacker runs ''chattr -i'' to unlock the file before writing a permissive doas rule. A chattr -i on this host shortly before the doas use is the step that made a malicious doas.conf edit possible.'
+  - id: 0cf7a157-8879-41a2-8f55-388dd23746b7
+    name: Linux Recon Indicators
+    reason: 'Precursor recon: ''find / -perm -4000'' SUID hunting enumerates the local privilege-escalation paths an operator weighs before choosing doas. Seeing it just before the doas invocation shows the escalation came from deliberate privesc-vector discovery, not a routine admin command.'
+  - id: a015e032-146d-4717-8944-7a1884122111
+    name: Linux HackTool Execution
+    reason: 'Precursor / co-occurring tooling: linpeas and pspy are precisely what flag a usable doas rule, and offensive agents (metasploit, havoc, merlin, crackmapexec) stage the surrounding activity. Their execution on this host corroborates a hands-on attacker toolkit behind the doas use rather than a trusted admin.'
   - id: fa4aaed5-4fe0-498d-bbc0-08e3346387ba
     name: Copy Passwd Or Shadow From TMP Path
-    reason: 'Follow-on credential access: copying /etc/shadow or /etc/passwd requires the root that doas just granted. Harvesting password hashes is the usual objective immediately after a successful local privilege escalation.'
-  - id: 6b14bac8-3e3a-4324-8109-42f0546a347f
-    name: Scheduled Cron Task/Job - Linux
-    reason: 'Follow-on persistence: writing a root crontab is a frequent immediate abuse of freshly gained elevation, establishing durable code execution on the same host right after the doas escalation.'
-  window: 1h
+    reason: 'Follow-on credential access: reading and copying /etc/shadow is root-only and the classic first action after escalation. A ''cp'' of passwd/shadow into /tmp right after this doas invocation confirms doas reached uid 0 and is being used to harvest password hashes.'
+  - id: 6a50f16c-3b7b-42d1-b081-0fdd3ba70a73
+    name: User Added To Root/Sudoers Group Using Usermod
+    reason: 'Follow-on persistence: having gained root through doas, ''usermod -aG root/sudoers'' makes the privilege durable so the operator never has to re-run doas. It cements exactly the access this alert represents and commonly fires minutes after it.'
+  - id: e3a8a052-111f-4606-9aee-f28ebeb76776
+    name: Disabling Security Tools
+    reason: 'Follow-on defense evasion: root obtained via doas lets the operator stop or disable firewalld, falcon-sensor, Carbon Black or SELinux. If it fires after the doas invocation, the escalation is being used to blind the very telemetry that caught it, sharply raising incident confidence.'
+  window: 2h
   enrichment_searches:
   # Behaviour-targeted hunts the engine runs around the alert (not a sweep).
-  - name: Child processes spawned by doas (the actually-elevated command)
+  - name: doas configuration file (/etc/doas.conf, /etc/doas.d) created, read or modified on this host
+    query: (data_process_exec_process_arguments:/.*\/[Dd][Oo][Aa][Ss]\.[Cc][Oo][Nn][Ff].*/ OR data_process_exec_process_arguments:/.*\/[Dd][Oo][Aa][Ss]\.[Dd]\/.*/)
+    pivot_on:
+    - host
+    window: 2h
+  - name: Other privilege-escalation binaries (sudo/su/pkexec/setcap/newgrp/gpasswd) on this host
+    query: data_process_exec_process_binary:/.*(\/[Ss][Uu]|\/[Ss][Uu][Dd][Oo]|\/[Pp][Kk][Ee][Xx][Ee][Cc]|\/[Dd][Oo][Aa][Ss]|\/[Ss][Ee][Tt][Cc][Aa][Pp]|\/[Nn][Ee][Ww][Gg][Rr][Pp]|\/[Gg][Pp][Aa][Ss][Ss][Ww][Dd])/
+    pivot_on:
+    - host
+    window: 2h
+  - name: Credential store access (shadow/gshadow/SSH keys) after escalation on this host
+    query: ((data_process_exec_process_arguments:/.*\/[Ee][Tt][Cc]\/[Ss][Hh][Aa][Dd][Oo][Ww].*/) OR (data_process_exec_process_arguments:/.*\/[Ee][Tt][Cc]\/[Gg][Ss][Hh][Aa][Dd][Oo][Ww].*/) OR (data_process_exec_process_arguments:/.*[Ii][Dd]_[Rr][Ss][Aa].*/) OR (data_process_exec_process_arguments:/.*[Aa][Uu][Tt][Hh][Oo][Rr][Ii][Zz][Ee][Dd]_[Kk][Ee][Yy][Ss].*/) OR (data_process_exec_process_arguments:/.*\/\.[Ss][Ss][Hh]\/.*/))
+    pivot_on:
+    - host
+    window: 1h
+  - name: Commands executed as a child of doas on this host (what ran as root)
     query: data_process_exec_parent_binary:/.*\/[Dd][Oo][Aa][Ss]/
     pivot_on:
     - host
     window: 1h
-  - name: doas config (/etc/doas.conf) read or modified on this host
-    query: data_process_exec_process_arguments:/.*\/[Ee][Tt][Cc]\/[Dd][Oo][Aa][Ss]\.[Cc][Oo][Nn][Ff].*/
-    pivot_on:
-    - host
-    window: 2h
-  - name: Other privilege-elevation helpers executed on this host
-    query: (data_process_exec_process_binary:/.*\/[Ss][Uu][Dd][Oo]/ OR data_process_exec_process_binary:/.*\/[Ss][Uu]/ OR data_process_exec_process_binary:/.*\/[Pp][Kk][Ee][Xx][Ee][Cc]/ OR data_process_exec_process_binary:/.*\/[Pp][Kk][Tt][Tt][Yy][Aa][Gg][Ee][Nn][Tt]/)
-    pivot_on:
-    - host
-    window: 2h
-  - name: Credential-store access on this host (what the elevation enabled)
-    query: data_process_exec_process_arguments:/.*(\/[Ee][Tt][Cc]\/[Ss][Hh][Aa][Dd][Oo][Ww]|\/[Ee][Tt][Cc]\/[Gg][Ss][Hh][Aa][Dd][Oo][Ww]|\/[Ee][Tt][Cc]\/[Ss][Uu][Dd][Oo][Ee][Rr][Ss]|\/\.[Ss][Ss][Hh]\/[Ii][Dd]_[Rr][Ss][Aa]).*/
-    pivot_on:
-    - host
-    window: 1h
-  - name: Privileged persistence and account changes on this host
-    query: (data_process_exec_process_binary:/.*\/[Uu][Ss][Ee][Rr][Aa][Dd][Dd]/ OR data_process_exec_process_binary:/.*\/[Uu][Ss][Ee][Rr][Mm][Oo][Dd]/ OR data_process_exec_process_binary:/.*\/[Gg][Rr][Oo][Uu][Pp][Aa][Dd][Dd]/ OR data_process_exec_process_binary:/.*\/[Pp][Aa][Ss][Ss][Ww][Dd]/ OR data_process_exec_process_binary:/.*\/[Cc][Rr][Oo][Nn][Tt][Aa][Bb]/ OR data_process_exec_process_binary:/.*\/[Vv][Ii][Ss][Uu][Dd][Oo]/)
+  - name: Account and persistence changes after escalation (usermod/useradd/passwd/visudo/crontab/systemctl, authorized_keys, sudoers, cron) on this host
+    query: ((data_process_exec_process_binary:/.*(\/[Uu][Ss][Ee][Rr][Mm][Oo][Dd]|\/[Uu][Ss][Ee][Rr][Aa][Dd][Dd]|\/[Aa][Dd][Dd][Uu][Ss][Ee][Rr]|\/[Pp][Aa][Ss][Ss][Ww][Dd]|\/[Cc][Hh][Pp][Aa][Ss][Ss][Ww][Dd]|\/[Vv][Ii][Ss][Uu][Dd][Oo]|\/[Cc][Rr][Oo][Nn][Tt][Aa][Bb]|\/[Ss][Yy][Ss][Tt][Ee][Mm][Cc][Tt][Ll])/) OR (data_process_exec_process_arguments:/.*[Aa][Uu][Tt][Hh][Oo][Rr][Ii][Zz][Ee][Dd]_[Kk][Ee][Yy][Ss].*/) OR (data_process_exec_process_arguments:/.*\/[Ee][Tt][Cc]\/[Ss][Uu][Dd][Oo][Ee][Rr][Ss].*/) OR (data_process_exec_process_arguments:/.*\/[Ee][Tt][Cc]\/[Cc][Rr][Oo][Nn].*/))
     pivot_on:
     - host
     window: 2h
