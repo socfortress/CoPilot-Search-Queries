@@ -140,40 +140,55 @@ graylog:
   query: data_win_system_eventID:"10" AND data_win_eventdata_callTrace:/.*[Cc][Mm][Ll][Uu][Aa]\.[Dd][Ll][Ll].*/
 
 correlation:
-  # Authored by the correlation engine for review. Related CoPilot Searches to run
-  # around an alert from this rule, scoped to the same host/user/IP within the window.
+  # Authored per-rule (behaviour-researched) for the correlation engine. Related CoPilot
+  # Searches + telemetry pivots to run around an alert, scoped to its host/user/ip/domain.
   related_rules:
-    - id: ec570e53-4c76-45a9-804d-dc3f355ff7a7
-      name: "7Zip Compressing Dump Files"
-      reason: "next kill-chain tactic: Collection"
-    - id: 0a1255c5-d732-4b62-ac02-b5152d34fb83
-      name: "ADExplorer Writing Complete AD Snapshot Into .dat File"
-      reason: "next kill-chain tactic: Discovery"
-    - id: 1ea13e8c-03ea-409b-877d-ce5c3d2c1cb3
-      name: "ADFS Database Named Pipe Connection By Uncommon Tool"
-      reason: "next kill-chain tactic: Collection"
-    - id: 75bf09fa-1dd7-4d18-9af9-dd9e492562eb
-      name: "ADSI-Cache File Creation By Uncommon Tool"
-      reason: "next kill-chain tactic: Command and Control"
-    - id: 33a2d1dd-f3b0-40bd-8baf-7974468927cc
-      name: "APT PRIVATELOG Image Load Pattern"
-      reason: "next kill-chain tactic: Privilege Escalation"
-    - id: 9aa01d62-7667-4d3b-acb8-8cb5103e2014
-      name: "APT27 - Emissary Panda Activity"
-      reason: "next kill-chain tactic: Execution"
-  window: 1h
+  - id: 4b60e6f2-bf39-47b4-b4ea-398e33cfe253
+    name: CMSTP UAC Bypass via COM Object Access
+    reason: 'The same CMSTPLUA auto-elevation seen from process creation: dllhost.exe spawning a High/System-integrity child under CLSID {3E5FC7F9-9A51-4367-9063-A120244FBEC7}, whose COM server is the exact cmlua.dll in this alert''s callTrace. If it also fires, the bypass succeeded and names the elevated payload.'
+  - id: 49f2f17b-b4c8-4172-a68b-d5bf95d05130
+    name: UAC Bypass via ICMLuaUtil
+    reason: ICMLuaUtil is the elevated COM method exposed by cmlua.dll/CMSTPLUA that this process-access event reaches into; this catches the high-integrity child it launches via ShellExec on the same host.
+  - id: e66779cc-383e-4224-a3a4-267eeb585c40
+    name: Bypass UAC via CMSTP
+    reason: 'The INF-driven sibling of this elevation: cmstp.exe installing a crafted .INF with its silent/auto flags. cmstp.exe also loads cmlua.dll, so this and the COM-object path are the two triggers that produce the cmlua.dll callTrace.'
+  - id: 7d4cdc5a-0076-40ca-aac8-f7e714570e47
+    name: CMSTP Execution Process Creation
+    reason: Catches children spawned by cmstp.exe itself, confirming the binary ran (rather than a standalone COM object) and revealing what code it executed at elevation.
+  - id: b6d235fc-1d38-4b12-adbe-325f06728f37
+    name: CMSTP Execution Registry Event
+    reason: The cmmgr32.exe registry footprint CMSTP writes while loading a connection profile/.INF; a co-occurring artifact that confirms genuine CMSTP activity rather than an unrelated cmlua.dll load.
+  - id: e7888eb1-13b0-4616-bd99-4bc0c2b054b9
+    name: Dllhost.EXE Execution Anomaly
+    reason: dllhost.exe is the COM surrogate that hosts the auto-elevating CMSTPLUA object; an anomalous dllhost.exe on this host is the vehicle through which the ICMLuaUtil elevation in this alert was staged.
+  - id: a18dd26b-6450-46de-8c91-9659150cf088
+    name: Potentially Suspicious GrantedAccess Flags On LSASS
+    reason: 'Immediate post-elevation objective: with the local-admin token this CMSTPLUA bypass just granted, the actor opens LSASS with dump access rights for credential theft - the same EID 10 process-access telemetry as this alert.'
+  window: 2h
   enrichment_searches:
-  # Rule-specific telemetry pivots the engine runs around an alert from this rule,
-  # scoped to the alert's host/user/IP within the window (behaviour-targeted, not a sweep).
-    - name: "Follow-on LOLBin / signed-binary-proxy execution on this host"
-      query: 'data_win_system_eventID:"1" AND data_win_eventdata_image:/.*(\\[Rr][Uu][Nn][Dd][Ll][Ll]32\.[Ee][Xx][Ee]|\\[Rr][Ee][Gg][Ss][Vv][Rr]32\.[Ee][Xx][Ee]|\\[Mm][Ss][Hh][Tt][Aa]\.[Ee][Xx][Ee]|\\[Ii][Nn][Ss][Tt][Aa][Ll][Ll][Uu][Tt][Ii][Ll]\.[Ee][Xx][Ee]|\\[Rr][Ee][Gg][Aa][Ss][Mm]\.[Ee][Xx][Ee]|\\[Rr][Ee][Gg][Ss][Vv][Cc][Ss]\.[Ee][Xx][Ee]|\\[Mm][Ss][Bb][Uu][Ii][Ll][Dd]\.[Ee][Xx][Ee]|\\[Cc][Ee][Rr][Tt][Uu][Tt][Ii][Ll]\.[Ee][Xx][Ee]|\\[Bb][Ii][Tt][Ss][Aa][Dd][Mm][Ii][Nn]\.[Ee][Xx][Ee]|\\[Ww][Mm][Ii][Cc]\.[Ee][Xx][Ee]|\\[Cc][Mm][Ss][Tt][Pp]\.[Ee][Xx][Ee]|\\[Oo][Dd][Bb][Cc][Cc][Oo][Nn][Ff]\.[Ee][Xx][Ee]|\\[Ff][Oo][Rr][Ff][Ii][Ll][Ee][Ss]\.[Ee][Xx][Ee]|\\[Pp][Cc][Aa][Ll][Uu][Aa]\.[Ee][Xx][Ee]|\\[Mm][Aa][Vv][Ii][Nn][Jj][Ee][Cc][Tt]\.[Ee][Xx][Ee]|\\[Ss][Cc][Rr][Ii][Pp][Tt][Rr][Uu][Nn][Nn][Ee][Rr]\.[Ee][Xx][Ee])/'
-      pivot_on: [host]
-      window: 1h
-    - name: "Autostart persistence written on this host (Run keys, services, IFEO)"
-      query: '(data_win_system_eventID:"12" OR data_win_system_eventID:"13") AND (data_win_eventdata_targetObject:/.*[Cc][Uu][Rr][Rr][Ee][Nn][Tt][Vv][Ee][Rr][Ss][Ii][Oo][Nn]\\[Rr][Uu][Nn].*/ OR data_win_eventdata_targetObject:/.*[Cc][Uu][Rr][Rr][Ee][Nn][Tt][Vv][Ee][Rr][Ss][Ii][Oo][Nn]\\[Rr][Uu][Nn][Oo][Nn][Cc][Ee].*/ OR data_win_eventdata_targetObject:/.*[Cc][Uu][Rr][Rr][Ee][Nn][Tt][Cc][Oo][Nn][Tt][Rr][Oo][Ll][Ss][Ee][Tt]\\[Ss][Ee][Rr][Vv][Ii][Cc][Ee][Ss]\\.*/ OR data_win_eventdata_targetObject:/.*[Ii][Mm][Aa][Gg][Ee] [Ff][Ii][Ll][Ee] [Ee][Xx][Ee][Cc][Uu][Tt][Ii][Oo][Nn] [Oo][Pp][Tt][Ii][Oo][Nn][Ss]\\.*/ OR data_win_eventdata_targetObject:/.*[Ww][Ii][Nn][Ll][Oo][Gg][Oo][Nn]\\[Ss][Hh][Ee][Ll][Ll].*/ OR data_win_eventdata_targetObject:/.*[Ww][Ii][Nn][Ll][Oo][Gg][Oo][Nn]\\[Uu][Ss][Ee][Rr][Ii][Nn][Ii][Tt].*/ OR data_win_eventdata_targetObject:/.*[Cc][Uu][Rr][Rr][Ee][Nn][Tt][Vv][Ee][Rr][Ss][Ii][Oo][Nn]\\[Ee][Xx][Pp][Ll][Oo][Rr][Ee][Rr]\\[Rr][Uu][Nn].*/ OR data_win_eventdata_targetObject:/.*[Pp][Oo][Ll][Ii][Cc][Ii][Ee][Ss]\\[Ee][Xx][Pp][Ll][Oo][Rr][Ee][Rr]\\[Rr][Uu][Nn].*/ OR data_win_eventdata_targetObject:/.*[Cc][Uu][Rr][Rr][Ee][Nn][Tt][Vv][Ee][Rr][Ss][Ii][Oo][Nn]\\[Ww][Ii][Nn][Dd][Oo][Ww][Ss]\\[Ll][Oo][Aa][Dd].*/)'
-      pivot_on: [host]
-      window: 4h
-    - name: "Process injection / remote-thread & LSASS access on this host"
-      query: '((data_win_system_eventID:"8") OR (data_win_system_eventID:"10" AND data_win_eventdata_targetImage:/.*(\\[Ll][Ss][Aa][Ss][Ss]\.[Ee][Xx][Ee])/) OR (data_win_system_eventID:"1" AND (data_win_eventdata_commandLine:/.*[Cc][Rr][Ee][Aa][Tt][Ee][Rr][Ee][Mm][Oo][Tt][Ee][Tt][Hh][Rr][Ee][Aa][Dd].*/ OR data_win_eventdata_commandLine:/.*[Vv][Ii][Rr][Tt][Uu][Aa][Ll][Aa][Ll][Ll][Oo][Cc][Ee][Xx].*/ OR data_win_eventdata_commandLine:/.*[Ww][Rr][Ii][Tt][Ee][Pp][Rr][Oo][Cc][Ee][Ss][Ss][Mm][Ee][Mm][Oo][Rr][Yy].*/)))'
-      pivot_on: [host]
-      window: 1h
+  # Behaviour-targeted hunts the engine runs around the alert (not a sweep).
+  - name: CMSTPLUA COM surrogate elevation - the child spawned under the auto-elevating CLSID
+    query: data_win_system_eventID:"1" AND data_win_eventdata_parentImage:/.*\\[Dd][Ll][Ll][Hh][Oo][Ss][Tt]\.[Ee][Xx][Ee]/ AND (data_win_eventdata_parentCommandLine:/.*\{3[Ee]5[Ff][Cc]7[Ff]9-9[Aa]51-4367-9063-[Aa]120244[Ff][Bb][Ee][Cc]7\}.*/ OR data_win_eventdata_parentCommandLine:/.*\{[Dd]2[Ee]7041[Bb]-2927-42[Ff][Bb]-8[Ee]9[Ff]-7[Cc][Ee]93[Bb]6[Dd][Cc]937\}.*/)
+    pivot_on:
+    - host
+    window: 1h
+  - name: Malicious .INF payload dropped in a user-writable path (CMSTP consumes it)
+    query: data_win_system_eventID:"11" AND data_win_eventdata_targetFilename:/.*\.[Ii][Nn][Ff]/ AND data_win_eventdata_targetFilename:/.*\\([Tt][Ee][Mm][Pp]|[Aa][Pp][Pp][Dd][Aa][Tt][Aa]|[Pp][Uu][Bb][Ll][Ii][Cc]|[Pp][Rr][Oo][Gg][Rr][Aa][Mm][Dd][Aa][Tt][Aa]|[Dd][Oo][Ww][Nn][Ll][Oo][Aa][Dd][Ss])\\.*/
+    pivot_on:
+    - host
+    window: 2h
+  - name: High-integrity interpreter / LOLBin launched by the bypass
+    query: data_win_system_eventID:"1" AND (data_win_eventdata_integrityLevel:/[Hh][Ii][Gg][Hh]/ OR data_win_eventdata_integrityLevel:/[Ss][Yy][Ss][Tt][Ee][Mm]/) AND data_win_eventdata_image:/.*\\([Pp][Oo][Ww][Ee][Rr][Ss][Hh][Ee][Ll][Ll]|[Cc][Mm][Dd]|[Ww][Ss][Cc][Rr][Ii][Pp][Tt]|[Cc][Ss][Cc][Rr][Ii][Pp][Tt]|[Mm][Ss][Hh][Tt][Aa]|[Rr][Uu][Nn][Dd][Ll][Ll]32|[Rr][Ee][Gg][Ss][Vv][Rr]32)\.[Ee][Xx][Ee]/
+    pivot_on:
+    - host
+    window: 1h
+  - name: Microsoft Defender disabled / tampered after elevation
+    query: (data_win_system_eventID:"13" AND (data_win_eventdata_targetObject:/.*[Dd][Ii][Ss][Aa][Bb][Ll][Ee][Rr][Ee][Aa][Ll][Tt][Ii][Mm][Ee][Mm][Oo][Nn][Ii][Tt][Oo][Rr][Ii][Nn][Gg]/ OR data_win_eventdata_targetObject:/.*[Dd][Ii][Ss][Aa][Bb][Ll][Ee][Aa][Nn][Tt][Ii][Ss][Pp][Yy][Ww][Aa][Rr][Ee]/ OR data_win_eventdata_targetObject:/.*[Tt][Aa][Mm][Pp][Ee][Rr][Pp][Rr][Oo][Tt][Ee][Cc][Tt][Ii][Oo][Nn]/)) OR (data_win_system_eventID:"1" AND (data_win_eventdata_commandLine:/.*[Ss][Ee][Tt]-[Mm][Pp][Pp][Rr][Ee][Ff][Ee][Rr][Ee][Nn][Cc][Ee].*/ OR data_win_eventdata_commandLine:/.*[Dd][Ii][Ss][Aa][Bb][Ll][Ee][Rr][Ee][Aa][Ll][Tt][Ii][Mm][Ee][Mm][Oo][Nn][Ii][Tt][Oo][Rr][Ii][Nn][Gg].*/ OR data_win_eventdata_commandLine:/.*[Ss][Tt][Oo][Pp].*[Ww][Ii][Nn][Dd][Ee][Ff][Ee][Nn][Dd].*/))
+    pivot_on:
+    - host
+    window: 4h
+  - name: Admin-level persistence created after elevation (service / scheduled task)
+    query: data_win_system_eventID:"1" AND ((data_win_eventdata_image:/.*\\[Ss][Cc]\.[Ee][Xx][Ee]/ AND data_win_eventdata_commandLine:/.*[Cc][Rr][Ee][Aa][Tt][Ee].*/) OR (data_win_eventdata_image:/.*\\[Ss][Cc][Hh][Tt][Aa][Ss][Kk][Ss]\.[Ee][Xx][Ee]/ AND data_win_eventdata_commandLine:/.*\/[Cc][Rr][Ee][Aa][Tt][Ee].*/) OR data_win_eventdata_commandLine:/.*[Nn][Ee][Ww]-[Ss][Ee][Rr][Vv][Ii][Cc][Ee].*/ OR data_win_eventdata_commandLine:/.*[Nn][Ee][Ww]-[Ss][Cc][Hh][Ee][Dd][Uu][Ll][Ee][Dd][Tt][Aa][Ss][Kk].*/)
+    pivot_on:
+    - host
+    window: 4h

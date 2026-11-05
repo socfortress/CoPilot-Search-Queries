@@ -154,44 +154,58 @@ graylog:
   query: data_win_system_eventID:"10" AND data_win_eventdata_targetImage:/.*\\[Ll][Ss][Aa][Ss][Ss]\.[Ee][Xx][Ee]/ AND data_win_eventdata_grantedAccess:/0[Xx]1440/ AND data_win_eventdata_callTrace:/[Cc]:\\[Ww][Ii][Nn][Dd][Oo][Ww][Ss]\\[Ss][Yy][Ss][Tt][Ee][Mm]32\\[Nn][Tt][Dd][Ll][Ll]\.[Dd][Ll][Ll]\+.*/ AND data_win_eventdata_callTrace:/.*\|[Uu][Nn][Kk][Nn][Oo][Ww][Nn]\(.*/ AND data_win_eventdata_callTrace:/.*\)/
 
 correlation:
-  # Authored by the correlation engine for review. Related CoPilot Searches to run
-  # around an alert from this rule, scoped to the same host/user/IP within the window.
+  # Authored per-rule (behaviour-researched) for the correlation engine. Related CoPilot
+  # Searches + telemetry pivots to run around an alert, scoped to its host/user/ip/domain.
   related_rules:
-    - id: ec570e53-4c76-45a9-804d-dc3f355ff7a7
-      name: "7Zip Compressing Dump Files"
-      reason: "next kill-chain tactic: Collection"
-    - id: 0a1255c5-d732-4b62-ac02-b5152d34fb83
-      name: "ADExplorer Writing Complete AD Snapshot Into .dat File"
-      reason: "next kill-chain tactic: Discovery"
-    - id: 1ea13e8c-03ea-409b-877d-ce5c3d2c1cb3
-      name: "ADFS Database Named Pipe Connection By Uncommon Tool"
-      reason: "next kill-chain tactic: Collection"
-    - id: 75bf09fa-1dd7-4d18-9af9-dd9e492562eb
-      name: "ADSI-Cache File Creation By Uncommon Tool"
-      reason: "next kill-chain tactic: Command and Control"
-    - id: 33a2d1dd-f3b0-40bd-8baf-7974468927cc
-      name: "APT PRIVATELOG Image Load Pattern"
-      reason: "next kill-chain tactic: Privilege Escalation"
-    - id: 9aa01d62-7667-4d3b-acb8-8cb5103e2014
-      name: "APT27 - Emissary Panda Activity"
-      reason: "next kill-chain tactic: Execution"
+  - id: ca621ba5-54ab-4035-9942-d378e6fcde3c
+    name: HackTool - HandleKatz LSASS Dumper Execution
+    reason: The exact same tool seen from the EID 1 process-creation side (the HandleKatz binary and its command line). This EID 10 alert is HandleKatz's stealth core - duplicating an existing LSASS handle (grantedAccess 0x1440 carries PROCESS_DUP_HANDLE) instead of opening a fresh one - so a matching HandleKatz process-creation event on the same host in-window is the highest-confidence confirmation the hacktool genuinely ran.
+  - id: d474c8fe-bb69-4ea0-b7d9-f682b56d52d3
+    name: HackTool - Doppelanger LSASS Dumper Execution
+    reason: 'Sibling evasive LSASS dumper: Doppelanger dumps LSASS via process cloning to defeat the same EDR hooks HandleKatz sidesteps with handle duplication. Operators routinely carry several such bypass dumpers, so its presence on the same host signals a toolkit built to beat LSASS-access detection rather than a one-off.'
+  - id: 6309645e-122d-4c5b-bb2b-22e4f9c2fa42
+    name: HackTool - Potential CobaltStrike Process Injection
+    reason: 'Likely origin of the in-memory code: HandleKatz''s callTrace carries an UNKNOWN()/ntdll-only frame, meaning the caller is manually-mapped (unbacked) memory - the hallmark of a C2 beacon. A CobaltStrike remote-thread injection on the same host in-window points to the beacon that ran the fileless dumper.'
+  - id: d5601f8c-b26f-4ab0-9035-69e11a8d4ad2
+    name: CobaltStrike Named Pipe
+    reason: 'Corroborates the beacon from a second angle: a default CobaltStrike named pipe (msagent_/postex_/status_) on the same host confirms an active beacon is the unbacked process that issued the LSASS handle-duplication call this alert caught.'
+  - id: windows-access-token-manipulation-sedebugprivilege-001
+    name: Windows Access Token Manipulation SeDebugPrivilege
+    reason: 'Required precursor: duplicating a handle to LSASS (PROCESS_DUP_HANDLE) needs SeDebugPrivilege enabled in the source token. Event 4703 enabling that privilege on the host moments before the access is the token manipulation that makes HandleKatz''s LSASS reach possible.'
+  - id: a18dd26b-6450-46de-8c91-9659150cf088
+    name: Potentially Suspicious GrantedAccess Flags On LSASS
+    reason: Co-occurring LSASS access with other suspicious access masks. If the actor also probed LSASS with granted-access flags beyond HandleKatz's 0x1440, this rule catches those attempts on the same host, widening a single-signature hit into the full picture of how LSASS was touched.
+  - id: a5a2d357-1ab8-4675-a967-ef9990a59391
+    name: LSASS Process Memory Dump Files
+    reason: 'The payoff artifact on disk: HandleKatz reads LSASS memory and writes an (obfuscated) minidump. An EID 11 lsass*.dmp FileCreate proves the dump actually completed and hands the analyst the output path to chase for compression and exfiltration.'
+  - id: 8eef149c-bd26-49f2-9e5a-9b00e3af499b
+    name: Pass the Hash Activity 2
+    reason: 'End goal and next move: NTLM hashes recovered from the LSASS dump are replayed (type-3 NTLMSSP logons) to move laterally without cracking passwords. Its appearance for the same account turns this credential-access alert into a confirmed, in-progress lateral-movement incident.'
   window: 1h
   enrichment_searches:
-  # Rule-specific telemetry pivots the engine runs around an alert from this rule,
-  # scoped to the alert's host/user/IP within the window (behaviour-targeted, not a sweep).
-    - name: "Memory/credential-dump creation & LSASS access on this host"
-      query: '((data_win_system_eventID:"1" AND data_win_eventdata_image:/.*(\\[Pp][Rr][Oo][Cc][Dd][Uu][Mm][Pp]\.[Ee][Xx][Ee]|\\[Pp][Rr][Oo][Cc][Dd][Uu][Mm][Pp]64\.[Ee][Xx][Ee]|\\[Ss][Qq][Ll][Dd][Uu][Mm][Pp][Ee][Rr]\.[Ee][Xx][Ee]|\\[Cc][Rr][Ee][Aa][Tt][Ee][Dd][Uu][Mm][Pp]\.[Ee][Xx][Ee]|\\[Rr][Dd][Rr][Ll][Ee][Aa][Kk][Dd][Ii][Aa][Gg]\.[Ee][Xx][Ee]|\\[Dd][Uu][Mm][Pp][Ee][Rr][Tt]\.[Ee][Xx][Ee]|\\[Nn][Aa][Nn][Oo][Dd][Uu][Mm][Pp]\.[Ee][Xx][Ee]|\\[Aa][Vv][Dd][Uu][Mm][Pp]\.[Ee][Xx][Ee])/) OR (data_win_system_eventID:"1" AND (data_win_eventdata_commandLine:/.*[Cc][Oo][Mm][Ss][Vv][Cc][Ss]\.[Dd][Ll][Ll].*/ OR data_win_eventdata_commandLine:/.*[Mm][Ii][Nn][Ii][Dd][Uu][Mm][Pp].*/ OR data_win_eventdata_commandLine:/.*[Dd][Uu][Mm][Pp][Ee][Rr][Tt].*/ OR data_win_eventdata_commandLine:/.*[Nn][Aa][Nn][Oo][Dd][Uu][Mm][Pp].*/ OR data_win_eventdata_commandLine:/.*[Ll][Ss][Aa][Ss][Ss].*/ OR data_win_eventdata_commandLine:/.*[Ss][Ee][Kk][Uu][Rr][Ll][Ss][Aa].*/ OR data_win_eventdata_commandLine:/.*[Nn][Tt][Dd][Ss]\.[Dd][Ii][Tt].*/ OR data_win_eventdata_commandLine:/.*[Nn][Tt][Dd][Ss][Uu][Tt][Ii][Ll].*/)) OR (data_win_system_eventID:"10" AND data_win_eventdata_targetImage:/.*(\\[Ll][Ss][Aa][Ss][Ss]\.[Ee][Xx][Ee])/))'
-      pivot_on: [host]
-      window: 1h
-    - name: "This account's logon activity across hosts (harvested-credential use)"
-      query: '(data_win_system_eventID:"4624" OR data_win_system_eventID:"4625")'
-      pivot_on: [user]
-      window: 6h
-    - name: "Remote-execution / lateral-movement tooling on this host"
-      query: '(data_win_system_eventID:"1" AND data_win_eventdata_image:/.*(\\[Pp][Ss][Ee][Xx][Ee][Cc]\.[Ee][Xx][Ee]|\\[Pp][Ss][Ee][Xx][Ee][Ss][Vv][Cc]\.[Ee][Xx][Ee]|\\[Pp][Aa][Ee][Xx][Ee][Cc]\.[Ee][Xx][Ee]|\\[Ww][Ii][Nn][Rr][Ss]\.[Ee][Xx][Ee]|\\[Mm][Ss][Tt][Ss][Cc]\.[Ee][Xx][Ee]|\\[Ww][Mm][Ii][Cc]\.[Ee][Xx][Ee])/) OR (data_win_system_eventID:"1" AND data_win_eventdata_image:/.*(\\[Pp][Oo][Ww][Ee][Rr][Ss][Hh][Ee][Ll][Ll]\.[Ee][Xx][Ee]|\\[Pp][Ww][Ss][Hh]\.[Ee][Xx][Ee])/ AND (data_win_eventdata_commandLine:/.*[Ii][Nn][Vv][Oo][Kk][Ee]-[Cc][Oo][Mm][Mm][Aa][Nn][Dd].*/ OR data_win_eventdata_commandLine:/.*[Nn][Ee][Ww]-[Pp][Ss][Ss][Ee][Ss][Ss][Ii][Oo][Nn].*/ OR data_win_eventdata_commandLine:/.*[Ee][Nn][Tt][Ee][Rr]-[Pp][Ss][Ss][Ee][Ss][Ss][Ii][Oo][Nn].*/ OR data_win_eventdata_commandLine:/.*-[Cc][Oo][Mm][Pp][Uu][Tt][Ee][Rr][Nn][Aa][Mm][Ee].*/))'
-      pivot_on: [host]
-      window: 2h
-    - name: "Process injection / remote-thread & LSASS access on this host"
-      query: '((data_win_system_eventID:"8") OR (data_win_system_eventID:"10" AND data_win_eventdata_targetImage:/.*(\\[Ll][Ss][Aa][Ss][Ss]\.[Ee][Xx][Ee])/) OR (data_win_system_eventID:"1" AND (data_win_eventdata_commandLine:/.*[Cc][Rr][Ee][Aa][Tt][Ee][Rr][Ee][Mm][Oo][Tt][Ee][Tt][Hh][Rr][Ee][Aa][Dd].*/ OR data_win_eventdata_commandLine:/.*[Vv][Ii][Rr][Tt][Uu][Aa][Ll][Aa][Ll][Ll][Oo][Cc][Ee][Xx].*/ OR data_win_eventdata_commandLine:/.*[Ww][Rr][Ii][Tt][Ee][Pp][Rr][Oo][Cc][Ee][Ss][Ss][Mm][Ee][Mm][Oo][Rr][Yy].*/)))'
-      pivot_on: [host]
-      window: 1h
+  # Behaviour-targeted hunts the engine runs around the alert (not a sweep).
+  - name: Stealthy LSASS access with dump/handle-duplication granted-access masks on this host
+    query: (data_win_system_eventID:"10" AND data_win_eventdata_targetImage:/.*\\[Ll][Ss][Aa][Ss][Ss]\.[Ee][Xx][Ee]/ AND (data_win_eventdata_grantedAccess:/0[Xx]1440/ OR data_win_eventdata_grantedAccess:/0[Xx]1040/ OR data_win_eventdata_grantedAccess:/0[Xx]1410/ OR data_win_eventdata_grantedAccess:/0[Xx]143[Aa]/ OR data_win_eventdata_grantedAccess:/0[Xx]1438/ OR data_win_eventdata_grantedAccess:/0[Xx]10[Ff][Ff]/ OR data_win_eventdata_grantedAccess:/0[Xx]1[Ff][Ff][Ff][Ff][Ff]/))
+    pivot_on:
+    - host
+    window: 1h
+  - name: 'Injected-beacon origin: remote-thread injection and CobaltStrike named pipes on this host'
+    query: (data_win_system_eventID:"8") OR ((data_win_system_eventID:"17" OR data_win_system_eventID:"18") AND (data_win_eventdata_pipeName:/.*\\[Mm][Ss][Ss][Ee]-.*/ OR data_win_eventdata_pipeName:/.*\\[Pp][Oo][Ss][Tt][Ee][Xx]_.*/ OR data_win_eventdata_pipeName:/.*\\[Ss][Tt][Aa][Tt][Uu][Ss]_.*/ OR data_win_eventdata_pipeName:/.*\\[Mm][Ss][Aa][Gg][Ee][Nn][Tt]_.*/ OR data_win_eventdata_pipeName:/.*\\[Ii][Nn][Tt][Ee][Rr][Pp][Rr][Oo][Cc][Ee][Ss][Ss]_.*/))
+    pivot_on:
+    - host
+    window: 2h
+  - name: LSASS dump written to disk and compressed for exfiltration on this host
+    query: (data_win_system_eventID:"11" AND (data_win_eventdata_targetFilename:/.*\.[Dd][Mm][Pp]/ OR data_win_eventdata_targetFilename:/.*[Ll][Ss][Aa][Ss][Ss].*\.[Dd][Mm][Pp].*/ OR data_win_eventdata_targetFilename:/.*\.[Dd][Uu][Mm][Pp]/)) OR (data_win_system_eventID:"1" AND (data_win_eventdata_commandLine:/.*\.[Dd][Mm][Pp].*/ OR data_win_eventdata_commandLine:/.*[Ll][Ss][Aa][Ss][Ss].*[Dd][Uu][Mm][Pp].*/) AND (data_win_eventdata_image:/.*\\(7[Zz]|7[Zz][Gg]|[Rr][Aa][Rr]|[Ww][Ii][Nn][Rr][Aa][Rr])\.[Ee][Xx][Ee]/ OR data_win_eventdata_commandLine:/.*[Cc][Oo][Mm][Pp][Rr][Ee][Ss][Ss]-[Aa][Rr][Cc][Hh][Ii][Vv][Ee].*/))
+    pivot_on:
+    - host
+    window: 2h
+  - name: SeDebugPrivilege enabled or RunAsPPL/WDigest LSASS-protection tampering on this host
+    query: (data_win_system_eventID:"4703") OR (data_win_system_eventID:"13" AND (data_win_eventdata_targetObject:/.*[Rr][Uu][Nn][Aa][Ss][Pp][Pp][Ll].*/ OR data_win_eventdata_targetObject:/.*[Ll][Ss][Aa][Cc][Ff][Gg][Ff][Ll][Aa][Gg][Ss].*/ OR data_win_eventdata_targetObject:/.*[Ww][Dd][Ii][Gg][Ee][Ss][Tt]\\[Uu][Ss][Ee][Ll][Oo][Gg][Oo][Nn][Cc][Rr][Ee][Dd][Ee][Nn][Tt][Ii][Aa][Ll].*/)) OR (data_win_system_eventID:"1" AND (data_win_eventdata_commandLine:/.*[Rr][Uu][Nn][Aa][Ss][Pp][Pp][Ll].*/ OR data_win_eventdata_commandLine:/.*[Uu][Ss][Ee][Ll][Oo][Gg][Oo][Nn][Cc][Rr][Ee][Dd][Ee][Nn][Tt][Ii][Aa][Ll].*/))
+    pivot_on:
+    - host
+    window: 4h
+  - name: Harvested-credential replay by this account across the estate (pass-the-hash / lateral logons)
+    query: (data_win_system_eventID:"4624" AND (data_win_eventdata_logonType:"3" OR data_win_eventdata_logonType:"9" OR data_win_eventdata_logonType:"10") AND (data_win_eventdata_logonProcessName:/[Nn][Tt][Ll][Mm][Ss][Ss][Pp]/ OR data_win_eventdata_logonProcessName:/[Ss][Ee][Cc][Ll][Oo][Gg][Oo]/)) OR (data_win_system_eventID:"4625" AND data_win_eventdata_logonType:"3")
+    pivot_on:
+    - user
+    window: 6h
