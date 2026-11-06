@@ -139,19 +139,58 @@ graylog:
   query: (data_win_system_eventID:"5441" OR data_win_system_eventID:"5447") AND data_win_eventdata_filterName:/.*[Cc][Uu][Ss][Tt][Oo][Mm] [Oo][Uu][Tt][Bb][Oo][Uu][Nn][Dd] [Ff][Ii][Ll][Tt][Ee][Rr].*/
 
 correlation:
-  # Authored by the correlation engine for review.
+  # Authored per-rule (behaviour-researched) for the correlation engine. Related CoPilot
+  # Searches + telemetry pivots to run around an alert, scoped to its host/user/ip/domain.
+  related_rules:
+  - id: eb2d07d4-49cb-4523-801a-da002df36602
+    name: HackTool - EDRSilencer Execution
+    reason: Process-creation view of the same tool (EDRSilencer.exe blockedr); confirms the WFP 'Custom Outbound Filter' came from the binary and gives the parent/command line.
+  - id: bacf58c6-e199-4040-a94f-95dea0f1e45a
+    name: Windows Filtering Platform Blocked Connection From EDR Agent Binary
+    reason: 'Direct consequence: once the filters exist, EDR agent binaries get 5157 WFP drops, proving the silencing actually took effect and the sensor is blind.'
+  - id: c598cc0c-9e70-4852-b9eb-8921af79f598
+    name: Hacktool - EDR-Freeze Execution
+    reason: Sibling EDR-neutralisation tool; attackers often try several (WFP blocking, then suspend/freeze) when the first is detected.
+  - id: 49e5bc24-8b86-49f1-b743-535f332c2856
+    name: Microsoft Defender Tamper Protection Trigger
+    reason: 'Same defense-impairment phase: attacker also attempts to disable Defender, and tamper-protection firing shows the pivot to the built-in AV.'
+  - id: windows-attempt-stop-security-service-001
+    name: Windows Attempt To Stop Security Service
+    reason: Parallel or fallback method to blind security agents by stopping their services when network blocking is insufficient.
+  - id: d99b79d2-0a6f-4f46-ad8b-260b6e17f982
+    name: Security Eventlog Cleared
+    reason: Once telemetry to the EDR is cut, attackers commonly clear local logs to remove remaining evidence.
+  - id: ab4561b1-6c7e-48a7-ad08-087cfb9ce8f1
+    name: Important Windows Event Auditing Disabled
+    reason: 'Same Security-log channel: disabling audit subcategories (incl. WFP auditing) hides filter creation and later activity.'
+  - id: 8943b567-f14d-4ee8-a0bb-2121d4ce3184
+    name: Dump LSASS via comsvcs DLL
+    reason: 'Typical next step on an EDR-blinded host: credential dumping from LSASS without detection.'
+  window: 2h
   enrichment_searches:
-  # Rule-specific telemetry pivots the engine runs around an alert from this rule,
-  # scoped to the alert's host/user/IP within the window (behaviour-targeted, not a sweep).
-    - name: "This account's logon activity across hosts"
-      query: '(data_win_system_eventID:"4624" OR data_win_system_eventID:"4625")'
-      pivot_on: [user]
-      window: 6h
-    - name: "Account / group / privilege changes involving this account"
-      query: '(data_win_system_eventID:"4720" OR data_win_system_eventID:"4722" OR data_win_system_eventID:"4724" OR data_win_system_eventID:"4728" OR data_win_system_eventID:"4732" OR data_win_system_eventID:"4756" OR data_win_system_eventID:"4672")'
-      pivot_on: [user]
-      window: 6h
-    - name: "Memory/credential-dump creation & LSASS access on this host"
-      query: '((data_win_system_eventID:"1" AND data_win_eventdata_image:/.*(\\[Pp][Rr][Oo][Cc][Dd][Uu][Mm][Pp]\.[Ee][Xx][Ee]|\\[Pp][Rr][Oo][Cc][Dd][Uu][Mm][Pp]64\.[Ee][Xx][Ee]|\\[Ss][Qq][Ll][Dd][Uu][Mm][Pp][Ee][Rr]\.[Ee][Xx][Ee]|\\[Cc][Rr][Ee][Aa][Tt][Ee][Dd][Uu][Mm][Pp]\.[Ee][Xx][Ee]|\\[Rr][Dd][Rr][Ll][Ee][Aa][Kk][Dd][Ii][Aa][Gg]\.[Ee][Xx][Ee]|\\[Dd][Uu][Mm][Pp][Ee][Rr][Tt]\.[Ee][Xx][Ee]|\\[Nn][Aa][Nn][Oo][Dd][Uu][Mm][Pp]\.[Ee][Xx][Ee]|\\[Aa][Vv][Dd][Uu][Mm][Pp]\.[Ee][Xx][Ee])/) OR (data_win_system_eventID:"1" AND (data_win_eventdata_commandLine:/.*[Cc][Oo][Mm][Ss][Vv][Cc][Ss]\.[Dd][Ll][Ll].*/ OR data_win_eventdata_commandLine:/.*[Mm][Ii][Nn][Ii][Dd][Uu][Mm][Pp].*/ OR data_win_eventdata_commandLine:/.*[Dd][Uu][Mm][Pp][Ee][Rr][Tt].*/ OR data_win_eventdata_commandLine:/.*[Nn][Aa][Nn][Oo][Dd][Uu][Mm][Pp].*/ OR data_win_eventdata_commandLine:/.*[Ll][Ss][Aa][Ss][Ss].*/ OR data_win_eventdata_commandLine:/.*[Ss][Ee][Kk][Uu][Rr][Ll][Ss][Aa].*/ OR data_win_eventdata_commandLine:/.*[Nn][Tt][Dd][Ss]\.[Dd][Ii][Tt].*/ OR data_win_eventdata_commandLine:/.*[Nn][Tt][Dd][Ss][Uu][Tt][Ii][Ll].*/)) OR (data_win_system_eventID:"10" AND data_win_eventdata_targetImage:/.*(\\[Ll][Ss][Aa][Ss][Ss]\.[Ee][Xx][Ee])/))'
-      pivot_on: [host]
-      window: 1h
+  # Behaviour-targeted hunts the engine runs around the alert (not a sweep).
+  - name: EDRSilencer binary or blockedr/block command line on host
+    query: data_win_system_eventID:"1" AND (data_win_eventdata_image:/.*[Ee][Dd][Rr][Ss][Ii][Ll][Ee][Nn][Cc][Ee][Rr].*/ OR data_win_eventdata_commandLine:/.*[Ee][Dd][Rr][Ss][Ii][Ll][Ee][Nn][Cc][Ee][Rr].*/ OR data_win_eventdata_commandLine:/.*[Bb][Ll][Oo][Cc][Kk][Ee][Dd][Rr].*/)
+    pivot_on:
+    - host
+    window: 2h
+  - name: WFP blocked connections from security agent binaries (5157)
+    query: data_win_system_eventID:"5157" AND (data_win_eventdata_application:*[Ss]ense* OR data_win_eventdata_application:*[Cc]rowd[Ss]trike* OR data_win_eventdata_application:*[Cc]s[Ff]alcon* OR data_win_eventdata_application:*[Ss]entinel* OR data_win_eventdata_application:*[Cc]arbon* OR data_win_eventdata_application:*[Cc]ylance* OR data_win_eventdata_application:*[Ee]lastic* OR data_win_eventdata_application:*[Ss]ophos* OR data_win_eventdata_application:*[Mm]sMpEng* OR data_win_eventdata_application:*[Ww]azuh*)
+    pivot_on:
+    - host
+    window: 2h
+  - name: 'Other EDR/AV tampering: service stop, Defender disable, firewall changes'
+    query: data_win_system_eventID:"1" AND (data_win_eventdata_commandLine:/.*[Ss][Cc](\.[Ee][Xx][Ee])? +(stop|config|delete).*/ OR data_win_eventdata_commandLine:/.*[Nn][Ee][Tt] +[Ss][Tt][Oo][Pp].*/ OR data_win_eventdata_commandLine:/.*[Ss][Ee][Tt]-[Mm][Pp][Pp][Rr][Ee][Ff][Ee][Rr][Ee][Nn][Cc][Ee].*/ OR data_win_eventdata_commandLine:/.*[Nn][Ee][Tt][Ss][Hh].*[Aa][Dd][Vv][Ff][Ii][Rr][Ee][Ww][Aa][Ll][Ll].*/ OR data_win_eventdata_commandLine:/.*[Tt][Aa][Ss][Kk][Kk][Ii][Ll][Ll].*/)
+    pivot_on:
+    - host
+    window: 2h
+  - name: Credential access and log clearing after sensor silencing
+    query: (data_win_system_eventID:"10" AND data_win_eventdata_targetImage:/.*\\[Ll][Ss][Aa][Ss][Ss]\.[Ee][Xx][Ee]/) OR (data_win_system_eventID:"1" AND (data_win_eventdata_commandLine:/.*[Cc][Oo][Mm][Ss][Vv][Cc][Ss].*[Mm][Ii][Nn][Ii][Dd][Uu][Mm][Pp].*/ OR data_win_eventdata_commandLine:/.*[Ww][Ee][Vv][Tt][Uu][Tt][Ii][Ll].* [Cc][Ll].*/ OR data_win_eventdata_commandLine:/.*[Vv][Ss][Ss][Aa][Dd][Mm][Ii][Nn].*[Dd][Ee][Ll][Ee][Tt][Ee].*/)) OR data_win_system_eventID:"1102"
+    pivot_on:
+    - host
+    window: 4h
+  - name: Outbound connections from non-browser processes on host (exfil/C2 while EDR blind)
+    query: data_win_system_eventID:"3" AND data_win_eventdata_initiated:"true" AND NOT data_win_eventdata_destinationIp:/(10\..*|192\.168\..*|127\..*)/ AND (data_win_eventdata_image:/.*\\(powershell|cmd|rundll32|regsvr32|mshta|wscript|cscript|rclone|curl)\.[Ee][Xx][Ee]/ OR data_win_eventdata_image:/.*\\[Tt]emp\\.*/ OR data_win_eventdata_image:/.*\\[Pp]rogram[Dd]ata\\.*/ OR data_win_eventdata_image:/.*\\[Uu]sers\\[Pp]ublic\\.*/)
+    pivot_on:
+    - host
+    window: 4h
