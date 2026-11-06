@@ -260,35 +260,58 @@ graylog:
   query: (data_win_system_eventID:"675" OR data_win_system_eventID:"4768" OR data_win_system_eventID:"4769" OR data_win_system_eventID:"4771") AND (data_win_eventdata_status:/0[Xx]9/ OR data_win_eventdata_status:/0[Xx][Aa]/ OR data_win_eventdata_status:/0[Xx][Bb]/ OR data_win_eventdata_status:/0[Xx][Ff]/ OR data_win_eventdata_status:/0[Xx]10/ OR data_win_eventdata_status:/0[Xx]11/ OR data_win_eventdata_status:/0[Xx]13/ OR data_win_eventdata_status:/0[Xx]14/ OR data_win_eventdata_status:/0[Xx]1[Aa]/ OR data_win_eventdata_status:/0[Xx]1[Ff]/ OR data_win_eventdata_status:/0[Xx]21/ OR data_win_eventdata_status:/0[Xx]22/ OR data_win_eventdata_status:/0[Xx]23/ OR data_win_eventdata_status:/0[Xx]24/ OR data_win_eventdata_status:/0[Xx]26/ OR data_win_eventdata_status:/0[Xx]27/ OR data_win_eventdata_status:/0[Xx]28/ OR data_win_eventdata_status:/0[Xx]29/ OR data_win_eventdata_status:/0[Xx]2[Cc]/ OR data_win_eventdata_status:/0[Xx]2[Dd]/ OR data_win_eventdata_status:/0[Xx]2[Ee]/ OR data_win_eventdata_status:/0[Xx]2[Ff]/ OR data_win_eventdata_status:/0[Xx]31/ OR data_win_eventdata_status:/0[Xx]32/ OR data_win_eventdata_status:/0[Xx]3[Ee]/ OR data_win_eventdata_status:/0[Xx]3[Ff]/ OR data_win_eventdata_status:/0[Xx]40/ OR data_win_eventdata_status:/0[Xx]41/ OR data_win_eventdata_status:/0[Xx]43/ OR data_win_eventdata_status:/0[Xx]44/)
 
 correlation:
-  # Authored by the correlation engine for review. Related CoPilot Searches to run
-  # around an alert from this rule, scoped to the same host/user/IP within the window.
+  # Authored per-rule (behaviour-researched) for the correlation engine. Related CoPilot
+  # Searches + telemetry pivots to run around an alert, scoped to its host/user/ip/domain.
   related_rules:
-    - id: 35ba1d85-724d-42a3-889f-2e2362bcaf23
-      name: "AD Privileged Users or Groups Reconnaissance"
-      reason: "next kill-chain tactic: Discovery"
-    - id: 17d619c1-e020-4347-957e-1d1207455c93
-      name: "Active Directory Replication from Non Machine Account"
-      reason: "next kill-chain tactic: Credential Access"
-    - id: 87261fb2-69d0-42fe-b9de-88c6b5f65a43
-      name: "Atera Agent Installation"
-      reason: "next kill-chain tactic: Command and Control"
+  - id: d04ae2b8-ad54-4de0-bd87-4bc1da66aa59
+    name: Kerberoasting Activity - Initial Query
+    reason: Failed TGT/TGS requests on 4768/4769 often sit beside Kerberoasting; the same account requesting SPN tickets in bulk is the credential-theft follow-on.
+  - id: 3e2f1b2c-4d5e-11ee-be56-0242ac120002
+    name: Potential AS-REP Roasting via Kerberos TGT Requests
+    reason: Repeated 4768 failures/requests for accounts without pre-auth is the same TGT-request surface used for AS-REP roasting.
+  - id: 496a0e47-0a33-4dca-b009-9e6ca3591f39
+    name: Suspicious Kerberos RC4 Ticket Encryption
+    reason: Downgraded RC4 ticket requests accompany roasting and ticket-forging tooling issuing crafted TGT/TGS requests.
+  - id: 7ec2c172-dceb-4c10-92c9-87c1881b7e18
+    name: HackTool - Rubeus Execution
+    reason: Rubeus generates malformed or failing TGT requests (asktgt, brute, roast); process execution on the client host explains the failures.
+  - id: 12e6d621-194f-4f59-90cc-1959e21e69f7
+    name: Register new Logon Process by Rubeus
+    reason: Rubeus registers a rogue logon process (4611) before ticket manipulation, a host-side precursor of the failing Kerberos requests.
+  - id: caa9a802-8bd8-4b9e-a5cd-4d6221670219
+    name: Suspicious Kerberos Ticket Request via CLI
+    reason: Command-line ticket requests (klist/Rubeus/Kekeo style) are the process-level cause of anomalous 4768/4769 events.
+  - id: 192a0330-c20b-4356-90b6-7b7049ae0b87
+    name: Successful Overpass the Hash Attempt
+    reason: 'Once failed TGT attempts succeed with a stolen hash, the outcome is an overpass-the-hash logon: confirms the manipulation worked.'
+  - id: 9eb99343-d336-4020-a3cd-67f3819e68ee
+    name: Account Tampering - Suspicious Failed Logon Reasons
+    reason: Failed logon sub-statuses against the same account co-occur with failed Kerberos pre-auth during guessing or tampering.
   window: 1h
   enrichment_searches:
-  # Rule-specific telemetry pivots the engine runs around an alert from this rule,
-  # scoped to the alert's host/user/IP within the window (behaviour-targeted, not a sweep).
-    - name: "Remote-execution / lateral-movement tooling on this host"
-      query: '(data_win_system_eventID:"1" AND data_win_eventdata_image:/.*(\\[Pp][Ss][Ee][Xx][Ee][Cc]\.[Ee][Xx][Ee]|\\[Pp][Ss][Ee][Xx][Ee][Ss][Vv][Cc]\.[Ee][Xx][Ee]|\\[Pp][Aa][Ee][Xx][Ee][Cc]\.[Ee][Xx][Ee]|\\[Ww][Ii][Nn][Rr][Ss]\.[Ee][Xx][Ee]|\\[Mm][Ss][Tt][Ss][Cc]\.[Ee][Xx][Ee]|\\[Ww][Mm][Ii][Cc]\.[Ee][Xx][Ee])/) OR (data_win_system_eventID:"1" AND data_win_eventdata_image:/.*(\\[Pp][Oo][Ww][Ee][Rr][Ss][Hh][Ee][Ll][Ll]\.[Ee][Xx][Ee]|\\[Pp][Ww][Ss][Hh]\.[Ee][Xx][Ee])/ AND (data_win_eventdata_commandLine:/.*[Ii][Nn][Vv][Oo][Kk][Ee]-[Cc][Oo][Mm][Mm][Aa][Nn][Dd].*/ OR data_win_eventdata_commandLine:/.*[Nn][Ee][Ww]-[Pp][Ss][Ss][Ee][Ss][Ss][Ii][Oo][Nn].*/ OR data_win_eventdata_commandLine:/.*[Ee][Nn][Tt][Ee][Rr]-[Pp][Ss][Ss][Ee][Ss][Ss][Ii][Oo][Nn].*/ OR data_win_eventdata_commandLine:/.*-[Cc][Oo][Mm][Pp][Uu][Tt][Ee][Rr][Nn][Aa][Mm][Ee].*/))'
-      pivot_on: [host]
-      window: 2h
-    - name: "This account's logon activity across hosts"
-      query: '(data_win_system_eventID:"4624" OR data_win_system_eventID:"4625")'
-      pivot_on: [user]
-      window: 6h
-    - name: "Account / group / privilege changes involving this account"
-      query: '(data_win_system_eventID:"4720" OR data_win_system_eventID:"4722" OR data_win_system_eventID:"4724" OR data_win_system_eventID:"4728" OR data_win_system_eventID:"4732" OR data_win_system_eventID:"4756" OR data_win_system_eventID:"4672")'
-      pivot_on: [user]
-      window: 6h
-    - name: "Memory/credential-dump creation & LSASS access on this host"
-      query: '((data_win_system_eventID:"1" AND data_win_eventdata_image:/.*(\\[Pp][Rr][Oo][Cc][Dd][Uu][Mm][Pp]\.[Ee][Xx][Ee]|\\[Pp][Rr][Oo][Cc][Dd][Uu][Mm][Pp]64\.[Ee][Xx][Ee]|\\[Ss][Qq][Ll][Dd][Uu][Mm][Pp][Ee][Rr]\.[Ee][Xx][Ee]|\\[Cc][Rr][Ee][Aa][Tt][Ee][Dd][Uu][Mm][Pp]\.[Ee][Xx][Ee]|\\[Rr][Dd][Rr][Ll][Ee][Aa][Kk][Dd][Ii][Aa][Gg]\.[Ee][Xx][Ee]|\\[Dd][Uu][Mm][Pp][Ee][Rr][Tt]\.[Ee][Xx][Ee]|\\[Nn][Aa][Nn][Oo][Dd][Uu][Mm][Pp]\.[Ee][Xx][Ee]|\\[Aa][Vv][Dd][Uu][Mm][Pp]\.[Ee][Xx][Ee])/) OR (data_win_system_eventID:"1" AND (data_win_eventdata_commandLine:/.*[Cc][Oo][Mm][Ss][Vv][Cc][Ss]\.[Dd][Ll][Ll].*/ OR data_win_eventdata_commandLine:/.*[Mm][Ii][Nn][Ii][Dd][Uu][Mm][Pp].*/ OR data_win_eventdata_commandLine:/.*[Dd][Uu][Mm][Pp][Ee][Rr][Tt].*/ OR data_win_eventdata_commandLine:/.*[Nn][Aa][Nn][Oo][Dd][Uu][Mm][Pp].*/ OR data_win_eventdata_commandLine:/.*[Ll][Ss][Aa][Ss][Ss].*/ OR data_win_eventdata_commandLine:/.*[Ss][Ee][Kk][Uu][Rr][Ll][Ss][Aa].*/ OR data_win_eventdata_commandLine:/.*[Nn][Tt][Dd][Ss]\.[Dd][Ii][Tt].*/ OR data_win_eventdata_commandLine:/.*[Nn][Tt][Dd][Ss][Uu][Tt][Ii][Ll].*/)) OR (data_win_system_eventID:"10" AND data_win_eventdata_targetImage:/.*(\\[Ll][Ss][Aa][Ss][Ss]\.[Ee][Xx][Ee])/))'
-      pivot_on: [host]
-      window: 1h
+  # Behaviour-targeted hunts the engine runs around the alert (not a sweep).
+  - name: Kerberos ticket tooling execution on host
+    query: data_win_system_eventID:"1" AND (data_win_eventdata_image:/.*[Rr][Uu][Bb][Ee][Uu][Ss].*/ OR data_win_eventdata_image:/.*[Kk][Ee][Kk][Ee][Oo].*/ OR data_win_eventdata_commandLine:/.*([Aa][Ss][Kk][Tt][Gg][Tt]|[Aa][Ss][Kk][Tt][Gg][Ss]|[Kk][Ee][Rr][Bb][Ee][Rr][Oo][Aa][Ss][Tt]|[Aa][Ss][Rr][Ee][Pp][Rr][Oo][Aa][Ss][Tt]|[Pp][Tt][Tt]|[Kk][Ll][Ii][Ss][Tt].*[Pp][Uu][Rr][Gg][Ee]|[Mm][Ii][Mm][Ii][Kk][Aa][Tt][Zz]|[Kk][Ee][Rr][Bb][Ee][Rr][Oo][Ss]::).*/)
+    pivot_on:
+    - host
+    window: 2h
+  - name: Kerberos ticket requests and failures for this account
+    query: (data_win_system_eventID:"4768" OR data_win_system_eventID:"4769" OR data_win_system_eventID:"4771" OR data_win_system_eventID:"4770")
+    pivot_on:
+    - user
+    window: 6h
+  - name: Explicit-credential and network logons by this account
+    query: (data_win_system_eventID:"4648" OR (data_win_system_eventID:"4624" AND (data_win_eventdata_logonType:"3" OR data_win_eventdata_logonType:"9")) OR data_win_system_eventID:"4625")
+    pivot_on:
+    - user
+    window: 6h
+  - name: LSASS access and credential dumping on host
+    query: (data_win_system_eventID:"10" AND data_win_eventdata_targetImage:/.*[Ll][Ss][Aa][Ss][Ss]\.[Ee][Xx][Ee]/) OR (data_win_system_eventID:"1" AND data_win_eventdata_commandLine:/.*([Ss][Ee][Kk][Uu][Rr][Ll][Ss][Aa]|[Pp][Rr][Oo][Cc][Dd][Uu][Mm][Pp]|[Cc][Oo][Mm][Ss][Vv][Cc][Ss]|[Nn][Tt][Dd][Ss][Uu][Tt][Ii][Ll]).*/)
+    pivot_on:
+    - host
+    window: 2h
+  - name: Directory replication and privileged-service access follow-on
+    query: (data_win_system_eventID:"4662" AND data_win_eventdata_properties:/.*1131f6a[ad]-9c07-11d1-f79f-00c04fc2dcd2.*/) OR data_win_system_eventID:"4672" OR data_win_system_eventID:"4742"
+    pivot_on:
+    - user
+    window: 6h

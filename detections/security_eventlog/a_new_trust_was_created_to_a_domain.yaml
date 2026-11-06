@@ -128,41 +128,58 @@ graylog:
   query: data_win_system_eventID:"4706"
 
 correlation:
-  # Authored by the correlation engine for review. Related CoPilot Searches to run
-  # around an alert from this rule, scoped to the same host/user/IP within the window.
+  # Authored per-rule (behaviour-researched) for the correlation engine. Related CoPilot
+  # Searches + telemetry pivots to run around an alert, scoped to its host/user/ip/domain.
   related_rules:
-    - id: 35ba1d85-724d-42a3-889f-2e2362bcaf23
-      name: "AD Privileged Users or Groups Reconnaissance"
-      reason: "next kill-chain tactic: Discovery"
-    - id: 9eb99343-d336-4020-a3cd-67f3819e68ee
-      name: "Account Tampering - Suspicious Failed Logon Reasons"
-      reason: "next kill-chain tactic: Persistence"
-    - id: 17d619c1-e020-4347-957e-1d1207455c93
-      name: "Active Directory Replication from Non Machine Account"
-      reason: "next kill-chain tactic: Credential Access"
-    - id: 300bac00-e041-4ee2-9c36-e262656a6ecc
-      name: "Active Directory User Backdoors"
-      reason: "next kill-chain tactic: Persistence"
-    - id: 2632954e-db1c-49cb-9936-67d1ef1d17d2
-      name: "Addition of SID History to Active Directory Object"
-      reason: "next kill-chain tactic: Privilege Escalation"
-  window: 1h
+  - id: c3e05466-5f22-11eb-ae93-0242ac130002
+    name: NLTest Domain Trust Discovery
+    reason: Attackers enumerate existing trusts with nltest /domain_trusts before creating or abusing a trust; precursor on the same DC/admin host.
+  - id: 3bad990e-4848-4a78-9530-b427d854aac0
+    name: Domain Trust Discovery Via Dsquery
+    reason: dsquery * -filter trustedDomain is trust reconnaissance that precedes building a rogue trust for cross-domain pivoting.
+  - id: 4fa7f846-054a-11ec-a836-acde48001122
+    name: Get-DomainTrust with PowerShell
+    reason: PowerView-style trust enumeration is a common precursor to adding or abusing a trust in the same session.
+  - id: 89275e7e-0548-11ec-bf75-acde48001122
+    name: Get-DomainTrust with PowerShell Script Block
+    reason: Script-block evidence of Get-DomainTrust on the host that then logged 4706, confirming scripted trust recon and manipulation.
+  - id: 5cc90652-4cbd-4241-aa3b-4b462fa5a248
+    name: Potential Recon Activity Via Nltest.EXE
+    reason: Broader nltest domain/DC recon by the same account just before trust creation.
+  - id: 2632954e-db1c-49cb-9936-67d1ef1d17d2
+    name: Addition of SID History to Active Directory Object
+    reason: Once a trust exists with SID filtering weakened, SID history injection is the classic follow-on for cross-trust privilege escalation.
+  - id: 17d619c1-e020-4347-957e-1d1207455c93
+    name: Active Directory Replication from Non Machine Account
+    reason: A new trust on a DC is often followed by DCSync-style replication to harvest credentials from the domain.
+  - id: f7644214-0eb0-4ace-9455-331ec4c09253
+    name: Kerberos Manipulation
+    reason: Forged or abused inter-realm tickets (golden ticket, trust ticket) are the way a rogue trust is exploited after creation.
+  window: 6h
   enrichment_searches:
-  # Rule-specific telemetry pivots the engine runs around an alert from this rule,
-  # scoped to the alert's host/user/IP within the window (behaviour-targeted, not a sweep).
-    - name: "Account / group / privilege changes on this host"
-      query: '(((data_win_system_eventID:"4720" OR data_win_system_eventID:"4728" OR data_win_system_eventID:"4732" OR data_win_system_eventID:"4756")) OR (data_win_system_eventID:"1" AND data_win_eventdata_image:/.*(\\[Nn][Ee][Tt]\.[Ee][Xx][Ee]|\\[Nn][Ee][Tt]1\.[Ee][Xx][Ee])/ AND (data_win_eventdata_commandLine:/.*[Uu][Ss][Ee][Rr] .*/ OR data_win_eventdata_commandLine:/.*[Ll][Oo][Cc][Aa][Ll][Gg][Rr][Oo][Uu][Pp].*/ OR data_win_eventdata_commandLine:/.*[Gg][Rr][Oo][Uu][Pp] .*/)))'
-      pivot_on: [host]
-      window: 6h
-    - name: "Memory/credential-dump creation & LSASS access on this host"
-      query: '((data_win_system_eventID:"1" AND data_win_eventdata_image:/.*(\\[Pp][Rr][Oo][Cc][Dd][Uu][Mm][Pp]\.[Ee][Xx][Ee]|\\[Pp][Rr][Oo][Cc][Dd][Uu][Mm][Pp]64\.[Ee][Xx][Ee]|\\[Ss][Qq][Ll][Dd][Uu][Mm][Pp][Ee][Rr]\.[Ee][Xx][Ee]|\\[Cc][Rr][Ee][Aa][Tt][Ee][Dd][Uu][Mm][Pp]\.[Ee][Xx][Ee]|\\[Rr][Dd][Rr][Ll][Ee][Aa][Kk][Dd][Ii][Aa][Gg]\.[Ee][Xx][Ee]|\\[Dd][Uu][Mm][Pp][Ee][Rr][Tt]\.[Ee][Xx][Ee]|\\[Nn][Aa][Nn][Oo][Dd][Uu][Mm][Pp]\.[Ee][Xx][Ee]|\\[Aa][Vv][Dd][Uu][Mm][Pp]\.[Ee][Xx][Ee])/) OR (data_win_system_eventID:"1" AND (data_win_eventdata_commandLine:/.*[Cc][Oo][Mm][Ss][Vv][Cc][Ss]\.[Dd][Ll][Ll].*/ OR data_win_eventdata_commandLine:/.*[Mm][Ii][Nn][Ii][Dd][Uu][Mm][Pp].*/ OR data_win_eventdata_commandLine:/.*[Dd][Uu][Mm][Pp][Ee][Rr][Tt].*/ OR data_win_eventdata_commandLine:/.*[Nn][Aa][Nn][Oo][Dd][Uu][Mm][Pp].*/ OR data_win_eventdata_commandLine:/.*[Ll][Ss][Aa][Ss][Ss].*/ OR data_win_eventdata_commandLine:/.*[Ss][Ee][Kk][Uu][Rr][Ll][Ss][Aa].*/ OR data_win_eventdata_commandLine:/.*[Nn][Tt][Dd][Ss]\.[Dd][Ii][Tt].*/ OR data_win_eventdata_commandLine:/.*[Nn][Tt][Dd][Ss][Uu][Tt][Ii][Ll].*/)) OR (data_win_system_eventID:"10" AND data_win_eventdata_targetImage:/.*(\\[Ll][Ss][Aa][Ss][Ss]\.[Ee][Xx][Ee])/))'
-      pivot_on: [host]
-      window: 1h
-    - name: "This account's logon activity across hosts"
-      query: '(data_win_system_eventID:"4624" OR data_win_system_eventID:"4625")'
-      pivot_on: [user]
-      window: 6h
-    - name: "Account / group / privilege changes involving this account"
-      query: '(data_win_system_eventID:"4720" OR data_win_system_eventID:"4722" OR data_win_system_eventID:"4724" OR data_win_system_eventID:"4728" OR data_win_system_eventID:"4732" OR data_win_system_eventID:"4756" OR data_win_system_eventID:"4672")'
-      pivot_on: [user]
-      window: 6h
+  # Behaviour-targeted hunts the engine runs around the alert (not a sweep).
+  - name: Trust creation / enumeration tooling (netdom, nltest, dsquery, PowerShell)
+    query: data_win_system_eventID:"1" AND (data_win_eventdata_commandLine:/.*[Nn][Ee][Tt][Dd][Oo][Mm].*[Tt][Rr][Uu][Ss][Tt].*/ OR data_win_eventdata_commandLine:/.*[Nn][Ll][Tt][Ee][Ss][Tt].*[Dd][Oo][Mm][Aa][Ii][Nn]_[Tt][Rr][Uu][Ss][Tt][Ss].*/ OR data_win_eventdata_commandLine:/.*[Tt][Rr][Uu][Ss][Tt][Ee][Dd][Dd][Oo][Mm][Aa][Ii][Nn].*/ OR data_win_eventdata_commandLine:/.*[Cc][Rr][Ee][Aa][Tt][Ee][Tt][Rr][Uu][Ss][Tt][Rr][Ee][Ll][Aa][Tt][Ii][Oo][Nn][Ss][Hh][Ii][Pp].*/ OR data_win_eventdata_commandLine:/.*[Nn][Ee][Ww]-[Aa][Dd][Tt][Rr][Uu][Ss][Tt].*/ OR data_win_eventdata_commandLine:/.*[Gg][Ee][Tt]-([Dd][Oo][Mm][Aa][Ii][Nn]|[Ff][Oo][Rr][Ee][Ss][Tt])[Tt][Rr][Uu][Ss][Tt].*/)
+    pivot_on:
+    - host
+    window: 6h
+  - name: Other trust modifications and SID-filtering events (4707, 4716, 4865-4867, 4675)
+    query: (data_win_system_eventID:"4707" OR data_win_system_eventID:"4716" OR data_win_system_eventID:"4865" OR data_win_system_eventID:"4866" OR data_win_system_eventID:"4867" OR data_win_system_eventID:"4675")
+    pivot_on:
+    - host
+    window: 24h
+  - name: Credential theft and replication on the DC (lsass access, ntds, DCSync)
+    query: (data_win_system_eventID:"4662" AND data_win_eventdata_properties:*1131f6a*) OR (data_win_system_eventID:"10" AND data_win_eventdata_targetImage:/.*[Ll][Ss][Aa][Ss][Ss]\.[Ee][Xx][Ee]/) OR (data_win_system_eventID:"1" AND (data_win_eventdata_commandLine:/.*[Nn][Tt][Dd][Ss][Uu][Tt][Ii][Ll].*/ OR data_win_eventdata_commandLine:/.*[Ll][Ss][Aa][Dd][Uu][Mm][Pp].*/ OR data_win_eventdata_commandLine:/.*[Mm][Ii][Mm][Ii][Kk][Aa][Tt][Zz].*/))
+    pivot_on:
+    - host
+    window: 6h
+  - name: Network logons and Kerberos tickets by this account (cross-domain use)
+    query: (data_win_system_eventID:"4624" AND data_win_eventdata_logonType:"3") OR data_win_system_eventID:"4768" OR data_win_system_eventID:"4769" OR data_win_system_eventID:"4648"
+    pivot_on:
+    - user
+    window: 6h
+  - name: Privileged account and group changes by this account
+    query: (data_win_system_eventID:"4672" OR data_win_system_eventID:"4720" OR data_win_system_eventID:"4728" OR data_win_system_eventID:"4732" OR data_win_system_eventID:"4756" OR data_win_system_eventID:"4738")
+    pivot_on:
+    - user
+    window: 6h

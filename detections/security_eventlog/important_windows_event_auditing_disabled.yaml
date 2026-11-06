@@ -214,19 +214,58 @@ graylog:
   query: ((data_win_system_eventID:"4719" AND (data_win_eventdata_subcategoryGuid:/\{0[Cc][Cc][Ee]9210-69[Aa][Ee]-11[Dd]9-[Bb][Ee][Dd]3-505054503030\}/ OR data_win_eventdata_subcategoryGuid:/\{0[Cc][Cc][Ee]9211-69[Aa][Ee]-11[Dd]9-[Bb][Ee][Dd]3-505054503030\}/ OR data_win_eventdata_subcategoryGuid:/\{0[Cc][Cc][Ee]9212-69[Aa][Ee]-11[Dd]9-[Bb][Ee][Dd]3-505054503030\}/ OR data_win_eventdata_subcategoryGuid:/\{0[Cc][Cc][Ee]9215-69[Aa][Ee]-11[Dd]9-[Bb][Ee][Dd]3-505054503030\}/ OR data_win_eventdata_subcategoryGuid:/\{0[Cc][Cc][Ee]921[Bb]-69[Aa][Ee]-11[Dd]9-[Bb][Ee][Dd]3-505054503030\}/ OR data_win_eventdata_subcategoryGuid:/\{0[Cc][Cc][Ee]922[Bb]-69[Aa][Ee]-11[Dd]9-[Bb][Ee][Dd]3-505054503030\}/ OR data_win_eventdata_subcategoryGuid:/\{0[Cc][Cc][Ee]922[Ff]-69[Aa][Ee]-11[Dd]9-[Bb][Ee][Dd]3-505054503030\}/ OR data_win_eventdata_subcategoryGuid:/\{0[Cc][Cc][Ee]9230-69[Aa][Ee]-11[Dd]9-[Bb][Ee][Dd]3-505054503030\}/ OR data_win_eventdata_subcategoryGuid:/\{0[Cc][Cc][Ee]9235-69[Aa][Ee]-11[Dd]9-[Bb][Ee][Dd]3-505054503030\}/ OR data_win_eventdata_subcategoryGuid:/\{0[Cc][Cc][Ee]9236-69[Aa][Ee]-11[Dd]9-[Bb][Ee][Dd]3-505054503030\}/ OR data_win_eventdata_subcategoryGuid:/\{0[Cc][Cc][Ee]9237-69[Aa][Ee]-11[Dd]9-[Bb][Ee][Dd]3-505054503030\}/ OR data_win_eventdata_subcategoryGuid:/\{0[Cc][Cc][Ee]923[Ff]-69[Aa][Ee]-11[Dd]9-[Bb][Ee][Dd]3-505054503030\}/ OR data_win_eventdata_subcategoryGuid:/\{0[Cc][Cc][Ee]9240-69[Aa][Ee]-11[Dd]9-[Bb][Ee][Dd]3-505054503030\}/ OR data_win_eventdata_subcategoryGuid:/\{0[Cc][Cc][Ee]9242-69[Aa][Ee]-11[Dd]9-[Bb][Ee][Dd]3-505054503030\}/) AND (data_win_eventdata_auditPolicyChanges:/.*%%8448.*/ OR data_win_eventdata_auditPolicyChanges:/.*%%8450.*/)) OR (data_win_system_eventID:"4719" AND data_win_eventdata_subcategoryGuid:/\{0[Cc][Cc][Ee]9217-69[Aa][Ee]-11[Dd]9-[Bb][Ee][Dd]3-505054503030\}/ AND data_win_eventdata_auditPolicyChanges:/.*%%8448.*/))
 
 correlation:
-  # Authored by the correlation engine for review.
+  # Authored per-rule (behaviour-researched) for the correlation engine. Related CoPilot
+  # Searches + telemetry pivots to run around an alert, scoped to its host/user/ip/domain.
+  related_rules:
+  - id: 0a13e132-651d-11eb-ae93-0242ac130002
+    name: Audit Policy Tampering Via Auditpol
+    reason: Auditpol is the usual command-line way to switch off the subcategories that produce this 4719 event; seeing the process creation confirms who/what ran it.
+  - id: windows-audit-policy-subcategory-disabled-via-auditpol-001
+    name: Windows Audit Policy Subcategory Disabled via Auditpol
+    reason: 'Same behaviour seen from process creation: auditpol /set /subcategory ... /success:disable on Logon/Process Creation subcategories, the exact change 4719 records.'
+  - id: Windows_Audit_Policy_Auditing_Option_Modified_-_Registry
+    name: Windows Audit Policy Auditing Option Modified - Registry
+    reason: Registry-level route to the same blind spot (Lsa audit options); co-occurs when the attacker bypasses auditpol.
+  - id: 1a4bd6af-99ac-4466-b5b2-7b72b4a05462
+    name: Security Event Logging Disabled via MiniNt Registry Key - Process
+    reason: MiniNt registry key trick suppresses Security event logging entirely; alternate audit-blinding method used alongside policy changes.
+  - id: 236e7c8e-c9d9-11eb-a824-acde48001122
+    name: Disable Logs Using WevtUtil
+    reason: wevtutil sl /e:false disables event channels; companion log-blinding step before noisy post-exploitation.
+  - id: cc36992a-4671-4f21-a91d-6c2b72a2edf5
+    name: Suspicious Eventlog Clearing or Configuration Change Activity
+    reason: Eventlog clearing/config change typically follows disabling auditing to erase events already recorded before the policy change.
+  - id: 0f017df3-8f5a-414f-ad6b-24aff1128278
+    name: Suspicious Eventlog Clear
+    reason: PowerShell-based Clear-EventLog / log clearing, a common follow-on cleanup once auditing is reduced.
+  - id: cd1f961e-0b96-436b-b7c6-38da4583ec00
+    name: Suspicious Windows Trace ETW Session Tamper Via Logman.EXE
+    reason: Logman ETW session tampering is a parallel telemetry-impairment technique chained with audit policy disabling.
+  window: 2h
   enrichment_searches:
-  # Rule-specific telemetry pivots the engine runs around an alert from this rule,
-  # scoped to the alert's host/user/IP within the window (behaviour-targeted, not a sweep).
-    - name: "This account's logon activity across hosts"
-      query: '(data_win_system_eventID:"4624" OR data_win_system_eventID:"4625")'
-      pivot_on: [user]
-      window: 6h
-    - name: "Account / group / privilege changes involving this account"
-      query: '(data_win_system_eventID:"4720" OR data_win_system_eventID:"4722" OR data_win_system_eventID:"4724" OR data_win_system_eventID:"4728" OR data_win_system_eventID:"4732" OR data_win_system_eventID:"4756" OR data_win_system_eventID:"4672")'
-      pivot_on: [user]
-      window: 6h
-    - name: "Memory/credential-dump creation & LSASS access on this host"
-      query: '((data_win_system_eventID:"1" AND data_win_eventdata_image:/.*(\\[Pp][Rr][Oo][Cc][Dd][Uu][Mm][Pp]\.[Ee][Xx][Ee]|\\[Pp][Rr][Oo][Cc][Dd][Uu][Mm][Pp]64\.[Ee][Xx][Ee]|\\[Ss][Qq][Ll][Dd][Uu][Mm][Pp][Ee][Rr]\.[Ee][Xx][Ee]|\\[Cc][Rr][Ee][Aa][Tt][Ee][Dd][Uu][Mm][Pp]\.[Ee][Xx][Ee]|\\[Rr][Dd][Rr][Ll][Ee][Aa][Kk][Dd][Ii][Aa][Gg]\.[Ee][Xx][Ee]|\\[Dd][Uu][Mm][Pp][Ee][Rr][Tt]\.[Ee][Xx][Ee]|\\[Nn][Aa][Nn][Oo][Dd][Uu][Mm][Pp]\.[Ee][Xx][Ee]|\\[Aa][Vv][Dd][Uu][Mm][Pp]\.[Ee][Xx][Ee])/) OR (data_win_system_eventID:"1" AND (data_win_eventdata_commandLine:/.*[Cc][Oo][Mm][Ss][Vv][Cc][Ss]\.[Dd][Ll][Ll].*/ OR data_win_eventdata_commandLine:/.*[Mm][Ii][Nn][Ii][Dd][Uu][Mm][Pp].*/ OR data_win_eventdata_commandLine:/.*[Dd][Uu][Mm][Pp][Ee][Rr][Tt].*/ OR data_win_eventdata_commandLine:/.*[Nn][Aa][Nn][Oo][Dd][Uu][Mm][Pp].*/ OR data_win_eventdata_commandLine:/.*[Ll][Ss][Aa][Ss][Ss].*/ OR data_win_eventdata_commandLine:/.*[Ss][Ee][Kk][Uu][Rr][Ll][Ss][Aa].*/ OR data_win_eventdata_commandLine:/.*[Nn][Tt][Dd][Ss]\.[Dd][Ii][Tt].*/ OR data_win_eventdata_commandLine:/.*[Nn][Tt][Dd][Ss][Uu][Tt][Ii][Ll].*/)) OR (data_win_system_eventID:"10" AND data_win_eventdata_targetImage:/.*(\\[Ll][Ss][Aa][Ss][Ss]\.[Ee][Xx][Ee])/))'
-      pivot_on: [host]
-      window: 1h
+  # Behaviour-targeted hunts the engine runs around the alert (not a sweep).
+  - name: Auditpol / audit policy commands on this host
+    query: data_win_system_eventID:"1" AND (data_win_eventdata_image:/.*[Aa][Uu][Dd][Ii][Tt][Pp][Oo][Ll]\.[Ee][Xx][Ee]/ OR data_win_eventdata_commandLine:/.*[Aa][Uu][Dd][Ii][Tt][Pp][Oo][Ll].*/)
+    pivot_on:
+    - host
+    window: 2h
+  - name: Event log clearing or channel disabling (wevtutil, Clear-EventLog, 1102/104)
+    query: (data_win_system_eventID:"1102" OR data_win_system_eventID:"104" OR (data_win_system_eventID:"1" AND (data_win_eventdata_commandLine:/.*[Ww][Ee][Vv][Tt][Uu][Tt][Ii][Ll].*[Cc][Ll].*/ OR data_win_eventdata_commandLine:/.*[Ww][Ee][Vv][Tt][Uu][Tt][Ii][Ll].*[Ss][Ll].*[Ee]:[Ff][Aa][Ll][Ss][Ee].*/ OR data_win_eventdata_commandLine:/.*[Cc][Ll][Ee][Aa][Rr]-[Ee][Vv][Ee][Nn][Tt][Ll][Oo][Gg].*/)))
+    pivot_on:
+    - host
+    window: 2h
+  - name: Registry changes to LSA audit options / MiniNt / EventLog service
+    query: (data_win_system_eventID:"13" OR data_win_system_eventID:"12") AND (data_win_eventdata_targetObject:*Control\Lsa\SCENoApplyLegacyAuditPolicy* OR data_win_eventdata_targetObject:*Control\MiniNt* OR data_win_eventdata_targetObject:*Control\Lsa\AuditBaseObjects* OR data_win_eventdata_targetObject:*Services\EventLog*)
+    pivot_on:
+    - host
+    window: 2h
+  - name: Admin-level logon and privilege use by the account that changed audit policy
+    query: data_win_system_eventID:"4672" OR data_win_system_eventID:"4624" OR data_win_system_eventID:"4648"
+    pivot_on:
+    - user
+    window: 4h
+  - name: 'Defense-evasion follow-ons: Defender/firewall disabling, shadow copy deletion, Sysmon unload'
+    query: data_win_system_eventID:"1" AND (data_win_eventdata_commandLine:/.*[Ss][Ee][Tt]-[Mm][Pp][Pp][Rr][Ee][Ff][Ee][Rr][Ee][Nn][Cc][Ee].*[Dd][Ii][Ss][Aa][Bb][Ll][Ee].*/ OR data_win_eventdata_commandLine:/.*[Nn][Ee][Tt][Ss][Hh].*[Aa][Dd][Vv][Ff][Ii][Rr][Ee][Ww][Aa][Ll][Ll].*[Oo][Ff][Ff].*/ OR data_win_eventdata_commandLine:/.*[Vv][Ss][Ss][Aa][Dd][Mm][Ii][Nn].*[Dd][Ee][Ll][Ee][Tt][Ee].*[Ss][Hh][Aa][Dd][Oo][Ww][Ss].*/ OR data_win_eventdata_commandLine:/.*[Ff][Ll][Tt][Mm][Cc].*[Uu][Nn][Ll][Oo][Aa][Dd].*/)
+    pivot_on:
+    - host
+    window: 4h

@@ -200,38 +200,58 @@ graylog:
   query: (data_win_system_eventID:"4625" OR data_win_system_eventID:"4776") AND (data_win_eventdata_status:/0[Xx][Cc]0000072/ OR data_win_eventdata_status:/0[Xx][Cc]000006[Ff]/ OR data_win_eventdata_status:/0[Xx][Cc]0000070/ OR data_win_eventdata_status:/0[Xx][Cc]0000413/ OR data_win_eventdata_status:/0[Xx][Cc]000018[Cc]/ OR data_win_eventdata_status:/0[Xx][Cc]000015[Bb]/ OR data_win_eventdata_subStatus:/0[Xx][Cc]0000072/ OR data_win_eventdata_subStatus:/0[Xx][Cc]000006[Ff]/ OR data_win_eventdata_subStatus:/0[Xx][Cc]0000070/ OR data_win_eventdata_subStatus:/0[Xx][Cc]0000413/ OR data_win_eventdata_subStatus:/0[Xx][Cc]000018[Cc]/ OR data_win_eventdata_subStatus:/0[Xx][Cc]000015[Bb]/) AND _exists_:data_win_eventdata_subjectUserSid AND NOT (data_win_eventdata_subjectUserSid:/[Ss]-1-0-0/)
 
 correlation:
-  # Authored by the correlation engine for review. Related CoPilot Searches to run
-  # around an alert from this rule, scoped to the same host/user/IP within the window.
+  # Authored per-rule (behaviour-researched) for the correlation engine. Related CoPilot
+  # Searches + telemetry pivots to run around an alert, scoped to its host/user/ip/domain.
   related_rules:
-    - id: 0255a820-e564-4e40-af2b-6ac61160335c
-      name: "A New Trust Was Created To A Domain"
-      reason: "next kill-chain tactic: Persistence"
-    - id: 35ba1d85-724d-42a3-889f-2e2362bcaf23
-      name: "AD Privileged Users or Groups Reconnaissance"
-      reason: "next kill-chain tactic: Discovery"
-    - id: 17d619c1-e020-4347-957e-1d1207455c93
-      name: "Active Directory Replication from Non Machine Account"
-      reason: "next kill-chain tactic: Credential Access"
-    - id: 300bac00-e041-4ee2-9c36-e262656a6ecc
-      name: "Active Directory User Backdoors"
-      reason: "next kill-chain tactic: Persistence"
-  window: 1h
+  - id: 941e5c45-cda7-4864-8cea-bbb7458d194a
+    name: Suspicious Remote Logon with Explicit Credentials
+    reason: Attacker probing a disabled/restricted account with stolen credentials typically moves on to explicit-credential (4648) logons to other hosts once a working credential is found
+  - id: 8eef149c-bd26-49f2-9e5a-9b00e3af499b
+    name: Pass the Hash Activity 2
+    reason: Failures from a stolen hash against restricted accounts are often followed by successful NTLM network logons using the same hash on other accounts or hosts
+  - id: 192a0330-c20b-4356-90b6-7b7049ae0b87
+    name: Successful Overpass the Hash Attempt
+    reason: Stolen-credential reuse that fails against a restricted account may succeed as a Kerberos overpass-the-hash logon with another account
+  - id: 3fb2e8e3-7bc0-4567-9722-c5ab9f8595eb
+    name: Windows Create Local Account
+    reason: Locked-out/disabled account attempts by an intruder are commonly followed by creating a fresh local account to regain a foothold
+  - id: c265cf08-3f99-46c1-8d59-328247057d57
+    name: User Added to Local Administrator Group
+    reason: After account tampering attempts, privilege grants to a local admin group confirm the access is being entrenched
+  - id: ab6bffca-beff-4baa-af11-6733f296d57a
+    name: Potential AD User Enumeration From Non-Machine Account
+    reason: Knowing which accounts are disabled or restricted implies prior user enumeration or later enumeration to find usable accounts
+  - id: d04ae2b8-ad54-4de0-bd87-4bc1da66aa59
+    name: Kerberoasting Activity - Initial Query
+    reason: Failed password-based logons on restricted accounts often pivot to Kerberos ticket-based credential theft against other accounts
+  - id: d99b79d2-0a6f-4f46-ad8b-260b6e17f982
+    name: Security Eventlog Cleared
+    reason: Once logon probing succeeds, intruders may clear the Security log to hide the failed-logon trail this detection relies on
+  window: 6h
   enrichment_searches:
-  # Rule-specific telemetry pivots the engine runs around an alert from this rule,
-  # scoped to the alert's host/user/IP within the window (behaviour-targeted, not a sweep).
-    - name: "Memory/credential-dump creation & LSASS access on this host"
-      query: '((data_win_system_eventID:"1" AND data_win_eventdata_image:/.*(\\[Pp][Rr][Oo][Cc][Dd][Uu][Mm][Pp]\.[Ee][Xx][Ee]|\\[Pp][Rr][Oo][Cc][Dd][Uu][Mm][Pp]64\.[Ee][Xx][Ee]|\\[Ss][Qq][Ll][Dd][Uu][Mm][Pp][Ee][Rr]\.[Ee][Xx][Ee]|\\[Cc][Rr][Ee][Aa][Tt][Ee][Dd][Uu][Mm][Pp]\.[Ee][Xx][Ee]|\\[Rr][Dd][Rr][Ll][Ee][Aa][Kk][Dd][Ii][Aa][Gg]\.[Ee][Xx][Ee]|\\[Dd][Uu][Mm][Pp][Ee][Rr][Tt]\.[Ee][Xx][Ee]|\\[Nn][Aa][Nn][Oo][Dd][Uu][Mm][Pp]\.[Ee][Xx][Ee]|\\[Aa][Vv][Dd][Uu][Mm][Pp]\.[Ee][Xx][Ee])/) OR (data_win_system_eventID:"1" AND (data_win_eventdata_commandLine:/.*[Cc][Oo][Mm][Ss][Vv][Cc][Ss]\.[Dd][Ll][Ll].*/ OR data_win_eventdata_commandLine:/.*[Mm][Ii][Nn][Ii][Dd][Uu][Mm][Pp].*/ OR data_win_eventdata_commandLine:/.*[Dd][Uu][Mm][Pp][Ee][Rr][Tt].*/ OR data_win_eventdata_commandLine:/.*[Nn][Aa][Nn][Oo][Dd][Uu][Mm][Pp].*/ OR data_win_eventdata_commandLine:/.*[Ll][Ss][Aa][Ss][Ss].*/ OR data_win_eventdata_commandLine:/.*[Ss][Ee][Kk][Uu][Rr][Ll][Ss][Aa].*/ OR data_win_eventdata_commandLine:/.*[Nn][Tt][Dd][Ss]\.[Dd][Ii][Tt].*/ OR data_win_eventdata_commandLine:/.*[Nn][Tt][Dd][Ss][Uu][Tt][Ii][Ll].*/)) OR (data_win_system_eventID:"10" AND data_win_eventdata_targetImage:/.*(\\[Ll][Ss][Aa][Ss][Ss]\.[Ee][Xx][Ee])/))'
-      pivot_on: [host]
-      window: 1h
-    - name: "This account's logon activity across hosts"
-      query: '(data_win_system_eventID:"4624" OR data_win_system_eventID:"4625")'
-      pivot_on: [user]
-      window: 6h
-    - name: "Account / group / privilege changes involving this account"
-      query: '(data_win_system_eventID:"4720" OR data_win_system_eventID:"4722" OR data_win_system_eventID:"4724" OR data_win_system_eventID:"4728" OR data_win_system_eventID:"4732" OR data_win_system_eventID:"4756" OR data_win_system_eventID:"4672")'
-      pivot_on: [user]
-      window: 6h
-    - name: "UAC-bypass / privilege-escalation binaries on this host"
-      query: 'data_win_system_eventID:"1" AND (data_win_eventdata_image:/.*(\\[Ff][Oo][Dd][Hh][Ee][Ll][Pp][Ee][Rr]\.[Ee][Xx][Ee]|\\[Ee][Vv][Ee][Nn][Tt][Vv][Ww][Rr]\.[Ee][Xx][Ee]|\\[Ss][Dd][Cc][Ll][Tt]\.[Ee][Xx][Ee]|\\[Cc][Oo][Mm][Pp][Uu][Tt][Ee][Rr][Dd][Ee][Ff][Aa][Uu][Ll][Tt][Ss]\.[Ee][Xx][Ee]|\\[Ss][Ll][Uu][Ii]\.[Ee][Xx][Ee]|\\[Ww][Ss][Rr][Ee][Ss][Ee][Tt]\.[Ee][Xx][Ee])/ OR data_win_eventdata_parentImage:/.*(\\[Ff][Oo][Dd][Hh][Ee][Ll][Pp][Ee][Rr]\.[Ee][Xx][Ee]|\\[Ee][Vv][Ee][Nn][Tt][Vv][Ww][Rr]\.[Ee][Xx][Ee]|\\[Ss][Dd][Cc][Ll][Tt]\.[Ee][Xx][Ee]|\\[Cc][Oo][Mm][Pp][Uu][Tt][Ee][Rr][Dd][Ee][Ff][Aa][Uu][Ll][Tt][Ss]\.[Ee][Xx][Ee]|\\[Ss][Ll][Uu][Ii]\.[Ee][Xx][Ee]|\\[Ww][Ss][Rr][Ee][Ss][Ee][Tt]\.[Ee][Xx][Ee])/)'
-      pivot_on: [host]
-      window: 2h
+  # Behaviour-targeted hunts the engine runs around the alert (not a sweep).
+  - name: Successful logons by this account after the failures
+    query: data_win_system_eventID:"4624" AND NOT data_win_eventdata_logonType:"5"
+    pivot_on:
+    - user
+    window: 6h
+  - name: Explicit-credential logons and special privileges assigned
+    query: (data_win_system_eventID:"4648" OR data_win_system_eventID:"4672")
+    pivot_on:
+    - user
+    window: 6h
+  - name: Account re-enable, unlock, password reset or group membership change
+    query: (data_win_system_eventID:"4722" OR data_win_system_eventID:"4767" OR data_win_system_eventID:"4723" OR data_win_system_eventID:"4724" OR data_win_system_eventID:"4738" OR data_win_system_eventID:"4732" OR data_win_system_eventID:"4728" OR data_win_system_eventID:"4756" OR data_win_system_eventID:"4720")
+    pivot_on:
+    - user
+    window: 6h
+  - name: Other failed logons and NTLM validation failures on this host
+    query: (data_win_system_eventID:"4625" OR data_win_system_eventID:"4776" OR data_win_system_eventID:"4771")
+    pivot_on:
+    - host
+    window: 2h
+  - name: Remote interactive and network logons or RDP denials on this host
+    query: (data_win_system_eventID:"4624" AND (data_win_eventdata_logonType:"10" OR data_win_eventdata_logonType:"3")) OR data_win_system_eventID:"4825"
+    pivot_on:
+    - host
+    window: 2h

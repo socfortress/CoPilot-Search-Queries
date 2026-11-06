@@ -180,35 +180,58 @@ graylog:
   query: (data_win_system_eventID:"141" OR data_win_system_eventID:"142") AND (data_win_eventdata_taskName:/.*\\[Ww][Ii][Nn][Dd][Oo][Ww][Ss]\\[Ss][Yy][Ss][Tt][Ee][Mm][Rr][Ee][Ss][Tt][Oo][Rr][Ee]\\[Ss][Rr].*/ OR data_win_eventdata_taskName:/.*\\[Ww][Ii][Nn][Dd][Oo][Ww][Ss]\\[Ww][Ii][Nn][Dd][Oo][Ww][Ss] [Dd][Ee][Ff][Ee][Nn][Dd][Ee][Rr]\\.*/ OR data_win_eventdata_taskName:/.*\\[Ww][Ii][Nn][Dd][Oo][Ww][Ss]\\[Bb][Ii][Tt][Ll][Oo][Cc][Kk][Ee][Rr].*/ OR data_win_eventdata_taskName:/.*\\[Ww][Ii][Nn][Dd][Oo][Ww][Ss]\\[Ww][Ii][Nn][Dd][Oo][Ww][Ss][Bb][Aa][Cc][Kk][Uu][Pp]\\.*/ OR data_win_eventdata_taskName:/.*\\[Ww][Ii][Nn][Dd][Oo][Ww][Ss]\\[Ww][Ii][Nn][Dd][Oo][Ww][Ss][Uu][Pp][Dd][Aa][Tt][Ee]\\.*/ OR data_win_eventdata_taskName:/.*\\[Ww][Ii][Nn][Dd][Oo][Ww][Ss]\\[Uu][Pp][Dd][Aa][Tt][Ee][Oo][Rr][Cc][Hh][Ee][Ss][Tt][Rr][Aa][Tt][Oo][Rr]\\.*/ OR data_win_eventdata_taskName:/.*\\[Ww][Ii][Nn][Dd][Oo][Ww][Ss]\\[Ee][Xx][Pp][Ll][Oo][Ii][Tt][Gg][Uu][Aa][Rr][Dd].*/) AND _exists_:data_win_eventdata_userName AND NOT (data_win_eventdata_userName:/.*[Aa][Uu][Tt][Hh][Oo][Rr][Ii].*/ OR data_win_eventdata_userName:/.*[Aa][Uu][Tt][Oo][Rr][Ii].*/)
 
 correlation:
-  # Authored by the correlation engine for review. Related CoPilot Searches to run
-  # around an alert from this rule, scoped to the same host/user/IP within the window.
+  # Authored per-rule (behaviour-researched) for the correlation engine. Related CoPilot
+  # Searches + telemetry pivots to run around an alert, scoped to its host/user/ip/domain.
   related_rules:
-    - id: 48d91a3a-2363-43ba-a456-ca71ac3da5c2
-      name: "Audit CVE Event"
-      reason: "next kill-chain tactic: Impact"
-    - id: eee8311f-a752-44f0-bf2f-6b007db16300
-      name: "BlueSky Ransomware Artefacts"
-      reason: "next kill-chain tactic: Impact"
-    - id: 3f2c93c7-7b2a-4d58-bb8d-6f39422d8148
-      name: "CVE-2024-49113 Exploitation Attempt - LDAP Nightmare"
-      reason: "next kill-chain tactic: Impact"
-  window: 1h
+  - id: dbc1f800-0fe0-4bc0-9c66-292c2abe3f78
+    name: Delete Important Scheduled Task
+    reason: 'Process-creation twin: schtasks /delete on the same protected Defender/Backup/Update/SystemRestore task names would be the command that produced this Task Scheduler 141 event and names the parent process.'
+  - id: 9ac94dc8-9042-493c-ba45-3b5e7c86b980
+    name: Disable Important Scheduled Task
+    reason: Process-creation twin for the disable path (schtasks /change /disable, event 142); shows the actor's command line and parent.
+  - id: c947b146-0abc-4c87-9c64-b17e9d7274a2
+    name: Shadow Copies Deletion Using Operating Systems Utilities
+    reason: Neutralising SystemRestore/WindowsBackup tasks is a recovery-inhibition step; vssadmin/wmic shadow copy deletion is the paired action before encryption.
+  - id: 639c9081-f482-47d3-a0bd-ddee3d4ecd76
+    name: All Backups Deleted Via Wbadmin.EXE
+    reason: Disabling WindowsBackup tasks followed by wbadmin delete backup completes destruction of backup recovery points.
+  - id: c9fbe8e9-119d-40a6-9b59-dd58a5d84429
+    name: Potential Ransomware or Unauthorized MBR Tampering Via Bcdedit.EXE
+    reason: Ransomware playbooks pair disabling restore/backup tasks with bcdedit recoveryenabled No / ignoreallfailures to prevent boot repair.
+  - id: db1c21e4-cd66-4b4e-85ca-590f0780529c
+    name: Windows Recovery Environment Disabled Via Reagentc
+    reason: Disabling WinRE alongside disabled backup/restore tasks removes the last offline recovery path before impact.
+  - id: b28e58e4-2a72-4fae-bdee-0fbe904db642
+    name: Windows Defender Real-time Protection Disabled
+    reason: Deleting/disabling tasks under Windows Defender is defense evasion that typically accompanies actually turning off real-time protection on the same host.
+  - id: 8f3a614f-6b98-4f7d-82dd-d0df38452a8b
+    name: Windows Excessive Service Stop Attempt
+    reason: T1489 service-stop wave (databases, backup, AV agents) commonly runs in the same minutes as scheduled-task neutralisation just before encryption.
+  window: 2h
   enrichment_searches:
-  # Rule-specific telemetry pivots the engine runs around an alert from this rule,
-  # scoped to the alert's host/user/IP within the window (behaviour-targeted, not a sweep).
-    - name: "Service-stop / recovery-inhibition behaviour on this host"
-      query: '(data_win_eventdata_commandLine:/.*[Vv][Ss][Ss][Aa][Dd][Mm][Ii][Nn].*/ OR data_win_eventdata_commandLine:/.*[Ss][Hh][Aa][Dd][Oo][Ww][Cc][Oo][Pp][Yy].*/ OR data_win_eventdata_commandLine:/.*[Bb][Cc][Dd][Ee][Dd][Ii][Tt].*/ OR data_win_eventdata_commandLine:/.*[Ww][Bb][Aa][Dd][Mm][Ii][Nn].*/ OR data_win_eventdata_commandLine:/.*[Cc][Ii][Pp][Hh][Ee][Rr] \/[Ww].*/ OR data_win_eventdata_commandLine:/.*[Ww][Mm][Ii][Cc] [Ss][Hh][Aa][Dd][Oo][Ww][Cc][Oo][Pp][Yy] [Dd][Ee][Ll][Ee][Tt][Ee].*/) OR (data_win_system_eventID:"1" AND data_win_eventdata_image:/.*(\\[Vv][Ss][Ss][Aa][Dd][Mm][Ii][Nn]\.[Ee][Xx][Ee]|\\[Ww][Bb][Aa][Dd][Mm][Ii][Nn]\.[Ee][Xx][Ee])/)'
-      pivot_on: [host]
-      window: 2h
-    - name: "Process creation by the task engine on this host"
-      query: 'data_win_system_eventID:"1" AND data_win_eventdata_parentImage:/.*(\\[Tt][Aa][Ss][Kk][Ee][Nn][Gg]\.[Ee][Xx][Ee]|\\[Tt][Aa][Ss][Kk][Hh][Oo][Ss][Tt][Ww]\.[Ee][Xx][Ee])/'
-      pivot_on: [host]
-      window: 2h
-    - name: "Follow-on LOLBin / signed-binary-proxy execution on this host"
-      query: 'data_win_system_eventID:"1" AND data_win_eventdata_image:/.*(\\[Rr][Uu][Nn][Dd][Ll][Ll]32\.[Ee][Xx][Ee]|\\[Rr][Ee][Gg][Ss][Vv][Rr]32\.[Ee][Xx][Ee]|\\[Mm][Ss][Hh][Tt][Aa]\.[Ee][Xx][Ee]|\\[Ii][Nn][Ss][Tt][Aa][Ll][Ll][Uu][Tt][Ii][Ll]\.[Ee][Xx][Ee]|\\[Rr][Ee][Gg][Aa][Ss][Mm]\.[Ee][Xx][Ee]|\\[Rr][Ee][Gg][Ss][Vv][Cc][Ss]\.[Ee][Xx][Ee]|\\[Mm][Ss][Bb][Uu][Ii][Ll][Dd]\.[Ee][Xx][Ee]|\\[Cc][Ee][Rr][Tt][Uu][Tt][Ii][Ll]\.[Ee][Xx][Ee]|\\[Bb][Ii][Tt][Ss][Aa][Dd][Mm][Ii][Nn]\.[Ee][Xx][Ee]|\\[Ww][Mm][Ii][Cc]\.[Ee][Xx][Ee]|\\[Cc][Mm][Ss][Tt][Pp]\.[Ee][Xx][Ee]|\\[Oo][Dd][Bb][Cc][Cc][Oo][Nn][Ff]\.[Ee][Xx][Ee]|\\[Ff][Oo][Rr][Ff][Ii][Ll][Ee][Ss]\.[Ee][Xx][Ee]|\\[Pp][Cc][Aa][Ll][Uu][Aa]\.[Ee][Xx][Ee]|\\[Mm][Aa][Vv][Ii][Nn][Jj][Ee][Cc][Tt]\.[Ee][Xx][Ee]|\\[Ss][Cc][Rr][Ii][Pp][Tt][Rr][Uu][Nn][Nn][Ee][Rr]\.[Ee][Xx][Ee])/'
-      pivot_on: [host]
-      window: 2h
-    - name: "Ransomware / recovery-inhibition behaviour on this host"
-      query: '(data_win_eventdata_commandLine:/.*[Vv][Ss][Ss][Aa][Dd][Mm][Ii][Nn].*/ OR data_win_eventdata_commandLine:/.*[Ss][Hh][Aa][Dd][Oo][Ww][Cc][Oo][Pp][Yy].*/ OR data_win_eventdata_commandLine:/.*[Bb][Cc][Dd][Ee][Dd][Ii][Tt].*/ OR data_win_eventdata_commandLine:/.*[Ww][Bb][Aa][Dd][Mm][Ii][Nn].*/ OR data_win_eventdata_commandLine:/.*[Cc][Ii][Pp][Hh][Ee][Rr] \/[Ww].*/ OR data_win_eventdata_commandLine:/.*[Ww][Mm][Ii][Cc] [Ss][Hh][Aa][Dd][Oo][Ww][Cc][Oo][Pp][Yy] [Dd][Ee][Ll][Ee][Tt][Ee].*/) OR (data_win_system_eventID:"1" AND data_win_eventdata_image:/.*(\\[Vv][Ss][Ss][Aa][Dd][Mm][Ii][Nn]\.[Ee][Xx][Ee]|\\[Ww][Bb][Aa][Dd][Mm][Ii][Nn]\.[Ee][Xx][Ee])/)'
-      pivot_on: [host]
-      window: 2h
+  # Behaviour-targeted hunts the engine runs around the alert (not a sweep).
+  - name: schtasks delete/disable command lines (who ran the task tampering)
+    query: data_win_system_eventID:"1" AND data_win_eventdata_image:/.*[Ss][Cc][Hh][Tt][Aa][Ss][Kk][Ss]\.[Ee][Xx][Ee]/ AND (data_win_eventdata_commandLine:/.*\/[Dd][Ee][Ll][Ee][Tt][Ee].*/ OR data_win_eventdata_commandLine:/.*\/[Dd][Ii][Ss][Aa][Bb][Ll][Ee].*/)
+    pivot_on:
+    - host
+    window: 2h
+  - name: Task Scheduler registrations/updates (replacement or persistence tasks)
+    query: (data_win_system_eventID:"106" OR data_win_system_eventID:"140" OR data_win_system_eventID:"141" OR data_win_system_eventID:"142")
+    pivot_on:
+    - host
+    window: 6h
+  - name: 'Recovery inhibition: shadow copies, backups, boot recovery'
+    query: data_win_system_eventID:"1" AND (data_win_eventdata_commandLine:/.*[Vv][Ss][Ss][Aa][Dd][Mm][Ii][Nn].*[Dd][Ee][Ll][Ee][Tt][Ee].*/ OR data_win_eventdata_commandLine:/.*[Ww][Bb][Aa][Dd][Mm][Ii][Nn].*[Dd][Ee][Ll][Ee][Tt][Ee].*/ OR data_win_eventdata_commandLine:/.*[Ss][Hh][Aa][Dd][Oo][Ww][Cc][Oo][Pp][Yy].*[Dd][Ee][Ll][Ee][Tt][Ee].*/ OR data_win_eventdata_commandLine:/.*[Bb][Cc][Dd][Ee][Dd][Ii][Tt].*([Rr][Ee][Cc][Oo][Vv][Ee][Rr][Yy][Ee][Nn][Aa][Bb][Ll][Ee][Dd]|[Ii][Gg][Nn][Oo][Rr][Ee][Aa][Ll][Ll][Ff][Aa][Ii][Ll][Uu][Rr][Ee][Ss]).*/ OR data_win_eventdata_commandLine:/.*[Rr][Ee][Aa][Gg][Ee][Nn][Tt][Cc].*\/[Dd][Ii][Ss][Aa][Bb][Ll][Ee].*/)
+    pivot_on:
+    - host
+    window: 2h
+  - name: Security tooling and service stop/disable commands
+    query: data_win_system_eventID:"1" AND (data_win_eventdata_commandLine:/.*[Ss][Ee][Tt]-[Mm][Pp][Pp][Rr][Ee][Ff][Ee][Rr][Ee][Nn][Cc][Ee].*[Dd][Ii][Ss][Aa][Bb][Ll][Ee].*/ OR data_win_eventdata_commandLine:/.*[Aa][Dd][Dd]-[Mm][Pp][Pp][Rr][Ee][Ff][Ee][Rr][Ee][Nn][Cc][Ee].*[Ee][Xx][Cc][Ll][Uu][Ss][Ii][Oo][Nn].*/ OR data_win_eventdata_commandLine:/.*[Nn][Ee][Tt]1? [Ss][Tt][Oo][Pp] .*/ OR data_win_eventdata_commandLine:/.*[Ss][Cc]\.?[Ee]?[Xx]?[Ee]? (stop|config).*/ OR data_win_eventdata_commandLine:/.*[Tt][Aa][Ss][Kk][Kk][Ii][Ll][Ll].*\/[Ff].*/)
+    pivot_on:
+    - host
+    window: 2h
+  - name: Ransom-note and mass-encryption file artefacts
+    query: data_win_system_eventID:"11" AND (data_win_eventdata_targetFilename:/.*([Dd][Ee][Cc][Rr][Yy][Pp][Tt]|[Rr][Ee][Aa][Dd][Mm][Ee]|[Hh][Oo][Ww][_ -]?[Tt][Oo]|[Rr][Ee][Cc][Oo][Vv][Ee][Rr]).*\.([Tt][Xx][Tt]|[Hh][Tt][Mm][Ll]?|[Hh][Tt][Aa])/ OR data_win_eventdata_targetFilename:/.*\.([Ll][Oo][Cc][Kk][Ee][Dd]|[Ee][Nn][Cc][Rr][Yy][Pp][Tt][Ee][Dd]|[Cc][Rr][Yy][Pp][Tt])/)
+    pivot_on:
+    - host
+    window: 4h

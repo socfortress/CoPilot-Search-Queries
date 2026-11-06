@@ -144,35 +144,58 @@ graylog:
   query: data_win_system_eventID:"4662" AND data_win_eventdata_objectType:/[Ss][Ee][Cc][Rr][Ee][Tt][Oo][Bb][Jj][Ee][Cc][Tt]/ AND data_win_eventdata_accessMask:/0[Xx]2/ AND data_win_eventdata_objectName:/.*[Bb][Cc][Kk][Uu][Pp][Kk][Ee][Yy].*/
 
 correlation:
-  # Authored by the correlation engine for review. Related CoPilot Searches to run
-  # around an alert from this rule, scoped to the same host/user/IP within the window.
+  # Authored per-rule (behaviour-researched) for the correlation engine. Related CoPilot
+  # Searches + telemetry pivots to run around an alert, scoped to its host/user/ip/domain.
   related_rules:
-    - id: 35ba1d85-724d-42a3-889f-2e2362bcaf23
-      name: "AD Privileged Users or Groups Reconnaissance"
-      reason: "next kill-chain tactic: Discovery"
-    - id: 17d619c1-e020-4347-957e-1d1207455c93
-      name: "Active Directory Replication from Non Machine Account"
-      reason: "next kill-chain tactic: Credential Access"
-    - id: 87261fb2-69d0-42fe-b9de-88c6b5f65a43
-      name: "Atera Agent Installation"
-      reason: "next kill-chain tactic: Command and Control"
+  - id: 39a94fd1-8c9a-4ff6-bf22-c058762f8014
+    name: DPAPI Domain Master Key Backup Attempt
+    reason: Event 4692 is the DC-side master key backup/recovery call (MS-BKRP) that the same tooling issues alongside the BCKUPKEY LSA secret read; co-occurring on the DC
+  - id: 17d619c1-e020-4347-957e-1d1207455c93
+    name: Active Directory Replication from Non Machine Account
+    reason: Attackers holding Domain Admin-equivalent rights on the DC who pull the DPAPI backup key typically also DCSync krbtgt/user hashes; same 4662 object-access audit stream
+  - id: c7d33b50-f690-4b51-8cfb-0fb912a31e57
+    name: HackTool - SharpDPAPI Execution
+    reason: SharpDPAPI (backupkey/masterkeys /pvk) is the common tool that retrieves the domain backup key; process-creation view of the same action
+  - id: 7892ec59-c5bb-496d-8968-e5d210ca3ac4
+    name: DPAPI Backup Keys And Certificate Export Activity IOC
+    reason: 'Follow-on: the extracted backup key is written to disk as a .pvk/ntds_capi file, which this file-creation rule catches'
+  - id: a642964e-bead-4bed-8910-1bb4d63e3b4d
+    name: HackTool - Mimikatz Execution
+    reason: Mimikatz lsadump::backupkeys is the classic way to read the BCKUPKEY secret from a DC; execution precedes or coincides with the 4662 event
+  - id: 6e2a900a-ced9-4e4a-a9c2-13e706f9518a
+    name: HackTool - Potential Remote Credential Dumping Activity Via CrackMapExec Or Impacket-Secretsdump
+    reason: Remote LSA secret/NTDS dumping tools that read secret objects over RPC leave output files on the DC alongside the BCKUPKEY access
+  - id: 32d56ea1-417f-44ff-822b-882873f5f43b
+    name: Impacket PsExec Execution
+    reason: Remote execution on the DC by the same Impacket toolkit is a likely precursor for the account performing the secret read
+  - id: 8eef149c-bd26-49f2-9e5a-9b00e3af499b
+    name: Pass the Hash Activity 2
+    reason: 'Likely next step: harvested credentials and decrypted DPAPI blobs are reused via pass-the-hash for lateral movement'
   window: 1h
   enrichment_searches:
-  # Rule-specific telemetry pivots the engine runs around an alert from this rule,
-  # scoped to the alert's host/user/IP within the window (behaviour-targeted, not a sweep).
-    - name: "Memory/credential-dump creation & LSASS access on this host"
-      query: '((data_win_system_eventID:"1" AND data_win_eventdata_image:/.*(\\[Pp][Rr][Oo][Cc][Dd][Uu][Mm][Pp]\.[Ee][Xx][Ee]|\\[Pp][Rr][Oo][Cc][Dd][Uu][Mm][Pp]64\.[Ee][Xx][Ee]|\\[Ss][Qq][Ll][Dd][Uu][Mm][Pp][Ee][Rr]\.[Ee][Xx][Ee]|\\[Cc][Rr][Ee][Aa][Tt][Ee][Dd][Uu][Mm][Pp]\.[Ee][Xx][Ee]|\\[Rr][Dd][Rr][Ll][Ee][Aa][Kk][Dd][Ii][Aa][Gg]\.[Ee][Xx][Ee]|\\[Dd][Uu][Mm][Pp][Ee][Rr][Tt]\.[Ee][Xx][Ee]|\\[Nn][Aa][Nn][Oo][Dd][Uu][Mm][Pp]\.[Ee][Xx][Ee]|\\[Aa][Vv][Dd][Uu][Mm][Pp]\.[Ee][Xx][Ee])/) OR (data_win_system_eventID:"1" AND (data_win_eventdata_commandLine:/.*[Cc][Oo][Mm][Ss][Vv][Cc][Ss]\.[Dd][Ll][Ll].*/ OR data_win_eventdata_commandLine:/.*[Mm][Ii][Nn][Ii][Dd][Uu][Mm][Pp].*/ OR data_win_eventdata_commandLine:/.*[Dd][Uu][Mm][Pp][Ee][Rr][Tt].*/ OR data_win_eventdata_commandLine:/.*[Nn][Aa][Nn][Oo][Dd][Uu][Mm][Pp].*/ OR data_win_eventdata_commandLine:/.*[Ll][Ss][Aa][Ss][Ss].*/ OR data_win_eventdata_commandLine:/.*[Ss][Ee][Kk][Uu][Rr][Ll][Ss][Aa].*/ OR data_win_eventdata_commandLine:/.*[Nn][Tt][Dd][Ss]\.[Dd][Ii][Tt].*/ OR data_win_eventdata_commandLine:/.*[Nn][Tt][Dd][Ss][Uu][Tt][Ii][Ll].*/)) OR (data_win_system_eventID:"10" AND data_win_eventdata_targetImage:/.*(\\[Ll][Ss][Aa][Ss][Ss]\.[Ee][Xx][Ee])/))'
-      pivot_on: [host]
-      window: 1h
-    - name: "This account's logon activity across hosts (harvested-credential use)"
-      query: '(data_win_system_eventID:"4624" OR data_win_system_eventID:"4625")'
-      pivot_on: [user]
-      window: 6h
-    - name: "Remote-execution / lateral-movement tooling on this host"
-      query: '(data_win_system_eventID:"1" AND data_win_eventdata_image:/.*(\\[Pp][Ss][Ee][Xx][Ee][Cc]\.[Ee][Xx][Ee]|\\[Pp][Ss][Ee][Xx][Ee][Ss][Vv][Cc]\.[Ee][Xx][Ee]|\\[Pp][Aa][Ee][Xx][Ee][Cc]\.[Ee][Xx][Ee]|\\[Ww][Ii][Nn][Rr][Ss]\.[Ee][Xx][Ee]|\\[Mm][Ss][Tt][Ss][Cc]\.[Ee][Xx][Ee]|\\[Ww][Mm][Ii][Cc]\.[Ee][Xx][Ee])/) OR (data_win_system_eventID:"1" AND data_win_eventdata_image:/.*(\\[Pp][Oo][Ww][Ee][Rr][Ss][Hh][Ee][Ll][Ll]\.[Ee][Xx][Ee]|\\[Pp][Ww][Ss][Hh]\.[Ee][Xx][Ee])/ AND (data_win_eventdata_commandLine:/.*[Ii][Nn][Vv][Oo][Kk][Ee]-[Cc][Oo][Mm][Mm][Aa][Nn][Dd].*/ OR data_win_eventdata_commandLine:/.*[Nn][Ee][Ww]-[Pp][Ss][Ss][Ee][Ss][Ss][Ii][Oo][Nn].*/ OR data_win_eventdata_commandLine:/.*[Ee][Nn][Tt][Ee][Rr]-[Pp][Ss][Ss][Ee][Ss][Ss][Ii][Oo][Nn].*/ OR data_win_eventdata_commandLine:/.*-[Cc][Oo][Mm][Pp][Uu][Tt][Ee][Rr][Nn][Aa][Mm][Ee].*/))'
-      pivot_on: [host]
-      window: 2h
-    - name: "This account's logon activity across hosts"
-      query: '(data_win_system_eventID:"4624" OR data_win_system_eventID:"4625")'
-      pivot_on: [user]
-      window: 6h
+  # Behaviour-targeted hunts the engine runs around the alert (not a sweep).
+  - name: Backup-key / DPAPI extraction tooling executed on this DC
+    query: data_win_system_eventID:"1" AND (data_win_eventdata_commandLine:/.*[Ss][Hh][Aa][Rr][Pp][Dd][Pp][Aa][Pp][Ii].*/ OR data_win_eventdata_commandLine:/.*[Ll][Ss][Aa][Dd][Uu][Mm][Pp]::[Bb][Aa][Cc][Kk][Uu][Pp][Kk][Ee][Yy][Ss].*/ OR data_win_eventdata_commandLine:/.*[Dd][Pp][Aa][Pp][Ii]::.*/ OR data_win_eventdata_commandLine:/.*[Bb][Aa][Cc][Kk][Uu][Pp][Kk][Ee][Yy].*/ OR data_win_eventdata_commandLine:/.*[Ss][Ee][Cc][Rr][Ee][Tt][Ss][Dd][Uu][Mm][Pp].*/ OR data_win_eventdata_commandLine:/.*[Mm][Ii][Mm][Ii][Kk][Aa][Tt][Zz].*/)
+    pivot_on:
+    - host
+    window: 2h
+  - name: Exported domain backup key / cert files written on this host
+    query: data_win_system_eventID:"11" AND (data_win_eventdata_targetFilename:*.pvk OR data_win_eventdata_targetFilename:*ntds_capi* OR data_win_eventdata_targetFilename:*.pfx OR data_win_eventdata_targetFilename:*.pkcs12 OR data_win_eventdata_targetFilename:*.key)
+    pivot_on:
+    - host
+    window: 2h
+  - name: DPAPI master key recovery and DS replication-right access (4692/4693/4662) on this DC
+    query: (data_win_system_eventID:"4692" OR data_win_system_eventID:"4693" OR (data_win_system_eventID:"4662" AND (data_win_eventdata_properties:*1131f6ad* OR data_win_eventdata_properties:*1131f6aa* OR data_win_eventdata_properties:*89e95b76*)))
+    pivot_on:
+    - host
+    window: 2h
+  - name: Privileged and network logons by this account (credential reuse after extraction)
+    query: (data_win_system_eventID:"4672" OR (data_win_system_eventID:"4624" AND (data_win_eventdata_logonType:"3" OR data_win_eventdata_logonType:"9" OR data_win_eventdata_logonType:"10")))
+    pivot_on:
+    - user
+    window: 6h
+  - name: Remote execution and service installs on this DC (Impacket/PsExec style)
+    query: (data_win_system_eventID:"7045" OR data_win_system_eventID:"4697" OR (data_win_system_eventID:"1" AND (data_win_eventdata_image:/.*\\[Pp][Ss][Ee][Xx][Ee][Ss][Vv][Cc]\.[Ee][Xx][Ee]/ OR data_win_eventdata_parentImage:/.*\\[Ss][Ee][Rr][Vv][Ii][Cc][Ee][Ss]\.[Ee][Xx][Ee]/ AND data_win_eventdata_commandLine:/.*\\\\127\.0\.0\.1\\[Aa][Dd][Mm][Ii][Nn]\$.*/)))
+    pivot_on:
+    - host
+    window: 2h

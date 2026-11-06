@@ -129,32 +129,52 @@ graylog:
   query: data_win_system_eventID:"4825"
 
 correlation:
-  # Authored by the correlation engine for review. Related CoPilot Searches to run
-  # around an alert from this rule, scoped to the same host/user/IP within the window.
+  # Authored per-rule (behaviour-researched) for the correlation engine. Related CoPilot
+  # Searches + telemetry pivots to run around an alert, scoped to its host/user/ip/domain.
   related_rules:
-    - id: 87261fb2-69d0-42fe-b9de-88c6b5f65a43
-      name: "Atera Agent Installation"
-      reason: "next kill-chain tactic: Command and Control"
-    - id: 48d91a3a-2363-43ba-a456-ca71ac3da5c2
-      name: "Audit CVE Event"
-      reason: "next kill-chain tactic: Lateral Movement"
+  - id: 9eb99343-d336-4020-a3cd-67f3819e68ee
+    name: Account Tampering - Suspicious Failed Logon Reasons
+    reason: 4825 means valid credentials but no RDP right; adjacent 4625/4776 failures with disabled/expired/restricted-account statuses show the same account being probed or misused
+  - id: 941e5c45-cda7-4864-8cea-bbb7458d194a
+    name: Suspicious Remote Logon with Explicit Credentials
+    reason: Attacker holding stolen credentials often reaches the host via explicit-credential (4648) logons right before or after the denied RDP attempt
+  - id: ffa28e60-bdb1-46e0-9f82-05f7a61cc06e
+    name: User Added to Remote Desktop Users Group
+    reason: 'Natural escalation after a denial: the attacker grants the account RDP rights so the next attempt succeeds'
+  - id: 3f6b7b62-61aa-45db-96bd-9c31b36b653c
+    name: RDP Sensitive Settings Changed
+    reason: Attacker blocked by RDP policy may alter Terminal Server registry settings to loosen access on the same host
+  - id: 954f0af7-62dd-418f-b3df-a84bc2c7a774
+    name: New Remote Desktop Connection Initiated Via Mstsc.EXE
+    reason: The denied connection originates from another host's mstsc; this shows the source side of the same lateral-movement hunt across servers
+  - id: 224f140f-3553-4cd1-af78-13d81bf9f7cc
+    name: Potential RDP Session Hijacking Activity
+    reason: If RDP access is obtained or an existing session exists, SYSTEM tscon hijacking is the follow-on way to take over a session without credentials
   window: 1h
   enrichment_searches:
-  # Rule-specific telemetry pivots the engine runs around an alert from this rule,
-  # scoped to the alert's host/user/IP within the window (behaviour-targeted, not a sweep).
-    - name: "Remote-execution / lateral-movement tooling on this host"
-      query: '(data_win_system_eventID:"1" AND data_win_eventdata_image:/.*(\\[Pp][Ss][Ee][Xx][Ee][Cc]\.[Ee][Xx][Ee]|\\[Pp][Ss][Ee][Xx][Ee][Ss][Vv][Cc]\.[Ee][Xx][Ee]|\\[Pp][Aa][Ee][Xx][Ee][Cc]\.[Ee][Xx][Ee]|\\[Ww][Ii][Nn][Rr][Ss]\.[Ee][Xx][Ee]|\\[Mm][Ss][Tt][Ss][Cc]\.[Ee][Xx][Ee]|\\[Ww][Mm][Ii][Cc]\.[Ee][Xx][Ee])/) OR (data_win_system_eventID:"1" AND data_win_eventdata_image:/.*(\\[Pp][Oo][Ww][Ee][Rr][Ss][Hh][Ee][Ll][Ll]\.[Ee][Xx][Ee]|\\[Pp][Ww][Ss][Hh]\.[Ee][Xx][Ee])/ AND (data_win_eventdata_commandLine:/.*[Ii][Nn][Vv][Oo][Kk][Ee]-[Cc][Oo][Mm][Mm][Aa][Nn][Dd].*/ OR data_win_eventdata_commandLine:/.*[Nn][Ee][Ww]-[Pp][Ss][Ss][Ee][Ss][Ss][Ii][Oo][Nn].*/ OR data_win_eventdata_commandLine:/.*[Ee][Nn][Tt][Ee][Rr]-[Pp][Ss][Ss][Ee][Ss][Ss][Ii][Oo][Nn].*/ OR data_win_eventdata_commandLine:/.*-[Cc][Oo][Mm][Pp][Uu][Tt][Ee][Rr][Nn][Aa][Mm][Ee].*/))'
-      pivot_on: [host]
-      window: 2h
-    - name: "Memory/credential-dump creation & LSASS access on this host"
-      query: '((data_win_system_eventID:"1" AND data_win_eventdata_image:/.*(\\[Pp][Rr][Oo][Cc][Dd][Uu][Mm][Pp]\.[Ee][Xx][Ee]|\\[Pp][Rr][Oo][Cc][Dd][Uu][Mm][Pp]64\.[Ee][Xx][Ee]|\\[Ss][Qq][Ll][Dd][Uu][Mm][Pp][Ee][Rr]\.[Ee][Xx][Ee]|\\[Cc][Rr][Ee][Aa][Tt][Ee][Dd][Uu][Mm][Pp]\.[Ee][Xx][Ee]|\\[Rr][Dd][Rr][Ll][Ee][Aa][Kk][Dd][Ii][Aa][Gg]\.[Ee][Xx][Ee]|\\[Dd][Uu][Mm][Pp][Ee][Rr][Tt]\.[Ee][Xx][Ee]|\\[Nn][Aa][Nn][Oo][Dd][Uu][Mm][Pp]\.[Ee][Xx][Ee]|\\[Aa][Vv][Dd][Uu][Mm][Pp]\.[Ee][Xx][Ee])/) OR (data_win_system_eventID:"1" AND (data_win_eventdata_commandLine:/.*[Cc][Oo][Mm][Ss][Vv][Cc][Ss]\.[Dd][Ll][Ll].*/ OR data_win_eventdata_commandLine:/.*[Mm][Ii][Nn][Ii][Dd][Uu][Mm][Pp].*/ OR data_win_eventdata_commandLine:/.*[Dd][Uu][Mm][Pp][Ee][Rr][Tt].*/ OR data_win_eventdata_commandLine:/.*[Nn][Aa][Nn][Oo][Dd][Uu][Mm][Pp].*/ OR data_win_eventdata_commandLine:/.*[Ll][Ss][Aa][Ss][Ss].*/ OR data_win_eventdata_commandLine:/.*[Ss][Ee][Kk][Uu][Rr][Ll][Ss][Aa].*/ OR data_win_eventdata_commandLine:/.*[Nn][Tt][Dd][Ss]\.[Dd][Ii][Tt].*/ OR data_win_eventdata_commandLine:/.*[Nn][Tt][Dd][Ss][Uu][Tt][Ii][Ll].*/)) OR (data_win_system_eventID:"10" AND data_win_eventdata_targetImage:/.*(\\[Ll][Ss][Aa][Ss][Ss]\.[Ee][Xx][Ee])/))'
-      pivot_on: [host]
-      window: 1h
-    - name: "This account's logon activity across hosts"
-      query: '(data_win_system_eventID:"4624" OR data_win_system_eventID:"4625")'
-      pivot_on: [user]
-      window: 6h
-    - name: "Account / group / privilege changes involving this account"
-      query: '(data_win_system_eventID:"4720" OR data_win_system_eventID:"4722" OR data_win_system_eventID:"4724" OR data_win_system_eventID:"4728" OR data_win_system_eventID:"4732" OR data_win_system_eventID:"4756" OR data_win_system_eventID:"4672")'
-      pivot_on: [user]
-      window: 6h
+  # Behaviour-targeted hunts the engine runs around the alert (not a sweep).
+  - name: Successful RDP (logon type 10/7) logons on this host
+    query: data_win_system_eventID:"4624" AND (data_win_eventdata_logonType:"10" OR data_win_eventdata_logonType:"7")
+    pivot_on:
+    - host
+    window: 2h
+  - name: Failed RDP/network logons and credential validation for this account
+    query: (data_win_system_eventID:"4625" AND (data_win_eventdata_logonType:"10" OR data_win_eventdata_logonType:"3")) OR data_win_system_eventID:"4776" OR data_win_system_eventID:"4648"
+    pivot_on:
+    - user
+    window: 6h
+  - name: Remote Desktop Users group membership changes
+    query: ((data_win_system_eventID:"4732" OR data_win_system_eventID:"4728" OR data_win_system_eventID:"4756") AND data_win_eventdata_targetUserName:/.*[Rr][Ee][Mm][Oo][Tt][Ee] [Dd][Ee][Ss][Kk][Tt][Oo][Pp].*/) OR (data_win_system_eventID:"1" AND data_win_eventdata_commandLine:/.*[Ll][Oo][Cc][Aa][Ll][Gg][Rr][Oo][Uu][Pp].*[Rr][Ee][Mm][Oo][Tt][Ee] [Dd][Ee][Ss][Kk][Tt][Oo][Pp].*/)
+    pivot_on:
+    - host
+    window: 4h
+  - name: RDP enablement, firewall or registry tampering on this host
+    query: (data_win_system_eventID:"13" AND (data_win_eventdata_targetObject:/.*[Ff][Dd][Ee][Nn][Yy][Tt][Ss][Cc][Oo][Nn][Nn][Ee][Cc][Tt][Ii][Oo][Nn][Ss].*/ OR data_win_eventdata_targetObject:/.*[Tt][Ee][Rr][Mm][Ii][Nn][Aa][Ll] [Ss][Ee][Rr][Vv][Ee][Rr].*/ OR data_win_eventdata_targetObject:/.*[Rr][Dd][Pp]-[Tt][Cc][Pp].*/)) OR (data_win_system_eventID:"1" AND data_win_eventdata_image:/.*\\[Nn][Ee][Tt][Ss][Hh]\.[Ee][Xx][Ee]/ AND data_win_eventdata_commandLine:/.*([Rr][Dd][Pp]|3389|[Rr]emote [Dd]esktop).*/)
+    pivot_on:
+    - host
+    window: 4h
+  - name: Outbound RDP connections from this host
+    query: data_win_system_eventID:"3" AND data_win_eventdata_destinationPort:"3389"
+    pivot_on:
+    - host
+    window: 6h

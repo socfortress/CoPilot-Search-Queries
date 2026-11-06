@@ -182,41 +182,58 @@ graylog:
   query: ((data_win_system_eventID:"4738" AND NOT (data_win_eventdata_allowedToDelegateTo:"" OR data_win_eventdata_allowedToDelegateTo:"-" OR NOT _exists_:data_win_eventdata_allowedToDelegateTo)) OR (data_win_system_eventID:"5136" AND data_win_eventdata_attributeLDAPDisplayName:/[Mm][Ss][Dd][Ss]-[Aa][Ll][Ll][Oo][Ww][Ee][Dd][Tt][Oo][Dd][Ee][Ll][Ee][Gg][Aa][Tt][Ee][Tt][Oo]/) OR (data_win_system_eventID:"5136" AND data_win_eventdata_objectClass:/[Uu][Ss][Ee][Rr]/ AND data_win_eventdata_attributeLDAPDisplayName:/[Ss][Ee][Rr][Vv][Ii][Cc][Ee][Pp][Rr][Ii][Nn][Cc][Ii][Pp][Aa][Ll][Nn][Aa][Mm][Ee]/) OR (data_win_system_eventID:"5136" AND data_win_eventdata_attributeLDAPDisplayName:/[Mm][Ss][Dd][Ss]-[Aa][Ll][Ll][Oo][Ww][Ee][Dd][Tt][Oo][Aa][Cc][Tt][Oo][Nn][Bb][Ee][Hh][Aa][Ll][Ff][Oo][Ff][Oo][Tt][Hh][Ee][Rr][Ii][Dd][Ee][Nn][Tt][Ii][Tt][Yy]/))
 
 correlation:
-  # Authored by the correlation engine for review. Related CoPilot Searches to run
-  # around an alert from this rule, scoped to the same host/user/IP within the window.
+  # Authored per-rule (behaviour-researched) for the correlation engine. Related CoPilot
+  # Searches + telemetry pivots to run around an alert, scoped to its host/user/ip/domain.
   related_rules:
-    - id: 0255a820-e564-4e40-af2b-6ac61160335c
-      name: "A New Trust Was Created To A Domain"
-      reason: "next kill-chain tactic: Persistence"
-    - id: 35ba1d85-724d-42a3-889f-2e2362bcaf23
-      name: "AD Privileged Users or Groups Reconnaissance"
-      reason: "next kill-chain tactic: Discovery"
-    - id: 9eb99343-d336-4020-a3cd-67f3819e68ee
-      name: "Account Tampering - Suspicious Failed Logon Reasons"
-      reason: "next kill-chain tactic: Persistence"
-    - id: 17d619c1-e020-4347-957e-1d1207455c93
-      name: "Active Directory Replication from Non Machine Account"
-      reason: "next kill-chain tactic: Credential Access"
-    - id: 2632954e-db1c-49cb-9936-67d1ef1d17d2
-      name: "Addition of SID History to Active Directory Object"
-      reason: "next kill-chain tactic: Privilege Escalation"
-  window: 1h
+  - id: 311b6ce2-7890-4383-a8c2-663a9f6b43cd
+    name: Enabled User Right in AD to Control User Objects
+    reason: 'Precursor: granting SeEnableDelegationPrivilege is what permits setting msDS-AllowedToDelegateTo on accounts; this rule is the delegation write that follows.'
+  - id: 028c7842-4243-41cd-be6f-12f3cf1a26c7
+    name: AD Object WriteDAC Access
+    reason: 'Precursor: attackers modify an object''s DACL to gain write rights over a user/computer before altering its delegation or SPN attributes.'
+  - id: d00a9a72-2c09-4459-ad03-5e0a23351e36
+    name: Suspicious LDAP-Attributes Used
+    reason: 'Co-occurring: LDAP attribute writes (e.g. SPN, delegation, shadow credentials) by the same actor are the same AD object-backdoor tradecraft.'
+  - id: 496a0e47-0a33-4dca-b009-9e6ca3591f39
+    name: Suspicious Kerberos RC4 Ticket Encryption
+    reason: 'Follow-on: a backdoored servicePrincipalName makes the user Kerberoastable, shown as RC4 service ticket requests (4769).'
+  - id: f6de9536-0441-4b3f-a646-f4e00f300ffd
+    name: Weak Encryption Enabled and Kerberoast
+    reason: 'Co-occurring: weakening supported encryption types alongside SPN or delegation changes is the Kerberoast setup for cracking the account.'
+  - id: f7644214-0eb0-4ace-9455-331ec4c09253
+    name: Kerberos Manipulation
+    reason: 'Follow-on: abusing the delegation (S4U2Proxy/RBCD) yields forged or impersonated Kerberos tickets and Kerberos failures from the same account.'
+  - id: 2632954e-db1c-49cb-9936-67d1ef1d17d2
+    name: Addition of SID History to Active Directory Object
+    reason: 'Co-occurring persistence: SID history injection is another account-level AD backdoor used with delegation abuse for privilege inheritance.'
+  - id: 17d619c1-e020-4347-957e-1d1207455c93
+    name: Active Directory Replication from Non Machine Account
+    reason: 'Follow-on: once delegation or ACL rights are in place, attackers escalate to DCSync to extract all domain credentials.'
+  window: 2h
   enrichment_searches:
-  # Rule-specific telemetry pivots the engine runs around an alert from this rule,
-  # scoped to the alert's host/user/IP within the window (behaviour-targeted, not a sweep).
-    - name: "Account / group / privilege changes on this host"
-      query: '(((data_win_system_eventID:"4720" OR data_win_system_eventID:"4728" OR data_win_system_eventID:"4732" OR data_win_system_eventID:"4756")) OR (data_win_system_eventID:"1" AND data_win_eventdata_image:/.*(\\[Nn][Ee][Tt]\.[Ee][Xx][Ee]|\\[Nn][Ee][Tt]1\.[Ee][Xx][Ee])/ AND (data_win_eventdata_commandLine:/.*[Uu][Ss][Ee][Rr] .*/ OR data_win_eventdata_commandLine:/.*[Ll][Oo][Cc][Aa][Ll][Gg][Rr][Oo][Uu][Pp].*/ OR data_win_eventdata_commandLine:/.*[Gg][Rr][Oo][Uu][Pp] .*/)))'
-      pivot_on: [host]
-      window: 6h
-    - name: "Memory/credential-dump creation & LSASS access on this host"
-      query: '((data_win_system_eventID:"1" AND data_win_eventdata_image:/.*(\\[Pp][Rr][Oo][Cc][Dd][Uu][Mm][Pp]\.[Ee][Xx][Ee]|\\[Pp][Rr][Oo][Cc][Dd][Uu][Mm][Pp]64\.[Ee][Xx][Ee]|\\[Ss][Qq][Ll][Dd][Uu][Mm][Pp][Ee][Rr]\.[Ee][Xx][Ee]|\\[Cc][Rr][Ee][Aa][Tt][Ee][Dd][Uu][Mm][Pp]\.[Ee][Xx][Ee]|\\[Rr][Dd][Rr][Ll][Ee][Aa][Kk][Dd][Ii][Aa][Gg]\.[Ee][Xx][Ee]|\\[Dd][Uu][Mm][Pp][Ee][Rr][Tt]\.[Ee][Xx][Ee]|\\[Nn][Aa][Nn][Oo][Dd][Uu][Mm][Pp]\.[Ee][Xx][Ee]|\\[Aa][Vv][Dd][Uu][Mm][Pp]\.[Ee][Xx][Ee])/) OR (data_win_system_eventID:"1" AND (data_win_eventdata_commandLine:/.*[Cc][Oo][Mm][Ss][Vv][Cc][Ss]\.[Dd][Ll][Ll].*/ OR data_win_eventdata_commandLine:/.*[Mm][Ii][Nn][Ii][Dd][Uu][Mm][Pp].*/ OR data_win_eventdata_commandLine:/.*[Dd][Uu][Mm][Pp][Ee][Rr][Tt].*/ OR data_win_eventdata_commandLine:/.*[Nn][Aa][Nn][Oo][Dd][Uu][Mm][Pp].*/ OR data_win_eventdata_commandLine:/.*[Ll][Ss][Aa][Ss][Ss].*/ OR data_win_eventdata_commandLine:/.*[Ss][Ee][Kk][Uu][Rr][Ll][Ss][Aa].*/ OR data_win_eventdata_commandLine:/.*[Nn][Tt][Dd][Ss]\.[Dd][Ii][Tt].*/ OR data_win_eventdata_commandLine:/.*[Nn][Tt][Dd][Ss][Uu][Tt][Ii][Ll].*/)) OR (data_win_system_eventID:"10" AND data_win_eventdata_targetImage:/.*(\\[Ll][Ss][Aa][Ss][Ss]\.[Ee][Xx][Ee])/))'
-      pivot_on: [host]
-      window: 1h
-    - name: "This account's logon activity across hosts"
-      query: '(data_win_system_eventID:"4624" OR data_win_system_eventID:"4625")'
-      pivot_on: [user]
-      window: 6h
-    - name: "Account / group / privilege changes involving this account"
-      query: '(data_win_system_eventID:"4720" OR data_win_system_eventID:"4722" OR data_win_system_eventID:"4724" OR data_win_system_eventID:"4728" OR data_win_system_eventID:"4732" OR data_win_system_eventID:"4756" OR data_win_system_eventID:"4672")'
-      pivot_on: [user]
-      window: 6h
+  # Behaviour-targeted hunts the engine runs around the alert (not a sweep).
+  - name: Kerberos service ticket requests (RC4/delegation) after AD attribute change
+    query: data_win_system_eventID:"4769" AND (data_win_eventdata_ticketEncryptionType:"0x17" OR data_win_eventdata_ticketEncryptionType:"0x18" OR data_win_eventdata_transmittedServices:*)
+    pivot_on:
+    - user
+    window: 6h
+  - name: Other directory object modifications by this account
+    query: (data_win_system_eventID:"5136" OR data_win_system_eventID:"5137" OR data_win_system_eventID:"5141" OR data_win_system_eventID:"4742" OR data_win_system_eventID:"4738")
+    pivot_on:
+    - user
+    window: 4h
+  - name: Delegation-abuse and AD attack tooling on host
+    query: data_win_system_eventID:"1" AND (data_win_eventdata_commandLine:/.*[Rr][Uu][Bb][Ee][Uu][Ss].*/ OR data_win_eventdata_commandLine:/.*[Ss]4[Uu].*/ OR data_win_eventdata_commandLine:/.*[Ss][Ee][Tt]-[Aa][Dd][Cc][Oo][Mm][Pp][Uu][Tt][Ee][Rr].*/ OR data_win_eventdata_commandLine:/.*[Ss][Ee][Tt]-[Aa][Dd][Uu][Ss][Ee][Rr].*/ OR data_win_eventdata_commandLine:/.*[Aa][Ll][Ll][Oo][Ww][Ee][Dd][Tt][Oo][Dd][Ee][Ll][Ee][Gg][Aa][Tt][Ee].*/ OR data_win_eventdata_commandLine:/.*[Ss][Ee][Tt][Ss][Pp][Nn].*/ OR data_win_eventdata_commandLine:/.*[Pp][Oo][Ww][Ee][Rr][Vv][Ii][Ee][Ww].*/ OR data_win_eventdata_commandLine:/.*[Mm][Ii][Mm][Ii][Kk][Aa][Tt][Zz].*/)
+    pivot_on:
+    - host
+    window: 4h
+  - name: Network logons using this account after the change
+    query: data_win_system_eventID:"4624" AND (data_win_eventdata_logonType:"3" OR data_win_eventdata_logonType:"9")
+    pivot_on:
+    - user
+    window: 6h
+  - name: Directory replication and DC-sync access requests
+    query: data_win_system_eventID:"4662" AND (data_win_eventdata_properties:/.*1131f6a[ad]-9c07-11d1-f79f-00c04fc2dcd2.*/ OR data_win_eventdata_properties:/.*89e95b76-444d-4c62-991a-0facbeda640c.*/)
+    pivot_on:
+    - user
+    window: 6h

@@ -131,35 +131,58 @@ graylog:
   query: data_win_system_eventID:"4692"
 
 correlation:
-  # Authored by the correlation engine for review. Related CoPilot Searches to run
-  # around an alert from this rule, scoped to the same host/user/IP within the window.
+  # Authored per-rule (behaviour-researched) for the correlation engine. Related CoPilot
+  # Searches + telemetry pivots to run around an alert, scoped to its host/user/ip/domain.
   related_rules:
-    - id: 35ba1d85-724d-42a3-889f-2e2362bcaf23
-      name: "AD Privileged Users or Groups Reconnaissance"
-      reason: "next kill-chain tactic: Discovery"
-    - id: 17d619c1-e020-4347-957e-1d1207455c93
-      name: "Active Directory Replication from Non Machine Account"
-      reason: "next kill-chain tactic: Credential Access"
-    - id: 87261fb2-69d0-42fe-b9de-88c6b5f65a43
-      name: "Atera Agent Installation"
-      reason: "next kill-chain tactic: Command and Control"
+  - id: 4ac1f50b-3bd0-4968-902d-868b4647937e
+    name: DPAPI Domain Backup Key Extraction
+    reason: 'DC-side counterpart: 4692 on the client is the master key backup request; the BCKUPKEY retrieval on the DC confirms the domain backup key was actually pulled'
+  - id: c7d33b50-f690-4b51-8cfb-0fb912a31e57
+    name: HackTool - SharpDPAPI Execution
+    reason: SharpDPAPI is a tool that triggers master key backup/unprotect (4692) while harvesting credentials
+  - id: a642964e-bead-4bed-8910-1bb4d63e3b4d
+    name: HackTool - Mimikatz Execution
+    reason: Mimikatz dpapi::masterkey /rpc and dpapi::chrome generate 4692 events; confirms tool-driven DPAPI abuse
+  - id: 611eab06-a145-4dfa-a295-3ccc5c20f59a
+    name: Mimikatz DC Sync
+    reason: An actor with domain-level DPAPI access often also replicates secrets from the DC; co-occurring domain credential theft
+  - id: 17d619c1-e020-4347-957e-1d1207455c93
+    name: Active Directory Replication from Non Machine Account
+    reason: Directory replication by a user account is a sibling domain-wide secret extraction path, often by the same actor around DPAPI key retrieval
+  - id: windows-credentials-access-vaultcli-module-001
+    name: Windows Credentials Access Via Vaultcli Module
+    reason: 'Follow-on: once master keys are recovered, Credential Manager/Vault blobs are decrypted via vaultcli.dll loads'
+  - id: 45545954-4016-43c6-855e-eae8f1c369dc
+    name: Protected Storage Service Access
+    reason: Access to the protected storage RPC interface is the same DPAPI secret-retrieval surface
+  - id: aa1697b7-d611-4f9a-9cb2-5125b4ccfd5c
+    name: Password Dumper Activity on LSASS
+    reason: Parallel local credential theft from LSASS in the same session indicates broad credential harvesting, not routine DPAPI use
   window: 1h
   enrichment_searches:
-  # Rule-specific telemetry pivots the engine runs around an alert from this rule,
-  # scoped to the alert's host/user/IP within the window (behaviour-targeted, not a sweep).
-    - name: "Memory/credential-dump creation & LSASS access on this host"
-      query: '((data_win_system_eventID:"1" AND data_win_eventdata_image:/.*(\\[Pp][Rr][Oo][Cc][Dd][Uu][Mm][Pp]\.[Ee][Xx][Ee]|\\[Pp][Rr][Oo][Cc][Dd][Uu][Mm][Pp]64\.[Ee][Xx][Ee]|\\[Ss][Qq][Ll][Dd][Uu][Mm][Pp][Ee][Rr]\.[Ee][Xx][Ee]|\\[Cc][Rr][Ee][Aa][Tt][Ee][Dd][Uu][Mm][Pp]\.[Ee][Xx][Ee]|\\[Rr][Dd][Rr][Ll][Ee][Aa][Kk][Dd][Ii][Aa][Gg]\.[Ee][Xx][Ee]|\\[Dd][Uu][Mm][Pp][Ee][Rr][Tt]\.[Ee][Xx][Ee]|\\[Nn][Aa][Nn][Oo][Dd][Uu][Mm][Pp]\.[Ee][Xx][Ee]|\\[Aa][Vv][Dd][Uu][Mm][Pp]\.[Ee][Xx][Ee])/) OR (data_win_system_eventID:"1" AND (data_win_eventdata_commandLine:/.*[Cc][Oo][Mm][Ss][Vv][Cc][Ss]\.[Dd][Ll][Ll].*/ OR data_win_eventdata_commandLine:/.*[Mm][Ii][Nn][Ii][Dd][Uu][Mm][Pp].*/ OR data_win_eventdata_commandLine:/.*[Dd][Uu][Mm][Pp][Ee][Rr][Tt].*/ OR data_win_eventdata_commandLine:/.*[Nn][Aa][Nn][Oo][Dd][Uu][Mm][Pp].*/ OR data_win_eventdata_commandLine:/.*[Ll][Ss][Aa][Ss][Ss].*/ OR data_win_eventdata_commandLine:/.*[Ss][Ee][Kk][Uu][Rr][Ll][Ss][Aa].*/ OR data_win_eventdata_commandLine:/.*[Nn][Tt][Dd][Ss]\.[Dd][Ii][Tt].*/ OR data_win_eventdata_commandLine:/.*[Nn][Tt][Dd][Ss][Uu][Tt][Ii][Ll].*/)) OR (data_win_system_eventID:"10" AND data_win_eventdata_targetImage:/.*(\\[Ll][Ss][Aa][Ss][Ss]\.[Ee][Xx][Ee])/))'
-      pivot_on: [host]
-      window: 1h
-    - name: "This account's logon activity across hosts (harvested-credential use)"
-      query: '(data_win_system_eventID:"4624" OR data_win_system_eventID:"4625")'
-      pivot_on: [user]
-      window: 6h
-    - name: "Remote-execution / lateral-movement tooling on this host"
-      query: '(data_win_system_eventID:"1" AND data_win_eventdata_image:/.*(\\[Pp][Ss][Ee][Xx][Ee][Cc]\.[Ee][Xx][Ee]|\\[Pp][Ss][Ee][Xx][Ee][Ss][Vv][Cc]\.[Ee][Xx][Ee]|\\[Pp][Aa][Ee][Xx][Ee][Cc]\.[Ee][Xx][Ee]|\\[Ww][Ii][Nn][Rr][Ss]\.[Ee][Xx][Ee]|\\[Mm][Ss][Tt][Ss][Cc]\.[Ee][Xx][Ee]|\\[Ww][Mm][Ii][Cc]\.[Ee][Xx][Ee])/) OR (data_win_system_eventID:"1" AND data_win_eventdata_image:/.*(\\[Pp][Oo][Ww][Ee][Rr][Ss][Hh][Ee][Ll][Ll]\.[Ee][Xx][Ee]|\\[Pp][Ww][Ss][Hh]\.[Ee][Xx][Ee])/ AND (data_win_eventdata_commandLine:/.*[Ii][Nn][Vv][Oo][Kk][Ee]-[Cc][Oo][Mm][Mm][Aa][Nn][Dd].*/ OR data_win_eventdata_commandLine:/.*[Nn][Ee][Ww]-[Pp][Ss][Ss][Ee][Ss][Ss][Ii][Oo][Nn].*/ OR data_win_eventdata_commandLine:/.*[Ee][Nn][Tt][Ee][Rr]-[Pp][Ss][Ss][Ee][Ss][Ss][Ii][Oo][Nn].*/ OR data_win_eventdata_commandLine:/.*-[Cc][Oo][Mm][Pp][Uu][Tt][Ee][Rr][Nn][Aa][Mm][Ee].*/))'
-      pivot_on: [host]
-      window: 2h
-    - name: "This account's logon activity across hosts"
-      query: '(data_win_system_eventID:"4624" OR data_win_system_eventID:"4625")'
-      pivot_on: [user]
-      window: 6h
+  # Behaviour-targeted hunts the engine runs around the alert (not a sweep).
+  - name: DPAPI abuse tooling command lines (SharpDPAPI, Mimikatz dpapi::, masterkey, pvk)
+    query: data_win_system_eventID:"1" AND (data_win_eventdata_commandLine:/.*[Dd][Pp][Aa][Pp][Ii]::.*/ OR data_win_eventdata_commandLine:/.*[Ss][Hh][Aa][Rr][Pp][Dd][Pp][Aa][Pp][Ii].*/ OR data_win_eventdata_commandLine:/.*[Mm][Aa][Ss][Tt][Ee][Rr][Kk][Ee][Yy].*/ OR data_win_eventdata_commandLine:/.*[Bb][Aa][Cc][Kk][Uu][Pp][Kk][Ee][Yy].*/ OR data_win_eventdata_commandLine:/.*\.[Pp][Vv][Kk].*/ OR data_win_eventdata_commandLine:/.*[Ss][Ee][Kk][Uu][Rr][Ll][Ss][Aa]::.*/)
+    pivot_on:
+    - host
+    window: 1h
+  - name: DPAPI/vault DLL loads and Protect-folder, pvk or browser credential file writes
+    query: (data_win_system_eventID:"7" AND (data_win_eventdata_imageLoaded:/.*[Vv][Aa][Uu][Ll][Tt][Cc][Ll][Ii]\.[Dd][Ll][Ll]/ OR data_win_eventdata_imageLoaded:/.*[Dd][Pp][Aa][Pp][Ii]\.[Dd][Ll][Ll]/)) OR (data_win_system_eventID:"11" AND (data_win_eventdata_targetFilename:/.*[Mm][Ii][Cc][Rr][Oo][Ss][Oo][Ff][Tt]\\[Pp][Rr][Oo][Tt][Ee][Cc][Tt]\\.*/ OR data_win_eventdata_targetFilename:/.*\.[Pp][Vv][Kk]/ OR data_win_eventdata_targetFilename:/.*[Ll][Oo][Gg][Ii][Nn] [Dd][Aa][Tt][Aa].*/))
+    pivot_on:
+    - host
+    window: 1h
+  - name: LSASS access and credential-dump commands on the host
+    query: (data_win_system_eventID:"10" AND data_win_eventdata_targetImage:/.*[Ll][Ss][Aa][Ss][Ss]\.[Ee][Xx][Ee]/) OR (data_win_system_eventID:"1" AND (data_win_eventdata_commandLine:/.*[Cc][Oo][Mm][Ss][Vv][Cc][Ss].*[Mm][Ii][Nn][Ii][Dd][Uu][Mm][Pp].*/ OR data_win_eventdata_commandLine:/.*[Ss][Ee][Kk][Uu][Rr][Ll][Ss][Aa].*/ OR data_win_eventdata_commandLine:/.*[Pp][Rr][Oo][Cc][Dd][Uu][Mm][Pp].*[Ll][Ss][Aa][Ss][Ss].*/))
+    pivot_on:
+    - host
+    window: 2h
+  - name: Network and remote logons by this account (stolen credential reuse)
+    query: data_win_system_eventID:"4624" AND (data_win_eventdata_logonType:"3" OR data_win_eventdata_logonType:"9" OR data_win_eventdata_logonType:"10")
+    pivot_on:
+    - user
+    window: 6h
+  - name: Lateral movement tooling and outbound SMB/RPC/WinRM from the host
+    query: (data_win_system_eventID:"1" AND data_win_eventdata_image:/.*(\\[Pp][Ss][Ee][Xx][Ee][Cc]|\\[Ww][Mm][Ii][Cc]|\\[Ww][Ii][Nn][Rr][Ss])\.[Ee][Xx][Ee]/) OR (data_win_system_eventID:"3" AND (data_win_eventdata_destinationPort:"445" OR data_win_eventdata_destinationPort:"135" OR data_win_eventdata_destinationPort:"5985"))
+    pivot_on:
+    - host
+    window: 2h

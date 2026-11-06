@@ -132,23 +132,58 @@ graylog:
   query: data_win_system_eventID:"4624" AND data_win_eventdata_logonType:"9" AND data_win_eventdata_targetOutboundUserName:/[Tt][Hh][Ii][Ss][Ii][Ss][Nn][Oo][Tt][Vv][Aa][Ll][Ii][Dd][Uu][Ss][Ee][Rr]/
 
 correlation:
-  # Authored by the correlation engine for review.
+  # Authored per-rule (behaviour-researched) for the correlation engine. Related CoPilot
+  # Searches + telemetry pivots to run around an alert, scoped to its host/user/ip/domain.
+  related_rules:
+  - id: 8a7e90c5-fe6e-45dc-889e-057fe4378bd9
+    name: HackTool - SysmonEOP Execution
+    reason: Sibling local-EoP POC of the same family (arbitrary file write/move abuse of a SYSTEM service); same operator toolbox, often tried alongside DiagTrackEoP on the same host.
+  - id: cf0c254b-22f1-4b2b-8221-e137b3c0af94
+    name: HackTool - Impersonate Execution
+    reason: Token impersonation tooling is the usual follow-on once a logon-type-9 / SYSTEM context has been obtained.
+  - id: 6bd75993-9888-4f91-9404-e1e4e4e34b77
+    name: HackTool - LocalPotato Execution
+    reason: Alternative local privilege escalation to SYSTEM; an attacker whose DiagTrackEoP attempt works or fails commonly falls back to a Potato-style exploit.
+  - id: 9bd04a79-dabe-4f1f-a5ff-92430265c96b
+    name: Privilege Escalation via Named Pipe Impersonation
+    reason: Named-pipe impersonation is a parallel route to SYSTEM from a service-account foothold, confirming the EoP intent.
+  - id: windows-access-token-winlogon-duplicate-handle-001
+    name: Windows Access Token Manipulation Winlogon Duplicate Token Handle
+    reason: Duplicating the winlogon SYSTEM token is a classic step after gaining elevation, to run arbitrary payloads as SYSTEM.
+  - id: d522eca2-2973-4391-a3e0-ef0374321dae
+    name: Abused Debug Privilege by Arbitrary Parent Processes
+    reason: EoP exploits typically enable SeDebugPrivilege to open SYSTEM processes; same behaviour chain as the logon-type-9 credential trick.
+  - id: 79ce34ca-af29-4d0e-b832-fc1b377020db
+    name: Whoami.EXE Execution From Privileged Process
+    reason: Attacker runs whoami from the new SYSTEM shell to verify the exploit worked, directly after successful EoP.
+  - id: 97a80ec7-0e2f-4d05-9ef4-65760e634f6b
+    name: Security Privileges Enumeration Via Whoami.EXE
+    reason: whoami /priv is the pre-exploit check for impersonation-capable privileges that precedes EoP POCs like this one.
+  window: 1h
   enrichment_searches:
-  # Rule-specific telemetry pivots the engine runs around an alert from this rule,
-  # scoped to the alert's host/user/IP within the window (behaviour-targeted, not a sweep).
-    - name: "Memory/credential-dump creation & LSASS access on this host"
-      query: '((data_win_system_eventID:"1" AND data_win_eventdata_image:/.*(\\[Pp][Rr][Oo][Cc][Dd][Uu][Mm][Pp]\.[Ee][Xx][Ee]|\\[Pp][Rr][Oo][Cc][Dd][Uu][Mm][Pp]64\.[Ee][Xx][Ee]|\\[Ss][Qq][Ll][Dd][Uu][Mm][Pp][Ee][Rr]\.[Ee][Xx][Ee]|\\[Cc][Rr][Ee][Aa][Tt][Ee][Dd][Uu][Mm][Pp]\.[Ee][Xx][Ee]|\\[Rr][Dd][Rr][Ll][Ee][Aa][Kk][Dd][Ii][Aa][Gg]\.[Ee][Xx][Ee]|\\[Dd][Uu][Mm][Pp][Ee][Rr][Tt]\.[Ee][Xx][Ee]|\\[Nn][Aa][Nn][Oo][Dd][Uu][Mm][Pp]\.[Ee][Xx][Ee]|\\[Aa][Vv][Dd][Uu][Mm][Pp]\.[Ee][Xx][Ee])/) OR (data_win_system_eventID:"1" AND (data_win_eventdata_commandLine:/.*[Cc][Oo][Mm][Ss][Vv][Cc][Ss]\.[Dd][Ll][Ll].*/ OR data_win_eventdata_commandLine:/.*[Mm][Ii][Nn][Ii][Dd][Uu][Mm][Pp].*/ OR data_win_eventdata_commandLine:/.*[Dd][Uu][Mm][Pp][Ee][Rr][Tt].*/ OR data_win_eventdata_commandLine:/.*[Nn][Aa][Nn][Oo][Dd][Uu][Mm][Pp].*/ OR data_win_eventdata_commandLine:/.*[Ll][Ss][Aa][Ss][Ss].*/ OR data_win_eventdata_commandLine:/.*[Ss][Ee][Kk][Uu][Rr][Ll][Ss][Aa].*/ OR data_win_eventdata_commandLine:/.*[Nn][Tt][Dd][Ss]\.[Dd][Ii][Tt].*/ OR data_win_eventdata_commandLine:/.*[Nn][Tt][Dd][Ss][Uu][Tt][Ii][Ll].*/)) OR (data_win_system_eventID:"10" AND data_win_eventdata_targetImage:/.*(\\[Ll][Ss][Aa][Ss][Ss]\.[Ee][Xx][Ee])/))'
-      pivot_on: [host]
-      window: 1h
-    - name: "This account's logon activity across hosts"
-      query: '(data_win_system_eventID:"4624" OR data_win_system_eventID:"4625")'
-      pivot_on: [user]
-      window: 6h
-    - name: "Account / group / privilege changes involving this account"
-      query: '(data_win_system_eventID:"4720" OR data_win_system_eventID:"4722" OR data_win_system_eventID:"4724" OR data_win_system_eventID:"4728" OR data_win_system_eventID:"4732" OR data_win_system_eventID:"4756" OR data_win_system_eventID:"4672")'
-      pivot_on: [user]
-      window: 6h
-    - name: "UAC-bypass / privilege-escalation binaries on this host"
-      query: 'data_win_system_eventID:"1" AND (data_win_eventdata_image:/.*(\\[Ff][Oo][Dd][Hh][Ee][Ll][Pp][Ee][Rr]\.[Ee][Xx][Ee]|\\[Ee][Vv][Ee][Nn][Tt][Vv][Ww][Rr]\.[Ee][Xx][Ee]|\\[Ss][Dd][Cc][Ll][Tt]\.[Ee][Xx][Ee]|\\[Cc][Oo][Mm][Pp][Uu][Tt][Ee][Rr][Dd][Ee][Ff][Aa][Uu][Ll][Tt][Ss]\.[Ee][Xx][Ee]|\\[Ss][Ll][Uu][Ii]\.[Ee][Xx][Ee]|\\[Ww][Ss][Rr][Ee][Ss][Ee][Tt]\.[Ee][Xx][Ee])/ OR data_win_eventdata_parentImage:/.*(\\[Ff][Oo][Dd][Hh][Ee][Ll][Pp][Ee][Rr]\.[Ee][Xx][Ee]|\\[Ee][Vv][Ee][Nn][Tt][Vv][Ww][Rr]\.[Ee][Xx][Ee]|\\[Ss][Dd][Cc][Ll][Tt]\.[Ee][Xx][Ee]|\\[Cc][Oo][Mm][Pp][Uu][Tt][Ee][Rr][Dd][Ee][Ff][Aa][Uu][Ll][Tt][Ss]\.[Ee][Xx][Ee]|\\[Ss][Ll][Uu][Ii]\.[Ee][Xx][Ee]|\\[Ww][Ss][Rr][Ee][Ss][Ee][Tt]\.[Ee][Xx][Ee])/)'
-      pivot_on: [host]
-      window: 2h
+  # Behaviour-targeted hunts the engine runs around the alert (not a sweep).
+  - name: Shells and tooling running as SYSTEM after the EoP attempt
+    query: data_win_system_eventID:"1" AND data_win_eventdata_user:/.*[Ss][Yy][Ss][Tt][Ee][Mm].*/ AND data_win_eventdata_image:/.*\\(cmd|powershell|pwsh|conhost|whoami|net|net1|sc|reg|rundll32|mshta)\.[Ee][Xx][Ee]/
+    pivot_on:
+    - host
+    window: 1h
+  - name: DiagTrack service tampering or DiagTrack-named file drops
+    query: (data_win_system_eventID:"11" AND data_win_eventdata_targetFilename:/.*([Dd][Ii][Aa][Gg][Tt][Rr][Aa][Cc][Kk]|[Uu][Tt][Cc]).*/) OR (data_win_system_eventID:"1" AND data_win_eventdata_commandLine:/.*[Dd][Ii][Aa][Gg][Tt][Rr][Aa][Cc][Kk].*/)
+    pivot_on:
+    - host
+    window: 2h
+  - name: DLL or EXE planted in System32 or Windows directories
+    query: data_win_system_eventID:"11" AND data_win_eventdata_targetFilename:/.*\\[Ww][Ii][Nn][Dd][Oo][Ww][Ss]\\([Ss][Yy][Ss][Tt][Ee][Mm]32|[Ss][Yy][Ss][Ww][Oo][Ww]64)\\.*\.([Dd][Ll][Ll]|[Ee][Xx][Ee]|[Ss][Yy][Ss])/
+    pivot_on:
+    - host
+    window: 2h
+  - name: Other NewCredentials, explicit-credential and privileged logons for this account
+    query: (data_win_system_eventID:"4624" AND data_win_eventdata_logonType:"9") OR data_win_system_eventID:"4648" OR data_win_system_eventID:"4672"
+    pivot_on:
+    - user
+    window: 6h
+  - name: EoP tool execution from user-writable paths
+    query: data_win_system_eventID:"1" AND data_win_eventdata_image:/.*\\([Uu][Ss][Ee][Rr][Ss]\\.*\\([Dd][Oo][Ww][Nn][Ll][Oo][Aa][Dd][Ss]|[Aa][Pp][Pp][Dd][Aa][Tt][Aa]|[Tt][Ee][Mm][Pp]|[Dd][Ee][Ss][Kk][Tt][Oo][Pp])|[Pp][Rr][Oo][Gg][Rr][Aa][Mm][Dd][Aa][Tt][Aa]|[Ww][Ii][Nn][Dd][Oo][Ww][Ss]\\[Tt][Ee][Mm][Pp])\\.*\.[Ee][Xx][Ee]/
+    pivot_on:
+    - host
+    window: 1h

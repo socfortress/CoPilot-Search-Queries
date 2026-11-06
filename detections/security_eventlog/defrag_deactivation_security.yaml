@@ -136,41 +136,58 @@ graylog:
   query: data_win_system_eventID:"4701" AND data_win_eventdata_taskName:/\\[Mm][Ii][Cc][Rr][Oo][Ss][Oo][Ff][Tt]\\[Ww][Ii][Nn][Dd][Oo][Ww][Ss]\\[Dd][Ee][Ff][Rr][Aa][Gg]\\[Ss][Cc][Hh][Ee][Dd][Uu][Ll][Ee][Dd][Dd][Ee][Ff][Rr][Aa][Gg]/
 
 correlation:
-  # Authored by the correlation engine for review. Related CoPilot Searches to run
-  # around an alert from this rule, scoped to the same host/user/IP within the window.
+  # Authored per-rule (behaviour-researched) for the correlation engine. Related CoPilot
+  # Searches + telemetry pivots to run around an alert, scoped to its host/user/ip/domain.
   related_rules:
-    - id: 0255a820-e564-4e40-af2b-6ac61160335c
-      name: "A New Trust Was Created To A Domain"
-      reason: "next kill-chain tactic: Persistence"
-    - id: 35ba1d85-724d-42a3-889f-2e2362bcaf23
-      name: "AD Privileged Users or Groups Reconnaissance"
-      reason: "next kill-chain tactic: Discovery"
-    - id: 9eb99343-d336-4020-a3cd-67f3819e68ee
-      name: "Account Tampering - Suspicious Failed Logon Reasons"
-      reason: "next kill-chain tactic: Persistence"
-    - id: 17d619c1-e020-4347-957e-1d1207455c93
-      name: "Active Directory Replication from Non Machine Account"
-      reason: "next kill-chain tactic: Credential Access"
-    - id: 300bac00-e041-4ee2-9c36-e262656a6ecc
-      name: "Active Directory User Backdoors"
-      reason: "next kill-chain tactic: Persistence"
+  - id: 958d81aa-8566-4cea-a565-59ccd4df27b0
+    name: Defrag Deactivation
+    reason: Same ScheduledDefrag disable seen from the command line (schtasks /change /disable); confirms which process and command line issued the 4701 event.
+  - id: 7595ba94-cf3b-4471-aa03-4f6baa9e5fad
+    name: Important Scheduled Task Deleted/Disabled
+    reason: Generic Security 4699/4701 on important tasks (Defender, Windows Update, backup); Slingshot-style tampering usually disables several maintenance tasks together.
+  - id: 9ac94dc8-9042-493c-ba45-3b5e7c86b980
+    name: Disable Important Scheduled Task
+    reason: Process-level view of the same task-disabling behavior, catching other disabled system tasks via schtasks.exe.
+  - id: 3a734d25-df5c-4b99-8034-af1ddb5883a4
+    name: Suspicious Scheduled Task Creation
+    reason: Slingshot-style actors disable legit tasks and then register their own malicious task for persistence/execution.
+  - id: 614cf376-6651-47c4-9dcc-6b9527f749f4
+    name: Suspicious Scheduled Task Update
+    reason: Modification of existing tasks (hijacking a legit task) is the persistence follow-on to tampering with scheduled tasks.
+  - id: f6de6525-4509-495a-8a82-1f8b0ed73a00
+    name: Remote Task Creation via ATSVC Named Pipe
+    reason: If the task change was made remotely, the ATSVC pipe shows lateral movement via task scheduler from another host.
+  - id: d99b79d2-0a6f-4f46-ad8b-260b6e17f982
+    name: Security Eventlog Cleared
+    reason: 'Defense-evasion follow-on: after tampering with system tasks an operator commonly clears the Security log to hide the 4701 trail.'
+  - id: ab4561b1-6c7e-48a7-ad08-087cfb9ce8f1
+    name: Important Windows Event Auditing Disabled
+    reason: 'Co-occurring defense evasion: disabling audit policy alongside task disabling indicates deliberate blinding of the host.'
   window: 1h
   enrichment_searches:
-  # Rule-specific telemetry pivots the engine runs around an alert from this rule,
-  # scoped to the alert's host/user/IP within the window (behaviour-targeted, not a sweep).
-    - name: "Scheduled-task creation on this host"
-      query: '((data_win_system_eventID:"1" AND data_win_eventdata_image:/.*(\\[Ss][Cc][Hh][Tt][Aa][Ss][Kk][Ss]\.[Ee][Xx][Ee]|\\[Aa][Tt]\.[Ee][Xx][Ee])/) OR ((data_win_system_eventID:"4698" OR data_win_system_eventID:"4702")))'
-      pivot_on: [host]
-      window: 4h
-    - name: "Memory/credential-dump creation & LSASS access on this host"
-      query: '((data_win_system_eventID:"1" AND data_win_eventdata_image:/.*(\\[Pp][Rr][Oo][Cc][Dd][Uu][Mm][Pp]\.[Ee][Xx][Ee]|\\[Pp][Rr][Oo][Cc][Dd][Uu][Mm][Pp]64\.[Ee][Xx][Ee]|\\[Ss][Qq][Ll][Dd][Uu][Mm][Pp][Ee][Rr]\.[Ee][Xx][Ee]|\\[Cc][Rr][Ee][Aa][Tt][Ee][Dd][Uu][Mm][Pp]\.[Ee][Xx][Ee]|\\[Rr][Dd][Rr][Ll][Ee][Aa][Kk][Dd][Ii][Aa][Gg]\.[Ee][Xx][Ee]|\\[Dd][Uu][Mm][Pp][Ee][Rr][Tt]\.[Ee][Xx][Ee]|\\[Nn][Aa][Nn][Oo][Dd][Uu][Mm][Pp]\.[Ee][Xx][Ee]|\\[Aa][Vv][Dd][Uu][Mm][Pp]\.[Ee][Xx][Ee])/) OR (data_win_system_eventID:"1" AND (data_win_eventdata_commandLine:/.*[Cc][Oo][Mm][Ss][Vv][Cc][Ss]\.[Dd][Ll][Ll].*/ OR data_win_eventdata_commandLine:/.*[Mm][Ii][Nn][Ii][Dd][Uu][Mm][Pp].*/ OR data_win_eventdata_commandLine:/.*[Dd][Uu][Mm][Pp][Ee][Rr][Tt].*/ OR data_win_eventdata_commandLine:/.*[Nn][Aa][Nn][Oo][Dd][Uu][Mm][Pp].*/ OR data_win_eventdata_commandLine:/.*[Ll][Ss][Aa][Ss][Ss].*/ OR data_win_eventdata_commandLine:/.*[Ss][Ee][Kk][Uu][Rr][Ll][Ss][Aa].*/ OR data_win_eventdata_commandLine:/.*[Nn][Tt][Dd][Ss]\.[Dd][Ii][Tt].*/ OR data_win_eventdata_commandLine:/.*[Nn][Tt][Dd][Ss][Uu][Tt][Ii][Ll].*/)) OR (data_win_system_eventID:"10" AND data_win_eventdata_targetImage:/.*(\\[Ll][Ss][Aa][Ss][Ss]\.[Ee][Xx][Ee])/))'
-      pivot_on: [host]
-      window: 1h
-    - name: "This account's logon activity across hosts"
-      query: '(data_win_system_eventID:"4624" OR data_win_system_eventID:"4625")'
-      pivot_on: [user]
-      window: 6h
-    - name: "Account / group / privilege changes involving this account"
-      query: '(data_win_system_eventID:"4720" OR data_win_system_eventID:"4722" OR data_win_system_eventID:"4724" OR data_win_system_eventID:"4728" OR data_win_system_eventID:"4732" OR data_win_system_eventID:"4756" OR data_win_system_eventID:"4672")'
-      pivot_on: [user]
-      window: 6h
+  # Behaviour-targeted hunts the engine runs around the alert (not a sweep).
+  - name: schtasks/at.exe disabling or deleting tasks on this host
+    query: data_win_system_eventID:"1" AND ((data_win_eventdata_image:/.*\\[Ss][Cc][Hh][Tt][Aa][Ss][Kk][Ss]\.[Ee][Xx][Ee]/ AND (data_win_eventdata_commandLine:/.*\/[Cc][Hh][Aa][Nn][Gg][Ee].*/ OR data_win_eventdata_commandLine:/.*\/[Dd][Ee][Ll][Ee][Tt][Ee].*/ OR data_win_eventdata_commandLine:/.*\/[Dd][Ii][Ss][Aa][Bb][Ll][Ee].*/)) OR data_win_eventdata_commandLine:/.*[Dd][Ii][Ss][Aa][Bb][Ll][Ee]-[Ss][Cc][Hh][Ee][Dd][Uu][Ll][Ee][Dd][Tt][Aa][Ss][Kk].*/)
+    pivot_on:
+    - host
+    window: 1h
+  - name: Scheduled task created, deleted or updated in Security log
+    query: (data_win_system_eventID:"4698" OR data_win_system_eventID:"4699" OR data_win_system_eventID:"4700" OR data_win_system_eventID:"4702")
+    pivot_on:
+    - host
+    window: 4h
+  - name: Process lineage of task-tampering parent (shell/script hosts, LOLBins)
+    query: data_win_system_eventID:"1" AND (data_win_eventdata_parentImage:/.*\\(([Pp][Oo][Ww][Ee][Rr][Ss][Hh][Ee][Ll][Ll])|([Cc][Mm][Dd])|([Ww][Ss][Cc][Rr][Ii][Pp][Tt])|([Cc][Ss][Cc][Rr][Ii][Pp][Tt])|([Mm][Ss][Hh][Tt][Aa])|([Rr][Uu][Nn][Dd][Ll][Ll]32)|([Pp][Ss][Ee][Xx][Ee][Ss][Vv][Cc]))\.[Ee][Xx][Ee]/ AND data_win_eventdata_image:/.*\\[Ss][Cc][Hh][Tt][Aa][Ss][Kk][Ss]\.[Ee][Xx][Ee]/)
+    pivot_on:
+    - host
+    window: 1h
+  - name: Event log clearing or audit policy tampering
+    query: ((data_win_system_eventID:"1102") OR (data_win_system_eventID:"1" AND ((data_win_eventdata_image:/.*\\[Ww][Ee][Vv][Tt][Uu][Tt][Ii][Ll]\.[Ee][Xx][Ee]/ AND data_win_eventdata_commandLine:/.*(\ |\/)[Cc][Ll].*/) OR data_win_eventdata_commandLine:/.*[Aa][Uu][Dd][Ii][Tt][Pp][Oo][Ll].*/ OR data_win_eventdata_commandLine:/.*[Cc][Ll][Ee][Aa][Rr]-[Ee][Vv][Ee][Nn][Tt][Ll][Oo][Gg].*/)))
+    pivot_on:
+    - host
+    window: 2h
+  - name: New service or executable dropped for persistence after task tampering
+    query: (data_win_system_eventID:"4697" OR data_win_system_eventID:"7045" OR (data_win_system_eventID:"11" AND (data_win_eventdata_targetFilename:/.*\\[Ww][Ii][Nn][Dd][Oo][Ww][Ss]\\[Tt][Aa][Ss][Kk][Ss]\\.*/ OR data_win_eventdata_targetFilename:/.*\\[Ss][Yy][Ss][Tt][Ee][Mm]32\\[Tt][Aa][Ss][Kk][Ss]\\.*/ OR data_win_eventdata_targetFilename:/.*\\[Pp][Rr][Oo][Gg][Rr][Aa][Mm][Dd][Aa][Tt][Aa]\\.*\.([Dd][Ll][Ll]|[Ee][Xx][Ee]|[Ss][Yy][Ss])/)))
+    pivot_on:
+    - host
+    window: 4h

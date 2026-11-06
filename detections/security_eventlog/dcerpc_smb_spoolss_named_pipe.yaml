@@ -142,32 +142,58 @@ graylog:
   query: data_win_system_eventID:"5145" AND data_win_eventdata_shareName:/\\\\\*\\[Ii][Pp][Cc]\$/ AND data_win_eventdata_relativeTargetName:/[Ss][Pp][Oo][Oo][Ll][Ss][Ss]/
 
 correlation:
-  # Authored by the correlation engine for review. Related CoPilot Searches to run
-  # around an alert from this rule, scoped to the same host/user/IP within the window.
+  # Authored per-rule (behaviour-researched) for the correlation engine. Related CoPilot
+  # Searches + telemetry pivots to run around an alert, scoped to its host/user/ip/domain.
   related_rules:
-    - id: 87261fb2-69d0-42fe-b9de-88c6b5f65a43
-      name: "Atera Agent Installation"
-      reason: "next kill-chain tactic: Command and Control"
-    - id: 48d91a3a-2363-43ba-a456-ca71ac3da5c2
-      name: "Audit CVE Event"
-      reason: "next kill-chain tactic: Lateral Movement"
+  - id: 1ce8c8a3-2723-48ed-8246-906ac91061a6
+    name: Possible PetitPotam Coerce Authentication Attempt
+    reason: Sibling authentication-coercion primitive (EFSRPC vs spoolss pipe); same attacker goal of forcing the host to NTLM-authenticate to attacker infrastructure, often tried back to back
+  - id: 8fe1c584-ee61-444b-be21-e9054b229694
+    name: CVE-2021-1675 Print Spooler Exploitation IPC Access
+    reason: Same IPC$ spoolss access can be PrintNightmare RCE rather than coercion; distinguishes remote driver-install exploitation from authentication relay
+  - id: bb76d96b-821c-47cf-944b-7ce377864492
+    name: Suspicious NTLM Authentication on the Printer Spooler Service
+    reason: 'Direct co-occurrence: the coerced spooler authentication produces NTLM auth events on the spooler service shortly after the pipe access'
+  - id: 6a53d871-682d-40b6-83e0-b7c1a6c4e3a5
+    name: PetitPotam Suspicious Kerberos TGT Request
+    reason: 'Follow-on: a coerced DC machine account authenticating to a relay target is then used to request a TGT for the machine account'
+  - id: 5589ab4f-a767-433c-961d-c91f3f704db1
+    name: Potential SMB Relay Attack Tool Execution
+    reason: Coerced NTLM authentication is captured and relayed by tools like Responder/ntlmrelayx on the attacker host
+  - id: 52d8b0c6-53d6-439a-9e41-52ad442ad9ad
+    name: First Time Seen Remote Named Pipe
+    reason: Remote spoolss pipe access from a source that never used it before is the baseline-deviation signal confirming the coercion is new in the environment
+  - id: d3abac66-f11c-4ed0-8acb-50cc29c97eed
+    name: NetNTLM Downgrade Attack
+    reason: Attackers weaken NTLM settings to make coerced authentication crackable or relayable, a precursor/companion of NTLM coercion chains
+  - id: dcdbc940-0bff-46b2-95f3-2d73f848e33b
+    name: Suspicious Spool Service Child Process
+    reason: If the spoolss access was exploitation (PrintNightmare style) rather than coercion, spoolsv.exe spawns the attacker payload as SYSTEM
   window: 1h
   enrichment_searches:
-  # Rule-specific telemetry pivots the engine runs around an alert from this rule,
-  # scoped to the alert's host/user/IP within the window (behaviour-targeted, not a sweep).
-    - name: "Remote-execution / lateral-movement tooling on this host"
-      query: '(data_win_system_eventID:"1" AND data_win_eventdata_image:/.*(\\[Pp][Ss][Ee][Xx][Ee][Cc]\.[Ee][Xx][Ee]|\\[Pp][Ss][Ee][Xx][Ee][Ss][Vv][Cc]\.[Ee][Xx][Ee]|\\[Pp][Aa][Ee][Xx][Ee][Cc]\.[Ee][Xx][Ee]|\\[Ww][Ii][Nn][Rr][Ss]\.[Ee][Xx][Ee]|\\[Mm][Ss][Tt][Ss][Cc]\.[Ee][Xx][Ee]|\\[Ww][Mm][Ii][Cc]\.[Ee][Xx][Ee])/) OR (data_win_system_eventID:"1" AND data_win_eventdata_image:/.*(\\[Pp][Oo][Ww][Ee][Rr][Ss][Hh][Ee][Ll][Ll]\.[Ee][Xx][Ee]|\\[Pp][Ww][Ss][Hh]\.[Ee][Xx][Ee])/ AND (data_win_eventdata_commandLine:/.*[Ii][Nn][Vv][Oo][Kk][Ee]-[Cc][Oo][Mm][Mm][Aa][Nn][Dd].*/ OR data_win_eventdata_commandLine:/.*[Nn][Ee][Ww]-[Pp][Ss][Ss][Ee][Ss][Ss][Ii][Oo][Nn].*/ OR data_win_eventdata_commandLine:/.*[Ee][Nn][Tt][Ee][Rr]-[Pp][Ss][Ss][Ee][Ss][Ss][Ii][Oo][Nn].*/ OR data_win_eventdata_commandLine:/.*-[Cc][Oo][Mm][Pp][Uu][Tt][Ee][Rr][Nn][Aa][Mm][Ee].*/))'
-      pivot_on: [host]
-      window: 2h
-    - name: "Memory/credential-dump creation & LSASS access on this host"
-      query: '((data_win_system_eventID:"1" AND data_win_eventdata_image:/.*(\\[Pp][Rr][Oo][Cc][Dd][Uu][Mm][Pp]\.[Ee][Xx][Ee]|\\[Pp][Rr][Oo][Cc][Dd][Uu][Mm][Pp]64\.[Ee][Xx][Ee]|\\[Ss][Qq][Ll][Dd][Uu][Mm][Pp][Ee][Rr]\.[Ee][Xx][Ee]|\\[Cc][Rr][Ee][Aa][Tt][Ee][Dd][Uu][Mm][Pp]\.[Ee][Xx][Ee]|\\[Rr][Dd][Rr][Ll][Ee][Aa][Kk][Dd][Ii][Aa][Gg]\.[Ee][Xx][Ee]|\\[Dd][Uu][Mm][Pp][Ee][Rr][Tt]\.[Ee][Xx][Ee]|\\[Nn][Aa][Nn][Oo][Dd][Uu][Mm][Pp]\.[Ee][Xx][Ee]|\\[Aa][Vv][Dd][Uu][Mm][Pp]\.[Ee][Xx][Ee])/) OR (data_win_system_eventID:"1" AND (data_win_eventdata_commandLine:/.*[Cc][Oo][Mm][Ss][Vv][Cc][Ss]\.[Dd][Ll][Ll].*/ OR data_win_eventdata_commandLine:/.*[Mm][Ii][Nn][Ii][Dd][Uu][Mm][Pp].*/ OR data_win_eventdata_commandLine:/.*[Dd][Uu][Mm][Pp][Ee][Rr][Tt].*/ OR data_win_eventdata_commandLine:/.*[Nn][Aa][Nn][Oo][Dd][Uu][Mm][Pp].*/ OR data_win_eventdata_commandLine:/.*[Ll][Ss][Aa][Ss][Ss].*/ OR data_win_eventdata_commandLine:/.*[Ss][Ee][Kk][Uu][Rr][Ll][Ss][Aa].*/ OR data_win_eventdata_commandLine:/.*[Nn][Tt][Dd][Ss]\.[Dd][Ii][Tt].*/ OR data_win_eventdata_commandLine:/.*[Nn][Tt][Dd][Ss][Uu][Tt][Ii][Ll].*/)) OR (data_win_system_eventID:"10" AND data_win_eventdata_targetImage:/.*(\\[Ll][Ss][Aa][Ss][Ss]\.[Ee][Xx][Ee])/))'
-      pivot_on: [host]
-      window: 1h
-    - name: "This account's logon activity across hosts"
-      query: '(data_win_system_eventID:"4624" OR data_win_system_eventID:"4625")'
-      pivot_on: [user]
-      window: 6h
-    - name: "Account / group / privilege changes involving this account"
-      query: '(data_win_system_eventID:"4720" OR data_win_system_eventID:"4722" OR data_win_system_eventID:"4724" OR data_win_system_eventID:"4728" OR data_win_system_eventID:"4732" OR data_win_system_eventID:"4756" OR data_win_system_eventID:"4672")'
-      pivot_on: [user]
-      window: 6h
+  # Behaviour-targeted hunts the engine runs around the alert (not a sweep).
+  - name: Other RPC coercion/recon named pipes over IPC$ on this host
+    query: data_win_system_eventID:"5145" AND data_win_eventdata_shareName:/.*[Ii][Pp][Cc]\$/ AND data_win_eventdata_relativeTargetName:/(efsrpc|lsarpc|lsass|netdfs|samr|netlogon|srvsvc|svcctl|atsvc|FssagentRpc|eventlog)/
+    pivot_on:
+    - host
+    window: 1h
+  - name: Inbound NTLM network logons to this host
+    query: data_win_system_eventID:"4624" AND data_win_eventdata_logonType:"3" AND data_win_eventdata_authenticationPackageName:/[Nn][Tt][Ll][Mm]/
+    pivot_on:
+    - host
+    window: 1h
+  - name: Machine-account Kerberos TGT/service ticket requests (relay or delegation abuse)
+    query: (data_win_system_eventID:"4768" OR data_win_system_eventID:"4769") AND data_win_eventdata_targetUserName:*\$
+    pivot_on:
+    - host
+    window: 2h
+  - name: Directory replication (DCSync) rights used after coercion
+    query: data_win_system_eventID:"4662" AND (data_win_eventdata_properties:*1131f6aa* OR data_win_eventdata_properties:*1131f6ad* OR data_win_eventdata_properties:*89e95b76*)
+    pivot_on:
+    - host
+    window: 4h
+  - name: Print spooler spawning processes or dropping driver DLLs
+    query: (data_win_system_eventID:"1" AND data_win_eventdata_parentImage:/.*\\[Ss][Pp][Oo][Oo][Ll][Ss][Vv]\.[Ee][Xx][Ee]/) OR (data_win_system_eventID:"11" AND data_win_eventdata_targetFilename:/.*[Ss][Pp][Oo][Oo][Ll]\\[Dd][Rr][Ii][Vv][Ee][Rr][Ss]\\.*\.[Dd][Ll][Ll]/)
+    pivot_on:
+    - host
+    window: 2h

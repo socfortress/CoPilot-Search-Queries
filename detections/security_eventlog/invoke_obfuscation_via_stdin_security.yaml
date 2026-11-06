@@ -155,41 +155,58 @@ graylog:
   query: data_win_system_eventID:"4697" AND data_win_eventdata_serviceFileName:/.*[Ss][Ee][Tt].*/ AND data_win_eventdata_serviceFileName:/.*\&\&.*/ AND (data_win_eventdata_serviceFileName:/.*[Ee][Nn][Vv][Ii][Rr][Oo][Nn][Mm][Ee][Nn][Tt].*/ OR data_win_eventdata_serviceFileName:/.*[Ii][Nn][Vv][Oo][Kk][Ee].*/ OR data_win_eventdata_serviceFileName:/.*\$\{[Ii][Nn][Pp][Uu][Tt]\).*/)
 
 correlation:
-  # Authored by the correlation engine for review. Related CoPilot Searches to run
-  # around an alert from this rule, scoped to the same host/user/IP within the window.
+  # Authored per-rule (behaviour-researched) for the correlation engine. Related CoPilot
+  # Searches + telemetry pivots to run around an alert, scoped to its host/user/ip/domain.
   related_rules:
-    - id: 0255a820-e564-4e40-af2b-6ac61160335c
-      name: "A New Trust Was Created To A Domain"
-      reason: "next kill-chain tactic: Persistence"
-    - id: 35ba1d85-724d-42a3-889f-2e2362bcaf23
-      name: "AD Privileged Users or Groups Reconnaissance"
-      reason: "next kill-chain tactic: Discovery"
-    - id: 9eb99343-d336-4020-a3cd-67f3819e68ee
-      name: "Account Tampering - Suspicious Failed Logon Reasons"
-      reason: "next kill-chain tactic: Persistence"
-    - id: 17d619c1-e020-4347-957e-1d1207455c93
-      name: "Active Directory Replication from Non Machine Account"
-      reason: "next kill-chain tactic: Credential Access"
-    - id: 300bac00-e041-4ee2-9c36-e262656a6ecc
-      name: "Active Directory User Backdoors"
-      reason: "next kill-chain tactic: Persistence"
+  - id: 0c718a5e-4284-4fb9-b4d9-b9a50b3a1974
+    name: Invoke-Obfuscation STDIN+ Launcher - Security
+    reason: Sibling 4697 detection for the Invoke-Obfuscation STDIN launcher variant; the same installed service command line often trips both, confirming obfuscated PowerShell delivered through a service.
+  - id: dcf2db1f-f091-425b-a821-c05875b8925a
+    name: Invoke-Obfuscation VAR+ Launcher - Security
+    reason: Another Invoke-Obfuscation launcher style via 4697; operators rotate launcher variants, so a second variant on the same host shows a tooling-driven service payload.
+  - id: 4edf51e1-cb83-4e1a-bc39-800e396068e3
+    name: Invoke-Obfuscation CLIP+ Launcher - Security
+    reason: Clipboard-based Invoke-Obfuscation launcher installed as a service; same obfuscation toolkit and same service-installation delivery path.
+  - id: d7a95147-145f-4678-b85d-d1ff4a3bb3f6
+    name: CobaltStrike Service Installations - Security
+    reason: Obfuscated cmd/PowerShell in a service binary path is the classic Cobalt Strike psexec/getsystem pattern; a hit here points to the C2 framework behind the obfuscation.
+  - id: 6fb63b40-e02a-403e-9ffd-3bcc1d749442
+    name: Metasploit Or Impacket Service Installation Via SMB PsExec
+    reason: Remote service creation via SMB psexec is a common way the obfuscated command lands; indicates lateral movement to this host.
+  - id: 586a8d6b-6bfe-4ad9-9d78-888cd2fe50c3
+    name: Remote Service Activity via SVCCTL Named Pipe
+    reason: Service creation over the SVCCTL pipe from another machine is the network side of the same 4697 event, identifying remote origin.
+  - id: c4e92a97-a9ff-4392-9d2d-7a4c642768ca
+    name: Service Installed By Unusual Client - Security
+    reason: Flags the service being installed from an unusual logon or client, separating admin tooling from attacker lateral movement behind this 4697.
+  - id: ecbc5e16-58e0-4521-9c60-eb9a7ea4ad34
+    name: Meterpreter or Cobalt Strike Getsystem Service Installation - Security
+    reason: Getsystem privilege escalation also installs a cmd-based service to reach SYSTEM; a follow-on or alternate explanation for the same service event.
   window: 1h
   enrichment_searches:
-  # Rule-specific telemetry pivots the engine runs around an alert from this rule,
-  # scoped to the alert's host/user/IP within the window (behaviour-targeted, not a sweep).
-    - name: "Outbound connections by script interpreters on this host"
-      query: 'data_win_system_eventID:"3" AND data_win_eventdata_image:/.*(\\[Pp][Oo][Ww][Ee][Rr][Ss][Hh][Ee][Ll][Ll]\.[Ee][Xx][Ee]|\\[Pp][Ww][Ss][Hh]\.[Ee][Xx][Ee]|\\[Pp][Oo][Ww][Ee][Rr][Ss][Hh][Ee][Ll][Ll]_[Ii][Ss][Ee]\.[Ee][Xx][Ee]|\\[Cc][Mm][Dd]\.[Ee][Xx][Ee]|\\[Ww][Ss][Cc][Rr][Ii][Pp][Tt]\.[Ee][Xx][Ee]|\\[Cc][Ss][Cc][Rr][Ii][Pp][Tt]\.[Ee][Xx][Ee]|\\[Mm][Ss][Hh][Tt][Aa]\.[Ee][Xx][Ee]|\\[Rr][Uu][Nn][Dd][Ll][Ll]32\.[Ee][Xx][Ee]|\\[Rr][Ee][Gg][Ss][Vv][Rr]32\.[Ee][Xx][Ee])/'
-      pivot_on: [host]
-      window: 1h
-    - name: "Encoded / obfuscated script execution on this host"
-      query: 'data_win_system_eventID:"4104" AND (data_win_eventdata_scriptBlockText:/.*[Dd][Oo][Ww][Nn][Ll][Oo][Aa][Dd][Ss][Tt][Rr][Ii][Nn][Gg].*/ OR data_win_eventdata_scriptBlockText:/.*[Dd][Oo][Ww][Nn][Ll][Oo][Aa][Dd][Ff][Ii][Ll][Ee].*/ OR data_win_eventdata_scriptBlockText:/.*[Ii][Nn][Vv][Oo][Kk][Ee]-[Ww][Ee][Bb][Rr][Ee][Qq][Uu][Ee][Ss][Tt].*/ OR data_win_eventdata_scriptBlockText:/.*[Nn][Ee][Tt]\.[Ww][Ee][Bb][Cc][Ll][Ii][Ee][Nn][Tt].*/ OR data_win_eventdata_scriptBlockText:/.*[Ff][Rr][Oo][Mm][Bb][Aa][Ss][Ee]64[Ss][Tt][Rr][Ii][Nn][Gg].*/ OR data_win_eventdata_scriptBlockText:/.*[Ii][Ee][Xx].*/ OR data_win_eventdata_scriptBlockText:/.*[Ii][Nn][Vv][Oo][Kk][Ee]-[Ee][Xx][Pp][Rr][Ee][Ss][Ss][Ii][Oo][Nn].*/ OR data_win_eventdata_scriptBlockText:/.*[Ss][Tt][Aa][Rr][Tt]-[Bb][Ii][Tt][Ss][Tt][Rr][Aa][Nn][Ss][Ff][Ee][Rr].*/ OR data_win_eventdata_scriptBlockText:/.*[Aa][Mm][Ss][Ii][Uu][Tt][Ii][Ll][Ss].*/ OR data_win_eventdata_scriptBlockText:/.*-[Ee][Nn][Cc].*/ OR data_win_eventdata_scriptBlockText:/.*-[Ee][Nn][Cc][Oo][Dd][Ee][Dd][Cc][Oo][Mm][Mm][Aa][Nn][Dd].*/ OR data_win_eventdata_scriptBlockText:/.*[Rr][Ee][Ff][Ll][Ee][Cc][Tt][Ii][Oo][Nn]\.[Aa][Ss][Ss][Ee][Mm][Bb][Ll][Yy].*/)'
-      pivot_on: [host]
-      window: 1h
-    - name: "Autostart persistence written on this host (Run keys, services, IFEO)"
-      query: '(data_win_system_eventID:"12" OR data_win_system_eventID:"13") AND (data_win_eventdata_targetObject:/.*[Cc][Uu][Rr][Rr][Ee][Nn][Tt][Vv][Ee][Rr][Ss][Ii][Oo][Nn]\\[Rr][Uu][Nn].*/ OR data_win_eventdata_targetObject:/.*[Cc][Uu][Rr][Rr][Ee][Nn][Tt][Vv][Ee][Rr][Ss][Ii][Oo][Nn]\\[Rr][Uu][Nn][Oo][Nn][Cc][Ee].*/ OR data_win_eventdata_targetObject:/.*[Cc][Uu][Rr][Rr][Ee][Nn][Tt][Cc][Oo][Nn][Tt][Rr][Oo][Ll][Ss][Ee][Tt]\\[Ss][Ee][Rr][Vv][Ii][Cc][Ee][Ss]\\.*/ OR data_win_eventdata_targetObject:/.*[Ii][Mm][Aa][Gg][Ee] [Ff][Ii][Ll][Ee] [Ee][Xx][Ee][Cc][Uu][Tt][Ii][Oo][Nn] [Oo][Pp][Tt][Ii][Oo][Nn][Ss]\\.*/ OR data_win_eventdata_targetObject:/.*[Ww][Ii][Nn][Ll][Oo][Gg][Oo][Nn]\\[Ss][Hh][Ee][Ll][Ll].*/ OR data_win_eventdata_targetObject:/.*[Ww][Ii][Nn][Ll][Oo][Gg][Oo][Nn]\\[Uu][Ss][Ee][Rr][Ii][Nn][Ii][Tt].*/ OR data_win_eventdata_targetObject:/.*[Cc][Uu][Rr][Rr][Ee][Nn][Tt][Vv][Ee][Rr][Ss][Ii][Oo][Nn]\\[Ee][Xx][Pp][Ll][Oo][Rr][Ee][Rr]\\[Rr][Uu][Nn].*/ OR data_win_eventdata_targetObject:/.*[Pp][Oo][Ll][Ii][Cc][Ii][Ee][Ss]\\[Ee][Xx][Pp][Ll][Oo][Rr][Ee][Rr]\\[Rr][Uu][Nn].*/ OR data_win_eventdata_targetObject:/.*[Cc][Uu][Rr][Rr][Ee][Nn][Tt][Vv][Ee][Rr][Ss][Ii][Oo][Nn]\\[Ww][Ii][Nn][Dd][Oo][Ww][Ss]\\[Ll][Oo][Aa][Dd].*/)'
-      pivot_on: [host]
-      window: 4h
-    - name: "This account's logon activity across hosts"
-      query: '(data_win_system_eventID:"4624" OR data_win_system_eventID:"4625")'
-      pivot_on: [user]
-      window: 6h
+  # Behaviour-targeted hunts the engine runs around the alert (not a sweep).
+  - name: Service started by services.exe spawning cmd/PowerShell with stdin or set&& pattern
+    query: data_win_system_eventID:"1" AND data_win_eventdata_parentImage:/.*[Ss][Ee][Rr][Vv][Ii][Cc][Ee][Ss]\.[Ee][Xx][Ee]/ AND data_win_eventdata_image:/.*([Cc][Mm][Dd]|[Pp][Oo][Ww][Ee][Rr][Ss][Hh][Ee][Ll][Ll])\.[Ee][Xx][Ee]/
+    pivot_on:
+    - host
+    window: 1h
+  - name: PowerShell script blocks with IEX, input stream or encoded payload
+    query: data_win_system_eventID:"4104" AND (data_win_eventdata_scriptBlockText:*[Ii][Ee][Xx]* OR data_win_eventdata_scriptBlockText:*[Ii]nvoke-[Ee]xpression* OR data_win_eventdata_scriptBlockText:*FromBase64String* OR data_win_eventdata_scriptBlockText:*$input* OR data_win_eventdata_scriptBlockText:*DownloadString*)
+    pivot_on:
+    - host
+    window: 1h
+  - name: Other service installs on this host (System 7045 and Security 4697)
+    query: (data_win_system_eventID:"7045" OR data_win_system_eventID:"4697") AND (data_win_eventdata_imagePath:*cmd* OR data_win_eventdata_imagePath:*powershell* OR data_win_eventdata_serviceFileName:*cmd* OR data_win_eventdata_serviceFileName:*powershell* OR data_win_eventdata_serviceFileName:*ADMIN$* OR data_win_eventdata_imagePath:*\\*)
+    pivot_on:
+    - host
+    window: 4h
+  - name: Outbound network connections from PowerShell or cmd on this host
+    query: data_win_system_eventID:"3" AND data_win_eventdata_image:/.*([Pp][Oo][Ww][Ee][Rr][Ss][Hh][Ee][Ll][Ll]|[Cc][Mm][Dd])\.[Ee][Xx][Ee]/ AND data_win_eventdata_initiated:"true"
+    pivot_on:
+    - host
+    window: 2h
+  - name: Network logons (type 3) by the installing account
+    query: data_win_system_eventID:"4624" AND data_win_eventdata_logonType:"3"
+    pivot_on:
+    - user
+    window: 6h

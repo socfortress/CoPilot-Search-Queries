@@ -138,44 +138,58 @@ graylog:
   query: data_win_system_eventID:"4720" AND data_win_eventdata_targetUserName:/.*\$/ AND _exists_:data_win_eventdata_targetUserName AND NOT (data_win_eventdata_targetUserName:/[Hh][Oo][Mm][Ee][Gg][Rr][Oo][Uu][Pp][Uu][Ss][Ee][Rr]\$/)
 
 correlation:
-  # Authored by the correlation engine for review. Related CoPilot Searches to run
-  # around an alert from this rule, scoped to the same host/user/IP within the window.
+  # Authored per-rule (behaviour-researched) for the correlation engine. Related CoPilot
+  # Searches + telemetry pivots to run around an alert, scoped to its host/user/ip/domain.
   related_rules:
-    - id: 0255a820-e564-4e40-af2b-6ac61160335c
-      name: "A New Trust Was Created To A Domain"
-      reason: "next kill-chain tactic: Persistence"
-    - id: 35ba1d85-724d-42a3-889f-2e2362bcaf23
-      name: "AD Privileged Users or Groups Reconnaissance"
-      reason: "next kill-chain tactic: Discovery"
-    - id: 9eb99343-d336-4020-a3cd-67f3819e68ee
-      name: "Account Tampering - Suspicious Failed Logon Reasons"
-      reason: "next kill-chain tactic: Persistence"
-    - id: 17d619c1-e020-4347-957e-1d1207455c93
-      name: "Active Directory Replication from Non Machine Account"
-      reason: "next kill-chain tactic: Credential Access"
-    - id: 300bac00-e041-4ee2-9c36-e262656a6ecc
-      name: "Active Directory User Backdoors"
-      reason: "next kill-chain tactic: Persistence"
-    - id: 2632954e-db1c-49cb-9936-67d1ef1d17d2
-      name: "Addition of SID History to Active Directory Object"
-      reason: "next kill-chain tactic: Privilege Escalation"
+  - id: cfeed607-6aa4-4bbd-9627-b637deb723c8
+    name: New or Renamed User Account with '$' Character
+    reason: Same trailing-$ trick to mimic a machine account, seen as a rename or alternate creation event; confirms deliberate account hiding on the same host.
+  - id: 460479f3-80b7-42da-9c43-2cc1d54dbccd
+    name: Creation of a Local Hidden User Account by Registry
+    reason: Registry-level creation of a hidden SAM user, the sibling technique to a $-named account; attackers often combine both to stay out of sight.
+  - id: f8aebc67-a56d-4ec9-9fbe-7b0e8b7b4efd
+    name: Hiding User Account Via SpecialAccounts Registry Key
+    reason: 'Follow-on hardening step: the SpecialAccounts UserList value hides the new account from the logon screen.'
+  - id: cd219ff3-fa99-45d4-8380-a7d15116c6dc
+    name: New User Created Via Net.EXE
+    reason: Process-level view of the net user /add command that typically produces the 4720 event; reveals parent process and command line.
+  - id: 2c568c34-bb57-4b43-9d75-19c605b98e70
+    name: Windows Create Local Administrator Account Via Net
+    reason: Creation plus admin grant in one command chain; a hidden account is created to be a privileged backdoor.
+  - id: c265cf08-3f99-46c1-8d59-328247057d57
+    name: User Added to Local Administrator Group
+    reason: 'Immediate next step: the new hidden account is placed in Administrators (event 4732) to give it privileges.'
+  - id: ffa28e60-bdb1-46e0-9f82-05f7a61cc06e
+    name: User Added to Remote Desktop Users Group
+    reason: Hidden accounts are commonly given RDP access so the attacker can return interactively.
+  - id: 0d5675be-bc88-4172-86d3-1e96a4476536
+    name: Potential Tampering With RDP Related Registry Keys Via Reg.EXE
+    reason: 'Backdoor chain: after account creation attackers enable RDP and relax its settings to use the account remotely.'
   window: 1h
   enrichment_searches:
-  # Rule-specific telemetry pivots the engine runs around an alert from this rule,
-  # scoped to the alert's host/user/IP within the window (behaviour-targeted, not a sweep).
-    - name: "Local account / group creation on this host"
-      query: '(((data_win_system_eventID:"4720" OR data_win_system_eventID:"4728" OR data_win_system_eventID:"4732" OR data_win_system_eventID:"4756")) OR (data_win_system_eventID:"1" AND data_win_eventdata_image:/.*(\\[Nn][Ee][Tt]\.[Ee][Xx][Ee]|\\[Nn][Ee][Tt]1\.[Ee][Xx][Ee])/ AND (data_win_eventdata_commandLine:/.*[Uu][Ss][Ee][Rr] .*/ OR data_win_eventdata_commandLine:/.*[Ll][Oo][Cc][Aa][Ll][Gg][Rr][Oo][Uu][Pp].*/ OR data_win_eventdata_commandLine:/.*[Gg][Rr][Oo][Uu][Pp] .*/)))'
-      pivot_on: [host]
-      window: 6h
-    - name: "Follow-on LOLBin / signed-binary-proxy execution on this host"
-      query: 'data_win_system_eventID:"1" AND data_win_eventdata_image:/.*(\\[Rr][Uu][Nn][Dd][Ll][Ll]32\.[Ee][Xx][Ee]|\\[Rr][Ee][Gg][Ss][Vv][Rr]32\.[Ee][Xx][Ee]|\\[Mm][Ss][Hh][Tt][Aa]\.[Ee][Xx][Ee]|\\[Ii][Nn][Ss][Tt][Aa][Ll][Ll][Uu][Tt][Ii][Ll]\.[Ee][Xx][Ee]|\\[Rr][Ee][Gg][Aa][Ss][Mm]\.[Ee][Xx][Ee]|\\[Rr][Ee][Gg][Ss][Vv][Cc][Ss]\.[Ee][Xx][Ee]|\\[Mm][Ss][Bb][Uu][Ii][Ll][Dd]\.[Ee][Xx][Ee]|\\[Cc][Ee][Rr][Tt][Uu][Tt][Ii][Ll]\.[Ee][Xx][Ee]|\\[Bb][Ii][Tt][Ss][Aa][Dd][Mm][Ii][Nn]\.[Ee][Xx][Ee]|\\[Ww][Mm][Ii][Cc]\.[Ee][Xx][Ee]|\\[Cc][Mm][Ss][Tt][Pp]\.[Ee][Xx][Ee]|\\[Oo][Dd][Bb][Cc][Cc][Oo][Nn][Ff]\.[Ee][Xx][Ee]|\\[Ff][Oo][Rr][Ff][Ii][Ll][Ee][Ss]\.[Ee][Xx][Ee]|\\[Pp][Cc][Aa][Ll][Uu][Aa]\.[Ee][Xx][Ee]|\\[Mm][Aa][Vv][Ii][Nn][Jj][Ee][Cc][Tt]\.[Ee][Xx][Ee]|\\[Ss][Cc][Rr][Ii][Pp][Tt][Rr][Uu][Nn][Nn][Ee][Rr]\.[Ee][Xx][Ee])/'
-      pivot_on: [host]
-      window: 1h
-    - name: "This account's logon activity across hosts"
-      query: '(data_win_system_eventID:"4624" OR data_win_system_eventID:"4625")'
-      pivot_on: [user]
-      window: 6h
-    - name: "Account / group / privilege changes involving this account"
-      query: '(data_win_system_eventID:"4720" OR data_win_system_eventID:"4722" OR data_win_system_eventID:"4724" OR data_win_system_eventID:"4728" OR data_win_system_eventID:"4732" OR data_win_system_eventID:"4756" OR data_win_system_eventID:"4672")'
-      pivot_on: [user]
-      window: 6h
+  # Behaviour-targeted hunts the engine runs around the alert (not a sweep).
+  - name: Net user/localgroup commands creating or elevating accounts
+    query: data_win_system_eventID:"1" AND data_win_eventdata_image:/.*\\[Nn][Ee][Tt]1?\.[Ee][Xx][Ee]/ AND (data_win_eventdata_commandLine:/.*([Uu][Ss][Ee][Rr]|[Ll][Oo][Cc][Aa][Ll][Gg][Rr][Oo][Uu][Pp]).*\/[Aa][Dd][Dd].*/ OR data_win_eventdata_commandLine:/.*[Aa][Cc][Tt][Ii][Vv][Ee]:[Yy][Ee][Ss].*/)
+    pivot_on:
+    - host
+    window: 2h
+  - name: Registry hiding of user accounts (SpecialAccounts / SAM Users)
+    query: (data_win_system_eventID:"12" OR data_win_system_eventID:"13") AND (data_win_eventdata_targetObject:*SpecialAccounts* OR data_win_eventdata_targetObject:*SAM*Domains*Account*Users*)
+    pivot_on:
+    - host
+    window: 2h
+  - name: New account added to privileged local groups
+    query: (data_win_system_eventID:"4732" OR data_win_system_eventID:"4728" OR data_win_system_eventID:"4756") AND (data_win_eventdata_targetUserName:/.*([Aa]dministrators|[Rr]emote [Dd]esktop [Uu]sers).*/)
+    pivot_on:
+    - host
+    window: 2h
+  - name: RDP enablement and firewall opening on the host
+    query: (data_win_system_eventID:"13" AND data_win_eventdata_targetObject:*fDenyTSConnections*) OR (data_win_system_eventID:"1" AND (data_win_eventdata_commandLine:*portopening* OR data_win_eventdata_commandLine:*fDenyTSConnections* OR data_win_eventdata_commandLine:*Remote*Desktop*))
+    pivot_on:
+    - host
+    window: 4h
+  - name: 'First use of the hidden account: logons and password resets'
+    query: (data_win_system_eventID:"4624" OR data_win_system_eventID:"4625" OR data_win_system_eventID:"4724" OR data_win_system_eventID:"4722")
+    pivot_on:
+    - user
+    window: 24h

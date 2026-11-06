@@ -185,35 +185,58 @@ graylog:
   query: data_win_system_eventID:"4662" AND (data_win_eventdata_properties:/.*[Rr][Ee][Pp][Ll][Ii][Cc][Aa][Tt][Ii][Nn][Gg] [Dd][Ii][Rr][Ee][Cc][Tt][Oo][Rr][Yy] [Cc][Hh][Aa][Nn][Gg][Ee][Ss] [Aa][Ll][Ll].*/ OR data_win_eventdata_properties:/.*1131[Ff]6[Aa][Dd]-9[Cc]07-11[Dd]1-[Ff]79[Ff]-00[Cc]04[Ff][Cc]2[Dd][Cc][Dd]2.*/ OR data_win_eventdata_properties:/.*1131[Ff]6[Aa][Aa]-9[Cc]07-11[Dd]1-[Ff]79[Ff]-00[Cc]04[Ff][Cc]2[Dd][Cc][Dd]2.*/ OR data_win_eventdata_properties:/.*9923[Aa]32[Aa]-3607-11[Dd]2-[Bb]9[Bb][Ee]-0000[Ff]87[Aa]36[Bb]2.*/ OR data_win_eventdata_properties:/.*89[Ee]95[Bb]76-444[Dd]-4[Cc]62-991[Aa]-0[Ff][Aa][Cc][Bb][Ee][Dd][Aa]640[Cc].*/) AND data_win_eventdata_accessMask:/0[Xx]100/ AND _exists_:data_win_eventdata_subjectDomainName AND _exists_:data_win_eventdata_subjectUserName AND NOT (data_win_eventdata_subjectDomainName:/[Ww][Ii][Nn][Dd][Oo][Ww] [Mm][Aa][Nn][Aa][Gg][Ee][Rr]/ OR data_win_eventdata_subjectUserName:/[Nn][Tt] [Aa][Uu][Tt].*/ OR data_win_eventdata_subjectUserName:/[Mm][Ss][Oo][Ll]_.*/ OR data_win_eventdata_subjectUserName:/.*\$/)
 
 correlation:
-  # Authored by the correlation engine for review. Related CoPilot Searches to run
-  # around an alert from this rule, scoped to the same host/user/IP within the window.
+  # Authored per-rule (behaviour-researched) for the correlation engine. Related CoPilot
+  # Searches + telemetry pivots to run around an alert, scoped to its host/user/ip/domain.
   related_rules:
-    - id: 35ba1d85-724d-42a3-889f-2e2362bcaf23
-      name: "AD Privileged Users or Groups Reconnaissance"
-      reason: "next kill-chain tactic: Discovery"
-    - id: 17d619c1-e020-4347-957e-1d1207455c93
-      name: "Active Directory Replication from Non Machine Account"
-      reason: "next kill-chain tactic: Credential Access"
-    - id: 87261fb2-69d0-42fe-b9de-88c6b5f65a43
-      name: "Atera Agent Installation"
-      reason: "next kill-chain tactic: Command and Control"
+  - id: 17d619c1-e020-4347-957e-1d1207455c93
+    name: Active Directory Replication from Non Machine Account
+    reason: Same DRSUAPI replication abuse seen via the same 4662 replication GUIDs from a non-machine account; co-occurs with or confirms DCSync.
+  - id: 2c99737c-585d-4431-b61a-c911d86ff32f
+    name: Powerview Add-DomainObjectAcl DCSync AD Extend Right
+    reason: 'Precursor: attacker grants a non-privileged account DS-Replication extended rights on the domain object, then performs DCSync with it.'
+  - id: 35ba1d85-724d-42a3-889f-2e2362bcaf23
+    name: AD Privileged Users or Groups Reconnaissance
+    reason: 'Precursor: enumeration of Domain/Enterprise Admins to pick the high-value accounts (krbtgt, admins) to sync.'
+  - id: a642964e-bead-4bed-8910-1bb4d63e3b4d
+    name: HackTool - Mimikatz Execution
+    reason: The DCSync is typically run by mimikatz (lsadump::dcsync); process creation on the source host identifies the tool and operator.
+  - id: 962fe167-e48d-4fd6-9974-11e5b9a5d6d1
+    name: LSASS Access From Non System Account
+    reason: 'Co-occurring credential access: attacker often dumps LSASS on a foothold/DC before or alongside DCSync to obtain the replicating account.'
+  - id: 8eef149c-bd26-49f2-9e5a-9b00e3af499b
+    name: Pass the Hash Activity 2
+    reason: 'Follow-on: the NTLM hashes pulled by DCSync are replayed for lateral movement.'
+  - id: 192a0330-c20b-4356-90b6-7b7049ae0b87
+    name: Successful Overpass the Hash Attempt
+    reason: 'Follow-on: DCSync-obtained hashes or AES keys are used to request Kerberos TGTs (overpass-the-hash / golden-ticket prep with krbtgt).'
+  - id: 13bbd574-83ac-11ec-99d4-acde48001122
+    name: Mimikatz PassTheTicket CommandLine Parameters
+    reason: 'Follow-on: krbtgt/service hashes from DCSync lead to forged tickets injected via mimikatz kerberos:: commands.'
   window: 1h
   enrichment_searches:
-  # Rule-specific telemetry pivots the engine runs around an alert from this rule,
-  # scoped to the alert's host/user/IP within the window (behaviour-targeted, not a sweep).
-    - name: "Memory/credential-dump creation & LSASS access on this host"
-      query: '((data_win_system_eventID:"1" AND data_win_eventdata_image:/.*(\\[Pp][Rr][Oo][Cc][Dd][Uu][Mm][Pp]\.[Ee][Xx][Ee]|\\[Pp][Rr][Oo][Cc][Dd][Uu][Mm][Pp]64\.[Ee][Xx][Ee]|\\[Ss][Qq][Ll][Dd][Uu][Mm][Pp][Ee][Rr]\.[Ee][Xx][Ee]|\\[Cc][Rr][Ee][Aa][Tt][Ee][Dd][Uu][Mm][Pp]\.[Ee][Xx][Ee]|\\[Rr][Dd][Rr][Ll][Ee][Aa][Kk][Dd][Ii][Aa][Gg]\.[Ee][Xx][Ee]|\\[Dd][Uu][Mm][Pp][Ee][Rr][Tt]\.[Ee][Xx][Ee]|\\[Nn][Aa][Nn][Oo][Dd][Uu][Mm][Pp]\.[Ee][Xx][Ee]|\\[Aa][Vv][Dd][Uu][Mm][Pp]\.[Ee][Xx][Ee])/) OR (data_win_system_eventID:"1" AND (data_win_eventdata_commandLine:/.*[Cc][Oo][Mm][Ss][Vv][Cc][Ss]\.[Dd][Ll][Ll].*/ OR data_win_eventdata_commandLine:/.*[Mm][Ii][Nn][Ii][Dd][Uu][Mm][Pp].*/ OR data_win_eventdata_commandLine:/.*[Dd][Uu][Mm][Pp][Ee][Rr][Tt].*/ OR data_win_eventdata_commandLine:/.*[Nn][Aa][Nn][Oo][Dd][Uu][Mm][Pp].*/ OR data_win_eventdata_commandLine:/.*[Ll][Ss][Aa][Ss][Ss].*/ OR data_win_eventdata_commandLine:/.*[Ss][Ee][Kk][Uu][Rr][Ll][Ss][Aa].*/ OR data_win_eventdata_commandLine:/.*[Nn][Tt][Dd][Ss]\.[Dd][Ii][Tt].*/ OR data_win_eventdata_commandLine:/.*[Nn][Tt][Dd][Ss][Uu][Tt][Ii][Ll].*/)) OR (data_win_system_eventID:"10" AND data_win_eventdata_targetImage:/.*(\\[Ll][Ss][Aa][Ss][Ss]\.[Ee][Xx][Ee])/))'
-      pivot_on: [host]
-      window: 1h
-    - name: "This account's logon activity across hosts (harvested-credential use)"
-      query: '(data_win_system_eventID:"4624" OR data_win_system_eventID:"4625")'
-      pivot_on: [user]
-      window: 6h
-    - name: "Remote-execution / lateral-movement tooling on this host"
-      query: '(data_win_system_eventID:"1" AND data_win_eventdata_image:/.*(\\[Pp][Ss][Ee][Xx][Ee][Cc]\.[Ee][Xx][Ee]|\\[Pp][Ss][Ee][Xx][Ee][Ss][Vv][Cc]\.[Ee][Xx][Ee]|\\[Pp][Aa][Ee][Xx][Ee][Cc]\.[Ee][Xx][Ee]|\\[Ww][Ii][Nn][Rr][Ss]\.[Ee][Xx][Ee]|\\[Mm][Ss][Tt][Ss][Cc]\.[Ee][Xx][Ee]|\\[Ww][Mm][Ii][Cc]\.[Ee][Xx][Ee])/) OR (data_win_system_eventID:"1" AND data_win_eventdata_image:/.*(\\[Pp][Oo][Ww][Ee][Rr][Ss][Hh][Ee][Ll][Ll]\.[Ee][Xx][Ee]|\\[Pp][Ww][Ss][Hh]\.[Ee][Xx][Ee])/ AND (data_win_eventdata_commandLine:/.*[Ii][Nn][Vv][Oo][Kk][Ee]-[Cc][Oo][Mm][Mm][Aa][Nn][Dd].*/ OR data_win_eventdata_commandLine:/.*[Nn][Ee][Ww]-[Pp][Ss][Ss][Ee][Ss][Ss][Ii][Oo][Nn].*/ OR data_win_eventdata_commandLine:/.*[Ee][Nn][Tt][Ee][Rr]-[Pp][Ss][Ss][Ee][Ss][Ss][Ii][Oo][Nn].*/ OR data_win_eventdata_commandLine:/.*-[Cc][Oo][Mm][Pp][Uu][Tt][Ee][Rr][Nn][Aa][Mm][Ee].*/))'
-      pivot_on: [host]
-      window: 2h
-    - name: "This account's logon activity across hosts"
-      query: '(data_win_system_eventID:"4624" OR data_win_system_eventID:"4625")'
-      pivot_on: [user]
-      window: 6h
+  # Behaviour-targeted hunts the engine runs around the alert (not a sweep).
+  - name: Credential-dumping tooling and LSASS access on this host
+    query: (data_win_system_eventID:"1" AND (data_win_eventdata_commandLine:/.*[Ll][Ss][Aa][Dd][Uu][Mm][Pp].*/ OR data_win_eventdata_commandLine:/.*[Dd][Cc][Ss][Yy][Nn][Cc].*/ OR data_win_eventdata_commandLine:/.*[Ss][Ee][Kk][Uu][Rr][Ll][Ss][Aa].*/ OR data_win_eventdata_commandLine:/.*[Mm][Ii][Mm][Ii][Kk][Aa][Tt][Zz].*/ OR data_win_eventdata_commandLine:/.*[Ss][Ee][Cc][Rr][Ee][Tt][Ss][Dd][Uu][Mm][Pp].*/)) OR (data_win_system_eventID:"10" AND data_win_eventdata_targetImage:/.*[Ll][Ss][Aa][Ss][Ss]\.[Ee][Xx][Ee]/)
+    pivot_on:
+    - host
+    window: 2h
+  - name: DCSync / replication-rights tooling and AD ACL changes via PowerShell
+    query: data_win_system_eventID:"4104" AND (data_win_eventdata_scriptBlockText:/.*[Gg][Ee][Tt]-[Aa][Dd][Rr][Ee][Pp][Ll].*/ OR data_win_eventdata_scriptBlockText:/.*[Aa][Dd][Dd]-[Dd][Oo][Mm][Aa][Ii][Nn][Oo][Bb][Jj][Ee][Cc][Tt][Aa][Cc][Ll].*/ OR data_win_eventdata_scriptBlockText:/.*[Dd][Ss]-[Rr][Ee][Pp][Ll][Ii][Cc][Aa][Tt][Ii][Oo][Nn]-[Gg][Ee][Tt]-[Cc][Hh][Aa][Nn][Gg][Ee][Ss].*/ OR data_win_eventdata_scriptBlockText:/.*1131[Ff]6[Aa][Dd]-9[Cc]07-11[Dd]1-[Ff]79[Ff]-00[Cc]04[Ff][Cc]2[Dd][Cc][Dd]2.*/ OR data_win_eventdata_scriptBlockText:/.*[Ii][Nn][Vv][Oo][Kk][Ee]-[Mm][Ii][Mm][Ii][Kk][Aa][Tt][Zz].*/)
+    pivot_on:
+    - host
+    window: 2h
+  - name: Logons by the replicating account across hosts (source of DCSync and follow-on use)
+    query: (data_win_system_eventID:"4624" AND (data_win_eventdata_logonType:"3" OR data_win_eventdata_logonType:"9" OR data_win_eventdata_logonType:"10")) OR data_win_system_eventID:"4648" OR data_win_system_eventID:"4672"
+    pivot_on:
+    - user
+    window: 6h
+  - name: Kerberos ticket requests and AD account/group changes by this account (golden ticket, persistence)
+    query: data_win_system_eventID:"4768" OR data_win_system_eventID:"4769" OR data_win_system_eventID:"4738" OR data_win_system_eventID:"4728" OR data_win_system_eventID:"4732" OR data_win_system_eventID:"4756" OR data_win_system_eventID:"4724" OR data_win_system_eventID:"4723"
+    pivot_on:
+    - user
+    window: 24h
+  - name: Remote execution and credential staging tooling on this host
+    query: data_win_system_eventID:"1" AND (data_win_eventdata_image:/.*\\[Pp][Ss][Ee][Xx][Ee][Cc]\.[Ee][Xx][Ee]/ OR data_win_eventdata_image:/.*\\[Ww][Mm][Ii][Cc]\.[Ee][Xx][Ee]/ OR data_win_eventdata_commandLine:/.*[Nn][Tt][Dd][Ss][Uu][Tt][Ii][Ll].*/ OR data_win_eventdata_commandLine:/.*[Vv][Ss][Ss][Aa][Dd][Mm][Ii][Nn].*[Cc][Rr][Ee][Aa][Tt][Ee].*/ OR data_win_eventdata_commandLine:/.*[Ii][Nn][Vv][Oo][Kk][Ee]-[Cc][Oo][Mm][Mm][Aa][Nn][Dd].*/)
+    pivot_on:
+    - host
+    window: 4h

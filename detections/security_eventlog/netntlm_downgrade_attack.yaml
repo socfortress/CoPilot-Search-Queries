@@ -160,44 +160,55 @@ graylog:
   query: data_win_system_eventID:"4657" AND data_win_eventdata_objectName:/.*\\[Rr][Ee][Gg][Ii][Ss][Tt][Rr][Yy]\\[Mm][Aa][Cc][Hh][Ii][Nn][Ee]\\[Ss][Yy][Ss][Tt][Ee][Mm].*/ AND data_win_eventdata_objectName:/.*[Cc][Oo][Nn][Tt][Rr][Oo][Ll][Ss][Ee][Tt].*/ AND data_win_eventdata_objectName:/.*\\[Cc][Oo][Nn][Tt][Rr][Oo][Ll]\\[Ll][Ss][Aa].*/ AND (data_win_eventdata_objectValueName:/[Ll][Mm][Cc][Oo][Mm][Pp][Aa][Tt][Ii][Bb][Ii][Ll][Ii][Tt][Yy][Ll][Ee][Vv][Ee][Ll]/ OR data_win_eventdata_objectValueName:/[Nn][Tt][Ll][Mm][Mm][Ii][Nn][Cc][Ll][Ii][Ee][Nn][Tt][Ss][Ee][Cc]/ OR data_win_eventdata_objectValueName:/[Rr][Ee][Ss][Tt][Rr][Ii][Cc][Tt][Ss][Ee][Nn][Dd][Ii][Nn][Gg][Nn][Tt][Ll][Mm][Tt][Rr][Aa][Ff][Ff][Ii][Cc]/)
 
 correlation:
-  # Authored by the correlation engine for review. Related CoPilot Searches to run
-  # around an alert from this rule, scoped to the same host/user/IP within the window.
+  # Authored per-rule (behaviour-researched) for the correlation engine. Related CoPilot
+  # Searches + telemetry pivots to run around an alert, scoped to its host/user/ip/domain.
   related_rules:
-    - id: 0255a820-e564-4e40-af2b-6ac61160335c
-      name: "A New Trust Was Created To A Domain"
-      reason: "next kill-chain tactic: Persistence"
-    - id: 35ba1d85-724d-42a3-889f-2e2362bcaf23
-      name: "AD Privileged Users or Groups Reconnaissance"
-      reason: "next kill-chain tactic: Discovery"
-    - id: 9eb99343-d336-4020-a3cd-67f3819e68ee
-      name: "Account Tampering - Suspicious Failed Logon Reasons"
-      reason: "next kill-chain tactic: Persistence"
-    - id: 17d619c1-e020-4347-957e-1d1207455c93
-      name: "Active Directory Replication from Non Machine Account"
-      reason: "next kill-chain tactic: Credential Access"
-    - id: 300bac00-e041-4ee2-9c36-e262656a6ecc
-      name: "Active Directory User Backdoors"
-      reason: "next kill-chain tactic: Persistence"
-    - id: 2632954e-db1c-49cb-9936-67d1ef1d17d2
-      name: "Addition of SID History to Active Directory Object"
-      reason: "next kill-chain tactic: Privilege Escalation"
-  window: 1h
+  - id: d67572a0-e2ec-45d6-b8db-c100d14b8ef2
+    name: NetNTLM Downgrade Attack - Registry
+    reason: Sysmon registry-event twin of the same LmCompatibilityLevel/NtlmMinClientSec change; co-firing confirms the downgrade from a second telemetry source and may expose the writing process
+  - id: e9d4ab66-a532-4ef7-a502-66a9e4a34f5d
+    name: NTLMv1 Logon Between Client and Server
+    reason: 'direct consequence: once LmCompatibilityLevel is lowered, hosts start negotiating NTLMv1, which is crackable/relayable'
+  - id: 8eef149c-bd26-49f2-9e5a-9b00e3af499b
+    name: Pass the Hash Activity 2
+    reason: weakened NTLM settings are commonly set so captured NTLM hashes can be replayed; NTLM network logons with hash-style characteristics follow
+  - id: 5589ab4f-a767-433c-961d-c91f3f704db1
+    name: Potential SMB Relay Attack Tool Execution
+    reason: NTLM downgrade is a prerequisite step for relay/capture tooling such as Responder or ntlmrelayx on the same host
+  - id: 1ce8c8a3-2723-48ed-8246-906ac91061a6
+    name: Possible PetitPotam Coerce Authentication Attempt
+    reason: coercion forces machine accounts to authenticate over NTLM; a downgraded policy makes the captured authentication far more useful
+  - id: 6c6d9280-e6d0-4b9d-80ac-254701b64916
+    name: Potential NTLM Coercion Via Certutil.EXE
+    reason: LOLBin-driven NTLM coercion to an attacker host; pairs with a downgrade to harvest weak NetNTLM responses
+  - id: aa1697b7-d611-4f9a-9cb2-5125b4ccfd5c
+    name: Password Dumper Activity on LSASS
+    reason: 'same Lsa-focused credential theft phase: after loosening NTLM policy attackers dump LSASS for hashes on the host'
+  window: 2h
   enrichment_searches:
-  # Rule-specific telemetry pivots the engine runs around an alert from this rule,
-  # scoped to the alert's host/user/IP within the window (behaviour-targeted, not a sweep).
-    - name: "Autostart / security-setting registry changes on this host"
-      query: '(((data_win_system_eventID:"12" OR data_win_system_eventID:"13") AND (data_win_eventdata_targetObject:/.*[Cc][Uu][Rr][Rr][Ee][Nn][Tt][Vv][Ee][Rr][Ss][Ii][Oo][Nn]\\[Rr][Uu][Nn].*/ OR data_win_eventdata_targetObject:/.*[Cc][Uu][Rr][Rr][Ee][Nn][Tt][Vv][Ee][Rr][Ss][Ii][Oo][Nn]\\[Rr][Uu][Nn][Oo][Nn][Cc][Ee].*/ OR data_win_eventdata_targetObject:/.*[Cc][Uu][Rr][Rr][Ee][Nn][Tt][Cc][Oo][Nn][Tt][Rr][Oo][Ll][Ss][Ee][Tt]\\[Ss][Ee][Rr][Vv][Ii][Cc][Ee][Ss]\\.*/ OR data_win_eventdata_targetObject:/.*[Ii][Mm][Aa][Gg][Ee] [Ff][Ii][Ll][Ee] [Ee][Xx][Ee][Cc][Uu][Tt][Ii][Oo][Nn] [Oo][Pp][Tt][Ii][Oo][Nn][Ss]\\.*/ OR data_win_eventdata_targetObject:/.*[Ww][Ii][Nn][Ll][Oo][Gg][Oo][Nn]\\[Ss][Hh][Ee][Ll][Ll].*/ OR data_win_eventdata_targetObject:/.*[Ww][Ii][Nn][Ll][Oo][Gg][Oo][Nn]\\[Uu][Ss][Ee][Rr][Ii][Nn][Ii][Tt].*/ OR data_win_eventdata_targetObject:/.*[Cc][Uu][Rr][Rr][Ee][Nn][Tt][Vv][Ee][Rr][Ss][Ii][Oo][Nn]\\[Ee][Xx][Pp][Ll][Oo][Rr][Ee][Rr]\\[Rr][Uu][Nn].*/ OR data_win_eventdata_targetObject:/.*[Pp][Oo][Ll][Ii][Cc][Ii][Ee][Ss]\\[Ee][Xx][Pp][Ll][Oo][Rr][Ee][Rr]\\[Rr][Uu][Nn].*/ OR data_win_eventdata_targetObject:/.*[Cc][Uu][Rr][Rr][Ee][Nn][Tt][Vv][Ee][Rr][Ss][Ii][Oo][Nn]\\[Ww][Ii][Nn][Dd][Oo][Ww][Ss]\\[Ll][Oo][Aa][Dd].*/)) OR (data_win_system_eventID:"1" AND (data_win_eventdata_commandLine:/.*[Ss][Ee][Tt]-[Mm][Pp][Pp][Rr][Ee][Ff][Ee][Rr][Ee][Nn][Cc][Ee].*/ OR data_win_eventdata_commandLine:/.*[Dd][Ii][Ss][Aa][Bb][Ll][Ee][Rr][Ee][Aa][Ll][Tt][Ii][Mm][Ee][Mm][Oo][Nn][Ii][Tt][Oo][Rr][Ii][Nn][Gg].*/ OR data_win_eventdata_commandLine:/.*[Dd][Ii][Ss][Aa][Bb][Ll][Ee][Aa][Nn][Tt][Ii][Ss][Pp][Yy][Ww][Aa][Rr][Ee].*/ OR data_win_eventdata_commandLine:/.*[Aa][Dd][Dd]-[Mm][Pp][Pp][Rr][Ee][Ff][Ee][Rr][Ee][Nn][Cc][Ee] -[Ee][Xx][Cc][Ll][Uu][Ss][Ii][Oo][Nn][Pp][Aa][Tt][Hh].*/ OR data_win_eventdata_commandLine:/.*[Ww][Ee][Vv][Tt][Uu][Tt][Ii][Ll].*/ OR data_win_eventdata_commandLine:/.*[Cc][Ll][Ee][Aa][Rr]-[Ee][Vv][Ee][Nn][Tt][Ll][Oo][Gg].*/ OR data_win_eventdata_commandLine:/.*[Ff][Ss][Uu][Tt][Ii][Ll] [Uu][Ss][Nn] [Dd][Ee][Ll][Ee][Tt][Ee][Jj][Oo][Uu][Rr][Nn][Aa][Ll].*/ OR data_win_eventdata_commandLine:/.*[Vv][Ss][Ss][Aa][Dd][Mm][Ii][Nn].*/ OR data_win_eventdata_commandLine:/.*[Ss][Tt][Oo][Pp]-[Ss][Ee][Rr][Vv][Ii][Cc][Ee].*/ OR data_win_eventdata_commandLine:/.*[Ss][Cc] [Ss][Tt][Oo][Pp].*/ OR data_win_eventdata_commandLine:/.*[Ss][Cc] [Cc][Oo][Nn][Ff][Ii][Gg].*/)))'
-      pivot_on: [host]
-      window: 2h
-    - name: "Follow-on LOLBin / signed-binary-proxy execution on this host"
-      query: 'data_win_system_eventID:"1" AND data_win_eventdata_image:/.*(\\[Rr][Uu][Nn][Dd][Ll][Ll]32\.[Ee][Xx][Ee]|\\[Rr][Ee][Gg][Ss][Vv][Rr]32\.[Ee][Xx][Ee]|\\[Mm][Ss][Hh][Tt][Aa]\.[Ee][Xx][Ee]|\\[Ii][Nn][Ss][Tt][Aa][Ll][Ll][Uu][Tt][Ii][Ll]\.[Ee][Xx][Ee]|\\[Rr][Ee][Gg][Aa][Ss][Mm]\.[Ee][Xx][Ee]|\\[Rr][Ee][Gg][Ss][Vv][Cc][Ss]\.[Ee][Xx][Ee]|\\[Mm][Ss][Bb][Uu][Ii][Ll][Dd]\.[Ee][Xx][Ee]|\\[Cc][Ee][Rr][Tt][Uu][Tt][Ii][Ll]\.[Ee][Xx][Ee]|\\[Bb][Ii][Tt][Ss][Aa][Dd][Mm][Ii][Nn]\.[Ee][Xx][Ee]|\\[Ww][Mm][Ii][Cc]\.[Ee][Xx][Ee]|\\[Cc][Mm][Ss][Tt][Pp]\.[Ee][Xx][Ee]|\\[Oo][Dd][Bb][Cc][Cc][Oo][Nn][Ff]\.[Ee][Xx][Ee]|\\[Ff][Oo][Rr][Ff][Ii][Ll][Ee][Ss]\.[Ee][Xx][Ee]|\\[Pp][Cc][Aa][Ll][Uu][Aa]\.[Ee][Xx][Ee]|\\[Mm][Aa][Vv][Ii][Nn][Jj][Ee][Cc][Tt]\.[Ee][Xx][Ee]|\\[Ss][Cc][Rr][Ii][Pp][Tt][Rr][Uu][Nn][Nn][Ee][Rr]\.[Ee][Xx][Ee])/'
-      pivot_on: [host]
-      window: 1h
-    - name: "This account's logon activity across hosts"
-      query: '(data_win_system_eventID:"4624" OR data_win_system_eventID:"4625")'
-      pivot_on: [user]
-      window: 6h
-    - name: "Account / group / privilege changes involving this account"
-      query: '(data_win_system_eventID:"4720" OR data_win_system_eventID:"4722" OR data_win_system_eventID:"4724" OR data_win_system_eventID:"4728" OR data_win_system_eventID:"4732" OR data_win_system_eventID:"4756" OR data_win_system_eventID:"4672")'
-      pivot_on: [user]
-      window: 6h
+  # Behaviour-targeted hunts the engine runs around the alert (not a sweep).
+  - name: Other writes to the LSA / MSV1_0 NTLM security policy keys
+    query: (data_win_system_eventID:"13" OR data_win_system_eventID:"12") AND (data_win_eventdata_targetObject:/.*[Cc][Oo][Nn][Tt][Rr][Oo][Ll]\\[Ll][Ss][Aa].*/ OR data_win_eventdata_targetObject:/.*[Mm][Ss][Vv]1_0.*/) AND (data_win_eventdata_targetObject:/.*([Ll][Mm][Cc][Oo][Mm][Pp][Aa][Tt][Ii][Bb][Ii][Ll][Ii][Tt][Yy][Ll][Ee][Vv][Ee][Ll]|[Nn][Tt][Ll][Mm][Mm][Ii][Nn][Cc][Ll][Ii][Ee][Nn][Tt][Ss][Ee][Cc]|[Nn][Tt][Ll][Mm][Mm][Ii][Nn][Ss][Ee][Rr][Vv][Ee][Rr][Ss][Ee][Cc]|[Rr][Ee][Ss][Tt][Rr][Ii][Cc][Tt][Ss][Ee][Nn][Dd][Ii][Nn][Gg][Nn][Tt][Ll][Mm][Tt][Rr][Aa][Ff][Ff][Ii][Cc]|[Rr][Ee][Ss][Tt][Rr][Ii][Cc][Tt][Rr][Ee][Cc][Ee][Ii][Vv][Ii][Nn][Gg][Nn][Tt][Ll][Mm][Tt][Rr][Aa][Ff][Ff][Ii][Cc]|[Nn][Oo][Ll][Mm][Hh][Aa][Ss][Hh]).*/)
+    pivot_on:
+    - host
+    window: 4h
+  - name: Process that changed NTLM settings (reg.exe, PowerShell, secedit, GPO tooling)
+    query: data_win_system_eventID:"1" AND (data_win_eventdata_commandLine:/.*([Ll][Mm][Cc][Oo][Mm][Pp][Aa][Tt][Ii][Bb][Ii][Ll][Ii][Tt][Yy][Ll][Ee][Vv][Ee][Ll]|[Nn][Tt][Ll][Mm][Mm][Ii][Nn][Cc][Ll][Ii][Ee][Nn][Tt][Ss][Ee][Cc]|[Rr][Ee][Ss][Tt][Rr][Ii][Cc][Tt][Ss][Ee][Nn][Dd][Ii][Nn][Gg][Nn][Tt][Ll][Mm][Tt][Rr][Aa][Ff][Ff][Ii][Cc]).*/ OR (data_win_eventdata_commandLine:/.*[Cc][Oo][Nn][Tt][Rr][Oo][Ll]\\[Ll][Ss][Aa].*/ AND data_win_eventdata_commandLine:/.*([Rr][Ee][Gg] +[Aa][Dd][Dd]|[Ss][Ee][Tt]-[Ii][Tt][Ee][Mm][Pp][Rr][Oo][Pp][Ee][Rr][Tt][Yy]|[Nn][Ee][Ww]-[Ii][Tt][Ee][Mm][Pp][Rr][Oo][Pp][Ee][Rr][Tt][Yy]).*/))
+    pivot_on:
+    - host
+    window: 2h
+  - name: NTLMv1 / LM network logons accepted on this host
+    query: data_win_system_eventID:"4624" AND data_win_eventdata_authenticationPackageName:"NTLM" AND (data_win_eventdata_lmPackageName:/[Nn][Tt][Ll][Mm] [Vv]1/ OR data_win_eventdata_lmPackageName:"LM") AND NOT data_win_eventdata_targetUserName:/.*\$/
+    pivot_on:
+    - host
+    window: 6h
+  - name: NTLM credential validations and SMB share access by this account
+    query: (data_win_system_eventID:"4776" OR (data_win_system_eventID:"4624" AND data_win_eventdata_logonType:"3" AND data_win_eventdata_authenticationPackageName:"NTLM") OR data_win_system_eventID:"5140" OR data_win_system_eventID:"5145")
+    pivot_on:
+    - user
+    window: 6h
+  - name: LSASS process access following the NTLM policy change
+    query: data_win_system_eventID:"10" AND data_win_eventdata_targetImage:/.*[Ll][Ss][Aa][Ss][Ss]\.[Ee][Xx][Ee]/ AND NOT data_win_eventdata_sourceImage:/.*(\\[Ww][Ii][Nn][Ii][Nn][Ii][Tt]|\\[Cc][Ss][Rr][Ss][Ss]|\\[Ss][Vv][Cc][Hh][Oo][Ss][Tt]|\\[Ww][Mm][Ii][Pp][Rr][Vv][Ss][Ee]|\\[Ss][Ee][Rr][Vv][Ii][Cc][Ee][Ss]|[Mm][Ss][Mm][Pp][Ee][Nn][Gg]|[Ww][Ii][Nn][Dd][Ee][Ff][Ee][Nn][Dd]|[Mm][Ss][Ee][Nn][Gg]).*\.[Ee][Xx][Ee]/
+    pivot_on:
+    - host
+    window: 2h

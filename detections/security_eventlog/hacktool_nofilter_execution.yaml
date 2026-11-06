@@ -153,44 +153,58 @@ graylog:
   query: ((data_win_system_eventID:"5447" AND data_win_eventdata_filterName:/.*[Rr][Oo][Nn][Pp][Oo][Ll][Ii][Cc][Yy].*/) OR (data_win_system_eventID:"5449" AND data_win_eventdata_providerContextName:/.*[Rr][Oo][Nn][Pp][Oo][Ll][Ii][Cc][Yy].*/))
 
 correlation:
-  # Authored by the correlation engine for review. Related CoPilot Searches to run
-  # around an alert from this rule, scoped to the same host/user/IP within the window.
+  # Authored per-rule (behaviour-researched) for the correlation engine. Related CoPilot
+  # Searches + telemetry pivots to run around an alert, scoped to its host/user/ip/domain.
   related_rules:
-    - id: 0255a820-e564-4e40-af2b-6ac61160335c
-      name: "A New Trust Was Created To A Domain"
-      reason: "next kill-chain tactic: Privilege Escalation"
-    - id: 35ba1d85-724d-42a3-889f-2e2362bcaf23
-      name: "AD Privileged Users or Groups Reconnaissance"
-      reason: "next kill-chain tactic: Discovery"
-    - id: 9eb99343-d336-4020-a3cd-67f3819e68ee
-      name: "Account Tampering - Suspicious Failed Logon Reasons"
-      reason: "next kill-chain tactic: Privilege Escalation"
-    - id: 17d619c1-e020-4347-957e-1d1207455c93
-      name: "Active Directory Replication from Non Machine Account"
-      reason: "next kill-chain tactic: Credential Access"
-    - id: 300bac00-e041-4ee2-9c36-e262656a6ecc
-      name: "Active Directory User Backdoors"
-      reason: "next kill-chain tactic: Privilege Escalation"
-    - id: 2632954e-db1c-49cb-9936-67d1ef1d17d2
-      name: "Addition of SID History to Active Directory Object"
-      reason: "next kill-chain tactic: Privilege Escalation"
+  - id: 2617e7ed-adb7-40ba-b0f3-8f9945fe6c09
+    name: Suspicious SYSTEM User Process Creation
+    reason: NoFilter's purpose is to obtain a SYSTEM token via WFP/IPsec RPC abuse; the direct result is an unexpected process running as SYSTEM
+  - id: 178e615d-e666-498b-9630-9ed363038101
+    name: Elevated System Shell Spawned From Uncommon Parent Location
+    reason: NoFilter is typically used to pop an elevated SYSTEM cmd/powershell from a tool dropped in a user-writable path
+  - id: d522eca2-2973-4391-a3e0-ef0374321dae
+    name: Abused Debug Privilege by Arbitrary Parent Processes
+    reason: Companion token-privilege escalation technique (T1134); operators chain SeDebug abuse with token duplication to reach SYSTEM
+  - id: 7c0dcd3d-acf8-4f71-9570-f448b0034f94
+    name: PsExec Service Child Process Execution as LOCAL SYSTEM
+    reason: Alternative route to a SYSTEM shell; seeing both on one host shows repeated privilege-escalation attempts from an already-admin operator
+  - id: a642964e-bead-4bed-8910-1bb4d63e3b4d
+    name: HackTool - Mimikatz Execution
+    reason: Once SYSTEM is obtained the next step is credential theft with Mimikatz
+  - id: 8943b567-f14d-4ee8-a0bb-2121d4ce3184
+    name: Dump LSASS via comsvcs DLL
+    reason: SYSTEM/SeDebug access enables LSASS dumping via comsvcs MiniDump as the follow-on credential access
+  - id: 5afee48e-67dd-4e03-a783-f74259dcf998
+    name: Potential LSASS Process Dump Via Procdump
+    reason: Another LSASS memory dump method commonly run from the elevated SYSTEM context NoFilter provides
+  - id: 89ca78fd-b37c-4310-b3d3-81a023f83936
+    name: Schtasks Creation Or Modification With SYSTEM Privileges
+    reason: With SYSTEM obtained, attackers persist via SYSTEM-level scheduled tasks
   window: 1h
   enrichment_searches:
-  # Rule-specific telemetry pivots the engine runs around an alert from this rule,
-  # scoped to the alert's host/user/IP within the window (behaviour-targeted, not a sweep).
-    - name: "UAC-bypass / token-manipulation binaries on this host"
-      query: 'data_win_system_eventID:"1" AND (data_win_eventdata_image:/.*(\\[Ff][Oo][Dd][Hh][Ee][Ll][Pp][Ee][Rr]\.[Ee][Xx][Ee]|\\[Ee][Vv][Ee][Nn][Tt][Vv][Ww][Rr]\.[Ee][Xx][Ee]|\\[Ss][Dd][Cc][Ll][Tt]\.[Ee][Xx][Ee]|\\[Cc][Oo][Mm][Pp][Uu][Tt][Ee][Rr][Dd][Ee][Ff][Aa][Uu][Ll][Tt][Ss]\.[Ee][Xx][Ee]|\\[Ss][Ll][Uu][Ii]\.[Ee][Xx][Ee]|\\[Ww][Ss][Rr][Ee][Ss][Ee][Tt]\.[Ee][Xx][Ee])/ OR data_win_eventdata_parentImage:/.*(\\[Ff][Oo][Dd][Hh][Ee][Ll][Pp][Ee][Rr]\.[Ee][Xx][Ee]|\\[Ee][Vv][Ee][Nn][Tt][Vv][Ww][Rr]\.[Ee][Xx][Ee]|\\[Ss][Dd][Cc][Ll][Tt]\.[Ee][Xx][Ee]|\\[Cc][Oo][Mm][Pp][Uu][Tt][Ee][Rr][Dd][Ee][Ff][Aa][Uu][Ll][Tt][Ss]\.[Ee][Xx][Ee]|\\[Ss][Ll][Uu][Ii]\.[Ee][Xx][Ee]|\\[Ww][Ss][Rr][Ee][Ss][Ee][Tt]\.[Ee][Xx][Ee])/)'
-      pivot_on: [host]
-      window: 2h
-    - name: "Memory/credential-dump creation & LSASS access on this host"
-      query: '((data_win_system_eventID:"1" AND data_win_eventdata_image:/.*(\\[Pp][Rr][Oo][Cc][Dd][Uu][Mm][Pp]\.[Ee][Xx][Ee]|\\[Pp][Rr][Oo][Cc][Dd][Uu][Mm][Pp]64\.[Ee][Xx][Ee]|\\[Ss][Qq][Ll][Dd][Uu][Mm][Pp][Ee][Rr]\.[Ee][Xx][Ee]|\\[Cc][Rr][Ee][Aa][Tt][Ee][Dd][Uu][Mm][Pp]\.[Ee][Xx][Ee]|\\[Rr][Dd][Rr][Ll][Ee][Aa][Kk][Dd][Ii][Aa][Gg]\.[Ee][Xx][Ee]|\\[Dd][Uu][Mm][Pp][Ee][Rr][Tt]\.[Ee][Xx][Ee]|\\[Nn][Aa][Nn][Oo][Dd][Uu][Mm][Pp]\.[Ee][Xx][Ee]|\\[Aa][Vv][Dd][Uu][Mm][Pp]\.[Ee][Xx][Ee])/) OR (data_win_system_eventID:"1" AND (data_win_eventdata_commandLine:/.*[Cc][Oo][Mm][Ss][Vv][Cc][Ss]\.[Dd][Ll][Ll].*/ OR data_win_eventdata_commandLine:/.*[Mm][Ii][Nn][Ii][Dd][Uu][Mm][Pp].*/ OR data_win_eventdata_commandLine:/.*[Dd][Uu][Mm][Pp][Ee][Rr][Tt].*/ OR data_win_eventdata_commandLine:/.*[Nn][Aa][Nn][Oo][Dd][Uu][Mm][Pp].*/ OR data_win_eventdata_commandLine:/.*[Ll][Ss][Aa][Ss][Ss].*/ OR data_win_eventdata_commandLine:/.*[Ss][Ee][Kk][Uu][Rr][Ll][Ss][Aa].*/ OR data_win_eventdata_commandLine:/.*[Nn][Tt][Dd][Ss]\.[Dd][Ii][Tt].*/ OR data_win_eventdata_commandLine:/.*[Nn][Tt][Dd][Ss][Uu][Tt][Ii][Ll].*/)) OR (data_win_system_eventID:"10" AND data_win_eventdata_targetImage:/.*(\\[Ll][Ss][Aa][Ss][Ss]\.[Ee][Xx][Ee])/))'
-      pivot_on: [host]
-      window: 1h
-    - name: "This account's logon activity across hosts"
-      query: '(data_win_system_eventID:"4624" OR data_win_system_eventID:"4625")'
-      pivot_on: [user]
-      window: 6h
-    - name: "Account / group / privilege changes involving this account"
-      query: '(data_win_system_eventID:"4720" OR data_win_system_eventID:"4722" OR data_win_system_eventID:"4724" OR data_win_system_eventID:"4728" OR data_win_system_eventID:"4732" OR data_win_system_eventID:"4756" OR data_win_system_eventID:"4672")'
-      pivot_on: [user]
-      window: 6h
+  # Behaviour-targeted hunts the engine runs around the alert (not a sweep).
+  - name: WFP filter/provider context changes (5447/5449/5441) on this host
+    query: (data_win_system_eventID:"5447" OR data_win_system_eventID:"5449" OR data_win_system_eventID:"5441" OR data_win_system_eventID:"5448")
+    pivot_on:
+    - host
+    window: 2h
+  - name: Shells and tools spawned as SYSTEM from user-writable paths
+    query: data_win_system_eventID:"1" AND data_win_eventdata_user:/.*[Ss][Yy][Ss][Tt][Ee][Mm]/ AND (data_win_eventdata_image:/.*[Cc][Mm][Dd]\.[Ee][Xx][Ee]/ OR data_win_eventdata_image:/.*[Pp][Oo][Ww][Ee][Rr][Ss][Hh][Ee][Ll][Ll].*/ OR data_win_eventdata_image:/.*[Pp][Ww][Ss][Hh]\.[Ee][Xx][Ee]/) AND (data_win_eventdata_parentImage:*\\Users\\* OR data_win_eventdata_parentImage:*\\Temp\\* OR data_win_eventdata_parentImage:*\\ProgramData\\* OR data_win_eventdata_parentImage:*\\Downloads\\*)
+    pivot_on:
+    - host
+    window: 1h
+  - name: Credential dumping and LSASS access following escalation
+    query: ((data_win_system_eventID:"10" AND data_win_eventdata_targetImage:/.*[Ll][Ss][Aa][Ss][Ss]\.[Ee][Xx][Ee]/) OR (data_win_system_eventID:"1" AND (data_win_eventdata_commandLine:/.*[Mm][Ii][Nn][Ii][Dd][Uu][Mm][Pp].*/ OR data_win_eventdata_commandLine:/.*[Ss][Ee][Kk][Uu][Rr][Ll][Ss][Aa].*/ OR data_win_eventdata_commandLine:/.*[Pp][Rr][Oo][Cc][Dd][Uu][Mm][Pp].*/ OR data_win_eventdata_commandLine:/.*[Ss][Aa][Mm][Ss][Aa][Vv][Ee].*/ OR data_win_eventdata_commandLine:/.*[Nn][Tt][Dd][Ss][Uu][Tt][Ii][Ll].*/)))
+    pivot_on:
+    - host
+    window: 2h
+  - name: Persistence via services and scheduled tasks after SYSTEM access
+    query: ((data_win_system_eventID:"1" AND (data_win_eventdata_commandLine:/.*[Ss][Cc]\.[Ee][Xx][Ee].*[Cc][Rr][Ee][Aa][Tt][Ee].*/ OR data_win_eventdata_commandLine:/.*[Ss][Cc][Hh][Tt][Aa][Ss][Kk][Ss].*\/[Cc][Rr][Ee][Aa][Tt][Ee].*/)) OR data_win_system_eventID:"4697" OR data_win_system_eventID:"7045" OR data_win_system_eventID:"4698")
+    pivot_on:
+    - host
+    window: 4h
+  - name: Special-privilege logons and failed logons by this account
+    query: (data_win_system_eventID:"4672" OR data_win_system_eventID:"4624" OR data_win_system_eventID:"4625")
+    pivot_on:
+    - user
+    window: 6h

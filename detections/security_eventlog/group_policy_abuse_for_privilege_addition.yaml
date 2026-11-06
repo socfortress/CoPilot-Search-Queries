@@ -151,44 +151,58 @@ graylog:
   query: data_win_system_eventID:"5136" AND data_win_eventdata_attributeLDAPDisplayName:/[Gg][Pp][Cc][Mm][Aa][Cc][Hh][Ii][Nn][Ee][Ee][Xx][Tt][Ee][Nn][Ss][Ii][Oo][Nn][Nn][Aa][Mm][Ee][Ss]/ AND (data_win_eventdata_attributeValue:/.*827[Dd]319[Ee]-6[Ee][Aa][Cc]-11[Dd]2-[Aa]4[Ee][Aa]-00[Cc]04[Ff]79[Ff]83[Aa].*/ OR data_win_eventdata_attributeValue:/.*803[Ee]14[Aa]0-[Bb]4[Ff][Bb]-11[Dd]0-[Aa]0[Dd]0-00[Aa]0[Cc]90[Ff]574[Bb].*/)
 
 correlation:
-  # Authored by the correlation engine for review. Related CoPilot Searches to run
-  # around an alert from this rule, scoped to the same host/user/IP within the window.
+  # Authored per-rule (behaviour-researched) for the correlation engine. Related CoPilot
+  # Searches + telemetry pivots to run around an alert, scoped to its host/user/ip/domain.
   related_rules:
-    - id: 0255a820-e564-4e40-af2b-6ac61160335c
-      name: "A New Trust Was Created To A Domain"
-      reason: "next kill-chain tactic: Privilege Escalation"
-    - id: 35ba1d85-724d-42a3-889f-2e2362bcaf23
-      name: "AD Privileged Users or Groups Reconnaissance"
-      reason: "next kill-chain tactic: Discovery"
-    - id: 9eb99343-d336-4020-a3cd-67f3819e68ee
-      name: "Account Tampering - Suspicious Failed Logon Reasons"
-      reason: "next kill-chain tactic: Privilege Escalation"
-    - id: 17d619c1-e020-4347-957e-1d1207455c93
-      name: "Active Directory Replication from Non Machine Account"
-      reason: "next kill-chain tactic: Credential Access"
-    - id: 300bac00-e041-4ee2-9c36-e262656a6ecc
-      name: "Active Directory User Backdoors"
-      reason: "next kill-chain tactic: Privilege Escalation"
-    - id: 2632954e-db1c-49cb-9936-67d1ef1d17d2
-      name: "Addition of SID History to Active Directory Object"
-      reason: "next kill-chain tactic: Privilege Escalation"
-  window: 1h
+  - id: 311b6ce2-7890-4383-a8c2-663a9f6b43cd
+    name: Enabled User Right in AD to Control User Objects
+    reason: Both abuse AD/GPO-delegated rights to grant an attacker control; a right granted on the domain often accompanies the GPO privilege edit and shows the same actor widening access.
+  - id: e5ac86dd-2da1-454b-be74-05d26c769d7d
+    name: Windows Default Domain GPO Modification
+    reason: Same actor editing the Default Domain (Controllers) Policy is the usual vehicle for the Security Settings extension change this rule fires on.
+  - id: dcff7e85-d01f-4eb5-badd-84e2e6be8294
+    name: Windows Default Domain GPO Modification via GPME
+    reason: Interactive GPO editing via gpme.msc on a default GPO is the process-level precursor to the 5136 attribute write for privilege rights.
+  - id: ada4b0c4-758b-46ac-9033-9004613a150d
+    name: Modify Group Policy Settings
+    reason: Command-line/registry GPO modification on the host is the tooling-side counterpart of the directory-side GPO change.
+  - id: a8f29a7b-b137-4446-80a0-b804272f3da2
+    name: Persistence and Execution at Scale via GPO Scheduled Task
+    reason: After granting privileges via GPO, attackers push a GPO scheduled task to execute payloads across every host the GPO applies to.
+  - id: 123e4e6d-b123-48f8-b261-7214938acaf0
+    name: Startup/Logon Script Added to Group Policy Object
+    reason: 'Co-occurring GPO weaponization: privileges granted plus a startup/logon script gives mass code execution under elevated rights.'
+  - id: 5f87308a-0a5b-4623-ae15-d8fa1809bc60
+    name: Suspicious Files in Default GPO Folder
+    reason: Payloads or modified GptTmpl.inf dropped in the default GPO SYSVOL folder are the file-level evidence of the same GPO tampering.
+  - id: 05f3c945-dcc8-4393-9f3d-af65077a8f86
+    name: Suspicious SYSVOL Domain Group Policy Access
+    reason: Reading or editing GPO files in SYSVOL by a non-standard process precedes or accompanies the policy attribute change.
+  window: 6h
   enrichment_searches:
-  # Rule-specific telemetry pivots the engine runs around an alert from this rule,
-  # scoped to the alert's host/user/IP within the window (behaviour-targeted, not a sweep).
-    - name: "Memory/credential-dump creation & LSASS access on this host"
-      query: '((data_win_system_eventID:"1" AND data_win_eventdata_image:/.*(\\[Pp][Rr][Oo][Cc][Dd][Uu][Mm][Pp]\.[Ee][Xx][Ee]|\\[Pp][Rr][Oo][Cc][Dd][Uu][Mm][Pp]64\.[Ee][Xx][Ee]|\\[Ss][Qq][Ll][Dd][Uu][Mm][Pp][Ee][Rr]\.[Ee][Xx][Ee]|\\[Cc][Rr][Ee][Aa][Tt][Ee][Dd][Uu][Mm][Pp]\.[Ee][Xx][Ee]|\\[Rr][Dd][Rr][Ll][Ee][Aa][Kk][Dd][Ii][Aa][Gg]\.[Ee][Xx][Ee]|\\[Dd][Uu][Mm][Pp][Ee][Rr][Tt]\.[Ee][Xx][Ee]|\\[Nn][Aa][Nn][Oo][Dd][Uu][Mm][Pp]\.[Ee][Xx][Ee]|\\[Aa][Vv][Dd][Uu][Mm][Pp]\.[Ee][Xx][Ee])/) OR (data_win_system_eventID:"1" AND (data_win_eventdata_commandLine:/.*[Cc][Oo][Mm][Ss][Vv][Cc][Ss]\.[Dd][Ll][Ll].*/ OR data_win_eventdata_commandLine:/.*[Mm][Ii][Nn][Ii][Dd][Uu][Mm][Pp].*/ OR data_win_eventdata_commandLine:/.*[Dd][Uu][Mm][Pp][Ee][Rr][Tt].*/ OR data_win_eventdata_commandLine:/.*[Nn][Aa][Nn][Oo][Dd][Uu][Mm][Pp].*/ OR data_win_eventdata_commandLine:/.*[Ll][Ss][Aa][Ss][Ss].*/ OR data_win_eventdata_commandLine:/.*[Ss][Ee][Kk][Uu][Rr][Ll][Ss][Aa].*/ OR data_win_eventdata_commandLine:/.*[Nn][Tt][Dd][Ss]\.[Dd][Ii][Tt].*/ OR data_win_eventdata_commandLine:/.*[Nn][Tt][Dd][Ss][Uu][Tt][Ii][Ll].*/)) OR (data_win_system_eventID:"10" AND data_win_eventdata_targetImage:/.*(\\[Ll][Ss][Aa][Ss][Ss]\.[Ee][Xx][Ee])/))'
-      pivot_on: [host]
-      window: 1h
-    - name: "This account's logon activity across hosts"
-      query: '(data_win_system_eventID:"4624" OR data_win_system_eventID:"4625")'
-      pivot_on: [user]
-      window: 6h
-    - name: "Account / group / privilege changes involving this account"
-      query: '(data_win_system_eventID:"4720" OR data_win_system_eventID:"4722" OR data_win_system_eventID:"4724" OR data_win_system_eventID:"4728" OR data_win_system_eventID:"4732" OR data_win_system_eventID:"4756" OR data_win_system_eventID:"4672")'
-      pivot_on: [user]
-      window: 6h
-    - name: "UAC-bypass / privilege-escalation binaries on this host"
-      query: 'data_win_system_eventID:"1" AND (data_win_eventdata_image:/.*(\\[Ff][Oo][Dd][Hh][Ee][Ll][Pp][Ee][Rr]\.[Ee][Xx][Ee]|\\[Ee][Vv][Ee][Nn][Tt][Vv][Ww][Rr]\.[Ee][Xx][Ee]|\\[Ss][Dd][Cc][Ll][Tt]\.[Ee][Xx][Ee]|\\[Cc][Oo][Mm][Pp][Uu][Tt][Ee][Rr][Dd][Ee][Ff][Aa][Uu][Ll][Tt][Ss]\.[Ee][Xx][Ee]|\\[Ss][Ll][Uu][Ii]\.[Ee][Xx][Ee]|\\[Ww][Ss][Rr][Ee][Ss][Ee][Tt]\.[Ee][Xx][Ee])/ OR data_win_eventdata_parentImage:/.*(\\[Ff][Oo][Dd][Hh][Ee][Ll][Pp][Ee][Rr]\.[Ee][Xx][Ee]|\\[Ee][Vv][Ee][Nn][Tt][Vv][Ww][Rr]\.[Ee][Xx][Ee]|\\[Ss][Dd][Cc][Ll][Tt]\.[Ee][Xx][Ee]|\\[Cc][Oo][Mm][Pp][Uu][Tt][Ee][Rr][Dd][Ee][Ff][Aa][Uu][Ll][Tt][Ss]\.[Ee][Xx][Ee]|\\[Ss][Ll][Uu][Ii]\.[Ee][Xx][Ee]|\\[Ww][Ss][Rr][Ee][Ss][Ee][Tt]\.[Ee][Xx][Ee])/)'
-      pivot_on: [host]
-      window: 2h
+  # Behaviour-targeted hunts the engine runs around the alert (not a sweep).
+  - name: GPO-related directory object changes by this account
+    query: (data_win_system_eventID:"5136" OR data_win_system_eventID:"5137" OR data_win_system_eventID:"5141") AND (data_win_eventdata_objectClass:/.*[Gg][Rr][Oo][Uu][Pp][Pp][Oo][Ll][Ii][Cc][Yy][Cc][Oo][Nn][Tt][Aa][Ii][Nn][Ee][Rr].*/ OR data_win_eventdata_attributeLDAPDisplayName:/.*[Gg][Pp][Cc].*/)
+    pivot_on:
+    - user
+    window: 6h
+  - name: Privileged group membership and user-right assignment changes
+    query: data_win_system_eventID:("4728" OR "4732" OR "4756" OR "4704" OR "4670" OR "4739")
+    pivot_on:
+    - user
+    window: 6h
+  - name: Special-privilege logons and new logons by this account
+    query: data_win_system_eventID:("4672" OR "4624") AND NOT data_win_eventdata_logonType:"5"
+    pivot_on:
+    - user
+    window: 24h
+  - name: SYSVOL / policy file share access
+    query: data_win_system_eventID:"5145" AND (data_win_eventdata_relativeTargetName:/.*([Gg][Pp][Tt][Tt][Mm][Pp][Ll]\.[Ii][Nn][Ff]|[Ss][Cc][Rr][Ii][Pp][Tt][Ss]|[Pp][Oo][Ll][Ii][Cc][Ii][Ee][Ss]).*/ OR data_win_eventdata_shareName:/.*[Ss][Yy][Ss][Vv][Oo][Ll].*/)
+    pivot_on:
+    - user
+    window: 6h
+  - name: Policy refresh and privileged tool execution on host
+    query: data_win_system_eventID:"1" AND (data_win_eventdata_image:/.*(\\[Gg][Pp][Uu][Pp][Dd][Aa][Tt][Ee]|\\[Ss][Ee][Cc][Ee][Dd][Ii][Tt]).*/ OR data_win_eventdata_commandLine:/.*([Gg][Pp][Uu][Pp][Dd][Aa][Tt][Ee]|[Ss][Ee][Cc][Ed][Ii][Tt]|[Nn][Ee][Tt] +[Ll][Oo][Cc][Aa][Ll][Gg][Rr][Oo][Uu][Pp]|[Nn][Ee][Tt] +[Gg][Rr][Oo][Uu][Pp]).*/)
+    pivot_on:
+    - host
+    window: 4h

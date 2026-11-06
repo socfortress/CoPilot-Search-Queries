@@ -188,41 +188,58 @@ graylog:
   query: (data_win_system_eventID:"4699" OR data_win_system_eventID:"4701") AND (data_win_eventdata_taskName:/.*\\[Ww][Ii][Nn][Dd][Oo][Ww][Ss]\\[Ss][Yy][Ss][Tt][Ee][Mm][Rr][Ee][Ss][Tt][Oo][Rr][Ee]\\[Ss][Rr].*/ OR data_win_eventdata_taskName:/.*\\[Ww][Ii][Nn][Dd][Oo][Ww][Ss]\\[Ww][Ii][Nn][Dd][Oo][Ww][Ss] [Dd][Ee][Ff][Ee][Nn][Dd][Ee][Rr]\\.*/ OR data_win_eventdata_taskName:/.*\\[Ww][Ii][Nn][Dd][Oo][Ww][Ss]\\[Bb][Ii][Tt][Ll][Oo][Cc][Kk][Ee][Rr].*/ OR data_win_eventdata_taskName:/.*\\[Ww][Ii][Nn][Dd][Oo][Ww][Ss]\\[Ww][Ii][Nn][Dd][Oo][Ww][Ss][Bb][Aa][Cc][Kk][Uu][Pp]\\.*/ OR data_win_eventdata_taskName:/.*\\[Ww][Ii][Nn][Dd][Oo][Ww][Ss]\\[Ww][Ii][Nn][Dd][Oo][Ww][Ss][Uu][Pp][Dd][Aa][Tt][Ee]\\.*/ OR data_win_eventdata_taskName:/.*\\[Ww][Ii][Nn][Dd][Oo][Ww][Ss]\\[Uu][Pp][Dd][Aa][Tt][Ee][Oo][Rr][Cc][Hh][Ee][Ss][Tt][Rr][Aa][Tt][Oo][Rr]\\[Ss][Cc][Hh][Ee][Dd][Uu][Ll][Ee].*/ OR data_win_eventdata_taskName:/.*\\[Ww][Ii][Nn][Dd][Oo][Ww][Ss]\\[Ee][Xx][Pp][Ll][Oo][Ii][Tt][Gg][Uu][Aa][Rr][Dd].*/) AND _exists_:data_win_system_eventID AND _exists_:data_win_eventdata_subjectUserName AND _exists_:data_win_eventdata_taskName AND NOT (data_win_system_eventID:"4699" AND data_win_eventdata_subjectUserName:/.*\$/ AND data_win_eventdata_taskName:/.*\\[Ww][Ii][Nn][Dd][Oo][Ww][Ss]\\[Ww][Ii][Nn][Dd][Oo][Ww][Ss] [Dd][Ee][Ff][Ee][Nn][Dd][Ee][Rr]\\.*/)
 
 correlation:
-  # Authored by the correlation engine for review. Related CoPilot Searches to run
-  # around an alert from this rule, scoped to the same host/user/IP within the window.
+  # Authored per-rule (behaviour-researched) for the correlation engine. Related CoPilot
+  # Searches + telemetry pivots to run around an alert, scoped to its host/user/ip/domain.
   related_rules:
-    - id: 0255a820-e564-4e40-af2b-6ac61160335c
-      name: "A New Trust Was Created To A Domain"
-      reason: "next kill-chain tactic: Persistence"
-    - id: 35ba1d85-724d-42a3-889f-2e2362bcaf23
-      name: "AD Privileged Users or Groups Reconnaissance"
-      reason: "next kill-chain tactic: Discovery"
-    - id: 9eb99343-d336-4020-a3cd-67f3819e68ee
-      name: "Account Tampering - Suspicious Failed Logon Reasons"
-      reason: "next kill-chain tactic: Persistence"
-    - id: 17d619c1-e020-4347-957e-1d1207455c93
-      name: "Active Directory Replication from Non Machine Account"
-      reason: "next kill-chain tactic: Credential Access"
-    - id: 300bac00-e041-4ee2-9c36-e262656a6ecc
-      name: "Active Directory User Backdoors"
-      reason: "next kill-chain tactic: Persistence"
+  - id: dbc1f800-0fe0-4bc0-9c66-292c2abe3f78
+    name: Delete Important Scheduled Task
+    reason: Process-creation view of the same schtasks /delete on a protected task (Defender, SystemRestore, backup); confirms the command line and parent process behind the 4699.
+  - id: 9ac94dc8-9042-493c-ba45-3b5e7c86b980
+    name: Disable Important Scheduled Task
+    reason: Process-creation counterpart of the 4701 disable event; gives the schtasks /change /disable command line and its parent.
+  - id: 220457c1-1c9f-4c2e-afe6-9598926222c1
+    name: Delete All Scheduled Tasks
+    reason: Mass task deletion (schtasks /delete /tn * ) is the bulk, destructive version of this behaviour, typical of wiper or ransomware prep.
+  - id: 9e3cb244-bdb8-4632-8c90-6079c8f4f16d
+    name: Important Scheduled Task Deleted or Disabled
+    reason: Same deletion/disable seen in the Task Scheduler operational log; corroborates the Security-log event from a second channel.
+  - id: 614cf376-6651-47c4-9dcc-6b9527f749f4
+    name: Suspicious Scheduled Task Update
+    reason: Attackers often modify an existing task (4702) before or instead of deleting it, so a suspicious update on the same host is part of the same tampering.
+  - id: 3a734d25-df5c-4b99-8034-af1ddb5883a4
+    name: Suspicious Scheduled Task Creation
+    reason: Attacker typically replaces the disabled/deleted protection task with a malicious one (4698) for persistence or execution.
+  - id: 526cc8bc-1cdc-48ad-8b26-f19bff969cec
+    name: Removal Of Index Value to Hide Schedule Task - Registry
+    reason: Registry-level task hiding is a companion anti-forensics step for adversaries tampering with scheduled tasks.
+  - id: windows-disable-modify-tools-taskkill-001
+    name: Windows Disable or Modify Tools Via Taskkill
+    reason: Killing security/backup processes alongside disabling their scheduled tasks is the classic pre-encryption defense-evasion sequence.
   window: 1h
   enrichment_searches:
-  # Rule-specific telemetry pivots the engine runs around an alert from this rule,
-  # scoped to the alert's host/user/IP within the window (behaviour-targeted, not a sweep).
-    - name: "Scheduled-task creation on this host"
-      query: '((data_win_system_eventID:"1" AND data_win_eventdata_image:/.*(\\[Ss][Cc][Hh][Tt][Aa][Ss][Kk][Ss]\.[Ee][Xx][Ee]|\\[Aa][Tt]\.[Ee][Xx][Ee])/) OR ((data_win_system_eventID:"4698" OR data_win_system_eventID:"4702")))'
-      pivot_on: [host]
-      window: 4h
-    - name: "Memory/credential-dump creation & LSASS access on this host"
-      query: '((data_win_system_eventID:"1" AND data_win_eventdata_image:/.*(\\[Pp][Rr][Oo][Cc][Dd][Uu][Mm][Pp]\.[Ee][Xx][Ee]|\\[Pp][Rr][Oo][Cc][Dd][Uu][Mm][Pp]64\.[Ee][Xx][Ee]|\\[Ss][Qq][Ll][Dd][Uu][Mm][Pp][Ee][Rr]\.[Ee][Xx][Ee]|\\[Cc][Rr][Ee][Aa][Tt][Ee][Dd][Uu][Mm][Pp]\.[Ee][Xx][Ee]|\\[Rr][Dd][Rr][Ll][Ee][Aa][Kk][Dd][Ii][Aa][Gg]\.[Ee][Xx][Ee]|\\[Dd][Uu][Mm][Pp][Ee][Rr][Tt]\.[Ee][Xx][Ee]|\\[Nn][Aa][Nn][Oo][Dd][Uu][Mm][Pp]\.[Ee][Xx][Ee]|\\[Aa][Vv][Dd][Uu][Mm][Pp]\.[Ee][Xx][Ee])/) OR (data_win_system_eventID:"1" AND (data_win_eventdata_commandLine:/.*[Cc][Oo][Mm][Ss][Vv][Cc][Ss]\.[Dd][Ll][Ll].*/ OR data_win_eventdata_commandLine:/.*[Mm][Ii][Nn][Ii][Dd][Uu][Mm][Pp].*/ OR data_win_eventdata_commandLine:/.*[Dd][Uu][Mm][Pp][Ee][Rr][Tt].*/ OR data_win_eventdata_commandLine:/.*[Nn][Aa][Nn][Oo][Dd][Uu][Mm][Pp].*/ OR data_win_eventdata_commandLine:/.*[Ll][Ss][Aa][Ss][Ss].*/ OR data_win_eventdata_commandLine:/.*[Ss][Ee][Kk][Uu][Rr][Ll][Ss][Aa].*/ OR data_win_eventdata_commandLine:/.*[Nn][Tt][Dd][Ss]\.[Dd][Ii][Tt].*/ OR data_win_eventdata_commandLine:/.*[Nn][Tt][Dd][Ss][Uu][Tt][Ii][Ll].*/)) OR (data_win_system_eventID:"10" AND data_win_eventdata_targetImage:/.*(\\[Ll][Ss][Aa][Ss][Ss]\.[Ee][Xx][Ee])/))'
-      pivot_on: [host]
-      window: 1h
-    - name: "This account's logon activity across hosts"
-      query: '(data_win_system_eventID:"4624" OR data_win_system_eventID:"4625")'
-      pivot_on: [user]
-      window: 6h
-    - name: "Account / group / privilege changes involving this account"
-      query: '(data_win_system_eventID:"4720" OR data_win_system_eventID:"4722" OR data_win_system_eventID:"4724" OR data_win_system_eventID:"4728" OR data_win_system_eventID:"4732" OR data_win_system_eventID:"4756" OR data_win_system_eventID:"4672")'
-      pivot_on: [user]
-      window: 6h
+  # Behaviour-targeted hunts the engine runs around the alert (not a sweep).
+  - name: schtasks/PowerShell deleting or disabling scheduled tasks
+    query: data_win_system_eventID:"1" AND ((data_win_eventdata_image:/.*\\[Ss][Cc][Hh][Tt][Aa][Ss][Kk][Ss]\.[Ee][Xx][Ee]/ AND (data_win_eventdata_commandLine:/.*.[Dd][Ee][Ll][Ee][Tt][Ee].*/ OR data_win_eventdata_commandLine:/.*.[Dd][Ii][Ss][Aa][Bb][Ll][Ee].*/)) OR data_win_eventdata_commandLine:/.*([Dd][Ii][Ss][Aa][Bb][Ll][Ee]|[Uu][Nn][Rr][Ee][Gg][Ii][Ss][Tt][Ee][Rr])-[Ss][Cc][Hh][Ee][Dd][Uu][Ll][Ee][Dd][Tt][Aa][Ss][Kk].*/)
+    pivot_on:
+    - host
+    window: 1h
+  - name: Defender and security tooling tampering
+    query: (data_win_system_eventID:"1" AND (data_win_eventdata_commandLine:/.*[Ss][Ee][Tt]-[Mm][Pp][Pp][Rr][Ee][Ff][Ee][Rr][Ee][Nn][Cc][Ee].*/ OR data_win_eventdata_commandLine:/.*[Dd][Ii][Ss][Aa][Bb][Ll][Ee][Rr][Ee][Aa][Ll][Tt][Ii][Mm][Ee].*/ OR data_win_eventdata_commandLine:/.*[Ss][Tt][Oo][Pp].*[Ww][Ii][Nn][Dd][Ee][Ff][Ee][Nn][Dd].*/ OR data_win_eventdata_commandLine:/.*[Aa][Dd][Dd]-[Mm][Pp][Pp][Rr][Ee][Ff][Ee][Rr][Ee][Nn][Cc][Ee].*[Ee][Xx][Cc][Ll][Uu][Ss][Ii][Oo][Nn].*/)) OR (data_win_system_eventID:"13" AND data_win_eventdata_targetObject:*Windows*Defender*Disable*)
+    pivot_on:
+    - host
+    window: 1h
+  - name: Backup and recovery destruction commands
+    query: data_win_system_eventID:"1" AND (data_win_eventdata_commandLine:/.*[Vv][Ss][Ss][Aa][Dd][Mm][Ii][Nn].*[Dd][Ee][Ll][Ee][Tt][Ee].*[Ss][Hh][Aa][Dd][Oo][Ww].*/ OR data_win_eventdata_commandLine:/.*[Ww][Bb][Aa][Dd][Mm][Ii][Nn].*[Dd][Ee][Ll][Ee][Tt][Ee].*/ OR data_win_eventdata_commandLine:/.*[Bb][Cc][Dd][Ee][Dd][Ii][Tt].*([Rr][Ee][Cc][Oo][Vv][Ee][Rr][Yy][Ee][Nn][Aa][Bb][Ll][Ee][Dd]|[Ii][Gg][Nn][Oo][Rr][Ee][Aa][Ll][Ll][Ff][Aa][Ii][Ll][Uu][Rr][Ee][Ss]).*/ OR data_win_eventdata_commandLine:/.*[Ww][Mm][Ii][Cc].*[Ss][Hh][Aa][Dd][Oo][Ww][Cc][Oo][Pp][Yy].*[Dd][Ee][Ll][Ee][Tt][Ee].*/)
+    pivot_on:
+    - host
+    window: 2h
+  - name: Task cache registry tampering hiding tasks
+    query: (data_win_system_eventID:"12" OR data_win_system_eventID:"13") AND data_win_eventdata_targetObject:*Schedule*TaskCache*Tree*
+    pivot_on:
+    - host
+    window: 1h
+  - name: Ransom notes and mass encryption artifacts
+    query: data_win_system_eventID:"11" AND (data_win_eventdata_targetFilename:/.*([Rr][Ee][Aa][Dd][Mm][Ee]|[Dd][Ee][Cc][Rr][Yy][Pp][Tt]|[Rr][Ee][Ss][Tt][Oo][Rr][Ee]|[Hh][Oo][Ww][_ -]?[Tt][Oo]).*\.([Tt][Xx][Tt]|[Hh][Tt][Mm][Ll]|[Hh][Tt][Aa])/ OR data_win_eventdata_targetFilename:/.*\.([Ll][Oo][Cc][Kk][Ee][Dd]|[Ee][Nn][Cc][Rr][Yy][Pp][Tt][Ee][Dd]|[Cc][Rr][Yy][Pp][Tt])/)
+    pivot_on:
+    - host
+    window: 2h

@@ -150,41 +150,58 @@ graylog:
   query: data_win_system_eventID:"4697" AND data_win_eventdata_serviceFileName:/.*[Mm][Ss][Hh][Tt][Aa].*/ AND data_win_eventdata_serviceFileName:/.*[Vv][Bb][Ss][Cc][Rr][Ii][Pp][Tt]:[Cc][Rr][Ee][Aa][Tt][Ee][Oo][Bb][Jj][Ee][Cc][Tt].*/ AND data_win_eventdata_serviceFileName:/.*\.[Rr][Uu][Nn].*/ AND data_win_eventdata_serviceFileName:/.*[Ww][Ii][Nn][Dd][Oo][Ww]\.[Cc][Ll][Oo][Ss][Ee].*/
 
 correlation:
-  # Authored by the correlation engine for review. Related CoPilot Searches to run
-  # around an alert from this rule, scoped to the same host/user/IP within the window.
+  # Authored per-rule (behaviour-researched) for the correlation engine. Related CoPilot
+  # Searches + telemetry pivots to run around an alert, scoped to its host/user/ip/domain.
   related_rules:
-    - id: 0255a820-e564-4e40-af2b-6ac61160335c
-      name: "A New Trust Was Created To A Domain"
-      reason: "next kill-chain tactic: Persistence"
-    - id: 35ba1d85-724d-42a3-889f-2e2362bcaf23
-      name: "AD Privileged Users or Groups Reconnaissance"
-      reason: "next kill-chain tactic: Discovery"
-    - id: 9eb99343-d336-4020-a3cd-67f3819e68ee
-      name: "Account Tampering - Suspicious Failed Logon Reasons"
-      reason: "next kill-chain tactic: Persistence"
-    - id: 17d619c1-e020-4347-957e-1d1207455c93
-      name: "Active Directory Replication from Non Machine Account"
-      reason: "next kill-chain tactic: Credential Access"
-    - id: 300bac00-e041-4ee2-9c36-e262656a6ecc
-      name: "Active Directory User Backdoors"
-      reason: "next kill-chain tactic: Persistence"
+  - id: 7e9c7999-0f9b-4d4a-a6ed-af6d553d4af4
+    name: Invoke-Obfuscation Via Use MSHTA - System
+    reason: Same vbscript:createobject/mshta service ImagePath logged as System 7045 by the SCM; confirms the service really installed, not just that 4697 was audited.
+  - id: ac20ae82-8758-4f38-958e-b44a3140ca88
+    name: Invoke-Obfuscation Via Use MSHTA
+    reason: Sysmon process-creation view of the same mshta vbscript:createobject .Run window.close launcher when the service starts or it is launched directly.
+  - id: e55a5195-4724-480e-a77e-3ebe64bd3759
+    name: Invoke-Obfuscation Via Use MSHTA - PowerShell
+    reason: Same Invoke-Obfuscation MSHTA launcher delivered through PowerShell script blocks; shows the obfuscated PowerShell that was wrapped into the service command.
+  - id: a0873b32-5b68-11eb-ae93-0242ac130002
+    name: Detect mshta inline hta execution
+    reason: mshta executing inline script (vbscript:/javascript:) is the runtime behaviour the installed service performs once started.
+  - id: 4aa5d062-e893-11eb-9eb2-acde48001122
+    name: Mshta spawning Rundll32 OR Regsvr32 Process
+    reason: 'Follow-on: the mshta/VBScript stub typically proxies the real payload through rundll32 or regsvr32.'
+  - id: 6fb63b40-e02a-403e-9ffd-3bcc1d749442
+    name: Metasploit Or Impacket Service Installation Via SMB PsExec
+    reason: Command-bearing services via 4697 are the PsExec/lateral-movement pattern; same event ID, so shows whether this service came over SMB.
+  - id: c4e92a97-a9ff-4392-9d2d-7a4c642768ca
+    name: Service Installed By Unusual Client - Security
+    reason: 'Co-occurring 4697: the installing account/logon session of this service is unusual, indicating remote or hijacked-account installation.'
+  - id: 17a1be64-8d88-40bf-b5ff-a4f7a50ebcc8
+    name: Suspicious New Service Creation
+    reason: sc.exe/New-Service process that created the service whose binary path holds the mshta payload; the precursor of this 4697.
   window: 1h
   enrichment_searches:
-  # Rule-specific telemetry pivots the engine runs around an alert from this rule,
-  # scoped to the alert's host/user/IP within the window (behaviour-targeted, not a sweep).
-    - name: "Outbound connections by script interpreters on this host"
-      query: 'data_win_system_eventID:"3" AND data_win_eventdata_image:/.*(\\[Pp][Oo][Ww][Ee][Rr][Ss][Hh][Ee][Ll][Ll]\.[Ee][Xx][Ee]|\\[Pp][Ww][Ss][Hh]\.[Ee][Xx][Ee]|\\[Pp][Oo][Ww][Ee][Rr][Ss][Hh][Ee][Ll][Ll]_[Ii][Ss][Ee]\.[Ee][Xx][Ee]|\\[Cc][Mm][Dd]\.[Ee][Xx][Ee]|\\[Ww][Ss][Cc][Rr][Ii][Pp][Tt]\.[Ee][Xx][Ee]|\\[Cc][Ss][Cc][Rr][Ii][Pp][Tt]\.[Ee][Xx][Ee]|\\[Mm][Ss][Hh][Tt][Aa]\.[Ee][Xx][Ee]|\\[Rr][Uu][Nn][Dd][Ll][Ll]32\.[Ee][Xx][Ee]|\\[Rr][Ee][Gg][Ss][Vv][Rr]32\.[Ee][Xx][Ee])/'
-      pivot_on: [host]
-      window: 1h
-    - name: "Encoded / obfuscated script execution on this host"
-      query: 'data_win_system_eventID:"4104" AND (data_win_eventdata_scriptBlockText:/.*[Dd][Oo][Ww][Nn][Ll][Oo][Aa][Dd][Ss][Tt][Rr][Ii][Nn][Gg].*/ OR data_win_eventdata_scriptBlockText:/.*[Dd][Oo][Ww][Nn][Ll][Oo][Aa][Dd][Ff][Ii][Ll][Ee].*/ OR data_win_eventdata_scriptBlockText:/.*[Ii][Nn][Vv][Oo][Kk][Ee]-[Ww][Ee][Bb][Rr][Ee][Qq][Uu][Ee][Ss][Tt].*/ OR data_win_eventdata_scriptBlockText:/.*[Nn][Ee][Tt]\.[Ww][Ee][Bb][Cc][Ll][Ii][Ee][Nn][Tt].*/ OR data_win_eventdata_scriptBlockText:/.*[Ff][Rr][Oo][Mm][Bb][Aa][Ss][Ee]64[Ss][Tt][Rr][Ii][Nn][Gg].*/ OR data_win_eventdata_scriptBlockText:/.*[Ii][Ee][Xx].*/ OR data_win_eventdata_scriptBlockText:/.*[Ii][Nn][Vv][Oo][Kk][Ee]-[Ee][Xx][Pp][Rr][Ee][Ss][Ss][Ii][Oo][Nn].*/ OR data_win_eventdata_scriptBlockText:/.*[Ss][Tt][Aa][Rr][Tt]-[Bb][Ii][Tt][Ss][Tt][Rr][Aa][Nn][Ss][Ff][Ee][Rr].*/ OR data_win_eventdata_scriptBlockText:/.*[Aa][Mm][Ss][Ii][Uu][Tt][Ii][Ll][Ss].*/ OR data_win_eventdata_scriptBlockText:/.*-[Ee][Nn][Cc].*/ OR data_win_eventdata_scriptBlockText:/.*-[Ee][Nn][Cc][Oo][Dd][Ee][Dd][Cc][Oo][Mm][Mm][Aa][Nn][Dd].*/ OR data_win_eventdata_scriptBlockText:/.*[Rr][Ee][Ff][Ll][Ee][Cc][Tt][Ii][Oo][Nn]\.[Aa][Ss][Ss][Ee][Mm][Bb][Ll][Yy].*/)'
-      pivot_on: [host]
-      window: 1h
-    - name: "Autostart persistence written on this host (Run keys, services, IFEO)"
-      query: '(data_win_system_eventID:"12" OR data_win_system_eventID:"13") AND (data_win_eventdata_targetObject:/.*[Cc][Uu][Rr][Rr][Ee][Nn][Tt][Vv][Ee][Rr][Ss][Ii][Oo][Nn]\\[Rr][Uu][Nn].*/ OR data_win_eventdata_targetObject:/.*[Cc][Uu][Rr][Rr][Ee][Nn][Tt][Vv][Ee][Rr][Ss][Ii][Oo][Nn]\\[Rr][Uu][Nn][Oo][Nn][Cc][Ee].*/ OR data_win_eventdata_targetObject:/.*[Cc][Uu][Rr][Rr][Ee][Nn][Tt][Cc][Oo][Nn][Tt][Rr][Oo][Ll][Ss][Ee][Tt]\\[Ss][Ee][Rr][Vv][Ii][Cc][Ee][Ss]\\.*/ OR data_win_eventdata_targetObject:/.*[Ii][Mm][Aa][Gg][Ee] [Ff][Ii][Ll][Ee] [Ee][Xx][Ee][Cc][Uu][Tt][Ii][Oo][Nn] [Oo][Pp][Tt][Ii][Oo][Nn][Ss]\\.*/ OR data_win_eventdata_targetObject:/.*[Ww][Ii][Nn][Ll][Oo][Gg][Oo][Nn]\\[Ss][Hh][Ee][Ll][Ll].*/ OR data_win_eventdata_targetObject:/.*[Ww][Ii][Nn][Ll][Oo][Gg][Oo][Nn]\\[Uu][Ss][Ee][Rr][Ii][Nn][Ii][Tt].*/ OR data_win_eventdata_targetObject:/.*[Cc][Uu][Rr][Rr][Ee][Nn][Tt][Vv][Ee][Rr][Ss][Ii][Oo][Nn]\\[Ee][Xx][Pp][Ll][Oo][Rr][Ee][Rr]\\[Rr][Uu][Nn].*/ OR data_win_eventdata_targetObject:/.*[Pp][Oo][Ll][Ii][Cc][Ii][Ee][Ss]\\[Ee][Xx][Pp][Ll][Oo][Rr][Ee][Rr]\\[Rr][Uu][Nn].*/ OR data_win_eventdata_targetObject:/.*[Cc][Uu][Rr][Rr][Ee][Nn][Tt][Vv][Ee][Rr][Ss][Ii][Oo][Nn]\\[Ww][Ii][Nn][Dd][Oo][Ww][Ss]\\[Ll][Oo][Aa][Dd].*/)'
-      pivot_on: [host]
-      window: 4h
-    - name: "This account's logon activity across hosts"
-      query: '(data_win_system_eventID:"4624" OR data_win_system_eventID:"4625")'
-      pivot_on: [user]
-      window: 6h
+  # Behaviour-targeted hunts the engine runs around the alert (not a sweep).
+  - name: mshta.exe launched with inline script or from a service parent
+    query: data_win_system_eventID:"1" AND data_win_eventdata_image:/.*[Mm][Ss][Hh][Tt][Aa]\.[Ee][Xx][Ee]/ AND (data_win_eventdata_commandLine:/.*[Vv][Bb][Ss][Cc][Rr][Ii][Pp][Tt]:.*/ OR data_win_eventdata_commandLine:/.*[Jj][Aa][Vv][Aa][Ss][Cc][Rr][Ii][Pp][Tt]:.*/ OR data_win_eventdata_commandLine:/.*[Hh][Tt][Tt][Pp].*/ OR data_win_eventdata_parentImage:/.*[Ss][Ee][Rr][Vv][Ii][Cc][Ee][Ss]\.[Ee][Xx][Ee]/ OR data_win_eventdata_parentImage:/.*[Cc][Mm][Dd]\.[Ee][Xx][Ee]/ OR data_win_eventdata_parentImage:/.*[Pp][Oo][Ww][Ee][Rr][Ss][Hh][Ee][Ll][Ll]\.[Ee][Xx][Ee]/)
+    pivot_on:
+    - host
+    window: 1h
+  - name: Child processes spawned by mshta.exe (payload proxying)
+    query: data_win_system_eventID:"1" AND data_win_eventdata_parentImage:/.*[Mm][Ss][Hh][Tt][Aa]\.[Ee][Xx][Ee]/
+    pivot_on:
+    - host
+    window: 2h
+  - name: mshta.exe network connections or DNS lookups
+    query: (data_win_system_eventID:"3" AND data_win_eventdata_image:/.*[Mm][Ss][Hh][Tt][Aa]\.[Ee][Xx][Ee]/) OR (data_win_system_eventID:"22" AND data_win_eventdata_image:/.*[Mm][Ss][Hh][Tt][Aa]\.[Ee][Xx][Ee]/)
+    pivot_on:
+    - host
+    window: 2h
+  - name: Service creation and registry ImagePath written with mshta or script-host payload
+    query: (data_win_system_eventID:"7045" AND data_win_eventdata_imagePath:/.*([Mm][Ss][Hh][Tt][Aa]|[Vv][Bb][Ss][Cc][Rr][Ii][Pp][Tt]|[Pp][Oo][Ww][Ee][Rr][Ss][Hh][Ee][Ll][Ll]|[Cc][Mm][Dd]\.[Ee][Xx][Ee]).*/) OR (data_win_system_eventID:"13" AND data_win_eventdata_targetObject:/.*[Ss][Ee][Rr][Vv][Ii][Cc][Ee][Ss]\\.*\\[Ii][Mm][Aa][Gg][Ee][Pp][Aa][Tt][Hh]/ AND data_win_eventdata_details:/.*([Mm][Ss][Hh][Tt][Aa]|[Vv][Bb][Ss][Cc][Rr][Ii][Pp][Tt]).*/)
+    pivot_on:
+    - host
+    window: 6h
+  - name: Network and service logons by the installing account (lateral movement)
+    query: data_win_system_eventID:"4624" AND (data_win_eventdata_logonType:"3" OR data_win_eventdata_logonType:"10")
+    pivot_on:
+    - user
+    window: 4h

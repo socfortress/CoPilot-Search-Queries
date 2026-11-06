@@ -129,55 +129,55 @@ correlation:
   # Authored per-rule (behaviour-researched) for the correlation engine. Related CoPilot
   # Searches + telemetry pivots to run around an alert, scoped to its host/user/ip/domain.
   related_rules:
-  - id: lnx-doas-001
-    name: Linux doas Execution Detection
-    reason: Same doas execution seen through auditd/syslog; confirms the invocation and gives the invoking user and exe context
   - id: linux-sudo-or-su-execution-001
     name: Linux Sudo Or Su Execution
-    reason: Attacker probing other privilege-delegation tools (sudo/su) on the same host alongside doas
-  - id: 0f79c4d2-4e1f-4683-9c36-b5469a665e06
-    name: Access of Sudoers File Content
-    reason: Reading sudoers/delegation config is the usual recon before or after using doas to check what elevation is permitted
-  - id: 86157017-c2b1-4d4a-8c33-93b8e67e4af4
-    name: Potential Suspicious Change To Sensitive/Critical Files
-    reason: Once elevated via doas, attackers modify sensitive files such as doas.conf, sudoers, passwd to persist root access
-  - id: fa4aaed5-4fe0-498d-bbc0-08e3346387ba
-    name: Copy Passwd Or Shadow From TMP Path
-    reason: Root obtained through doas is commonly used to stage passwd/shadow for credential cracking
-  - id: 6b14bac8-3e3a-4324-8109-42f0546a347f
-    name: Scheduled Cron Task/Job - Linux
-    reason: 'Follow-on persistence: root cron job installed after privilege escalation with doas'
-  - id: 759d0d51-bc99-4b5e-9add-8f5b2c8e7512
-    name: Creation Of An User Account
-    reason: Elevated doas session often followed by creating a backdoor local account
-  - id: 1182f3b3-e716-4efa-99ab-d2685d04360f
-    name: History File Deletion
-    reason: 'Post-escalation anti-forensics: clearing shell history after privileged commands'
+    reason: 'Sibling elevation path: an attacker without a working doas rule falls back to sudo/su on the same host'
+  - id: linux-pkexec-privilege-escalation-001
+    name: Linux pkexec Privilege Escalation
+    reason: Alternative privilege-escalation binary tried alongside or after doas when escalation is blocked
+  - id: linux-common-process-elevation-control-001
+    name: Linux Common Process For Elevation Control
+    reason: Generic elevation-control binaries (sudo, su, doas, setcap, chsh) co-occur with doas abuse in the same escalation burst
+  - id: a1b2c3d4-5e6f-7a8b-9c0d-e1f2a3b4c5d6
+    name: Linux Sudoers File Access
+    reason: Privilege config reconnaissance or tampering (sudoers/doas.conf) typically precedes granting oneself elevated rights
+  - id: linux-auditd-possible-access-sudoers-file-001
+    name: Linux Auditd Possible Access To Sudoers File
+    reason: Auditd view of reads/edits to privilege-delegation files, the setup step before running doas as root
+  - id: linux-auditd-add-user-001
+    name: Linux Auditd Add User
+    reason: Root via doas is commonly used next to create a backdoor account for persistence
+  - id: e2f3g4h5-6789-1011-1213-141516171819
+    name: Linux File Permission Modification Detection
+    reason: After elevation, chmod/chown (SUID bits, root-owned payloads) are the usual follow-on to make access durable
+  - id: 4d5e6f7a-8b90-2345-6789-01abcdef2345
+    name: Linux Credential Discovery
+    reason: Root obtained via doas is used to read shadow/credential files, the likely next objective
   window: 1h
   enrichment_searches:
   # Behaviour-targeted hunts the engine runs around the alert (not a sweep).
-  - name: Commands launched as children of doas
-    query: data_process_exec_parent_binary:"/usr/bin/doas"
+  - name: Other privilege delegation binaries run (sudo/su/pkexec/setcap)
+    query: data_process_exec_process_binary:("/usr/bin/sudo" OR "/usr/bin/su" OR "/bin/su" OR "/usr/bin/pkexec" OR "/usr/sbin/setcap")
     pivot_on:
     - host
     window: 1h
-  - name: Edits or reads of doas/sudoers delegation config
-    query: (data_process_exec_process_arguments:*doas.conf* OR data_process_exec_process_arguments:*sudoers* OR data_process_exec_process_arguments:*\/etc\/pam.d*)
+  - name: Edits to doas.conf / sudoers / sudoers.d
+    query: (data_process_exec_process_arguments:*doas.conf* OR data_process_exec_process_arguments:*sudoers*) AND data_process_exec_process_binary:("/usr/bin/vi" OR "/usr/bin/vim" OR "/usr/bin/nano" OR "/usr/bin/tee" OR "/usr/bin/sed" OR "/usr/bin/echo" OR "/usr/bin/cp" OR "/usr/bin/mv" OR "/usr/bin/visudo")
     pivot_on:
     - host
     window: 2h
-  - name: Account and credential file manipulation after elevation
-    query: (data_process_exec_process_binary:("/usr/sbin/useradd" OR "/usr/sbin/usermod" OR "/usr/bin/passwd" OR "/usr/sbin/adduser" OR "/usr/bin/chpasswd") OR data_process_exec_process_arguments:(*\/etc\/shadow* OR *\/etc\/passwd* OR *authorized_keys*))
+  - name: Account/credential changes after elevation (useradd, passwd, shadow reads)
+    query: data_process_exec_process_binary:("/usr/sbin/useradd" OR "/usr/sbin/adduser" OR "/usr/sbin/usermod" OR "/usr/bin/passwd" OR "/usr/sbin/chpasswd") OR data_process_exec_process_arguments:(*/etc/shadow* OR */etc/passwd*)
+    pivot_on:
+    - host
+    window: 2h
+  - name: Persistence and SUID/permission changes
+    query: data_process_exec_process_binary:("/usr/bin/chmod" OR "/usr/bin/chown" OR "/usr/bin/crontab") AND (data_process_exec_process_arguments:(*+s* OR *4755* OR *u+s*) OR data_process_exec_process_arguments:(*crontab* OR *authorized_keys* OR *systemd*))
     pivot_on:
     - host
     window: 4h
-  - name: SUID/permission tampering and persistence setup
-    query: ((data_process_exec_process_binary:("/usr/bin/chmod" OR "/usr/bin/chown" OR "/usr/bin/crontab" OR "/usr/bin/systemctl") AND data_process_exec_process_arguments:(*u+s* OR *4755* OR *6755* OR *\/etc\/cron* OR *enable* OR *\/etc\/systemd*)))
-    pivot_on:
-    - host
-    window: 4h
-  - name: Download-and-execute tooling around doas use
-    query: data_process_exec_process_binary:("/usr/bin/wget" OR "/usr/bin/curl" OR "/usr/bin/nc" OR "/usr/bin/ncat" OR "/usr/bin/scp")
+  - name: Payload staging via download tools before escalation
+    query: data_process_exec_process_binary:("/usr/bin/wget" OR "/usr/bin/curl" OR "/usr/bin/scp" OR "/usr/bin/nc" OR "/usr/bin/ncat") AND data_process_exec_process_arguments:(*http* OR */tmp/* OR */dev/shm/* OR *-e*)
     pivot_on:
     - host
     window: 2h
