@@ -144,35 +144,56 @@ graylog:
   query: data_win_system_eventID:"5145" AND data_win_eventdata_shareName:/\\\\.*/ AND data_win_eventdata_shareName:/.*\\[Ii][Pp][Cc]\$/ AND data_win_eventdata_relativeTargetName:/[Ll][Ss][Aa][Rr][Pp][Cc]/ AND data_win_eventdata_subjectUserName:/[Aa][Nn][Oo][Nn][Yy][Mm][Oo][Uu][Ss] [Ll][Oo][Gg][Oo][Nn]/
 
 correlation:
-  # Authored by the correlation engine for review. Related CoPilot Searches to run
-  # around an alert from this rule, scoped to the same host/user/IP within the window.
+  # Authored per-rule (behaviour-researched) for the correlation engine. Related CoPilot
+  # Searches + telemetry pivots to run around an alert, scoped to its host/user/ip/domain.
   related_rules:
-    - id: 35ba1d85-724d-42a3-889f-2e2362bcaf23
-      name: "AD Privileged Users or Groups Reconnaissance"
-      reason: "next kill-chain tactic: Discovery"
-    - id: 17d619c1-e020-4347-957e-1d1207455c93
-      name: "Active Directory Replication from Non Machine Account"
-      reason: "next kill-chain tactic: Credential Access"
-    - id: 87261fb2-69d0-42fe-b9de-88c6b5f65a43
-      name: "Atera Agent Installation"
-      reason: "next kill-chain tactic: Command and Control"
-  window: 1h
+  - id: 214e8f95-100a-4e04-bb31-ef6cba8ce07e
+    name: DCERPC SMB Spoolss Named Pipe
+    reason: Sibling coercion primitive (PrinterBug/SpoolSample via the spoolss pipe on IPC$) used against the same DC to force machine-account authentication; attackers rotate between EFSRPC and Spoolss
+  - id: d3abac66-f11c-4ed0-8acb-50cc29c97eed
+    name: NetNTLM Downgrade Attack
+    reason: Coerced DC NTLM auth is only relayable or crackable if NTLM is weakened; LM compatibility downgrade often accompanies relay setups
+  - id: bfbd3291-de87-4b7c-88a2-d6a5deb28668
+    name: ADCS Certificate Template Configuration Vulnerability with Risky EKU
+    reason: The classic PetitPotam payoff is relaying the DC NTLM auth to AD CS web enrollment (ESC8) to mint a DC certificate; AD CS abuse on the CA confirms the relay path
+  - id: 17d619c1-e020-4347-957e-1d1207455c93
+    name: Active Directory Replication from Non Machine Account
+    reason: With a DC certificate or relayed DC identity the attacker gets DC-equivalent rights and performs DCSync to dump domain hashes
+  - id: f7644214-0eb0-4ace-9455-331ec4c09253
+    name: Kerberos Manipulation
+    reason: A stolen DC certificate is exchanged for a TGT (PKINIT) and tickets are then abused; Kerberos anomalies follow a successful relay
+  - id: b210394c-ba12-4f89-9117-44a2464b9511
+    name: SMB Create Remote File Admin Share
+    reason: After domain-admin level access the attacker commonly drops payloads over admin shares for lateral movement
+  - id: c4e92a97-a9ff-4392-9d2d-7a4c642768ca
+    name: Service Installed By Unusual Client - Security
+    reason: Remote service installation by an unexpected client is the typical follow-on lateral execution once DC-level credentials are obtained
+  window: 2h
   enrichment_searches:
-  # Rule-specific telemetry pivots the engine runs around an alert from this rule,
-  # scoped to the alert's host/user/IP within the window (behaviour-targeted, not a sweep).
-    - name: "Remote-execution / lateral-movement tooling on this host"
-      query: '(data_win_system_eventID:"1" AND data_win_eventdata_image:/.*(\\[Pp][Ss][Ee][Xx][Ee][Cc]\.[Ee][Xx][Ee]|\\[Pp][Ss][Ee][Xx][Ee][Ss][Vv][Cc]\.[Ee][Xx][Ee]|\\[Pp][Aa][Ee][Xx][Ee][Cc]\.[Ee][Xx][Ee]|\\[Ww][Ii][Nn][Rr][Ss]\.[Ee][Xx][Ee]|\\[Mm][Ss][Tt][Ss][Cc]\.[Ee][Xx][Ee]|\\[Ww][Mm][Ii][Cc]\.[Ee][Xx][Ee])/) OR (data_win_system_eventID:"1" AND data_win_eventdata_image:/.*(\\[Pp][Oo][Ww][Ee][Rr][Ss][Hh][Ee][Ll][Ll]\.[Ee][Xx][Ee]|\\[Pp][Ww][Ss][Hh]\.[Ee][Xx][Ee])/ AND (data_win_eventdata_commandLine:/.*[Ii][Nn][Vv][Oo][Kk][Ee]-[Cc][Oo][Mm][Mm][Aa][Nn][Dd].*/ OR data_win_eventdata_commandLine:/.*[Nn][Ee][Ww]-[Pp][Ss][Ss][Ee][Ss][Ss][Ii][Oo][Nn].*/ OR data_win_eventdata_commandLine:/.*[Ee][Nn][Tt][Ee][Rr]-[Pp][Ss][Ss][Ee][Ss][Ss][Ii][Oo][Nn].*/ OR data_win_eventdata_commandLine:/.*-[Cc][Oo][Mm][Pp][Uu][Tt][Ee][Rr][Nn][Aa][Mm][Ee].*/))'
-      pivot_on: [host]
-      window: 2h
-    - name: "This account's logon activity across hosts"
-      query: '(data_win_system_eventID:"4624" OR data_win_system_eventID:"4625")'
-      pivot_on: [user]
-      window: 6h
-    - name: "Account / group / privilege changes involving this account"
-      query: '(data_win_system_eventID:"4720" OR data_win_system_eventID:"4722" OR data_win_system_eventID:"4724" OR data_win_system_eventID:"4728" OR data_win_system_eventID:"4732" OR data_win_system_eventID:"4756" OR data_win_system_eventID:"4672")'
-      pivot_on: [user]
-      window: 6h
-    - name: "Memory/credential-dump creation & LSASS access on this host"
-      query: '((data_win_system_eventID:"1" AND data_win_eventdata_image:/.*(\\[Pp][Rr][Oo][Cc][Dd][Uu][Mm][Pp]\.[Ee][Xx][Ee]|\\[Pp][Rr][Oo][Cc][Dd][Uu][Mm][Pp]64\.[Ee][Xx][Ee]|\\[Ss][Qq][Ll][Dd][Uu][Mm][Pp][Ee][Rr]\.[Ee][Xx][Ee]|\\[Cc][Rr][Ee][Aa][Tt][Ee][Dd][Uu][Mm][Pp]\.[Ee][Xx][Ee]|\\[Rr][Dd][Rr][Ll][Ee][Aa][Kk][Dd][Ii][Aa][Gg]\.[Ee][Xx][Ee]|\\[Dd][Uu][Mm][Pp][Ee][Rr][Tt]\.[Ee][Xx][Ee]|\\[Nn][Aa][Nn][Oo][Dd][Uu][Mm][Pp]\.[Ee][Xx][Ee]|\\[Aa][Vv][Dd][Uu][Mm][Pp]\.[Ee][Xx][Ee])/) OR (data_win_system_eventID:"1" AND (data_win_eventdata_commandLine:/.*[Cc][Oo][Mm][Ss][Vv][Cc][Ss]\.[Dd][Ll][Ll].*/ OR data_win_eventdata_commandLine:/.*[Mm][Ii][Nn][Ii][Dd][Uu][Mm][Pp].*/ OR data_win_eventdata_commandLine:/.*[Dd][Uu][Mm][Pp][Ee][Rr][Tt].*/ OR data_win_eventdata_commandLine:/.*[Nn][Aa][Nn][Oo][Dd][Uu][Mm][Pp].*/ OR data_win_eventdata_commandLine:/.*[Ll][Ss][Aa][Ss][Ss].*/ OR data_win_eventdata_commandLine:/.*[Ss][Ee][Kk][Uu][Rr][Ll][Ss][Aa].*/ OR data_win_eventdata_commandLine:/.*[Nn][Tt][Dd][Ss]\.[Dd][Ii][Tt].*/ OR data_win_eventdata_commandLine:/.*[Nn][Tt][Dd][Ss][Uu][Tt][Ii][Ll].*/)) OR (data_win_system_eventID:"10" AND data_win_eventdata_targetImage:/.*(\\[Ll][Ss][Aa][Ss][Ss]\.[Ee][Xx][Ee])/))'
-      pivot_on: [host]
-      window: 1h
+  # Behaviour-targeted hunts the engine runs around the alert (not a sweep).
+  - name: Other coercion RPC pipes over IPC$ (EFSRPC/Spoolss/DFSNM/FSRVP)
+    query: data_win_system_eventID:"5145" AND data_win_eventdata_shareName:/.*[Ii][Pp][Cc]\$/ AND (data_win_eventdata_relativeTargetName:/[Ee][Ff][Ss][Rr][Pp][Cc]/ OR data_win_eventdata_relativeTargetName:/[Ss][Pp][Oo][Oo][Ll][Ss][Ss]/ OR data_win_eventdata_relativeTargetName:/[Nn][Ee][Tt][Ll][Oo][Gg][Oo][Nn]/ OR data_win_eventdata_relativeTargetName:/[Ff][Ss][Rr][Vv][Pp][Ss][Ss]/ OR data_win_eventdata_relativeTargetName:/[Ss][Aa][Mm][Rr]/ OR data_win_eventdata_relativeTargetName:/[Ll][Ss][Aa][Rr][Pp][Cc]/ OR data_win_eventdata_relativeTargetName:/[Dd][Ff][Ss][Nn][Mm]/)
+    pivot_on:
+    - host
+    window: 2h
+  - name: Certificate issuance on CA (ESC8 relay payoff)
+    query: (data_win_system_eventID:"4886" OR data_win_system_eventID:"4887" OR data_win_system_eventID:"4898")
+    pivot_on:
+    - host
+    window: 4h
+  - name: NTLM network logons by machine accounts
+    query: data_win_system_eventID:"4624" AND data_win_eventdata_logonType:"3" AND data_win_eventdata_authenticationPackageName:"NTLM" AND data_win_eventdata_targetUserName:/.*\$/
+    pivot_on:
+    - host
+    - ip
+    window: 2h
+  - name: PKINIT certificate TGT requests and DCSync replication
+    query: (data_win_system_eventID:"4768" AND data_win_eventdata_preAuthType:"16") OR (data_win_system_eventID:"4662" AND data_win_eventdata_accessMask:/0[Xx]100/ AND data_win_eventdata_properties:/.*1131[Ff]6[Aa][Aa]-9[Cc]07-11[Dd]1-[Ff]79[Ff]-00[Cc]04[Ff][Cc]2[Dd][Cc][Dd]2.*/)
+    pivot_on:
+    - host
+    window: 4h
+  - name: Coercion/relay tooling execution (PetitPotam, Coercer, ntlmrelayx, Certipy)
+    query: data_win_system_eventID:"1" AND (data_win_eventdata_image:/.*(\\[Pp][Ee][Tt][Ii][Tt][Pp][Oo][Tt][Aa][Mm]|\\[Cc][Oo][Ee][Rr][Cc][Ee][Rr]|\\[Ee][Ff][Ss][Pp][Oo][Tt][Aa][Tt][Oo]|\\[Ss][Pp][Oo][Oo][Ll][Ss][Aa][Mm][Pp][Ll][Ee]|\\[Cc][Ee][Rr][Tt][Ii][Pp][Yy]).*/ OR data_win_eventdata_commandLine:/.*([Pp][Ee][Tt][Ii][Tt][Pp][Oo][Tt][Aa][Mm]|[Nn][Tt][Ll][Mm][Rr][Ee][Ll][Aa][Yy][Xx]|[Cc][Ee][Rr][Tt][Ss][Rr][Vv]).*/)
+    pivot_on:
+    - host
+    window: 2h

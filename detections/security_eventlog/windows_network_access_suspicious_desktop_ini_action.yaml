@@ -167,44 +167,60 @@ graylog:
   query: data_win_system_eventID:"5145" AND data_win_eventdata_objectType:/[Ff][Ii][Ll][Ee]/ AND data_win_eventdata_relativeTargetName:/.*\\[Dd][Ee][Ss][Kk][Tt][Oo][Pp]\.[Ii][Nn][Ii]/ AND (data_win_eventdata_accessList:/.*[Ww][Rr][Ii][Tt][Ee][Dd][Aa][Tt][Aa].*/ OR data_win_eventdata_accessList:/.*[Dd][Ee][Ll][Ee][Tt][Ee].*/ OR data_win_eventdata_accessList:/.*[Ww][Rr][Ii][Tt][Ee][Dd][Aa][Cc].*/ OR data_win_eventdata_accessList:/.*[Aa][Pp][Pp][Ee][Nn][Dd][Dd][Aa][Tt][Aa].*/ OR data_win_eventdata_accessList:/.*[Aa][Dd][Dd][Ss][Uu][Bb][Dd][Ii][Rr][Ee][Cc][Tt][Oo][Rr][Yy].*/)
 
 correlation:
-  # Authored by the correlation engine for review. Related CoPilot Searches to run
-  # around an alert from this rule, scoped to the same host/user/IP within the window.
+  # Authored per-rule (behaviour-researched) for the correlation engine. Related CoPilot
+  # Searches + telemetry pivots to run around an alert, scoped to its host/user/ip/domain.
   related_rules:
-    - id: 0255a820-e564-4e40-af2b-6ac61160335c
-      name: "A New Trust Was Created To A Domain"
-      reason: "next kill-chain tactic: Persistence"
-    - id: 35ba1d85-724d-42a3-889f-2e2362bcaf23
-      name: "AD Privileged Users or Groups Reconnaissance"
-      reason: "next kill-chain tactic: Discovery"
-    - id: 9eb99343-d336-4020-a3cd-67f3819e68ee
-      name: "Account Tampering - Suspicious Failed Logon Reasons"
-      reason: "next kill-chain tactic: Persistence"
-    - id: 17d619c1-e020-4347-957e-1d1207455c93
-      name: "Active Directory Replication from Non Machine Account"
-      reason: "next kill-chain tactic: Credential Access"
-    - id: 300bac00-e041-4ee2-9c36-e262656a6ecc
-      name: "Active Directory User Backdoors"
-      reason: "next kill-chain tactic: Persistence"
-    - id: 2632954e-db1c-49cb-9936-67d1ef1d17d2
-      name: "Addition of SID History to Active Directory Object"
-      reason: "next kill-chain tactic: Privilege Escalation"
+  - id: 81315b50-6b60-4d8f-9928-3466e1022515
+    name: Desktop.INI Created by Uncommon Process
+    reason: 'Host-side view of the same desktop.ini tampering: the process that locally drops desktop.ini is the writer behind the remote SMB write seen on the share server.'
+  - id: b210394c-ba12-4f89-9117-44a2464b9511
+    name: SMB Create Remote File Admin Share
+    reason: Same 5145 share-access telemetry; the actor writing desktop.ini over SMB often also plants files on admin shares for staging or lateral movement.
+  - id: 910ab938-668b-401b-b08c-b596e80fdca5
+    name: Transferring Files with Credential Data via Network Shares
+    reason: Remote desktop.ini writes are used to reach a user's NTLM hash via UNC icon paths; credential-bearing file transfers over shares show the harvest/exfil leg.
+  - id: 72124974-a68b-4366-b990-d30e0b2a190d
+    name: Metasploit SMB Authentication
+    reason: 'Precursor: the writer must authenticate to the share first; tool-driven SMB auth from the same source IP indicates an offensive framework behind the write.'
+  - id: 4aafb0fa-bff5-4b9d-b99e-8093e659c65f
+    name: Writing Local Admin Share
+    reason: 'Co-occurring: an attacker with share write access also drops payloads into admin shares on the same host.'
+  - id: 855bc8b5-2ae8-402e-a9ed-b889e6df1900
+    name: Copy From Or To Admin Share Or Sysvol Folder
+    reason: 'Same operator behaviour: copying files to/from admin shares or SYSVOL to stage tooling or poison logon-time content.'
+  - id: 1ce8c8a3-2723-48ed-8246-906ac91061a6
+    name: Possible PetitPotam Coerce Authentication Attempt
+    reason: 'Follow-on/related goal: desktop.ini with a UNC IconResource forces victims to authenticate to the attacker, the same NTLM-capture objective as coercion attacks.'
+  - id: d3abac66-f11c-4ed0-8acb-50cc29c97eed
+    name: NetNTLM Downgrade Attack
+    reason: 'Follow-on: once victims authenticate to an attacker-controlled path, NTLM downgrade is used to make captured hashes crackable.'
   window: 1h
   enrichment_searches:
-  # Rule-specific telemetry pivots the engine runs around an alert from this rule,
-  # scoped to the alert's host/user/IP within the window (behaviour-targeted, not a sweep).
-    - name: "Autostart persistence written on this host (Run keys, services, IFEO)"
-      query: '(data_win_system_eventID:"12" OR data_win_system_eventID:"13") AND (data_win_eventdata_targetObject:/.*[Cc][Uu][Rr][Rr][Ee][Nn][Tt][Vv][Ee][Rr][Ss][Ii][Oo][Nn]\\[Rr][Uu][Nn].*/ OR data_win_eventdata_targetObject:/.*[Cc][Uu][Rr][Rr][Ee][Nn][Tt][Vv][Ee][Rr][Ss][Ii][Oo][Nn]\\[Rr][Uu][Nn][Oo][Nn][Cc][Ee].*/ OR data_win_eventdata_targetObject:/.*[Cc][Uu][Rr][Rr][Ee][Nn][Tt][Cc][Oo][Nn][Tt][Rr][Oo][Ll][Ss][Ee][Tt]\\[Ss][Ee][Rr][Vv][Ii][Cc][Ee][Ss]\\.*/ OR data_win_eventdata_targetObject:/.*[Ii][Mm][Aa][Gg][Ee] [Ff][Ii][Ll][Ee] [Ee][Xx][Ee][Cc][Uu][Tt][Ii][Oo][Nn] [Oo][Pp][Tt][Ii][Oo][Nn][Ss]\\.*/ OR data_win_eventdata_targetObject:/.*[Ww][Ii][Nn][Ll][Oo][Gg][Oo][Nn]\\[Ss][Hh][Ee][Ll][Ll].*/ OR data_win_eventdata_targetObject:/.*[Ww][Ii][Nn][Ll][Oo][Gg][Oo][Nn]\\[Uu][Ss][Ee][Rr][Ii][Nn][Ii][Tt].*/ OR data_win_eventdata_targetObject:/.*[Cc][Uu][Rr][Rr][Ee][Nn][Tt][Vv][Ee][Rr][Ss][Ii][Oo][Nn]\\[Ee][Xx][Pp][Ll][Oo][Rr][Ee][Rr]\\[Rr][Uu][Nn].*/ OR data_win_eventdata_targetObject:/.*[Pp][Oo][Ll][Ii][Cc][Ii][Ee][Ss]\\[Ee][Xx][Pp][Ll][Oo][Rr][Ee][Rr]\\[Rr][Uu][Nn].*/ OR data_win_eventdata_targetObject:/.*[Cc][Uu][Rr][Rr][Ee][Nn][Tt][Vv][Ee][Rr][Ss][Ii][Oo][Nn]\\[Ww][Ii][Nn][Dd][Oo][Ww][Ss]\\[Ll][Oo][Aa][Dd].*/)'
-      pivot_on: [host]
-      window: 2h
-    - name: "Memory/credential-dump creation & LSASS access on this host"
-      query: '((data_win_system_eventID:"1" AND data_win_eventdata_image:/.*(\\[Pp][Rr][Oo][Cc][Dd][Uu][Mm][Pp]\.[Ee][Xx][Ee]|\\[Pp][Rr][Oo][Cc][Dd][Uu][Mm][Pp]64\.[Ee][Xx][Ee]|\\[Ss][Qq][Ll][Dd][Uu][Mm][Pp][Ee][Rr]\.[Ee][Xx][Ee]|\\[Cc][Rr][Ee][Aa][Tt][Ee][Dd][Uu][Mm][Pp]\.[Ee][Xx][Ee]|\\[Rr][Dd][Rr][Ll][Ee][Aa][Kk][Dd][Ii][Aa][Gg]\.[Ee][Xx][Ee]|\\[Dd][Uu][Mm][Pp][Ee][Rr][Tt]\.[Ee][Xx][Ee]|\\[Nn][Aa][Nn][Oo][Dd][Uu][Mm][Pp]\.[Ee][Xx][Ee]|\\[Aa][Vv][Dd][Uu][Mm][Pp]\.[Ee][Xx][Ee])/) OR (data_win_system_eventID:"1" AND (data_win_eventdata_commandLine:/.*[Cc][Oo][Mm][Ss][Vv][Cc][Ss]\.[Dd][Ll][Ll].*/ OR data_win_eventdata_commandLine:/.*[Mm][Ii][Nn][Ii][Dd][Uu][Mm][Pp].*/ OR data_win_eventdata_commandLine:/.*[Dd][Uu][Mm][Pp][Ee][Rr][Tt].*/ OR data_win_eventdata_commandLine:/.*[Nn][Aa][Nn][Oo][Dd][Uu][Mm][Pp].*/ OR data_win_eventdata_commandLine:/.*[Ll][Ss][Aa][Ss][Ss].*/ OR data_win_eventdata_commandLine:/.*[Ss][Ee][Kk][Uu][Rr][Ll][Ss][Aa].*/ OR data_win_eventdata_commandLine:/.*[Nn][Tt][Dd][Ss]\.[Dd][Ii][Tt].*/ OR data_win_eventdata_commandLine:/.*[Nn][Tt][Dd][Ss][Uu][Tt][Ii][Ll].*/)) OR (data_win_system_eventID:"10" AND data_win_eventdata_targetImage:/.*(\\[Ll][Ss][Aa][Ss][Ss]\.[Ee][Xx][Ee])/))'
-      pivot_on: [host]
-      window: 1h
-    - name: "This account's logon activity across hosts"
-      query: '(data_win_system_eventID:"4624" OR data_win_system_eventID:"4625")'
-      pivot_on: [user]
-      window: 6h
-    - name: "Account / group / privilege changes involving this account"
-      query: '(data_win_system_eventID:"4720" OR data_win_system_eventID:"4722" OR data_win_system_eventID:"4724" OR data_win_system_eventID:"4728" OR data_win_system_eventID:"4732" OR data_win_system_eventID:"4756" OR data_win_system_eventID:"4672")'
-      pivot_on: [user]
-      window: 6h
+  # Behaviour-targeted hunts the engine runs around the alert (not a sweep).
+  - name: Other lure files written to shares (desktop.ini, .scf, .lnk, .url, .library-ms)
+    query: data_win_system_eventID:"5145" AND data_win_eventdata_relativeTargetName:/.*\.([Ss][Cc][Ff]|[Ll][Nn][Kk]|[Uu][Rr][Ll]|[Ll][Ii][Bb][Rr][Aa][Rr][Yy]-[Mm][Ss]|[Ii][Nn][Ii])/ AND (data_win_eventdata_accessList:*WriteData* OR data_win_eventdata_accessList:*AppendData*)
+    pivot_on:
+    - host
+    window: 4h
+  - name: Admin share (C$/ADMIN$/IPC$) access from the same source
+    query: data_win_system_eventID:"5145" AND (data_win_eventdata_shareName:*C$ OR data_win_eventdata_shareName:*ADMIN$ OR data_win_eventdata_shareName:*IPC$)
+    pivot_on:
+    - host
+    - ip
+    window: 2h
+  - name: NTLM network logons by this account/source
+    query: data_win_system_eventID:"4624" AND data_win_eventdata_logonType:"3" AND data_win_eventdata_authenticationPackageName:NTLM
+    pivot_on:
+    - user
+    - ip
+    window: 6h
+  - name: Outbound SMB connections from user-space processes
+    query: data_win_system_eventID:"3" AND data_win_eventdata_destinationPort:"445" AND NOT data_win_eventdata_image:/.*\\[Ss][Yy][Ss][Tt][Ee][Mm]/
+    pivot_on:
+    - host
+    window: 2h
+  - name: Remote execution after share write (services/wmiprvse spawning shells)
+    query: data_win_system_eventID:"1" AND data_win_eventdata_parentImage:/.*\\([Ss][Ee][Rr][Vv][Ii][Cc][Ee][Ss]|[Ww][Mm][Ii][Pp][Rr][Vv][Ss][Ee]|[Ww][Mm][Ii][Pp][Rr][Vv][Ss][Ee])\.[Ee][Xx][Ee]/ AND data_win_eventdata_image:/.*\\([Cc][Mm][Dd]|[Pp][Oo][Ww][Ee][Rr][Ss][Hh][Ee][Ll][Ll]|[Pp][Ww][Ss][Hh])\.[Ee][Xx][Ee]/
+    pivot_on:
+    - host
+    window: 2h

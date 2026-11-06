@@ -157,32 +157,58 @@ graylog:
   query: (data_win_system_eventID:"4656" OR data_win_system_eventID:"4663") AND data_win_eventdata_objectType:/[Kk][Ee][Yy]/ AND (data_win_eventdata_objectName:/.*[Ll][Ss][Aa]\\[Jj][Dd]/ OR data_win_eventdata_objectName:/.*[Ll][Ss][Aa]\\[Gg][Bb][Gg]/ OR data_win_eventdata_objectName:/.*[Ll][Ss][Aa]\\[Ss][Kk][Ee][Ww]1/ OR data_win_eventdata_objectName:/.*[Ll][Ss][Aa]\\[Dd][Aa][Tt][Aa]/)
 
 correlation:
-  # Authored by the correlation engine for review. Related CoPilot Searches to run
-  # around an alert from this rule, scoped to the same host/user/IP within the window.
+  # Authored per-rule (behaviour-researched) for the correlation engine. Related CoPilot
+  # Searches + telemetry pivots to run around an alert, scoped to its host/user/ip/domain.
   related_rules:
-    - id: 35ba1d85-724d-42a3-889f-2e2362bcaf23
-      name: "AD Privileged Users or Groups Reconnaissance"
-      reason: "next kill-chain tactic: Discovery"
-    - id: 87261fb2-69d0-42fe-b9de-88c6b5f65a43
-      name: "Atera Agent Installation"
-      reason: "next kill-chain tactic: Command and Control"
+  - id: fd877b94-9bb5-4191-bb25-d79cbd93c167
+    name: Dumping of Sensitive Hives Via Reg.EXE
+    reason: Reading the LSA JD/GBG/Skew1/Data keys is how the boot key is derived to decrypt SAM/SECURITY hives; reg save of those hives is the matching local acquisition step
+  - id: 4e87b8e2-2ee9-4b2a-a715-4727d297ece0
+    name: Potential SAM Database Dump
+    reason: SysKey access is needed to decrypt an exported SAM; a SAM/SYSTEM hive file written to disk confirms the offline credential-extraction workflow
+  - id: 252902e3-5830-4cf6-bf21-c22083dfd5cf
+    name: Possible Impacket SecretDump Remote Activity
+    reason: secretsdump remotely reads the same LSA boot-key registry values via the remote registry service; this is the remote variant of the same behaviour
+  - id: 6e2a900a-ced9-4e4a-a9c2-13e706f9518a
+    name: HackTool - Potential Remote Credential Dumping Activity Via CrackMapExec Or Impacket-Secretsdump
+    reason: Follow-on file artifacts of remote SAM/LSA secret dumping that begins with boot key (SysKey) reads
+  - id: 6ea858a8-ba71-4a12-b2cc-5d83312404c7
+    name: HackTool - Typical HiveNightmare SAM File Export
+    reason: Alternative SAM/SYSTEM acquisition path whose output needs the SysKey for decryption
+  - id: d372f928-ce4f-11eb-a762-acde48001122
+    name: Esentutl SAM Copy
+    reason: Living-off-the-land copy of locked SAM hive, a sibling credential-hive acquisition step to the boot key read
+  - id: a642964e-bead-4bed-8910-1bb4d63e3b4d
+    name: HackTool - Mimikatz Execution
+    reason: lsadump::sam/secrets in Mimikatz reads these LSA keys to compute the SysKey, the likely tool behind the registry access
+  - id: 611eab06-a145-4dfa-a295-3ccc5c20f59a
+    name: Mimikatz DC Sync
+    reason: On a domain controller, local SysKey/secrets access is commonly followed by DCSync to obtain domain-wide hashes
   window: 1h
   enrichment_searches:
-  # Rule-specific telemetry pivots the engine runs around an alert from this rule,
-  # scoped to the alert's host/user/IP within the window (behaviour-targeted, not a sweep).
-    - name: "Remote-execution / lateral-movement tooling on this host"
-      query: '(data_win_system_eventID:"1" AND data_win_eventdata_image:/.*(\\[Pp][Ss][Ee][Xx][Ee][Cc]\.[Ee][Xx][Ee]|\\[Pp][Ss][Ee][Xx][Ee][Ss][Vv][Cc]\.[Ee][Xx][Ee]|\\[Pp][Aa][Ee][Xx][Ee][Cc]\.[Ee][Xx][Ee]|\\[Ww][Ii][Nn][Rr][Ss]\.[Ee][Xx][Ee]|\\[Mm][Ss][Tt][Ss][Cc]\.[Ee][Xx][Ee]|\\[Ww][Mm][Ii][Cc]\.[Ee][Xx][Ee])/) OR (data_win_system_eventID:"1" AND data_win_eventdata_image:/.*(\\[Pp][Oo][Ww][Ee][Rr][Ss][Hh][Ee][Ll][Ll]\.[Ee][Xx][Ee]|\\[Pp][Ww][Ss][Hh]\.[Ee][Xx][Ee])/ AND (data_win_eventdata_commandLine:/.*[Ii][Nn][Vv][Oo][Kk][Ee]-[Cc][Oo][Mm][Mm][Aa][Nn][Dd].*/ OR data_win_eventdata_commandLine:/.*[Nn][Ee][Ww]-[Pp][Ss][Ss][Ee][Ss][Ss][Ii][Oo][Nn].*/ OR data_win_eventdata_commandLine:/.*[Ee][Nn][Tt][Ee][Rr]-[Pp][Ss][Ss][Ee][Ss][Ss][Ii][Oo][Nn].*/ OR data_win_eventdata_commandLine:/.*-[Cc][Oo][Mm][Pp][Uu][Tt][Ee][Rr][Nn][Aa][Mm][Ee].*/))'
-      pivot_on: [host]
-      window: 2h
-    - name: "This account's logon activity across hosts"
-      query: '(data_win_system_eventID:"4624" OR data_win_system_eventID:"4625")'
-      pivot_on: [user]
-      window: 6h
-    - name: "Account / group / privilege changes involving this account"
-      query: '(data_win_system_eventID:"4720" OR data_win_system_eventID:"4722" OR data_win_system_eventID:"4724" OR data_win_system_eventID:"4728" OR data_win_system_eventID:"4732" OR data_win_system_eventID:"4756" OR data_win_system_eventID:"4672")'
-      pivot_on: [user]
-      window: 6h
-    - name: "Host / domain reconnaissance commands on this host"
-      query: 'data_win_system_eventID:"1" AND data_win_eventdata_image:/.*(\\[Ww][Hh][Oo][Aa][Mm][Ii]\.[Ee][Xx][Ee]|\\[Nn][Ee][Tt]\.[Ee][Xx][Ee]|\\[Nn][Ee][Tt]1\.[Ee][Xx][Ee]|\\[Nn][Ll][Tt][Ee][Ss][Tt]\.[Ee][Xx][Ee]|\\[Ss][Yy][Ss][Tt][Ee][Mm][Ii][Nn][Ff][Oo]\.[Ee][Xx][Ee]|\\[Ii][Pp][Cc][Oo][Nn][Ff][Ii][Gg]\.[Ee][Xx][Ee]|\\[Aa][Rr][Pp]\.[Ee][Xx][Ee]|\\[Rr][Oo][Uu][Tt][Ee]\.[Ee][Xx][Ee]|\\[Tt][Aa][Ss][Kk][Ll][Ii][Ss][Tt]\.[Ee][Xx][Ee]|\\[Qq][Uu][Ss][Ee][Rr]\.[Ee][Xx][Ee]|\\[Qq][Ww][Ii][Nn][Ss][Tt][Aa]\.[Ee][Xx][Ee]|\\[Dd][Ss][Qq][Uu][Ee][Rr][Yy]\.[Ee][Xx][Ee]|\\[Nn][Bb][Tt][Ss][Tt][Aa][Tt]\.[Ee][Xx][Ee]|\\[Hh][Oo][Ss][Tt][Nn][Aa][Mm][Ee]\.[Ee][Xx][Ee]|\\[Nn][Ee][Tt][Ss][Tt][Aa][Tt]\.[Ee][Xx][Ee]|\\[Rr][Ee][Gg]\.[Ee][Xx][Ee])/'
-      pivot_on: [host]
-      window: 1h
+  # Behaviour-targeted hunts the engine runs around the alert (not a sweep).
+  - name: Registry hive export (SAM/SYSTEM/SECURITY) via reg/esentutl/ntdsutil
+    query: data_win_system_eventID:"1" AND ((data_win_eventdata_image:/.*\\[Rr][Ee][Gg]\.[Ee][Xx][Ee]/ AND data_win_eventdata_commandLine:/.*([Ss][Aa][Vv][Ee]|[Ee][Xx][Pp][Oo][Rr][Tt]).*([Hh][Kk][Ll][Mm]\\|[Ss][Aa][Mm]|[Ss][Yy][Ss][Tt][Ee][Mm]|[Ss][Ee][Cc][Uu][Rr][Ii][Tt][Yy]).*/) OR (data_win_eventdata_image:/.*\\[Ee][Ss][Ee][Nn][Tt][Uu][Tt][Ll]\.[Ee][Xx][Ee]/ AND data_win_eventdata_commandLine:/.*([Ss][Aa][Mm]|[Vv][Ss][Ss]).*/) OR (data_win_eventdata_image:/.*\\[Nn][Tt][Dd][Ss][Uu][Tt][Ii][Ll]\.[Ee][Xx][Ee]/ AND data_win_eventdata_commandLine:/.*[Ii][Ff][Mm].*/))
+    pivot_on:
+    - host
+    window: 1h
+  - name: Credential hive or dump files written to disk
+    query: data_win_system_eventID:"11" AND (data_win_eventdata_targetFilename:/.*\\([Ss][Aa][Mm]|[Ss][Ee][Cc][Uu][Rr][Ii][Tt][Yy]|[Ss][Yy][Ss][Tt][Ee][Mm])(\.[Ss][Aa][Vv][Ee]|\.[Bb][Aa][Kk]|\.[Hh][Ii][Vv][Ee])?/ OR data_win_eventdata_targetFilename:*ntds.dit* OR data_win_eventdata_targetFilename:*.dmp)
+    pivot_on:
+    - host
+    window: 2h
+  - name: Credential dumping tools and LSASS access
+    query: (data_win_system_eventID:"10" AND data_win_eventdata_targetImage:/.*\\[Ll][Ss][Aa][Ss][Ss]\.[Ee][Xx][Ee]/) OR (data_win_system_eventID:"1" AND (data_win_eventdata_commandLine:*sekurlsa* OR data_win_eventdata_commandLine:*lsadump* OR data_win_eventdata_commandLine:*secretsdump* OR data_win_eventdata_commandLine:*procdump*))
+    pivot_on:
+    - host
+    window: 2h
+  - name: Remote registry / admin share access from another host (remote secretsdump)
+    query: data_win_system_eventID:"5145" AND (data_win_eventdata_relativeTargetName:*winreg* OR data_win_eventdata_relativeTargetName:*svcctl* OR data_win_eventdata_shareName:*ADMIN$* OR data_win_eventdata_shareName:*C$*)
+    pivot_on:
+    - host
+    window: 1h
+  - name: Network logons by this account (credential reuse after dumping)
+    query: data_win_system_eventID:"4624" AND (data_win_eventdata_logonType:"3" OR data_win_eventdata_logonType:"9" OR data_win_eventdata_logonType:"10")
+    pivot_on:
+    - user
+    window: 6h

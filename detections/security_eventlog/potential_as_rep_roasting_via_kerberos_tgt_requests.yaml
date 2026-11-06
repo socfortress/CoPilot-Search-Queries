@@ -144,19 +144,58 @@ graylog:
   query: data_win_system_eventID:"4768" AND data_win_eventdata_ticketEncryptionType:/0[Xx]17/ AND data_win_eventdata_serviceName:/[Kk][Rr][Bb][Tt][Gg][Tt]/ AND data_win_eventdata_preAuthType:"0"
 
 correlation:
-  # Authored by the correlation engine for review.
+  # Authored per-rule (behaviour-researched) for the correlation engine. Related CoPilot
+  # Searches + telemetry pivots to run around an alert, scoped to its host/user/ip/domain.
+  related_rules:
+  - id: 59b51620-94c9-11ec-b3d5-acde48001122
+    name: Kerberos Pre-Authentication Flag Disabled with PowerShell
+    reason: 'Precursor/enabler: an attacker (or insider) setting DONT_REQ_PREAUTH on an account is what makes it AS-REP roastable in the first place.'
+  - id: 114c6bfe-9406-11ec-bcce-acde48001122
+    name: Disabled Kerberos Pre-Authentication Discovery With Get-ADUser
+    reason: 'Precursor: LDAP enumeration of accounts with DoesNotRequirePreAuth builds the target list whose AS-REPs are then requested (4768 preAuth 0).'
+  - id: b0b34e2c-90de-11ec-baeb-acde48001122
+    name: Disabled Kerberos Pre-Authentication Discovery With PowerView
+    reason: 'Precursor: PowerView -PreauthNotRequired discovery of roastable accounts immediately before the RC4 AS-REP requests.'
+  - id: f376c8a7-a2d0-4ddc-aa0c-16c17236d962
+    name: HackTool - Bloodhound/Sharphound Execution
+    reason: 'Co-occurring AD reconnaissance: the same operator usually maps the domain with SharpHound before or alongside roasting.'
+  - id: caa9a802-8bd8-4b9e-a5cd-4d6221670219
+    name: Suspicious Kerberos Ticket Request via CLI
+    reason: Process-side view of Kerberos ticket abuse tooling (Rubeus asreproast) that generates the 4768 events on the DC.
+  - id: 12e6d621-194f-4f59-90cc-1959e21e69f7
+    name: Register new Logon Process by Rubeus
+    reason: Rubeus on the source host registers a logon process; confirms the roasting tool origin of the TGT requests.
+  - id: d04ae2b8-ad54-4de0-bd87-4bc1da66aa59
+    name: Kerberoasting Activity - Initial Query
+    reason: Sibling offline-cracking technique (4769 RC4 service tickets); attackers commonly run both AS-REP roasting and Kerberoasting in one pass.
+  - id: 496a0e47-0a33-4dca-b009-9e6ca3591f39
+    name: Suspicious Kerberos RC4 Ticket Encryption
+    reason: Same RC4 downgrade signal on service tickets (4769 0x17); co-occurs when the attacker pivots from AS-REP to TGS roasting.
+  window: 6h
   enrichment_searches:
-  # Rule-specific telemetry pivots the engine runs around an alert from this rule,
-  # scoped to the alert's host/user/IP within the window (behaviour-targeted, not a sweep).
-    - name: "This account's logon activity across hosts"
-      query: '(data_win_system_eventID:"4624" OR data_win_system_eventID:"4625")'
-      pivot_on: [user]
-      window: 6h
-    - name: "Account / group / privilege changes involving this account"
-      query: '(data_win_system_eventID:"4720" OR data_win_system_eventID:"4722" OR data_win_system_eventID:"4724" OR data_win_system_eventID:"4728" OR data_win_system_eventID:"4732" OR data_win_system_eventID:"4756" OR data_win_system_eventID:"4672")'
-      pivot_on: [user]
-      window: 6h
-    - name: "Memory/credential-dump creation & LSASS access on this host"
-      query: '((data_win_system_eventID:"1" AND data_win_eventdata_image:/.*(\\[Pp][Rr][Oo][Cc][Dd][Uu][Mm][Pp]\.[Ee][Xx][Ee]|\\[Pp][Rr][Oo][Cc][Dd][Uu][Mm][Pp]64\.[Ee][Xx][Ee]|\\[Ss][Qq][Ll][Dd][Uu][Mm][Pp][Ee][Rr]\.[Ee][Xx][Ee]|\\[Cc][Rr][Ee][Aa][Tt][Ee][Dd][Uu][Mm][Pp]\.[Ee][Xx][Ee]|\\[Rr][Dd][Rr][Ll][Ee][Aa][Kk][Dd][Ii][Aa][Gg]\.[Ee][Xx][Ee]|\\[Dd][Uu][Mm][Pp][Ee][Rr][Tt]\.[Ee][Xx][Ee]|\\[Nn][Aa][Nn][Oo][Dd][Uu][Mm][Pp]\.[Ee][Xx][Ee]|\\[Aa][Vv][Dd][Uu][Mm][Pp]\.[Ee][Xx][Ee])/) OR (data_win_system_eventID:"1" AND (data_win_eventdata_commandLine:/.*[Cc][Oo][Mm][Ss][Vv][Cc][Ss]\.[Dd][Ll][Ll].*/ OR data_win_eventdata_commandLine:/.*[Mm][Ii][Nn][Ii][Dd][Uu][Mm][Pp].*/ OR data_win_eventdata_commandLine:/.*[Dd][Uu][Mm][Pp][Ee][Rr][Tt].*/ OR data_win_eventdata_commandLine:/.*[Nn][Aa][Nn][Oo][Dd][Uu][Mm][Pp].*/ OR data_win_eventdata_commandLine:/.*[Ll][Ss][Aa][Ss][Ss].*/ OR data_win_eventdata_commandLine:/.*[Ss][Ee][Kk][Uu][Rr][Ll][Ss][Aa].*/ OR data_win_eventdata_commandLine:/.*[Nn][Tt][Dd][Ss]\.[Dd][Ii][Tt].*/ OR data_win_eventdata_commandLine:/.*[Nn][Tt][Dd][Ss][Uu][Tt][Ii][Ll].*/)) OR (data_win_system_eventID:"10" AND data_win_eventdata_targetImage:/.*(\\[Ll][Ss][Aa][Ss][Ss]\.[Ee][Xx][Ee])/))'
-      pivot_on: [host]
-      window: 1h
+  # Behaviour-targeted hunts the engine runs around the alert (not a sweep).
+  - name: 'Kerberos TGT/service ticket requests from this source: RC4 and pre-auth failures'
+    query: (data_win_system_eventID:"4768" OR data_win_system_eventID:"4769" OR data_win_system_eventID:"4771") AND (data_win_eventdata_ticketEncryptionType:/0[Xx]17/ OR data_win_eventdata_preAuthType:"0" OR data_win_eventdata_status:/0[Xx]18/)
+    pivot_on:
+    - ip
+    window: 6h
+  - name: Same source requesting AS-REPs for many different accounts (roasting sweep)
+    query: data_win_system_eventID:"4768" AND data_win_eventdata_preAuthType:"0" AND data_win_eventdata_serviceName:/[Kk][Rr][Bb][Tt][Gg][Tt]/
+    pivot_on:
+    - ip
+    window: 2h
+  - name: Roasting tooling and AD recon commands on the source host
+    query: data_win_system_eventID:"1" AND (data_win_eventdata_commandLine:/.*[Aa][Ss][Rr][Ee][Pp][Rr][Oo][Aa][Ss][Tt].*/ OR data_win_eventdata_commandLine:/.*[Rr][Uu][Bb][Ee][Uu][Ss].*/ OR data_win_eventdata_commandLine:/.*[Gg][Ee][Tt][Nn][Pp][Uu][Ss][Ee][Rr][Ss].*/ OR data_win_eventdata_commandLine:/.*[Ss][Hh][Aa][Rr][Pp][Hh][Oo][Uu][Nn][Dd].*/ OR data_win_eventdata_commandLine:/.*[Dd][Oo][Ee][Ss][Nn][Oo][Tt][Rr][Ee][Qq][Uu][Ii][Rr][Ee][Pp][Rr][Ee][Aa][Uu][Tt][Hh].*/ OR data_win_eventdata_commandLine:/.*[Pp][Rr][Ee][Aa][Uu][Tt][Hh][Nn][Oo][Tt][Rr][Ee][Qq][Uu][Ii][Rr][Ee][Dd].*/)
+    pivot_on:
+    - host
+    window: 4h
+  - name: PowerShell script blocks enumerating or modifying pre-auth settings
+    query: data_win_system_eventID:"4104" AND (data_win_eventdata_scriptBlockText:/.*[Dd][Oo][Ee][Ss][Nn][Oo][Tt][Rr][Ee][Qq][Uu][Ii][Rr][Ee][Pp][Rr][Ee][Aa][Uu][Tt][Hh].*/ OR data_win_eventdata_scriptBlockText:/.*[Pp][Rr][Ee][Aa][Uu][Tt][Hh][Nn][Oo][Tt][Rr][Ee][Qq][Uu][Ii][Rr][Ee][Dd].*/ OR data_win_eventdata_scriptBlockText:/.*[Gg][Ee][Tt]-[Dd][Oo][Mm][Aa][Ii][Nn][Uu][Ss][Ee][Rr].*/ OR data_win_eventdata_scriptBlockText:/.*[Dd][Oo][Nn][Tt]_[Rr][Ee][Qq]_[Pp][Rr][Ee][Aa][Uu][Tt][Hh].*/)
+    pivot_on:
+    - host
+    window: 6h
+  - name: Logons and account changes for the roasted account (cracked password reuse)
+    query: data_win_system_eventID:"4624" OR data_win_system_eventID:"4625" OR data_win_system_eventID:"4648" OR data_win_system_eventID:"4738" OR data_win_system_eventID:"4724"
+    pivot_on:
+    - user
+    window: 24h

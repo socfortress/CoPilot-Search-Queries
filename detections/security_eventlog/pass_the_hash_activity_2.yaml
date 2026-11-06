@@ -168,32 +168,59 @@ graylog:
   query: ((data_win_system_eventID:"4624" AND data_win_eventdata_subjectUserSid:/[Ss]-1-0-0/ AND data_win_eventdata_logonType:"3" AND data_win_eventdata_logonProcessName:/[Nn][Tt][Ll][Mm][Ss][Ss][Pp]/ AND data_win_eventdata_keyLength:"0") OR (data_win_system_eventID:"4624" AND data_win_eventdata_logonType:"9" AND data_win_eventdata_logonProcessName:/[Ss][Ee][Cc][Ll][Oo][Gg][Oo]/)) AND _exists_:data_win_eventdata_targetUserName AND NOT (data_win_eventdata_targetUserName:/[Aa][Nn][Oo][Nn][Yy][Mm][Oo][Uu][Ss] [Ll][Oo][Gg][Oo][Nn]/)
 
 correlation:
-  # Authored by the correlation engine for review. Related CoPilot Searches to run
-  # around an alert from this rule, scoped to the same host/user/IP within the window.
+  # Authored per-rule (behaviour-researched) for the correlation engine. Related CoPilot
+  # Searches + telemetry pivots to run around an alert, scoped to its host/user/ip/domain.
   related_rules:
-    - id: 87261fb2-69d0-42fe-b9de-88c6b5f65a43
-      name: "Atera Agent Installation"
-      reason: "next kill-chain tactic: Command and Control"
-    - id: 48d91a3a-2363-43ba-a456-ca71ac3da5c2
-      name: "Audit CVE Event"
-      reason: "next kill-chain tactic: Lateral Movement"
+  - id: a642964e-bead-4bed-8910-1bb4d63e3b4d
+    name: HackTool - Mimikatz Execution
+    reason: sekurlsa::pth spawns a process via seclogo (logon type 9), the exact second branch of this rule; Mimikatz on the source host is the hash-injection precursor
+  - id: 7aa7009a-28b9-4344-8c1f-159489a390df
+    name: HackTool - Windows Credential Editor (WCE) Execution
+    reason: WCE injects NTLM hashes into a logon session, producing the same type 9 / seclogo logon
+  - id: 8943b567-f14d-4ee8-a0bb-2121d4ce3184
+    name: Dump LSASS via comsvcs DLL
+    reason: The hash being replayed must first be harvested from LSASS on a previously compromised host
+  - id: fdfcbd78-48f1-4a4b-90ac-d82241e368c5
+    name: PsExec Service Execution
+    reason: PtH network logons (type 3, NtLmSsp) are commonly followed by PsExec service creation on the target to get execution
+  - id: 10c14723-61c7-4c75-92ca-9af245723ad2
+    name: HackTool - Potential Impacket Lateral Movement Activity
+    reason: Impacket psexec/wmiexec/smbexec authenticate with NTLM hashes producing keyLength 0 type 3 logons, then run remote commands
+  - id: 692f0bec-83ba-4d04-af7e-e884a96059b6
+    name: Potential WMI Lateral Movement WmiPrvSE Spawned PowerShell
+    reason: After hash-authenticated logon, WMI remote execution is a follow-on lateral movement path on the target
+  - id: 7773b877-5abb-4a3e-b9c9-fd0369b59b00
+    name: WMIC Remote Command Execution
+    reason: Hash-authenticated access to a remote host is used to run commands via wmic /node, the common next step
+  - id: 3abd6094-7027-475f-9630-8ab9be7b9725
+    name: Windows Admin Share Mount Via Net.EXE
+    reason: Pass-the-hash grants SMB access, so attackers mount C$/ADMIN$ shares to stage tools right after the logon
   window: 1h
   enrichment_searches:
-  # Rule-specific telemetry pivots the engine runs around an alert from this rule,
-  # scoped to the alert's host/user/IP within the window (behaviour-targeted, not a sweep).
-    - name: "Kerberos ticket / logon activity for this account"
-      query: '(((data_win_system_eventID:"4768" OR data_win_system_eventID:"4769" OR data_win_system_eventID:"4771")) OR ((data_win_system_eventID:"4624" OR data_win_system_eventID:"4625")))'
-      pivot_on: [user]
-      window: 6h
-    - name: "Memory/credential-dump creation & LSASS access on this host"
-      query: '((data_win_system_eventID:"1" AND data_win_eventdata_image:/.*(\\[Pp][Rr][Oo][Cc][Dd][Uu][Mm][Pp]\.[Ee][Xx][Ee]|\\[Pp][Rr][Oo][Cc][Dd][Uu][Mm][Pp]64\.[Ee][Xx][Ee]|\\[Ss][Qq][Ll][Dd][Uu][Mm][Pp][Ee][Rr]\.[Ee][Xx][Ee]|\\[Cc][Rr][Ee][Aa][Tt][Ee][Dd][Uu][Mm][Pp]\.[Ee][Xx][Ee]|\\[Rr][Dd][Rr][Ll][Ee][Aa][Kk][Dd][Ii][Aa][Gg]\.[Ee][Xx][Ee]|\\[Dd][Uu][Mm][Pp][Ee][Rr][Tt]\.[Ee][Xx][Ee]|\\[Nn][Aa][Nn][Oo][Dd][Uu][Mm][Pp]\.[Ee][Xx][Ee]|\\[Aa][Vv][Dd][Uu][Mm][Pp]\.[Ee][Xx][Ee])/) OR (data_win_system_eventID:"1" AND (data_win_eventdata_commandLine:/.*[Cc][Oo][Mm][Ss][Vv][Cc][Ss]\.[Dd][Ll][Ll].*/ OR data_win_eventdata_commandLine:/.*[Mm][Ii][Nn][Ii][Dd][Uu][Mm][Pp].*/ OR data_win_eventdata_commandLine:/.*[Dd][Uu][Mm][Pp][Ee][Rr][Tt].*/ OR data_win_eventdata_commandLine:/.*[Nn][Aa][Nn][Oo][Dd][Uu][Mm][Pp].*/ OR data_win_eventdata_commandLine:/.*[Ll][Ss][Aa][Ss][Ss].*/ OR data_win_eventdata_commandLine:/.*[Ss][Ee][Kk][Uu][Rr][Ll][Ss][Aa].*/ OR data_win_eventdata_commandLine:/.*[Nn][Tt][Dd][Ss]\.[Dd][Ii][Tt].*/ OR data_win_eventdata_commandLine:/.*[Nn][Tt][Dd][Ss][Uu][Tt][Ii][Ll].*/)) OR (data_win_system_eventID:"10" AND data_win_eventdata_targetImage:/.*(\\[Ll][Ss][Aa][Ss][Ss]\.[Ee][Xx][Ee])/))'
-      pivot_on: [host]
-      window: 1h
-    - name: "This account's logon activity across hosts"
-      query: '(data_win_system_eventID:"4624" OR data_win_system_eventID:"4625")'
-      pivot_on: [user]
-      window: 6h
-    - name: "Account / group / privilege changes involving this account"
-      query: '(data_win_system_eventID:"4720" OR data_win_system_eventID:"4722" OR data_win_system_eventID:"4724" OR data_win_system_eventID:"4728" OR data_win_system_eventID:"4732" OR data_win_system_eventID:"4756" OR data_win_system_eventID:"4672")'
-      pivot_on: [user]
-      window: 6h
+  # Behaviour-targeted hunts the engine runs around the alert (not a sweep).
+  - name: Remote service installation (PsExec/smbexec style) on target
+    query: data_win_system_eventID:"7045" AND (data_win_eventdata_imagePath:*ADMIN$* OR data_win_eventdata_imagePath:/.*[Cc][Mm][Dd]\.[Ee][Xx][Ee].*/ OR data_win_eventdata_imagePath:/.*[Pp][Ss][Ee][Xx][Ee][Ss][Vv][Cc].*/ OR data_win_eventdata_imagePath:/.*[Pp]ower[Ss]hell.*/)
+    pivot_on:
+    - host
+    window: 1h
+  - name: Admin share access (C$/ADMIN$/IPC$) following the logon
+    query: data_win_system_eventID:"5140" AND (data_win_eventdata_shareName:*ADMIN$* OR data_win_eventdata_shareName:*C$* OR data_win_eventdata_shareName:*IPC$*)
+    pivot_on:
+    - host
+    - user
+    window: 1h
+  - name: Credential tooling / sekurlsa::pth and LSASS access
+    query: (data_win_system_eventID:"1" AND (data_win_eventdata_commandLine:/.*[Ss][Ee][Kk][Uu][Rr][Ll][Ss][Aa].*/ OR data_win_eventdata_commandLine:/.*[Mm][Ii][Mm][Ii][Kk][Aa][Tt][Zz].*/ OR data_win_eventdata_commandLine:/.*[Ww][Cc][Ee]\.[Ee][Xx][Ee].*/ OR data_win_eventdata_commandLine:/.*[Cc][Oo][Mm][Ss][Vv][Cc][Ss].*[Mm][Ii][Nn][Ii][Dd][Uu][Mm][Pp].*/)) OR (data_win_system_eventID:"10" AND data_win_eventdata_targetImage:/.*[Ll][Ss][Aa][Ss][Ss]\.[Ee][Xx][Ee]/)
+    pivot_on:
+    - host
+    window: 2h
+  - name: Remote execution children (WmiPrvSE/wsmprovhost/services) on target
+    query: data_win_system_eventID:"1" AND (data_win_eventdata_parentImage:/.*[Ww][Mm][Ii][Pp][Rr][Vv][Ss][Ee]\.[Ee][Xx][Ee]/ OR data_win_eventdata_parentImage:/.*[Ww][Ss][Mm][Pp][Rr][Oo][Vv][Hh][Oo][Ss][Tt]\.[Ee][Xx][Ee]/ OR data_win_eventdata_parentImage:/.*\\[Ss][Ee][Rr][Vv][Ii][Cc][Ee][Ss]\.[Ee][Xx][Ee]/ OR data_win_eventdata_parentImage:/.*[Pp][Ss][Ee][Xx][Ee][Ss][Vv][Cc].*/)
+    pivot_on:
+    - host
+    window: 1h
+  - name: Same account NTLM network logons / explicit-credential use across hosts
+    query: (data_win_system_eventID:"4624" AND data_win_eventdata_logonType:"3" AND data_win_eventdata_authenticationPackageName:/[Nn][Tt][Ll][Mm]/) OR data_win_system_eventID:"4648" OR data_win_system_eventID:"4672"
+    pivot_on:
+    - user
+    window: 6h

@@ -143,35 +143,58 @@ graylog:
   query: data_win_system_eventID:"4673" AND data_win_eventdata_service:/[Ll][Ss][Aa][Rr][Ee][Gg][Ii][Ss][Tt][Ee][Rr][Ll][Oo][Gg][Oo][Nn][Pp][Rr][Oo][Cc][Ee][Ss][Ss]\(\)/ AND data_win_system_keywords:/0[Xx]8010000000000000/
 
 correlation:
-  # Authored by the correlation engine for review. Related CoPilot Searches to run
-  # around an alert from this rule, scoped to the same host/user/IP within the window.
+  # Authored per-rule (behaviour-researched) for the correlation engine. Related CoPilot
+  # Searches + telemetry pivots to run around an alert, scoped to its host/user/ip/domain.
   related_rules:
-    - id: 35ba1d85-724d-42a3-889f-2e2362bcaf23
-      name: "AD Privileged Users or Groups Reconnaissance"
-      reason: "next kill-chain tactic: Discovery"
-    - id: 17d619c1-e020-4347-957e-1d1207455c93
-      name: "Active Directory Replication from Non Machine Account"
-      reason: "next kill-chain tactic: Credential Access"
-    - id: 87261fb2-69d0-42fe-b9de-88c6b5f65a43
-      name: "Atera Agent Installation"
-      reason: "next kill-chain tactic: Command and Control"
+  - id: 12e6d621-194f-4f59-90cc-1959e21e69f7
+    name: Register new Logon Process by Rubeus
+    reason: Same Rubeus LsaRegisterLogonProcess behaviour seen via 4611 logon-process registration; co-occurring confirmation that a tool obtained an LSA handle
+  - id: 7ec2c172-dceb-4c10-92c9-87c1881b7e18
+    name: HackTool - Rubeus Execution
+    reason: Process-creation evidence of the Rubeus binary or its verbs that would produce the LSA handle request
+  - id: 3245cd30-e015-40ff-a31d-5cadd5f377ec
+    name: HackTool - Rubeus Execution - ScriptBlock
+    reason: Rubeus loaded reflectively in PowerShell is a common way to call LsaRegisterLogonProcess without a file on disk
+  - id: d04ae2b8-ad54-4de0-bd87-4bc1da66aa59
+    name: Kerberoasting Activity - Initial Query
+    reason: 'Likely next step: Rubeus kerberoast requests service tickets (4769) after getting an LSA handle'
+  - id: 496a0e47-0a33-4dca-b009-9e6ca3591f39
+    name: Suspicious Kerberos RC4 Ticket Encryption
+    reason: Rubeus-requested tickets are often downgraded to RC4 for offline cracking; follow-on to the LSA handle
+  - id: f7644214-0eb0-4ace-9455-331ec4c09253
+    name: Kerberos Manipulation
+    reason: Kerberos failures and anomalies produced by ticket request/forging tooling running through the same LSA logon process
+  - id: 13bbd574-83ac-11ec-99d4-acde48001122
+    name: Mimikatz PassTheTicket CommandLine Parameters
+    reason: Ticket injection (ptt) with Rubeus or Mimikatz follows ticket extraction via the LSA handle
+  - id: fbf9e47f-e531-4fea-942d-5c95af7ed4d6
+    name: Windows PowerView Unconstrained Delegation Discovery
+    reason: The rule's reference is unconstrained-delegation abuse; delegation discovery precedes TGT capture with Rubeus monitor/dump
   window: 1h
   enrichment_searches:
-  # Rule-specific telemetry pivots the engine runs around an alert from this rule,
-  # scoped to the alert's host/user/IP within the window (behaviour-targeted, not a sweep).
-    - name: "Kerberos ticket requests for this account"
-      query: '(data_win_system_eventID:"4768" OR data_win_system_eventID:"4769" OR data_win_system_eventID:"4771")'
-      pivot_on: [user]
-      window: 6h
-    - name: "Remote-execution / lateral-movement tooling on this host"
-      query: '(data_win_system_eventID:"1" AND data_win_eventdata_image:/.*(\\[Pp][Ss][Ee][Xx][Ee][Cc]\.[Ee][Xx][Ee]|\\[Pp][Ss][Ee][Xx][Ee][Ss][Vv][Cc]\.[Ee][Xx][Ee]|\\[Pp][Aa][Ee][Xx][Ee][Cc]\.[Ee][Xx][Ee]|\\[Ww][Ii][Nn][Rr][Ss]\.[Ee][Xx][Ee]|\\[Mm][Ss][Tt][Ss][Cc]\.[Ee][Xx][Ee]|\\[Ww][Mm][Ii][Cc]\.[Ee][Xx][Ee])/) OR (data_win_system_eventID:"1" AND data_win_eventdata_image:/.*(\\[Pp][Oo][Ww][Ee][Rr][Ss][Hh][Ee][Ll][Ll]\.[Ee][Xx][Ee]|\\[Pp][Ww][Ss][Hh]\.[Ee][Xx][Ee])/ AND (data_win_eventdata_commandLine:/.*[Ii][Nn][Vv][Oo][Kk][Ee]-[Cc][Oo][Mm][Mm][Aa][Nn][Dd].*/ OR data_win_eventdata_commandLine:/.*[Nn][Ee][Ww]-[Pp][Ss][Ss][Ee][Ss][Ss][Ii][Oo][Nn].*/ OR data_win_eventdata_commandLine:/.*[Ee][Nn][Tt][Ee][Rr]-[Pp][Ss][Ss][Ee][Ss][Ss][Ii][Oo][Nn].*/ OR data_win_eventdata_commandLine:/.*-[Cc][Oo][Mm][Pp][Uu][Tt][Ee][Rr][Nn][Aa][Mm][Ee].*/))'
-      pivot_on: [host]
-      window: 2h
-    - name: "This account's logon activity across hosts"
-      query: '(data_win_system_eventID:"4624" OR data_win_system_eventID:"4625")'
-      pivot_on: [user]
-      window: 6h
-    - name: "Account / group / privilege changes involving this account"
-      query: '(data_win_system_eventID:"4720" OR data_win_system_eventID:"4722" OR data_win_system_eventID:"4724" OR data_win_system_eventID:"4728" OR data_win_system_eventID:"4732" OR data_win_system_eventID:"4756" OR data_win_system_eventID:"4672")'
-      pivot_on: [user]
-      window: 6h
+  # Behaviour-targeted hunts the engine runs around the alert (not a sweep).
+  - name: Rubeus verbs or Kerberos ticket tooling launched
+    query: data_win_system_eventID:"1" AND (data_win_eventdata_image:/.*[Rr][Uu][Bb][Ee][Uu][Ss].*/ OR data_win_eventdata_commandLine:/.*(asktgt|asktgs|kerberoast|asreproast|s4u|ptt|tgtdeleg|harvest|monitor|renew|dump).*[\/\-](ticket|service|user|rc4opsec|nowrap|outfile).*/)
+    pivot_on:
+    - host
+    window: 2h
+  - name: Reflective .NET / Rubeus loaded via PowerShell
+    query: data_win_system_eventID:"4104" AND (data_win_eventdata_scriptBlockText:*Rubeus* OR data_win_eventdata_scriptBlockText:*KerberosRequestorSecurityToken* OR data_win_eventdata_scriptBlockText:*LsaRegisterLogonProcess* OR data_win_eventdata_scriptBlockText:*LsaCallAuthenticationPackage*)
+    pivot_on:
+    - host
+    window: 2h
+  - name: Kerberos TGS requests with RC4 encryption
+    query: data_win_system_eventID:"4769" AND data_win_eventdata_ticketEncryptionType:/0[Xx]17/
+    pivot_on:
+    - user
+    window: 6h
+  - name: Direct Kerberos traffic from non-system process
+    query: data_win_system_eventID:"3" AND data_win_eventdata_destinationPort:"88" AND NOT data_win_eventdata_image:/.*[\\](lsass|svchost)\.[Ee][Xx][Ee]/
+    pivot_on:
+    - host
+    window: 2h
+  - name: Kerberos ticket files written to disk
+    query: data_win_system_eventID:"11" AND (data_win_eventdata_targetFilename:*.kirbi OR data_win_eventdata_targetFilename:*.ccache OR data_win_eventdata_targetFilename:/.*[Tt][Ii][Cc][Kk][Ee][Tt].*\.(txt|bin)/)
+    pivot_on:
+    - host
+    window: 4h

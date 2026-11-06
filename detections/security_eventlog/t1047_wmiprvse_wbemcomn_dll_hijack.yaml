@@ -145,41 +145,59 @@ graylog:
   query: data_win_system_eventID:"5145" AND data_win_eventdata_relativeTargetName:/.*\\[Ww][Bb][Ee][Mm]\\[Ww][Bb][Ee][Mm][Cc][Oo][Mm][Nn]\.[Dd][Ll][Ll]/ AND _exists_:data_win_eventdata_subjectUserName AND NOT (data_win_eventdata_subjectUserName:/.*\$/)
 
 correlation:
-  # Authored by the correlation engine for review. Related CoPilot Searches to run
-  # around an alert from this rule, scoped to the same host/user/IP within the window.
+  # Authored per-rule (behaviour-researched) for the correlation engine. Related CoPilot
+  # Searches + telemetry pivots to run around an alert, scoped to its host/user/ip/domain.
   related_rules:
-    - id: 0255a820-e564-4e40-af2b-6ac61160335c
-      name: "A New Trust Was Created To A Domain"
-      reason: "next kill-chain tactic: Persistence"
-    - id: 35ba1d85-724d-42a3-889f-2e2362bcaf23
-      name: "AD Privileged Users or Groups Reconnaissance"
-      reason: "next kill-chain tactic: Discovery"
-    - id: 9eb99343-d336-4020-a3cd-67f3819e68ee
-      name: "Account Tampering - Suspicious Failed Logon Reasons"
-      reason: "next kill-chain tactic: Persistence"
-    - id: 17d619c1-e020-4347-957e-1d1207455c93
-      name: "Active Directory Replication from Non Machine Account"
-      reason: "next kill-chain tactic: Credential Access"
-    - id: 300bac00-e041-4ee2-9c36-e262656a6ecc
-      name: "Active Directory User Backdoors"
-      reason: "next kill-chain tactic: Persistence"
-  window: 1h
+  - id: 7707a579-e0d8-4886-a853-ce47e4575aaa
+    name: Wmiprvse Wbemcomn DLL Hijack
+    reason: 'Host-side confirmation of the same attack: the planted wbemcomn.dll gets loaded by WmiPrvSE.exe when the attacker triggers a remote WMI call (Sysmon EID 7), proving the share write became code execution.'
+  - id: d21374ff-f574-44a7-9998-4a8c8bf33d7d
+    name: WmiPrvSE Spawned A Process
+    reason: 'Direct consequence: once the hijacked DLL or a WMI Win32_Process.Create call runs, children are spawned by WmiPrvSE.exe, typically under SYSTEM.'
+  - id: 8a582fe2-0882-4b89-a82a-da6b2dc32937
+    name: Suspicious WmiPrvSE Child Process
+    reason: 'Follow-on: the hijacked WmiPrvSE hosts attacker payloads, so cmd/powershell/rundll32 children of WmiPrvSE are the typical payload stage.'
+  - id: 692f0bec-83ba-4d04-af7e-e884a96059b6
+    name: Potential WMI Lateral Movement WmiPrvSE Spawned PowerShell
+    reason: 'Common post-exploitation payload: PowerShell launched by WmiPrvSE after remote WMI execution (wmiexec-style lateral movement).'
+  - id: d6e464e4-5c6a-474e-82d2-aed616a3a492
+    name: Impacket Lateral Movement WMIExec Commandline Parameters
+    reason: Impacket wmiexec produces SMB share activity followed by cmd.exe /Q /c with output redirected to an ADMIN$ file, a co-occurring toolkit signature for remote WMI lateral movement.
+  - id: 022eaba8-f0bf-4dd9-9217-4604b0bb3bb0
+    name: HackTool - Wmiexec Default Powershell Command
+    reason: Wmiexec-style tooling run through WmiPrvSE uses a characteristic default PowerShell command; confirms the remote WMI execution after the DLL drop.
+  - id: 24869767-8579-485d-9a4f-d9ddfd8f0cac
+    name: Process Execution via WMI
+    reason: Alternative remote execution path (Win32_Process.Create) the attacker uses to launch the process that triggers or follows the DLL hijack.
+  - id: 2f7979ae-f82b-45af-ac1d-2b10e93b0baa
+    name: Potential DCOM InternetExplorer.Application DLL Hijack
+    reason: 'Sibling technique: attacker plants a DLL over SMB and triggers it through remote DCOM/WMI; if both fire the actor is cycling through remote DLL hijack lateral movement methods.'
+  window: 2h
   enrichment_searches:
-  # Rule-specific telemetry pivots the engine runs around an alert from this rule,
-  # scoped to the alert's host/user/IP within the window (behaviour-targeted, not a sweep).
-    - name: "WMI process execution on this host"
-      query: '((data_win_system_eventID:"1" AND data_win_eventdata_image:/.*(\\[Ww][Mm][Ii][Cc]\.[Ee][Xx][Ee])/ AND (data_win_eventdata_commandLine:/.*[Pp][Rr][Oo][Cc][Ee][Ss][Ss] [Cc][Aa][Ll][Ll] [Cc][Rr][Ee][Aa][Tt][Ee].*/ OR data_win_eventdata_commandLine:/.*\/[Nn][Oo][Dd][Ee]:.*/)) OR (data_win_system_eventID:"1" AND data_win_eventdata_parentImage:/.*(\\[Ww][Mm][Ii][Pp][Rr][Vv][Ss][Ee]\.[Ee][Xx][Ee])/) OR (data_win_system_eventID:"1" AND data_win_eventdata_image:/.*(\\[Pp][Oo][Ww][Ee][Rr][Ss][Hh][Ee][Ll][Ll]\.[Ee][Xx][Ee]|\\[Pp][Ww][Ss][Hh]\.[Ee][Xx][Ee])/ AND (data_win_eventdata_commandLine:/.*[Ii][Nn][Vv][Oo][Kk][Ee]-[Ww][Mm][Ii][Mm][Ee][Tt][Hh][Oo][Dd].*/ OR data_win_eventdata_commandLine:/.*[Gg][Ee][Tt]-[Ww][Mm][Ii][Oo][Bb][Jj][Ee][Cc][Tt].*/ OR data_win_eventdata_commandLine:/.*[Ii][Nn][Vv][Oo][Kk][Ee]-[Cc][Ii][Mm][Mm][Ee][Tt][Hh][Oo][Dd].*/)))'
-      pivot_on: [host]
-      window: 2h
-    - name: "Remote-execution / lateral-movement tooling on this host"
-      query: '(data_win_system_eventID:"1" AND data_win_eventdata_image:/.*(\\[Pp][Ss][Ee][Xx][Ee][Cc]\.[Ee][Xx][Ee]|\\[Pp][Ss][Ee][Xx][Ee][Ss][Vv][Cc]\.[Ee][Xx][Ee]|\\[Pp][Aa][Ee][Xx][Ee][Cc]\.[Ee][Xx][Ee]|\\[Ww][Ii][Nn][Rr][Ss]\.[Ee][Xx][Ee]|\\[Mm][Ss][Tt][Ss][Cc]\.[Ee][Xx][Ee]|\\[Ww][Mm][Ii][Cc]\.[Ee][Xx][Ee])/) OR (data_win_system_eventID:"1" AND data_win_eventdata_image:/.*(\\[Pp][Oo][Ww][Ee][Rr][Ss][Hh][Ee][Ll][Ll]\.[Ee][Xx][Ee]|\\[Pp][Ww][Ss][Hh]\.[Ee][Xx][Ee])/ AND (data_win_eventdata_commandLine:/.*[Ii][Nn][Vv][Oo][Kk][Ee]-[Cc][Oo][Mm][Mm][Aa][Nn][Dd].*/ OR data_win_eventdata_commandLine:/.*[Nn][Ee][Ww]-[Pp][Ss][Ss][Ee][Ss][Ss][Ii][Oo][Nn].*/ OR data_win_eventdata_commandLine:/.*[Ee][Nn][Tt][Ee][Rr]-[Pp][Ss][Ss][Ee][Ss][Ss][Ii][Oo][Nn].*/ OR data_win_eventdata_commandLine:/.*-[Cc][Oo][Mm][Pp][Uu][Tt][Ee][Rr][Nn][Aa][Mm][Ee].*/))'
-      pivot_on: [host]
-      window: 2h
-    - name: "Memory/credential-dump creation & LSASS access on this host"
-      query: '((data_win_system_eventID:"1" AND data_win_eventdata_image:/.*(\\[Pp][Rr][Oo][Cc][Dd][Uu][Mm][Pp]\.[Ee][Xx][Ee]|\\[Pp][Rr][Oo][Cc][Dd][Uu][Mm][Pp]64\.[Ee][Xx][Ee]|\\[Ss][Qq][Ll][Dd][Uu][Mm][Pp][Ee][Rr]\.[Ee][Xx][Ee]|\\[Cc][Rr][Ee][Aa][Tt][Ee][Dd][Uu][Mm][Pp]\.[Ee][Xx][Ee]|\\[Rr][Dd][Rr][Ll][Ee][Aa][Kk][Dd][Ii][Aa][Gg]\.[Ee][Xx][Ee]|\\[Dd][Uu][Mm][Pp][Ee][Rr][Tt]\.[Ee][Xx][Ee]|\\[Nn][Aa][Nn][Oo][Dd][Uu][Mm][Pp]\.[Ee][Xx][Ee]|\\[Aa][Vv][Dd][Uu][Mm][Pp]\.[Ee][Xx][Ee])/) OR (data_win_system_eventID:"1" AND (data_win_eventdata_commandLine:/.*[Cc][Oo][Mm][Ss][Vv][Cc][Ss]\.[Dd][Ll][Ll].*/ OR data_win_eventdata_commandLine:/.*[Mm][Ii][Nn][Ii][Dd][Uu][Mm][Pp].*/ OR data_win_eventdata_commandLine:/.*[Dd][Uu][Mm][Pp][Ee][Rr][Tt].*/ OR data_win_eventdata_commandLine:/.*[Nn][Aa][Nn][Oo][Dd][Uu][Mm][Pp].*/ OR data_win_eventdata_commandLine:/.*[Ll][Ss][Aa][Ss][Ss].*/ OR data_win_eventdata_commandLine:/.*[Ss][Ee][Kk][Uu][Rr][Ll][Ss][Aa].*/ OR data_win_eventdata_commandLine:/.*[Nn][Tt][Dd][Ss]\.[Dd][Ii][Tt].*/ OR data_win_eventdata_commandLine:/.*[Nn][Tt][Dd][Ss][Uu][Tt][Ii][Ll].*/)) OR (data_win_system_eventID:"10" AND data_win_eventdata_targetImage:/.*(\\[Ll][Ss][Aa][Ss][Ss]\.[Ee][Xx][Ee])/))'
-      pivot_on: [host]
-      window: 1h
-    - name: "This account's logon activity across hosts"
-      query: '(data_win_system_eventID:"4624" OR data_win_system_eventID:"4625")'
-      pivot_on: [user]
-      window: 6h
+  # Behaviour-targeted hunts the engine runs around the alert (not a sweep).
+  - name: wbemcomn.dll written or loaded outside System32 on this host
+    query: (data_win_system_eventID:"11" AND data_win_eventdata_targetFilename:/.*[Ww][Bb][Ee][Mm][Cc][Oo][Mm][Nn]\.[Dd][Ll][Ll]/) OR (data_win_system_eventID:"7" AND data_win_eventdata_image:/.*[Ww][Mm][Ii][Pp][Rr][Vv][Ss][Ee]\.[Ee][Xx][Ee]/ AND data_win_eventdata_imageLoaded:/.*[Ww][Bb][Ee][Mm][Cc][Oo][Mm][Nn]\.[Dd][Ll][Ll]/)
+    pivot_on:
+    - host
+    window: 2h
+  - name: Processes spawned by WmiPrvSE after the DLL drop
+    query: data_win_system_eventID:"1" AND data_win_eventdata_parentImage:/.*[Ww][Mm][Ii][Pp][Rr][Vv][Ss][Ee]\.[Ee][Xx][Ee]/
+    pivot_on:
+    - host
+    window: 2h
+  - name: Other remote file writes to admin shares (SMB 5145)
+    query: data_win_system_eventID:"5145" AND (data_win_eventdata_shareName:*ADMIN* OR data_win_eventdata_shareName:*C$* OR data_win_eventdata_shareName:*IPC$*) AND (data_win_eventdata_relativeTargetName:*.dll OR data_win_eventdata_relativeTargetName:*.exe OR data_win_eventdata_relativeTargetName:*.bat OR data_win_eventdata_relativeTargetName:*.ps1 OR data_win_eventdata_relativeTargetName:*svcctl OR data_win_eventdata_relativeTargetName:*atsvc)
+    pivot_on:
+    - host
+    - user
+    window: 4h
+  - name: Network logons (type 3) by this account
+    query: (data_win_system_eventID:"4624" AND data_win_eventdata_logonType:"3") OR (data_win_system_eventID:"4648")
+    pivot_on:
+    - user
+    window: 6h
+  - name: Persistence and service creation following remote WMI execution
+    query: (data_win_system_eventID:"7045") OR (data_win_system_eventID:"4697") OR (data_win_system_eventID:"4698") OR (data_win_system_eventID:"13" AND data_win_eventdata_targetObject:/.*[Cc][Uu][Rr][Rr][Ee][Nn][Tt][Vv][Ee][Rr][Ss][Ii][Oo][Nn]\\[Rr][Uu][Nn].*/)
+    pivot_on:
+    - host
+    window: 4h

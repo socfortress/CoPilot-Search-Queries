@@ -156,41 +156,58 @@ graylog:
   query: data_win_system_eventID:"4732" AND (data_win_eventdata_targetUserName:/[Aa][Dd][Mm][Ii][Nn][Ii][Ss][Tt][Rr].*/ OR data_win_eventdata_targetSid:/[Ss]-1-5-32-544/) AND _exists_:data_win_eventdata_subjectUserName AND NOT (data_win_eventdata_subjectUserName:/.*\$/)
 
 correlation:
-  # Authored by the correlation engine for review. Related CoPilot Searches to run
-  # around an alert from this rule, scoped to the same host/user/IP within the window.
+  # Authored per-rule (behaviour-researched) for the correlation engine. Related CoPilot
+  # Searches + telemetry pivots to run around an alert, scoped to its host/user/ip/domain.
   related_rules:
-    - id: 0255a820-e564-4e40-af2b-6ac61160335c
-      name: "A New Trust Was Created To A Domain"
-      reason: "next kill-chain tactic: Persistence"
-    - id: 35ba1d85-724d-42a3-889f-2e2362bcaf23
-      name: "AD Privileged Users or Groups Reconnaissance"
-      reason: "next kill-chain tactic: Discovery"
-    - id: 9eb99343-d336-4020-a3cd-67f3819e68ee
-      name: "Account Tampering - Suspicious Failed Logon Reasons"
-      reason: "next kill-chain tactic: Initial Access"
-    - id: 17d619c1-e020-4347-957e-1d1207455c93
-      name: "Active Directory Replication from Non Machine Account"
-      reason: "next kill-chain tactic: Credential Access"
-    - id: 300bac00-e041-4ee2-9c36-e262656a6ecc
-      name: "Active Directory User Backdoors"
-      reason: "next kill-chain tactic: Persistence"
+  - id: d95de845-b83c-4a9a-8a6a-4fc802ebf6c0
+    name: Suspicious Group And Account Reconnaissance Activity Using Net.EXE
+    reason: 'Precursor: attackers enumerate local groups/accounts with net.exe before choosing whom to add to Administrators.'
+  - id: 2c568c34-bb57-4b43-9d75-19c605b98e70
+    name: Windows Create Local Administrator Account Via Net
+    reason: 'Same outcome via a new account: net user /add followed by net localgroup administrators produces this 4732 event.'
+  - id: ad720b90-25ad-43ff-9b5e-5c841facc8e5
+    name: User Added to Local Administrators Group
+    reason: Process-creation view of the same action; the net.exe/net1.exe command line identifies the parent process that triggered the 4732.
+  - id: 5b768e71-86f2-4879-b448-81061cbae951
+    name: Suspicious Manipulation Of Default Accounts Via Net.EXE
+    reason: 'Co-occurring: enabling Guest/DefaultAccount then adding it to Administrators is a common backdoor-account pattern.'
+  - id: d4498716-1d52-438f-8084-4a603157d131
+    name: Password Provided In Command Line Of Net.EXE
+    reason: Account creation or password set with inline credentials immediately before the group add.
+  - id: 9ec9fb1b-e059-4489-9642-f270c207923d
+    name: Hiding User Account Via SpecialAccounts Registry Key - CommandLine
+    reason: 'Follow-on: attackers hide the newly privileged backdoor account from the logon screen to keep persistence.'
+  - id: ffa28e60-bdb1-46e0-9f82-05f7a61cc06e
+    name: User Added to Remote Desktop Users Group
+    reason: 'Co-occurring: the same account is often also granted RDP rights to use the admin access remotely.'
+  - id: 8943b567-f14d-4ee8-a0bb-2121d4ce3184
+    name: Dump LSASS via comsvcs DLL
+    reason: 'Follow-on: with new local admin rights the actor commonly dumps LSASS for credentials to move laterally.'
   window: 1h
   enrichment_searches:
-  # Rule-specific telemetry pivots the engine runs around an alert from this rule,
-  # scoped to the alert's host/user/IP within the window (behaviour-targeted, not a sweep).
-    - name: "Account / group / privilege changes on this host"
-      query: '(((data_win_system_eventID:"4720" OR data_win_system_eventID:"4728" OR data_win_system_eventID:"4732" OR data_win_system_eventID:"4756")) OR (data_win_system_eventID:"1" AND data_win_eventdata_image:/.*(\\[Nn][Ee][Tt]\.[Ee][Xx][Ee]|\\[Nn][Ee][Tt]1\.[Ee][Xx][Ee])/ AND (data_win_eventdata_commandLine:/.*[Uu][Ss][Ee][Rr] .*/ OR data_win_eventdata_commandLine:/.*[Ll][Oo][Cc][Aa][Ll][Gg][Rr][Oo][Uu][Pp].*/ OR data_win_eventdata_commandLine:/.*[Gg][Rr][Oo][Uu][Pp] .*/)))'
-      pivot_on: [host]
-      window: 6h
-    - name: "Memory/credential-dump creation & LSASS access on this host"
-      query: '((data_win_system_eventID:"1" AND data_win_eventdata_image:/.*(\\[Pp][Rr][Oo][Cc][Dd][Uu][Mm][Pp]\.[Ee][Xx][Ee]|\\[Pp][Rr][Oo][Cc][Dd][Uu][Mm][Pp]64\.[Ee][Xx][Ee]|\\[Ss][Qq][Ll][Dd][Uu][Mm][Pp][Ee][Rr]\.[Ee][Xx][Ee]|\\[Cc][Rr][Ee][Aa][Tt][Ee][Dd][Uu][Mm][Pp]\.[Ee][Xx][Ee]|\\[Rr][Dd][Rr][Ll][Ee][Aa][Kk][Dd][Ii][Aa][Gg]\.[Ee][Xx][Ee]|\\[Dd][Uu][Mm][Pp][Ee][Rr][Tt]\.[Ee][Xx][Ee]|\\[Nn][Aa][Nn][Oo][Dd][Uu][Mm][Pp]\.[Ee][Xx][Ee]|\\[Aa][Vv][Dd][Uu][Mm][Pp]\.[Ee][Xx][Ee])/) OR (data_win_system_eventID:"1" AND (data_win_eventdata_commandLine:/.*[Cc][Oo][Mm][Ss][Vv][Cc][Ss]\.[Dd][Ll][Ll].*/ OR data_win_eventdata_commandLine:/.*[Mm][Ii][Nn][Ii][Dd][Uu][Mm][Pp].*/ OR data_win_eventdata_commandLine:/.*[Dd][Uu][Mm][Pp][Ee][Rr][Tt].*/ OR data_win_eventdata_commandLine:/.*[Nn][Aa][Nn][Oo][Dd][Uu][Mm][Pp].*/ OR data_win_eventdata_commandLine:/.*[Ll][Ss][Aa][Ss][Ss].*/ OR data_win_eventdata_commandLine:/.*[Ss][Ee][Kk][Uu][Rr][Ll][Ss][Aa].*/ OR data_win_eventdata_commandLine:/.*[Nn][Tt][Dd][Ss]\.[Dd][Ii][Tt].*/ OR data_win_eventdata_commandLine:/.*[Nn][Tt][Dd][Ss][Uu][Tt][Ii][Ll].*/)) OR (data_win_system_eventID:"10" AND data_win_eventdata_targetImage:/.*(\\[Ll][Ss][Aa][Ss][Ss]\.[Ee][Xx][Ee])/))'
-      pivot_on: [host]
-      window: 1h
-    - name: "This account's logon activity across hosts"
-      query: '(data_win_system_eventID:"4624" OR data_win_system_eventID:"4625")'
-      pivot_on: [user]
-      window: 6h
-    - name: "Account / group / privilege changes involving this account"
-      query: '(data_win_system_eventID:"4720" OR data_win_system_eventID:"4722" OR data_win_system_eventID:"4724" OR data_win_system_eventID:"4728" OR data_win_system_eventID:"4732" OR data_win_system_eventID:"4756" OR data_win_system_eventID:"4672")'
-      pivot_on: [user]
-      window: 6h
+  # Behaviour-targeted hunts the engine runs around the alert (not a sweep).
+  - name: net.exe user/localgroup commands that created or elevated the account
+    query: data_win_system_eventID:"1" AND data_win_eventdata_image:/.*\\[Nn][Ee][Tt]1?\.[Ee][Xx][Ee]/ AND (data_win_eventdata_commandLine:/.*[Ll][Oo][Cc][Aa][Ll][Gg][Rr][Oo][Uu][Pp].*[Aa][Dd][Mm][Ii][Nn].*/ OR data_win_eventdata_commandLine:/.*[Uu][Ss][Ee][Rr] .*\/[Aa][Dd][Dd].*/)
+    pivot_on:
+    - host
+    window: 2h
+  - name: New local account creation, enablement or password reset around the group add
+    query: (data_win_system_eventID:"4720" OR data_win_system_eventID:"4722" OR data_win_system_eventID:"4724" OR data_win_system_eventID:"4738")
+    pivot_on:
+    - host
+    window: 2h
+  - name: PowerShell local user/group cmdlets and WMI account tampering
+    query: data_win_system_eventID:"4104" AND (data_win_eventdata_scriptBlockText:*Add-LocalGroupMember* OR data_win_eventdata_scriptBlockText:*New-LocalUser* OR data_win_eventdata_scriptBlockText:*WinNT\:\/\/* OR data_win_eventdata_scriptBlockText:*NetLocalGroupAddMembers*)
+    pivot_on:
+    - host
+    window: 2h
+  - name: Credential dumping and LSASS access after privilege grant
+    query: (data_win_system_eventID:"10" AND data_win_eventdata_targetImage:/.*\\[Ll][Ss][Aa][Ss][Ss]\.[Ee][Xx][Ee]/) OR (data_win_system_eventID:"1" AND (data_win_eventdata_commandLine:/.*[Cc][Oo][Mm][Ss][Vv][Cc][Ss].*[Mm][Ii][Nn][Ii][Dd][Uu][Mm][Pp].*/ OR data_win_eventdata_commandLine:/.*[Pp][Rr][Oo][Cc][Dd][Uu][Mm][Pp].*[Ll][Ss][Aa][Ss][Ss].*/ OR data_win_eventdata_commandLine:/.*[Ss][Ee][Kk][Uu][Rr][Ll][Ss][Aa].*/))
+    pivot_on:
+    - host
+    window: 4h
+  - name: Logons and special-privilege sessions by the added account
+    query: data_win_system_eventID:"4624" OR data_win_system_eventID:"4672" OR data_win_system_eventID:"4648"
+    pivot_on:
+    - user
+    window: 24h

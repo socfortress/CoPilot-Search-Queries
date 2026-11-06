@@ -154,41 +154,59 @@ graylog:
   query: ((data_win_eventdata_samAccountName:/[Ss][Aa][Mm][Tt][Hh][Ee][Aa][Dd][Mm][Ii][Nn]-.*/ AND data_win_eventdata_samAccountName:/.*\$/) OR (data_win_eventdata_targetUserName:/[Ss][Aa][Mm][Tt][Hh][Ee][Aa][Dd][Mm][Ii][Nn]-.*/ AND data_win_eventdata_targetUserName:/.*\$/))
 
 correlation:
-  # Authored by the correlation engine for review. Related CoPilot Searches to run
-  # around an alert from this rule, scoped to the same host/user/IP within the window.
+  # Authored per-rule (behaviour-researched) for the correlation engine. Related CoPilot
+  # Searches + telemetry pivots to run around an alert, scoped to its host/user/ip/domain.
   related_rules:
-    - id: 0255a820-e564-4e40-af2b-6ac61160335c
-      name: "A New Trust Was Created To A Domain"
-      reason: "next kill-chain tactic: Persistence"
-    - id: 35ba1d85-724d-42a3-889f-2e2362bcaf23
-      name: "AD Privileged Users or Groups Reconnaissance"
-      reason: "next kill-chain tactic: Discovery"
-    - id: 9eb99343-d336-4020-a3cd-67f3819e68ee
-      name: "Account Tampering - Suspicious Failed Logon Reasons"
-      reason: "next kill-chain tactic: Initial Access"
-    - id: 17d619c1-e020-4347-957e-1d1207455c93
-      name: "Active Directory Replication from Non Machine Account"
-      reason: "next kill-chain tactic: Credential Access"
-    - id: 300bac00-e041-4ee2-9c36-e262656a6ecc
-      name: "Active Directory User Backdoors"
-      reason: "next kill-chain tactic: Persistence"
-  window: 1h
+  - id: ab6bffca-beff-4baa-af11-6733f296d57a
+    name: Potential AD User Enumeration From Non-Machine Account
+    reason: 'Precursor: sAMTheAdmin needs a domain user plus knowledge of DC/admin names, typically gathered by LDAP/AD user enumeration just before the machine account is created.'
+  - id: 4627c6ae-6899-46e2-aa0c-6ebcb1becd19
+    name: HackTool - Impacket Tools Execution
+    reason: The samtheadmin-N$ machine account is created by sam_the_admin.py, an Impacket-based script; Impacket tooling on the same host is the likely origin.
+  - id: 7ec2c172-dceb-4c10-92c9-87c1881b7e18
+    name: HackTool - Rubeus Execution
+    reason: CVE-2021-42278/42287 abuse hinges on requesting TGT/S4U2self tickets, which Rubeus is commonly used for from Windows attacker hosts.
+  - id: caa9a802-8bd8-4b9e-a5cd-4d6221670219
+    name: Suspicious Kerberos Ticket Request via CLI
+    reason: 'Core step of the noPac chain: forging a TGT as the renamed machine account then S4U2self ticket request as Administrator.'
+  - id: 12e6d621-194f-4f59-90cc-1959e21e69f7
+    name: Register new Logon Process by Rubeus
+    reason: Rubeus registers a logon process (4611) when requesting or injecting the impersonated ticket after the account spoofing.
+  - id: 496a0e47-0a33-4dca-b009-9e6ca3591f39
+    name: Suspicious Kerberos RC4 Ticket Encryption
+    reason: Tickets obtained through the machine-account name confusion are often RC4 (0x17) service tickets for the DC, flagged by anomalous 4769 encryption type.
+  - id: 17d619c1-e020-4347-957e-1d1207455c93
+    name: Active Directory Replication from Non Machine Account
+    reason: 'Typical follow-on: with a ticket impersonating Administrator on the DC, the attacker DCSyncs krbtgt and domain hashes.'
+  - id: 10c14723-61c7-4c75-92ca-9af245723ad2
+    name: HackTool - Potential Impacket Lateral Movement Activity
+    reason: After obtaining a DC admin ticket, sam_the_admin offers a psexec/smbexec shell; Impacket lateral movement from the same source confirms domain takeover.
+  window: 2h
   enrichment_searches:
-  # Rule-specific telemetry pivots the engine runs around an alert from this rule,
-  # scoped to the alert's host/user/IP within the window (behaviour-targeted, not a sweep).
-    - name: "Memory/credential-dump creation & LSASS access on this host"
-      query: '((data_win_system_eventID:"1" AND data_win_eventdata_image:/.*(\\[Pp][Rr][Oo][Cc][Dd][Uu][Mm][Pp]\.[Ee][Xx][Ee]|\\[Pp][Rr][Oo][Cc][Dd][Uu][Mm][Pp]64\.[Ee][Xx][Ee]|\\[Ss][Qq][Ll][Dd][Uu][Mm][Pp][Ee][Rr]\.[Ee][Xx][Ee]|\\[Cc][Rr][Ee][Aa][Tt][Ee][Dd][Uu][Mm][Pp]\.[Ee][Xx][Ee]|\\[Rr][Dd][Rr][Ll][Ee][Aa][Kk][Dd][Ii][Aa][Gg]\.[Ee][Xx][Ee]|\\[Dd][Uu][Mm][Pp][Ee][Rr][Tt]\.[Ee][Xx][Ee]|\\[Nn][Aa][Nn][Oo][Dd][Uu][Mm][Pp]\.[Ee][Xx][Ee]|\\[Aa][Vv][Dd][Uu][Mm][Pp]\.[Ee][Xx][Ee])/) OR (data_win_system_eventID:"1" AND (data_win_eventdata_commandLine:/.*[Cc][Oo][Mm][Ss][Vv][Cc][Ss]\.[Dd][Ll][Ll].*/ OR data_win_eventdata_commandLine:/.*[Mm][Ii][Nn][Ii][Dd][Uu][Mm][Pp].*/ OR data_win_eventdata_commandLine:/.*[Dd][Uu][Mm][Pp][Ee][Rr][Tt].*/ OR data_win_eventdata_commandLine:/.*[Nn][Aa][Nn][Oo][Dd][Uu][Mm][Pp].*/ OR data_win_eventdata_commandLine:/.*[Ll][Ss][Aa][Ss][Ss].*/ OR data_win_eventdata_commandLine:/.*[Ss][Ee][Kk][Uu][Rr][Ll][Ss][Aa].*/ OR data_win_eventdata_commandLine:/.*[Nn][Tt][Dd][Ss]\.[Dd][Ii][Tt].*/ OR data_win_eventdata_commandLine:/.*[Nn][Tt][Dd][Ss][Uu][Tt][Ii][Ll].*/)) OR (data_win_system_eventID:"10" AND data_win_eventdata_targetImage:/.*(\\[Ll][Ss][Aa][Ss][Ss]\.[Ee][Xx][Ee])/))'
-      pivot_on: [host]
-      window: 1h
-    - name: "This account's logon activity across hosts"
-      query: '(data_win_system_eventID:"4624" OR data_win_system_eventID:"4625")'
-      pivot_on: [user]
-      window: 6h
-    - name: "Account / group / privilege changes involving this account"
-      query: '(data_win_system_eventID:"4720" OR data_win_system_eventID:"4722" OR data_win_system_eventID:"4724" OR data_win_system_eventID:"4728" OR data_win_system_eventID:"4732" OR data_win_system_eventID:"4756" OR data_win_system_eventID:"4672")'
-      pivot_on: [user]
-      window: 6h
-    - name: "UAC-bypass / privilege-escalation binaries on this host"
-      query: 'data_win_system_eventID:"1" AND (data_win_eventdata_image:/.*(\\[Ff][Oo][Dd][Hh][Ee][Ll][Pp][Ee][Rr]\.[Ee][Xx][Ee]|\\[Ee][Vv][Ee][Nn][Tt][Vv][Ww][Rr]\.[Ee][Xx][Ee]|\\[Ss][Dd][Cc][Ll][Tt]\.[Ee][Xx][Ee]|\\[Cc][Oo][Mm][Pp][Uu][Tt][Ee][Rr][Dd][Ee][Ff][Aa][Uu][Ll][Tt][Ss]\.[Ee][Xx][Ee]|\\[Ss][Ll][Uu][Ii]\.[Ee][Xx][Ee]|\\[Ww][Ss][Rr][Ee][Ss][Ee][Tt]\.[Ee][Xx][Ee])/ OR data_win_eventdata_parentImage:/.*(\\[Ff][Oo][Dd][Hh][Ee][Ll][Pp][Ee][Rr]\.[Ee][Xx][Ee]|\\[Ee][Vv][Ee][Nn][Tt][Vv][Ww][Rr]\.[Ee][Xx][Ee]|\\[Ss][Dd][Cc][Ll][Tt]\.[Ee][Xx][Ee]|\\[Cc][Oo][Mm][Pp][Uu][Tt][Ee][Rr][Dd][Ee][Ff][Aa][Uu][Ll][Tt][Ss]\.[Ee][Xx][Ee]|\\[Ss][Ll][Uu][Ii]\.[Ee][Xx][Ee]|\\[Ww][Ss][Rr][Ee][Ss][Ee][Tt]\.[Ee][Xx][Ee])/)'
-      pivot_on: [host]
-      window: 2h
+  # Behaviour-targeted hunts the engine runs around the alert (not a sweep).
+  - name: Computer account created or renamed / SAM account name changed (noPac staging)
+    query: (data_win_system_eventID:"4741" OR data_win_system_eventID:"4742" OR data_win_system_eventID:"4781" OR data_win_system_eventID:"4738" OR data_win_system_eventID:"4743")
+    pivot_on:
+    - user
+    window: 2h
+  - name: Kerberos TGT/service ticket requests (4768/4769) for machine accounts or the DC
+    query: ((data_win_system_eventID:"4768" OR data_win_system_eventID:"4769") AND (data_win_eventdata_targetUserName:/.*\$/ OR data_win_eventdata_serviceName:/.*[Kk][Rr][Bb][Tt][Gg][Tt].*/ OR data_win_eventdata_serviceName:/[Cc][Ii][Ff][Ss]\/.*/ OR data_win_eventdata_serviceName:/[Ll][Dd][Aa][Pp]\/.*/))
+    pivot_on:
+    - host
+    - user
+    window: 2h
+  - name: Directory replication / DCSync (4662 with replication GUIDs)
+    query: (data_win_system_eventID:"4662" AND (data_win_eventdata_properties:*1131f6aa-9c07-11d1-f79f-00c04fc2dcd2* OR data_win_eventdata_properties:*1131f6ad-9c07-11d1-f79f-00c04fc2dcd2* OR data_win_eventdata_properties:*89e95b76-444d-4c62-991a-0facbeda640c*))
+    pivot_on:
+    - user
+    window: 4h
+  - name: Network logons and explicit-credential use by this account
+    query: ((data_win_system_eventID:"4624" AND data_win_eventdata_logonType:"3") OR data_win_system_eventID:"4648" OR data_win_system_eventID:"4672")
+    pivot_on:
+    - user
+    window: 4h
+  - name: Impacket/Rubeus-style tooling and remote service execution on this host
+    query: (data_win_system_eventID:"1" AND (data_win_eventdata_commandLine:/.*[Rr][Uu][Bb][Ee][Uu][Ss].*/ OR data_win_eventdata_commandLine:/.*[Ss][Aa][Mm]_[Tt][Hh][Ee]_[Aa][Dd][Mm][Ii][Nn].*/ OR data_win_eventdata_commandLine:/.*[Ss][Ee][Cc][Rr][Ee][Tt][Ss][Dd][Uu][Mm][Pp].*/ OR data_win_eventdata_commandLine:/.*[Nn][Oo][Pp][Aa][Cc].*/ OR data_win_eventdata_commandLine:/.*[Pp][Oo][Ww][Ee][Rr][Mm][Aa][Dd].*/ OR data_win_eventdata_commandLine:/.*[Aa][Ss][Kk][Tt][Gg][Tt].*/))
+    pivot_on:
+    - host
+    window: 2h

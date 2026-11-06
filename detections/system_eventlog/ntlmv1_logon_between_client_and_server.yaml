@@ -133,32 +133,60 @@ graylog:
   query: data_win_system_providerName:/[Ll][Ss][Aa][Ss][Rr][Vv]/ AND (data_win_system_eventID:"6038" OR data_win_system_eventID:"6039")
 
 correlation:
-  # Authored by the correlation engine for review. Related CoPilot Searches to run
-  # around an alert from this rule, scoped to the same host/user/IP within the window.
+  # Authored per-rule (behaviour-researched) for the correlation engine. Related CoPilot
+  # Searches + telemetry pivots to run around an alert, scoped to its host/user/ip/domain.
   related_rules:
-    - id: 87261fb2-69d0-42fe-b9de-88c6b5f65a43
-      name: "Atera Agent Installation"
-      reason: "next kill-chain tactic: Command and Control"
-    - id: 48d91a3a-2363-43ba-a456-ca71ac3da5c2
-      name: "Audit CVE Event"
-      reason: "next kill-chain tactic: Lateral Movement"
+  - id: d67572a0-e2ec-45d6-b8db-c100d14b8ef2
+    name: NetNTLM Downgrade Attack - Registry
+    reason: 'Precursor: LmCompatibilityLevel/NtlmMinClientSec lowered on the host is what lets NTLMv1 be negotiated at all, so a registry downgrade just before LsaSrv 6038/6039 means the NTLMv1 use was engineered.'
+  - id: d3abac66-f11c-4ed0-8acb-50cc29c97eed
+    name: NetNTLM Downgrade Attack
+    reason: Security-log variant of the same downgrade (registry value set via 4657); confirms the host was deliberately weakened to NTLMv1 before the authentication.
+  - id: 5589ab4f-a767-433c-961d-c91f3f704db1
+    name: Potential SMB Relay Attack Tool Execution
+    reason: NTLMv1 challenge/response captured from a rogue SMB/NTLM server (Responder, ntlmrelayx, Inveigh) is crackable to the NT hash; tool execution on the same or nearby host is the likely cause.
+  - id: 1ce8c8a3-2723-48ed-8246-906ac91061a6
+    name: Possible PetitPotam Coerce Authentication Attempt
+    reason: Coercion over MS-EFSR forces a machine account to authenticate to an attacker server, producing exactly this kind of unexpected NTLM logon, which is then relayed or cracked.
+  - id: bb76d96b-821c-47cf-944b-7ce377864492
+    name: Suspicious NTLM Authentication on the Printer Spooler Service
+    reason: Spooler coercion (PrinterBug) triggers outbound NTLM auth from a server to an attacker host; the NTLMv1 logon can be its victim-side artifact.
+  - id: 6c6d9280-e6d0-4b9d-80ac-254701b64916
+    name: Potential NTLM Coercion Via Certutil.EXE
+    reason: Certutil fetching a UNC/remote path forces an outbound NTLM authentication; a downgraded-NTLM logon right after points to credential capture.
+  - id: 8eef149c-bd26-49f2-9e5a-9b00e3af499b
+    name: Pass the Hash Activity 2
+    reason: 'Follow-on: once the NT hash is cracked or replayed from the NTLMv1 exchange, the attacker authenticates elsewhere with NTLM network logons (4624 type 3) using the hash.'
+  - id: 5ef9853e-4d0e-4a70-846f-a9ca37d876da
+    name: Potential Credential Dumping Activity Via LSASS
+    reason: 'Alternate source of the NTLM material: LSASS access on the same host shows the attacker harvesting hashes locally in parallel with, or after, the NTLMv1 authentication.'
   window: 1h
   enrichment_searches:
-  # Rule-specific telemetry pivots the engine runs around an alert from this rule,
-  # scoped to the alert's host/user/IP within the window (behaviour-targeted, not a sweep).
-    - name: "Kerberos ticket / logon activity for this account"
-      query: '(((data_win_system_eventID:"4768" OR data_win_system_eventID:"4769" OR data_win_system_eventID:"4771")) OR ((data_win_system_eventID:"4624" OR data_win_system_eventID:"4625")))'
-      pivot_on: [user]
-      window: 6h
-    - name: "Memory/credential-dump creation & LSASS access on this host"
-      query: '((data_win_system_eventID:"1" AND data_win_eventdata_image:/.*(\\[Pp][Rr][Oo][Cc][Dd][Uu][Mm][Pp]\.[Ee][Xx][Ee]|\\[Pp][Rr][Oo][Cc][Dd][Uu][Mm][Pp]64\.[Ee][Xx][Ee]|\\[Ss][Qq][Ll][Dd][Uu][Mm][Pp][Ee][Rr]\.[Ee][Xx][Ee]|\\[Cc][Rr][Ee][Aa][Tt][Ee][Dd][Uu][Mm][Pp]\.[Ee][Xx][Ee]|\\[Rr][Dd][Rr][Ll][Ee][Aa][Kk][Dd][Ii][Aa][Gg]\.[Ee][Xx][Ee]|\\[Dd][Uu][Mm][Pp][Ee][Rr][Tt]\.[Ee][Xx][Ee]|\\[Nn][Aa][Nn][Oo][Dd][Uu][Mm][Pp]\.[Ee][Xx][Ee]|\\[Aa][Vv][Dd][Uu][Mm][Pp]\.[Ee][Xx][Ee])/) OR (data_win_system_eventID:"1" AND (data_win_eventdata_commandLine:/.*[Cc][Oo][Mm][Ss][Vv][Cc][Ss]\.[Dd][Ll][Ll].*/ OR data_win_eventdata_commandLine:/.*[Mm][Ii][Nn][Ii][Dd][Uu][Mm][Pp].*/ OR data_win_eventdata_commandLine:/.*[Dd][Uu][Mm][Pp][Ee][Rr][Tt].*/ OR data_win_eventdata_commandLine:/.*[Nn][Aa][Nn][Oo][Dd][Uu][Mm][Pp].*/ OR data_win_eventdata_commandLine:/.*[Ll][Ss][Aa][Ss][Ss].*/ OR data_win_eventdata_commandLine:/.*[Ss][Ee][Kk][Uu][Rr][Ll][Ss][Aa].*/ OR data_win_eventdata_commandLine:/.*[Nn][Tt][Dd][Ss]\.[Dd][Ii][Tt].*/ OR data_win_eventdata_commandLine:/.*[Nn][Tt][Dd][Ss][Uu][Tt][Ii][Ll].*/)) OR (data_win_system_eventID:"10" AND data_win_eventdata_targetImage:/.*(\\[Ll][Ss][Aa][Ss][Ss]\.[Ee][Xx][Ee])/))'
-      pivot_on: [host]
-      window: 1h
-    - name: "Service installations on this host"
-      query: 'data_win_system_eventID:"7045"'
-      pivot_on: [host]
-      window: 6h
-    - name: "Follow-on LOLBin / signed-binary-proxy execution on this host"
-      query: 'data_win_system_eventID:"1" AND data_win_eventdata_image:/.*(\\[Rr][Uu][Nn][Dd][Ll][Ll]32\.[Ee][Xx][Ee]|\\[Rr][Ee][Gg][Ss][Vv][Rr]32\.[Ee][Xx][Ee]|\\[Mm][Ss][Hh][Tt][Aa]\.[Ee][Xx][Ee]|\\[Ii][Nn][Ss][Tt][Aa][Ll][Ll][Uu][Tt][Ii][Ll]\.[Ee][Xx][Ee]|\\[Rr][Ee][Gg][Aa][Ss][Mm]\.[Ee][Xx][Ee]|\\[Rr][Ee][Gg][Ss][Vv][Cc][Ss]\.[Ee][Xx][Ee]|\\[Mm][Ss][Bb][Uu][Ii][Ll][Dd]\.[Ee][Xx][Ee]|\\[Cc][Ee][Rr][Tt][Uu][Tt][Ii][Ll]\.[Ee][Xx][Ee]|\\[Bb][Ii][Tt][Ss][Aa][Dd][Mm][Ii][Nn]\.[Ee][Xx][Ee]|\\[Ww][Mm][Ii][Cc]\.[Ee][Xx][Ee]|\\[Cc][Mm][Ss][Tt][Pp]\.[Ee][Xx][Ee]|\\[Oo][Dd][Bb][Cc][Cc][Oo][Nn][Ff]\.[Ee][Xx][Ee]|\\[Ff][Oo][Rr][Ff][Ii][Ll][Ee][Ss]\.[Ee][Xx][Ee]|\\[Pp][Cc][Aa][Ll][Uu][Aa]\.[Ee][Xx][Ee]|\\[Mm][Aa][Vv][Ii][Nn][Jj][Ee][Cc][Tt]\.[Ee][Xx][Ee]|\\[Ss][Cc][Rr][Ii][Pp][Tt][Rr][Uu][Nn][Nn][Ee][Rr]\.[Ee][Xx][Ee])/'
-      pivot_on: [host]
-      window: 2h
+  # Behaviour-targeted hunts the engine runs around the alert (not a sweep).
+  - name: NTLM network logons using NTLM V1 / LM package
+    query: data_win_system_eventID:"4624" AND (data_win_eventdata_lmPackageName:/.*[Nn][Tt][Ll][Mm].*[Vv]1.*/ OR (data_win_eventdata_authenticationPackageName:"NTLM" AND data_win_eventdata_logonType:"3"))
+    pivot_on:
+    - host
+    - user
+    window: 1h
+  - name: NTLM credential validation on DC (4776) and failed NTLM logons
+    query: data_win_system_eventID:"4776" OR (data_win_system_eventID:"4625" AND data_win_eventdata_authenticationPackageName:"NTLM")
+    pivot_on:
+    - user
+    - host
+    window: 6h
+  - name: LM compatibility / NTLM restriction registry changes
+    query: (data_win_system_eventID:"13" OR data_win_system_eventID:"12") AND (data_win_eventdata_targetObject:/.*[Ll][Mm][Cc]ompatibility[Ll]evel.*/ OR data_win_eventdata_targetObject:/.*[Nn][Tt][Ll][Mm][Mm]in(Client|Server)[Ss]ec.*/ OR data_win_eventdata_targetObject:/.*[Rr]estrict[Ss]ending[Nn][Tt][Ll][Mm][Tt]raffic.*/)
+    pivot_on:
+    - host
+    window: 24h
+  - name: NTLM capture / relay tooling execution
+    query: data_win_system_eventID:"1" AND (data_win_eventdata_image:/.*(\\[Rr]esponder|\\[Ii]nveigh|\\[Nn]tlmrelayx|\\[Mm]ultirelay).*/ OR data_win_eventdata_commandLine:/.*([Rr]esponder|[Ii]nveigh|[Nn]tlmrelayx|[Pp]etit[Pp]otam|[Pp]rinter[Bb]ug|[Cc]oerce).*/)
+    pivot_on:
+    - host
+    window: 4h
+  - name: Outbound SMB/NTLM connections to unusual servers
+    query: data_win_system_eventID:"3" AND (data_win_eventdata_destinationPort:"445" OR data_win_eventdata_destinationPort:"139") AND data_win_eventdata_initiated:"true"
+    pivot_on:
+    - host
+    window: 2h

@@ -151,35 +151,55 @@ graylog:
   query: data_win_system_eventID:"4663" AND (data_win_eventdata_objectName:/.*\\[Mm][Ii][Cc][Rr][Oo][Ss][Oo][Ff][Tt]\\[Tt][Ee][Aa][Mm][Ss]\\[Cc][Oo][Oo][Kk][Ii][Ee][Ss].*/ OR data_win_eventdata_objectName:/.*\\[Mm][Ii][Cc][Rr][Oo][Ss][Oo][Ff][Tt]\\[Tt][Ee][Aa][Mm][Ss]\\[Ll][Oo][Cc][Aa][Ll] [Ss][Tt][Oo][Rr][Aa][Gg][Ee]\\[Ll][Ee][Vv][Ee][Ll][Dd][Bb].*/) AND _exists_:data_win_eventdata_processName AND NOT (data_win_eventdata_processName:/.*\\[Mm][Ii][Cc][Rr][Oo][Ss][Oo][Ff][Tt]\\[Tt][Ee][Aa][Mm][Ss]\\[Cc][Uu][Rr][Rr][Ee][Nn][Tt]\\[Tt][Ee][Aa][Mm][Ss]\.[Ee][Xx][Ee].*/)
 
 correlation:
-  # Authored by the correlation engine for review. Related CoPilot Searches to run
-  # around an alert from this rule, scoped to the same host/user/IP within the window.
+  # Authored per-rule (behaviour-researched) for the correlation engine. Related CoPilot
+  # Searches + telemetry pivots to run around an alert, scoped to its host/user/ip/domain.
   related_rules:
-    - id: 35ba1d85-724d-42a3-889f-2e2362bcaf23
-      name: "AD Privileged Users or Groups Reconnaissance"
-      reason: "next kill-chain tactic: Discovery"
-    - id: 17d619c1-e020-4347-957e-1d1207455c93
-      name: "Active Directory Replication from Non Machine Account"
-      reason: "next kill-chain tactic: Credential Access"
-    - id: 87261fb2-69d0-42fe-b9de-88c6b5f65a43
-      name: "Atera Agent Installation"
-      reason: "next kill-chain tactic: Command and Control"
+  - id: d2eb17db-1d39-41dc-b57f-301f6512fa75
+    name: Potentially Suspicious Command Targeting Teams Sensitive Files
+    reason: 'Process-creation view of the same behaviour: a command line (copy/type/PowerShell) reading the Teams Cookies/leveldb stores; the 4663 object access is the file-level footprint of that command.'
+  - id: 88f46b67-14d4-4f45-ac2c-d66984f22191
+    name: Renamed Microsoft Teams Execution
+    reason: Attackers rename or copy Teams binaries to blend in while reading its token stores, which is exactly the non-Teams.exe process this 4663 alert catches.
+  - id: 47147b5b-9e17-4d76-b8d2-7bac24c5ce1b
+    name: Potential Browser Data Stealing
+    reason: Same Electron/Chromium cookie and LevelDB store theft technique; the same stealer typically harvests browser data alongside Teams tokens.
+  - id: 5a6e1e16-07de-48d8-8aae-faa766c05e88
+    name: Potential Cookies Session Hijacking
+    reason: Teams tokens in Cookies are stolen for session hijacking; this is the same cookie-database access via command line on the same host.
+  - id: 6d3a3952-6530-44a3-8554-cf17c116c615
+    name: Potentially Suspicious JWT Token Search Via CLI
+    reason: After reading leveldb, attackers grep the dump for JWT/bearer tokens (eyJ...) to extract the usable Teams/Graph access token.
+  - id: 6a69f62d-ce75-4b57-8dce-6351eb55b362
+    name: Esentutl Steals Browser Information
+    reason: Esentutl is a LOLBin used to copy locked browser/app data stores; it can read the locked Teams Cookies SQLite file the same way.
+  - id: b3d34dc5-2efd-4ae3-845f-8ec14921f449
+    name: Browser Started with Remote Debugging
+    reason: Alternative token/cookie theft path against Chromium-based apps (Teams is Electron); remote-debugging use on the same host indicates the same session-theft objective.
   window: 1h
   enrichment_searches:
-  # Rule-specific telemetry pivots the engine runs around an alert from this rule,
-  # scoped to the alert's host/user/IP within the window (behaviour-targeted, not a sweep).
-    - name: "Remote-execution / lateral-movement tooling on this host"
-      query: '(data_win_system_eventID:"1" AND data_win_eventdata_image:/.*(\\[Pp][Ss][Ee][Xx][Ee][Cc]\.[Ee][Xx][Ee]|\\[Pp][Ss][Ee][Xx][Ee][Ss][Vv][Cc]\.[Ee][Xx][Ee]|\\[Pp][Aa][Ee][Xx][Ee][Cc]\.[Ee][Xx][Ee]|\\[Ww][Ii][Nn][Rr][Ss]\.[Ee][Xx][Ee]|\\[Mm][Ss][Tt][Ss][Cc]\.[Ee][Xx][Ee]|\\[Ww][Mm][Ii][Cc]\.[Ee][Xx][Ee])/) OR (data_win_system_eventID:"1" AND data_win_eventdata_image:/.*(\\[Pp][Oo][Ww][Ee][Rr][Ss][Hh][Ee][Ll][Ll]\.[Ee][Xx][Ee]|\\[Pp][Ww][Ss][Hh]\.[Ee][Xx][Ee])/ AND (data_win_eventdata_commandLine:/.*[Ii][Nn][Vv][Oo][Kk][Ee]-[Cc][Oo][Mm][Mm][Aa][Nn][Dd].*/ OR data_win_eventdata_commandLine:/.*[Nn][Ee][Ww]-[Pp][Ss][Ss][Ee][Ss][Ss][Ii][Oo][Nn].*/ OR data_win_eventdata_commandLine:/.*[Ee][Nn][Tt][Ee][Rr]-[Pp][Ss][Ss][Ee][Ss][Ss][Ii][Oo][Nn].*/ OR data_win_eventdata_commandLine:/.*-[Cc][Oo][Mm][Pp][Uu][Tt][Ee][Rr][Nn][Aa][Mm][Ee].*/))'
-      pivot_on: [host]
-      window: 2h
-    - name: "This account's logon activity across hosts"
-      query: '(data_win_system_eventID:"4624" OR data_win_system_eventID:"4625")'
-      pivot_on: [user]
-      window: 6h
-    - name: "Account / group / privilege changes involving this account"
-      query: '(data_win_system_eventID:"4720" OR data_win_system_eventID:"4722" OR data_win_system_eventID:"4724" OR data_win_system_eventID:"4728" OR data_win_system_eventID:"4732" OR data_win_system_eventID:"4756" OR data_win_system_eventID:"4672")'
-      pivot_on: [user]
-      window: 6h
-    - name: "Memory/credential-dump creation & LSASS access on this host"
-      query: '((data_win_system_eventID:"1" AND data_win_eventdata_image:/.*(\\[Pp][Rr][Oo][Cc][Dd][Uu][Mm][Pp]\.[Ee][Xx][Ee]|\\[Pp][Rr][Oo][Cc][Dd][Uu][Mm][Pp]64\.[Ee][Xx][Ee]|\\[Ss][Qq][Ll][Dd][Uu][Mm][Pp][Ee][Rr]\.[Ee][Xx][Ee]|\\[Cc][Rr][Ee][Aa][Tt][Ee][Dd][Uu][Mm][Pp]\.[Ee][Xx][Ee]|\\[Rr][Dd][Rr][Ll][Ee][Aa][Kk][Dd][Ii][Aa][Gg]\.[Ee][Xx][Ee]|\\[Dd][Uu][Mm][Pp][Ee][Rr][Tt]\.[Ee][Xx][Ee]|\\[Nn][Aa][Nn][Oo][Dd][Uu][Mm][Pp]\.[Ee][Xx][Ee]|\\[Aa][Vv][Dd][Uu][Mm][Pp]\.[Ee][Xx][Ee])/) OR (data_win_system_eventID:"1" AND (data_win_eventdata_commandLine:/.*[Cc][Oo][Mm][Ss][Vv][Cc][Ss]\.[Dd][Ll][Ll].*/ OR data_win_eventdata_commandLine:/.*[Mm][Ii][Nn][Ii][Dd][Uu][Mm][Pp].*/ OR data_win_eventdata_commandLine:/.*[Dd][Uu][Mm][Pp][Ee][Rr][Tt].*/ OR data_win_eventdata_commandLine:/.*[Nn][Aa][Nn][Oo][Dd][Uu][Mm][Pp].*/ OR data_win_eventdata_commandLine:/.*[Ll][Ss][Aa][Ss][Ss].*/ OR data_win_eventdata_commandLine:/.*[Ss][Ee][Kk][Uu][Rr][Ll][Ss][Aa].*/ OR data_win_eventdata_commandLine:/.*[Nn][Tt][Dd][Ss]\.[Dd][Ii][Tt].*/ OR data_win_eventdata_commandLine:/.*[Nn][Tt][Dd][Ss][Uu][Tt][Ii][Ll].*/)) OR (data_win_system_eventID:"10" AND data_win_eventdata_targetImage:/.*(\\[Ll][Ss][Aa][Ss][Ss]\.[Ee][Xx][Ee])/))'
-      pivot_on: [host]
-      window: 1h
+  # Behaviour-targeted hunts the engine runs around the alert (not a sweep).
+  - name: Command lines touching Teams cookie/leveldb token stores
+    query: data_win_system_eventID:"1" AND (data_win_eventdata_commandLine:/.*[Tt]eams.*([Cc]ookies|[Ll]evel[Dd][Bb]|[Ll]ocal [Ss]torage).*/ OR data_win_eventdata_commandLine:/.*[Ll]evel[Dd][Bb].*(eyJ|[Ss]elect-[Ss]tring|[Ff]indstr|[Ss]trings|[Gg]rep).*/)
+    pivot_on:
+    - host
+    window: 1h
+  - name: Copy/staging of Teams token stores to other locations
+    query: data_win_system_eventID:"11" AND (data_win_eventdata_targetFilename:/.*[Ll]evel[Dd][Bb].*/ OR data_win_eventdata_targetFilename:/.*[Tt]eams.*[Cc]ookies.*/ OR data_win_eventdata_targetFilename:/.*(teams|ldb|leveldb).*[.](zip|7z|rar|ldb|log)/)
+    pivot_on:
+    - host
+    window: 2h
+  - name: Script blocks reading Teams tokens or calling Graph with stolen token
+    query: data_win_system_eventID:"4104" AND (data_win_eventdata_scriptBlockText:/.*[Ll]evel[Dd][Bb].*/ OR data_win_eventdata_scriptBlockText:/.*[Ss]kype[Tt]oken.*/ OR data_win_eventdata_scriptBlockText:/.*[Aa]uthtoken.*/ OR data_win_eventdata_scriptBlockText:/.*[Mm]icrosoft[\/][Tt]eams.*[Cc]ookies.*/ OR data_win_eventdata_scriptBlockText:/.*graph[.]microsoft[.]com.*[Bb]earer.*/)
+    pivot_on:
+    - host
+    window: 2h
+  - name: Non-Teams, non-browser process resolving Teams/Graph/Entra endpoints
+    query: data_win_system_eventID:"22" AND data_win_eventdata_queryName:/.*(graph[.]microsoft[.]com|teams[.]microsoft[.]com|api[.]spaces[.]skype[.]com|login[.]microsoftonline[.]com|smtp[.]office365[.]com).*/ AND NOT data_win_eventdata_image:/.*([Tt]eams|msedge|chrome|firefox|[Oo]utlook|[Ww][Ii][Nn][Ww][Oo][Rr][Dd]|[Ee][Xx][Cc][Ee][Ll]|OneDrive|svchost|[Ss]earch[Hh]ost).*/
+    pivot_on:
+    - host
+    window: 4h
+  - name: Same user authenticating from other hosts or IPs (token replay)
+    query: data_win_system_eventID:"4624" AND (data_win_eventdata_logonType:"3" OR data_win_eventdata_logonType:"10")
+    pivot_on:
+    - user
+    window: 6h

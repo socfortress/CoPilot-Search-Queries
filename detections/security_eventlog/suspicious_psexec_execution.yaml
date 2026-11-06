@@ -158,32 +158,58 @@ graylog:
   query: data_win_system_eventID:"5145" AND data_win_eventdata_shareName:/\\\\\*\\[Ii][Pp][Cc]\$/ AND (data_win_eventdata_relativeTargetName:/.*-[Ss][Tt][Dd][Ii][Nn]/ OR data_win_eventdata_relativeTargetName:/.*-[Ss][Tt][Dd][Oo][Uu][Tt]/ OR data_win_eventdata_relativeTargetName:/.*-[Ss][Tt][Dd][Ee][Rr][Rr]/) AND _exists_:data_win_eventdata_relativeTargetName AND NOT (data_win_eventdata_relativeTargetName:/[Pp][Ss][Ee][Xx][Ee][Ss][Vv][Cc].*/)
 
 correlation:
-  # Authored by the correlation engine for review. Related CoPilot Searches to run
-  # around an alert from this rule, scoped to the same host/user/IP within the window.
+  # Authored per-rule (behaviour-researched) for the correlation engine. Related CoPilot
+  # Searches + telemetry pivots to run around an alert, scoped to its host/user/ip/domain.
   related_rules:
-    - id: 87261fb2-69d0-42fe-b9de-88c6b5f65a43
-      name: "Atera Agent Installation"
-      reason: "next kill-chain tactic: Command and Control"
-    - id: 48d91a3a-2363-43ba-a456-ca71ac3da5c2
-      name: "Audit CVE Event"
-      reason: "next kill-chain tactic: Lateral Movement"
+  - id: 6fb63b40-e02a-403e-9ffd-3bcc1d749442
+    name: Metasploit Or Impacket Service Installation Via SMB PsExec
+    reason: PsExec-style IPC$ stdin/stdout/stderr pipes follow a remote service install (7045/4697) with a renamed service; this is the same remote-exec chain from the service-creation side.
+  - id: c4e92a97-a9ff-4392-9d2d-7a4c642768ca
+    name: Service Installed By Unusual Client - Security
+    reason: The renamed PsExec/paexec service is created over SMB by a remote client; a service installed from an unusual client confirms the target host side of the same execution.
+  - id: 586a8d6b-6bfe-4ad9-9d78-888cd2fe50c3
+    name: Remote Service Activity via SVCCTL Named Pipe
+    reason: PsExec drives the Service Control Manager over the svcctl pipe on IPC$ immediately before the stdin/stdout pipes appear.
+  - id: b210394c-ba12-4f89-9117-44a2464b9511
+    name: SMB Create Remote File Admin Share
+    reason: PsExec/paexec first copies its service binary to ADMIN$/C$ over SMB, a precursor to the IPC$ pipe activity.
+  - id: 941e5c45-cda7-4864-8cea-bbb7458d194a
+    name: Suspicious Remote Logon with Explicit Credentials
+    reason: PsExec with -u/-p creates a network logon with explicit credentials (4648) from the source host just before execution.
+  - id: 51ae86a2-e2e1-4097-ad85-c46cb6851de4
+    name: Renamed PsExec Service Execution
+    reason: The rule matches only non-PSEXESVC pipe names, i.e. a renamed service; this is the process-creation view of that same renamed service binary running on the target.
+  - id: 7c0dcd3d-acf8-4f71-9570-f448b0034f94
+    name: PsExec Service Child Process Execution as LOCAL SYSTEM
+    reason: The remote command the operator actually runs surfaces as a SYSTEM child of the PsExec service; shows what the attacker executed through the pipes.
+  - id: f0d1feba-4344-4ca9-8121-a6c97bd6df52
+    name: Credential Dumping Tools Service Execution - Security
+    reason: Remote service execution is commonly used to launch credential dumping tools as a service on the target, a typical next step after PsExec lands.
   window: 1h
   enrichment_searches:
-  # Rule-specific telemetry pivots the engine runs around an alert from this rule,
-  # scoped to the alert's host/user/IP within the window (behaviour-targeted, not a sweep).
-    - name: "Remote-execution / lateral-movement tooling on this host"
-      query: '(data_win_system_eventID:"1" AND data_win_eventdata_image:/.*(\\[Pp][Ss][Ee][Xx][Ee][Cc]\.[Ee][Xx][Ee]|\\[Pp][Ss][Ee][Xx][Ee][Ss][Vv][Cc]\.[Ee][Xx][Ee]|\\[Pp][Aa][Ee][Xx][Ee][Cc]\.[Ee][Xx][Ee]|\\[Ww][Ii][Nn][Rr][Ss]\.[Ee][Xx][Ee]|\\[Mm][Ss][Tt][Ss][Cc]\.[Ee][Xx][Ee]|\\[Ww][Mm][Ii][Cc]\.[Ee][Xx][Ee])/) OR (data_win_system_eventID:"1" AND data_win_eventdata_image:/.*(\\[Pp][Oo][Ww][Ee][Rr][Ss][Hh][Ee][Ll][Ll]\.[Ee][Xx][Ee]|\\[Pp][Ww][Ss][Hh]\.[Ee][Xx][Ee])/ AND (data_win_eventdata_commandLine:/.*[Ii][Nn][Vv][Oo][Kk][Ee]-[Cc][Oo][Mm][Mm][Aa][Nn][Dd].*/ OR data_win_eventdata_commandLine:/.*[Nn][Ee][Ww]-[Pp][Ss][Ss][Ee][Ss][Ss][Ii][Oo][Nn].*/ OR data_win_eventdata_commandLine:/.*[Ee][Nn][Tt][Ee][Rr]-[Pp][Ss][Ss][Ee][Ss][Ss][Ii][Oo][Nn].*/ OR data_win_eventdata_commandLine:/.*-[Cc][Oo][Mm][Pp][Uu][Tt][Ee][Rr][Nn][Aa][Mm][Ee].*/))'
-      pivot_on: [host]
-      window: 2h
-    - name: "Memory/credential-dump creation & LSASS access on this host"
-      query: '((data_win_system_eventID:"1" AND data_win_eventdata_image:/.*(\\[Pp][Rr][Oo][Cc][Dd][Uu][Mm][Pp]\.[Ee][Xx][Ee]|\\[Pp][Rr][Oo][Cc][Dd][Uu][Mm][Pp]64\.[Ee][Xx][Ee]|\\[Ss][Qq][Ll][Dd][Uu][Mm][Pp][Ee][Rr]\.[Ee][Xx][Ee]|\\[Cc][Rr][Ee][Aa][Tt][Ee][Dd][Uu][Mm][Pp]\.[Ee][Xx][Ee]|\\[Rr][Dd][Rr][Ll][Ee][Aa][Kk][Dd][Ii][Aa][Gg]\.[Ee][Xx][Ee]|\\[Dd][Uu][Mm][Pp][Ee][Rr][Tt]\.[Ee][Xx][Ee]|\\[Nn][Aa][Nn][Oo][Dd][Uu][Mm][Pp]\.[Ee][Xx][Ee]|\\[Aa][Vv][Dd][Uu][Mm][Pp]\.[Ee][Xx][Ee])/) OR (data_win_system_eventID:"1" AND (data_win_eventdata_commandLine:/.*[Cc][Oo][Mm][Ss][Vv][Cc][Ss]\.[Dd][Ll][Ll].*/ OR data_win_eventdata_commandLine:/.*[Mm][Ii][Nn][Ii][Dd][Uu][Mm][Pp].*/ OR data_win_eventdata_commandLine:/.*[Dd][Uu][Mm][Pp][Ee][Rr][Tt].*/ OR data_win_eventdata_commandLine:/.*[Nn][Aa][Nn][Oo][Dd][Uu][Mm][Pp].*/ OR data_win_eventdata_commandLine:/.*[Ll][Ss][Aa][Ss][Ss].*/ OR data_win_eventdata_commandLine:/.*[Ss][Ee][Kk][Uu][Rr][Ll][Ss][Aa].*/ OR data_win_eventdata_commandLine:/.*[Nn][Tt][Dd][Ss]\.[Dd][Ii][Tt].*/ OR data_win_eventdata_commandLine:/.*[Nn][Tt][Dd][Ss][Uu][Tt][Ii][Ll].*/)) OR (data_win_system_eventID:"10" AND data_win_eventdata_targetImage:/.*(\\[Ll][Ss][Aa][Ss][Ss]\.[Ee][Xx][Ee])/))'
-      pivot_on: [host]
-      window: 1h
-    - name: "This account's logon activity across hosts"
-      query: '(data_win_system_eventID:"4624" OR data_win_system_eventID:"4625")'
-      pivot_on: [user]
-      window: 6h
-    - name: "Account / group / privilege changes involving this account"
-      query: '(data_win_system_eventID:"4720" OR data_win_system_eventID:"4722" OR data_win_system_eventID:"4724" OR data_win_system_eventID:"4728" OR data_win_system_eventID:"4732" OR data_win_system_eventID:"4756" OR data_win_system_eventID:"4672")'
-      pivot_on: [user]
-      window: 6h
+  # Behaviour-targeted hunts the engine runs around the alert (not a sweep).
+  - name: Remote service installation (renamed PsExec/paexec service)
+    query: (data_win_system_eventID:"7045" OR data_win_system_eventID:"4697") AND (data_win_eventdata_imagePath:*ADMIN$* OR data_win_eventdata_imagePath:*\\\\* OR data_win_eventdata_serviceFileName:*ADMIN$* OR data_win_eventdata_serviceFileName:*\\\\* OR data_win_eventdata_imagePath:*.exe*)
+    pivot_on:
+    - host
+    window: 1h
+  - name: Admin share and SCM/pipe access preceding PsExec
+    query: data_win_system_eventID:"5145" AND (data_win_eventdata_shareName:/.*[Aa][Dd][Mm][Ii][Nn]\$/ OR data_win_eventdata_shareName:/.*[Cc]\$/ OR data_win_eventdata_relativeTargetName:*svcctl* OR data_win_eventdata_relativeTargetName:*atsvc*)
+    pivot_on:
+    - host
+    window: 1h
+  - name: Network and explicit-credential logons from the same account
+    query: (data_win_system_eventID:"4624" AND data_win_eventdata_logonType:"3") OR data_win_system_eventID:"4648"
+    pivot_on:
+    - user
+    window: 2h
+  - name: Child processes and LSASS access run through the remote service
+    query: (data_win_system_eventID:"1" AND (data_win_eventdata_parentImage:*ADMIN$* OR data_win_eventdata_parentImage:*svc*.exe OR data_win_eventdata_parentImage:*[Pp]s[Ee]xe*) AND (data_win_eventdata_image:*cmd.exe OR data_win_eventdata_image:*powershell.exe OR data_win_eventdata_image:*rundll32.exe OR data_win_eventdata_image:*whoami.exe)) OR (data_win_system_eventID:"10" AND data_win_eventdata_targetImage:*lsass.exe)
+    pivot_on:
+    - host
+    window: 2h
+  - name: 'Lateral spread: same account authenticating to other hosts over SMB'
+    query: data_win_system_eventID:"5140" OR (data_win_system_eventID:"5145" AND data_win_eventdata_shareName:*IPC$*)
+    pivot_on:
+    - user
+    window: 4h

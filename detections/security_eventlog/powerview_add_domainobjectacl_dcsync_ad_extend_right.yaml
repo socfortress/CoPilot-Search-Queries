@@ -178,44 +178,58 @@ graylog:
   query: data_win_system_eventID:"5136" AND data_win_eventdata_attributeLDAPDisplayName:/[Nn][Tt][Ss][Ee][Cc][Uu][Rr][Ii][Tt][Yy][Dd][Ee][Ss][Cc][Rr][Ii][Pp][Tt][Oo][Rr]/ AND (data_win_eventdata_attributeValue:/.*1131[Ff]6[Aa][Dd]-9[Cc]07-11[Dd]1-[Ff]79[Ff]-00[Cc]04[Ff][Cc]2[Dd][Cc][Dd]2.*/ OR data_win_eventdata_attributeValue:/.*1131[Ff]6[Aa][Aa]-9[Cc]07-11[Dd]1-[Ff]79[Ff]-00[Cc]04[Ff][Cc]2[Dd][Cc][Dd]2.*/ OR data_win_eventdata_attributeValue:/.*89[Ee]95[Bb]76-444[Dd]-4[Cc]62-991[Aa]-0[Ff][Aa][Cc][Bb][Ee][Dd][Aa]640[Cc].*/) AND _exists_:data_win_eventdata_objectClass AND NOT (data_win_eventdata_objectClass:/[Dd][Nn][Ss][Nn][Oo][Dd][Ee]/ OR data_win_eventdata_objectClass:/[Dd][Nn][Ss][Zz][Oo][Nn][Ee][Ss][Cc][Oo][Pp][Ee]/ OR data_win_eventdata_objectClass:/[Dd][Nn][Ss][Zz][Oo][Nn][Ee]/)
 
 correlation:
-  # Authored by the correlation engine for review. Related CoPilot Searches to run
-  # around an alert from this rule, scoped to the same host/user/IP within the window.
+  # Authored per-rule (behaviour-researched) for the correlation engine. Related CoPilot
+  # Searches + telemetry pivots to run around an alert, scoped to its host/user/ip/domain.
   related_rules:
-    - id: 0255a820-e564-4e40-af2b-6ac61160335c
-      name: "A New Trust Was Created To A Domain"
-      reason: "next kill-chain tactic: Persistence"
-    - id: 35ba1d85-724d-42a3-889f-2e2362bcaf23
-      name: "AD Privileged Users or Groups Reconnaissance"
-      reason: "next kill-chain tactic: Discovery"
-    - id: 9eb99343-d336-4020-a3cd-67f3819e68ee
-      name: "Account Tampering - Suspicious Failed Logon Reasons"
-      reason: "next kill-chain tactic: Persistence"
-    - id: 17d619c1-e020-4347-957e-1d1207455c93
-      name: "Active Directory Replication from Non Machine Account"
-      reason: "next kill-chain tactic: Credential Access"
-    - id: 300bac00-e041-4ee2-9c36-e262656a6ecc
-      name: "Active Directory User Backdoors"
-      reason: "next kill-chain tactic: Persistence"
-    - id: 2632954e-db1c-49cb-9936-67d1ef1d17d2
-      name: "Addition of SID History to Active Directory Object"
-      reason: "next kill-chain tactic: Privilege Escalation"
-  window: 1h
+  - id: e4a96dfd-667a-4487-b942-ccef5a1e81e8
+    name: Windows Find Interesting ACL with FindInterestingDomainAcl
+    reason: 'PowerView ACL hunting (Find-InterestingDomainAcl) is the usual precursor: the attacker finds an object they can WriteDACL on, then grants DCSync rights via Add-DomainObjectAcl.'
+  - id: 028c7842-4243-41cd-be6f-12f3cf1a26c7
+    name: AD Object WriteDAC Access
+    reason: WriteDACL access (4662) on the domain object is the permission that allows the ACL edit; the same actor and session should appear just before the 5136 change.
+  - id: 35ba1d85-724d-42a3-889f-2e2362bcaf23
+    name: AD Privileged Users or Groups Reconnaissance
+    reason: Enumeration of privileged AD groups and users commonly precedes choosing which account to backdoor with replication rights.
+  - id: 311b6ce2-7890-4383-a8c2-663a9f6b43cd
+    name: Enabled User Right in AD to Control User Objects
+    reason: Sibling AD privilege-delegation tampering (4704) by the same actor; both are ways of quietly granting control over directory objects.
+  - id: 300bac00-e041-4ee2-9c36-e262656a6ecc
+    name: Active Directory User Backdoors
+    reason: 'Co-occurring AD persistence: attackers who grant DCSync rights often also alter user attributes (SPN, AS-REP flag, SID history) to keep access.'
+  - id: 17d619c1-e020-4347-957e-1d1207455c93
+    name: Active Directory Replication from Non Machine Account
+    reason: 'Direct follow-on: once the granted account holds Replicating Directory Changes (All), it performs the DCSync and this 4662 detection fires.'
+  - id: 611eab06-a145-4dfa-a295-3ccc5c20f59a
+    name: Mimikatz DC Sync
+    reason: 'Follow-on execution: lsadump::dcsync using the newly delegated rights to pull krbtgt and admin hashes.'
+  - id: 32e19d25-4aed-4860-a55a-be99cb0bf7ed
+    name: Possible DC Shadow Attack
+    reason: Another post-privilege AD manipulation technique that uses replication-related rights and directory changes to persist.
+  window: 4h
   enrichment_searches:
-  # Rule-specific telemetry pivots the engine runs around an alert from this rule,
-  # scoped to the alert's host/user/IP within the window (behaviour-targeted, not a sweep).
-    - name: "Account / group / privilege changes on this host"
-      query: '(((data_win_system_eventID:"4720" OR data_win_system_eventID:"4728" OR data_win_system_eventID:"4732" OR data_win_system_eventID:"4756")) OR (data_win_system_eventID:"1" AND data_win_eventdata_image:/.*(\\[Nn][Ee][Tt]\.[Ee][Xx][Ee]|\\[Nn][Ee][Tt]1\.[Ee][Xx][Ee])/ AND (data_win_eventdata_commandLine:/.*[Uu][Ss][Ee][Rr] .*/ OR data_win_eventdata_commandLine:/.*[Ll][Oo][Cc][Aa][Ll][Gg][Rr][Oo][Uu][Pp].*/ OR data_win_eventdata_commandLine:/.*[Gg][Rr][Oo][Uu][Pp] .*/)))'
-      pivot_on: [host]
-      window: 6h
-    - name: "Memory/credential-dump creation & LSASS access on this host"
-      query: '((data_win_system_eventID:"1" AND data_win_eventdata_image:/.*(\\[Pp][Rr][Oo][Cc][Dd][Uu][Mm][Pp]\.[Ee][Xx][Ee]|\\[Pp][Rr][Oo][Cc][Dd][Uu][Mm][Pp]64\.[Ee][Xx][Ee]|\\[Ss][Qq][Ll][Dd][Uu][Mm][Pp][Ee][Rr]\.[Ee][Xx][Ee]|\\[Cc][Rr][Ee][Aa][Tt][Ee][Dd][Uu][Mm][Pp]\.[Ee][Xx][Ee]|\\[Rr][Dd][Rr][Ll][Ee][Aa][Kk][Dd][Ii][Aa][Gg]\.[Ee][Xx][Ee]|\\[Dd][Uu][Mm][Pp][Ee][Rr][Tt]\.[Ee][Xx][Ee]|\\[Nn][Aa][Nn][Oo][Dd][Uu][Mm][Pp]\.[Ee][Xx][Ee]|\\[Aa][Vv][Dd][Uu][Mm][Pp]\.[Ee][Xx][Ee])/) OR (data_win_system_eventID:"1" AND (data_win_eventdata_commandLine:/.*[Cc][Oo][Mm][Ss][Vv][Cc][Ss]\.[Dd][Ll][Ll].*/ OR data_win_eventdata_commandLine:/.*[Mm][Ii][Nn][Ii][Dd][Uu][Mm][Pp].*/ OR data_win_eventdata_commandLine:/.*[Dd][Uu][Mm][Pp][Ee][Rr][Tt].*/ OR data_win_eventdata_commandLine:/.*[Nn][Aa][Nn][Oo][Dd][Uu][Mm][Pp].*/ OR data_win_eventdata_commandLine:/.*[Ll][Ss][Aa][Ss][Ss].*/ OR data_win_eventdata_commandLine:/.*[Ss][Ee][Kk][Uu][Rr][Ll][Ss][Aa].*/ OR data_win_eventdata_commandLine:/.*[Nn][Tt][Dd][Ss]\.[Dd][Ii][Tt].*/ OR data_win_eventdata_commandLine:/.*[Nn][Tt][Dd][Ss][Uu][Tt][Ii][Ll].*/)) OR (data_win_system_eventID:"10" AND data_win_eventdata_targetImage:/.*(\\[Ll][Ss][Aa][Ss][Ss]\.[Ee][Xx][Ee])/))'
-      pivot_on: [host]
-      window: 1h
-    - name: "This account's logon activity across hosts"
-      query: '(data_win_system_eventID:"4624" OR data_win_system_eventID:"4625")'
-      pivot_on: [user]
-      window: 6h
-    - name: "Account / group / privilege changes involving this account"
-      query: '(data_win_system_eventID:"4720" OR data_win_system_eventID:"4722" OR data_win_system_eventID:"4724" OR data_win_system_eventID:"4728" OR data_win_system_eventID:"4732" OR data_win_system_eventID:"4756" OR data_win_system_eventID:"4672")'
-      pivot_on: [user]
-      window: 6h
+  # Behaviour-targeted hunts the engine runs around the alert (not a sweep).
+  - name: Directory replication access (DCSync) using replication GUIDs
+    query: data_win_system_eventID:"4662" AND (data_win_eventdata_properties:*1131f6aa-9c07-11d1-f79f-00c04fc2dcd2* OR data_win_eventdata_properties:*1131f6ad-9c07-11d1-f79f-00c04fc2dcd2* OR data_win_eventdata_properties:*89e95b76-444d-4c62-991a-0facbeda640c*)
+    pivot_on:
+    - user
+    window: 24h
+  - name: PowerView / ACL-editing tooling and DCSync commands
+    query: (data_win_system_eventID:"1" AND (data_win_eventdata_commandLine:*Add-DomainObjectAcl* OR data_win_eventdata_commandLine:*Add-ObjectAcl* OR data_win_eventdata_commandLine:*PowerView* OR data_win_eventdata_commandLine:*Find-InterestingDomainAcl* OR data_win_eventdata_commandLine:*lsadump\:\:dcsync* OR data_win_eventdata_commandLine:*DCSync* OR data_win_eventdata_commandLine:/.*[Dd][Ss][Aa][Cc][Ll][Ss].*/)) OR (data_win_system_eventID:"4104" AND (data_win_eventdata_scriptBlockText:*Add-DomainObjectAcl* OR data_win_eventdata_scriptBlockText:*Add-ObjectAcl* OR data_win_eventdata_scriptBlockText:*Get-DomainObjectAcl* OR data_win_eventdata_scriptBlockText:*DCSync*))
+    pivot_on:
+    - host
+    window: 4h
+  - name: Other directory object modifications by same account (5136/5137/5141)
+    query: (data_win_system_eventID:"5136" OR data_win_system_eventID:"5137" OR data_win_system_eventID:"5141") AND NOT data_win_eventdata_objectClass:/[Dd][Nn][Ss].*/
+    pivot_on:
+    - user
+    window: 4h
+  - name: Credential dumping tools and NTDS/LSASS access following ACL change
+    query: (data_win_system_eventID:"1" AND (data_win_eventdata_commandLine:*ntdsutil* OR data_win_eventdata_commandLine:*secretsdump* OR data_win_eventdata_commandLine:*sekurlsa* OR data_win_eventdata_commandLine:*mimikatz* OR data_win_eventdata_commandLine:*ntds.dit*)) OR (data_win_system_eventID:"10" AND data_win_eventdata_targetImage:*lsass.exe)
+    pivot_on:
+    - host
+    window: 4h
+  - name: Logons by the account that made the ACL change
+    query: (data_win_system_eventID:"4624" OR data_win_system_eventID:"4672" OR data_win_system_eventID:"4768" OR data_win_system_eventID:"4769")
+    pivot_on:
+    - user
+    window: 6h

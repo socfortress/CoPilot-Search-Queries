@@ -160,35 +160,58 @@ graylog:
   query: data_win_system_eventID:"4768" AND data_win_eventdata_targetUserName:/.*\$/ AND data_win_eventdata_certThumbprint:/.*/ AND _exists_:data_win_eventdata_ipAddress AND _exists_:data_win_eventdata_certThumbprint AND NOT (data_win_eventdata_ipAddress:"::1" OR data_win_eventdata_certThumbprint:"")
 
 correlation:
-  # Authored by the correlation engine for review. Related CoPilot Searches to run
-  # around an alert from this rule, scoped to the same host/user/IP within the window.
+  # Authored per-rule (behaviour-researched) for the correlation engine. Related CoPilot
+  # Searches + telemetry pivots to run around an alert, scoped to its host/user/ip/domain.
   related_rules:
-    - id: 35ba1d85-724d-42a3-889f-2e2362bcaf23
-      name: "AD Privileged Users or Groups Reconnaissance"
-      reason: "next kill-chain tactic: Discovery"
-    - id: 17d619c1-e020-4347-957e-1d1207455c93
-      name: "Active Directory Replication from Non Machine Account"
-      reason: "next kill-chain tactic: Credential Access"
-    - id: 87261fb2-69d0-42fe-b9de-88c6b5f65a43
-      name: "Atera Agent Installation"
-      reason: "next kill-chain tactic: Command and Control"
-  window: 1h
+  - id: 1ce8c8a3-2723-48ed-8246-906ac91061a6
+    name: Possible PetitPotam Coerce Authentication Attempt
+    reason: 'Direct precursor: the EFSRPC/MS-EFSR coercion that forces a DC to authenticate to the attacker relay, which is relayed to AD CS to obtain the machine certificate later used in this PKINIT TGT request.'
+  - id: cd8c163e-a19b-402e-bdd5-419ff5859f12
+    name: HackTool - ADCSPwn Execution
+    reason: 'Precursor: ADCSPwn relays machine authentication to AD CS web enrollment to mint the certificate whose thumbprint appears in this 4768.'
+  - id: caa9a802-8bd8-4b9e-a5cd-4d6221670219
+    name: Suspicious Kerberos Ticket Request via CLI
+    reason: 'Same-step tooling view: Rubeus asktgt /certificate on the command line is the usual way the certificate TGT request is made.'
+  - id: 17d619c1-e020-4347-957e-1d1207455c93
+    name: Active Directory Replication from Non Machine Account
+    reason: 'Likely next step: a DC machine-account TGT/certificate is used to perform DCSync to dump krbtgt and domain hashes.'
+  - id: 192a0330-c20b-4356-90b6-7b7049ae0b87
+    name: Successful Overpass the Hash Attempt
+    reason: 'Co-occurring ticket abuse: after obtaining a TGT with a stolen credential/certificate, attackers chain alternate-credential Kerberos logons from the same host.'
+  - id: f598ea0c-c25a-4f72-a219-50c44411c791
+    name: Possible Shadow Credentials Added
+    reason: 'Alternative certificate-based auth path: msDS-KeyCredentialLink abuse also yields PKINIT 4768 events with a cert thumbprint, confirming certificate-authentication abuse.'
+  - id: 993c2665-e6ef-40e3-a62a-e1a97686af79
+    name: Certificate Use With No Strong Mapping
+    reason: 'Same certificate-authentication abuse seen from the KDC side: certificate-mapped logons without strong mapping are what allow forged/relayed machine certificates to authenticate.'
+  - id: bfbd3291-de87-4b7c-88a2-d6a5deb28668
+    name: ADCS Certificate Template Configuration Vulnerability with Risky EKU
+    reason: 'Certificate-abuse context: risky AD CS templates are the other route to obtaining certificates usable for PKINIT TGT requests.'
+  window: 2h
   enrichment_searches:
-  # Rule-specific telemetry pivots the engine runs around an alert from this rule,
-  # scoped to the alert's host/user/IP within the window (behaviour-targeted, not a sweep).
-    - name: "Remote-execution / lateral-movement tooling on this host"
-      query: '(data_win_system_eventID:"1" AND data_win_eventdata_image:/.*(\\[Pp][Ss][Ee][Xx][Ee][Cc]\.[Ee][Xx][Ee]|\\[Pp][Ss][Ee][Xx][Ee][Ss][Vv][Cc]\.[Ee][Xx][Ee]|\\[Pp][Aa][Ee][Xx][Ee][Cc]\.[Ee][Xx][Ee]|\\[Ww][Ii][Nn][Rr][Ss]\.[Ee][Xx][Ee]|\\[Mm][Ss][Tt][Ss][Cc]\.[Ee][Xx][Ee]|\\[Ww][Mm][Ii][Cc]\.[Ee][Xx][Ee])/) OR (data_win_system_eventID:"1" AND data_win_eventdata_image:/.*(\\[Pp][Oo][Ww][Ee][Rr][Ss][Hh][Ee][Ll][Ll]\.[Ee][Xx][Ee]|\\[Pp][Ww][Ss][Hh]\.[Ee][Xx][Ee])/ AND (data_win_eventdata_commandLine:/.*[Ii][Nn][Vv][Oo][Kk][Ee]-[Cc][Oo][Mm][Mm][Aa][Nn][Dd].*/ OR data_win_eventdata_commandLine:/.*[Nn][Ee][Ww]-[Pp][Ss][Ss][Ee][Ss][Ss][Ii][Oo][Nn].*/ OR data_win_eventdata_commandLine:/.*[Ee][Nn][Tt][Ee][Rr]-[Pp][Ss][Ss][Ee][Ss][Ss][Ii][Oo][Nn].*/ OR data_win_eventdata_commandLine:/.*-[Cc][Oo][Mm][Pp][Uu][Tt][Ee][Rr][Nn][Aa][Mm][Ee].*/))'
-      pivot_on: [host]
-      window: 2h
-    - name: "This account's logon activity across hosts"
-      query: '(data_win_system_eventID:"4624" OR data_win_system_eventID:"4625")'
-      pivot_on: [user]
-      window: 6h
-    - name: "Account / group / privilege changes involving this account"
-      query: '(data_win_system_eventID:"4720" OR data_win_system_eventID:"4722" OR data_win_system_eventID:"4724" OR data_win_system_eventID:"4728" OR data_win_system_eventID:"4732" OR data_win_system_eventID:"4756" OR data_win_system_eventID:"4672")'
-      pivot_on: [user]
-      window: 6h
-    - name: "Memory/credential-dump creation & LSASS access on this host"
-      query: '((data_win_system_eventID:"1" AND data_win_eventdata_image:/.*(\\[Pp][Rr][Oo][Cc][Dd][Uu][Mm][Pp]\.[Ee][Xx][Ee]|\\[Pp][Rr][Oo][Cc][Dd][Uu][Mm][Pp]64\.[Ee][Xx][Ee]|\\[Ss][Qq][Ll][Dd][Uu][Mm][Pp][Ee][Rr]\.[Ee][Xx][Ee]|\\[Cc][Rr][Ee][Aa][Tt][Ee][Dd][Uu][Mm][Pp]\.[Ee][Xx][Ee]|\\[Rr][Dd][Rr][Ll][Ee][Aa][Kk][Dd][Ii][Aa][Gg]\.[Ee][Xx][Ee]|\\[Dd][Uu][Mm][Pp][Ee][Rr][Tt]\.[Ee][Xx][Ee]|\\[Nn][Aa][Nn][Oo][Dd][Uu][Mm][Pp]\.[Ee][Xx][Ee]|\\[Aa][Vv][Dd][Uu][Mm][Pp]\.[Ee][Xx][Ee])/) OR (data_win_system_eventID:"1" AND (data_win_eventdata_commandLine:/.*[Cc][Oo][Mm][Ss][Vv][Cc][Ss]\.[Dd][Ll][Ll].*/ OR data_win_eventdata_commandLine:/.*[Mm][Ii][Nn][Ii][Dd][Uu][Mm][Pp].*/ OR data_win_eventdata_commandLine:/.*[Dd][Uu][Mm][Pp][Ee][Rr][Tt].*/ OR data_win_eventdata_commandLine:/.*[Nn][Aa][Nn][Oo][Dd][Uu][Mm][Pp].*/ OR data_win_eventdata_commandLine:/.*[Ll][Ss][Aa][Ss][Ss].*/ OR data_win_eventdata_commandLine:/.*[Ss][Ee][Kk][Uu][Rr][Ll][Ss][Aa].*/ OR data_win_eventdata_commandLine:/.*[Nn][Tt][Dd][Ss]\.[Dd][Ii][Tt].*/ OR data_win_eventdata_commandLine:/.*[Nn][Tt][Dd][Ss][Uu][Tt][Ii][Ll].*/)) OR (data_win_system_eventID:"10" AND data_win_eventdata_targetImage:/.*(\\[Ll][Ss][Aa][Ss][Ss]\.[Ee][Xx][Ee])/))'
-      pivot_on: [host]
-      window: 1h
+  # Behaviour-targeted hunts the engine runs around the alert (not a sweep).
+  - name: Rubeus / PKINIT certificate TGT request tooling
+    query: data_win_system_eventID:"1" AND (data_win_eventdata_commandLine:/.*[Aa][Ss][Kk][Tt][Gg][Tt].*/ OR data_win_eventdata_commandLine:/.*\/[Cc][Ee][Rr][Tt][Ii][Ff][Ii][Cc][Aa][Tt][Ee]:.*/ OR data_win_eventdata_commandLine:/.*[Rr][Uu][Bb][Ee][Uu][Ss].*/ OR data_win_eventdata_commandLine:/.*[Pp][Kk][Ii][Nn][Ii][Tt].*/ OR data_win_eventdata_commandLine:/.*[Cc][Ee][Rr][Tt][Ii][Pp][Yy].*/ OR data_win_eventdata_commandLine:/.*[Gg][Ee][Tt][Nn][Tt][Hh][Aa][Ss][Hh].*/)
+    pivot_on:
+    - host
+    window: 2h
+  - name: EFSRPC / PetitPotam coercion share access
+    query: data_win_system_eventID:"5145" AND (data_win_eventdata_relativeTargetName:/.*([Ee][Ff][Ss][Rr][Pp][Cc]|[Ll][Ss][Aa][Rr][Pp][Cc]|[Ll][Ss][Aa][Ss][Ss]|[Ss][Aa][Mm][Rr]|[Nn][Ee][Tt][Ll][Oo][Gg][Oo][Nn]).*/ OR data_win_eventdata_shareName:/.*[Ii][Pp][Cc]\$.*/)
+    pivot_on:
+    - host
+    window: 1h
+  - name: Certificate issuance on the CA (4886/4887) and cert-related files
+    query: (data_win_system_eventID:"4886" OR data_win_system_eventID:"4887" OR (data_win_system_eventID:"11" AND (data_win_eventdata_targetFilename:/.*\.[Pp][Ff][Xx]/ OR data_win_eventdata_targetFilename:/.*\.[Kk][Ii][Rr][Bb][Ii]/ OR data_win_eventdata_targetFilename:/.*\.[Cc][Cc][Aa][Cc][Hh][Ee]/)))
+    pivot_on:
+    - host
+    window: 4h
+  - name: Machine-account network logons and DC replication rights (DCSync follow-on)
+    query: (data_win_system_eventID:"4624" AND data_win_eventdata_logonType:"3" AND data_win_eventdata_targetUserName:/.*\$/) OR (data_win_system_eventID:"4662" AND (data_win_eventdata_properties:/.*1131[Ff]6[Aa][Aa]-9[Cc]07-11[Dd]1-[Ff]79[Ff]-00[Cc]04[Ff][Cc]2[Dd][Cc][Dd]2.*/ OR data_win_eventdata_properties:/.*1131[Ff]6[Aa][Dd]-9[Cc]07-11[Dd]1-[Ff]79[Ff]-00[Cc]04[Ff][Cc]2[Dd][Cc][Dd]2.*/))
+    pivot_on:
+    - user
+    window: 6h
+  - name: Kerberos service ticket requests and logons using the account
+    query: (data_win_system_eventID:"4769" OR data_win_system_eventID:"4768" OR data_win_system_eventID:"4624")
+    pivot_on:
+    - user
+    window: 2h
