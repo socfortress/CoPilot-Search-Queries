@@ -135,58 +135,58 @@ graylog:
   query: data_win_system_eventID:"4104" AND (data_win_eventdata_scriptBlockText:/.*IO\.Compression\..*/ OR data_win_eventdata_scriptBlockText:/.*IO\.StreamReader.*/ OR data_win_eventdata_scriptBlockText:/.*\]::Decompress.*/)
 
 correlation:
-  # Authored by the correlation engine for review. Related CoPilot Searches to run
-  # around an alert from this rule, scoped to the same host/user/IP within the window.
+  # Authored per-rule (behaviour-researched) for the correlation engine. Related CoPilot
+  # Searches + telemetry pivots to run around an alert, scoped to its host/user/ip/domain.
   related_rules:
-    - id: de7fcadc-04f3-11ec-a241-acde48001122
-      name: "AdsiSearcher Account Discovery"
-      reason: "same analytic story: Data Destruction"
-    - id: 2452e632-9e0d-11eb-bacd-acde48001122
-      name: "DNS Exfiltration Using Nslookup App"
-      reason: "same analytic story: Compromised Windows Host"
-    - id: cc316032-924a-11eb-91a2-acde48001122
-      name: "DSQuery Domain Discovery"
-      reason: "same analytic story: Compromised Windows Host"
-    - id: 5ee2bcd0-b2ff-11eb-bb34-acde48001122
-      name: "Delete ShadowCopy With PowerShell"
-      reason: "same analytic story: Data Destruction"
-    - id: f533ca6c-9440-4686-80cb-7f294c07812a
-      name: "Detect Certify With PowerShell Script Block Logging"
-      reason: "same analytic story: Malicious PowerShell"
-    - id: bc1dc6b8-c954-11eb-bade-acde48001122
-      name: "Detect Empire with PowerShell Script Block Logging"
-      reason: "same analytic story: Hellcat Ransomware"
-    - id: 9b3af1e6-5b68-11eb-ae93-0242ac130002
-      name: "Detect MSHTA Url in Command Line"
-      reason: "same analytic story: Compromised Windows Host"
-    - id: 8148c29c-c952-11eb-9255-acde48001122
-      name: "Detect Mimikatz With PowerShell Script Block Logging"
-      reason: "same analytic story: Hellcat Ransomware"
-    - id: 27c3a83d-cada-47c6-9042-67baf19d2574
-      name: "Detect PsExec With accepteula Flag"
-      reason: "same analytic story: Medusa Ransomware"
-    - id: 32e0baea-b3f1-11eb-a2ce-acde48001122
-      name: "Detect RClone Command-Line Usage"
-      reason: "same analytic story: Hellcat Ransomware"
-    - id: 72170ec5-f7d2-42f5-aefb-2b8be6aad15f
-      name: "Detect Regasm Spawning a Process"
-      reason: "same analytic story: Compromised Windows Host"
-    - id: bc477b57-5c21-4ab6-9c33-668772e7f114
-      name: "Detect Regsvcs Spawning a Process"
-      reason: "same analytic story: Compromised Windows Host"
+  - id: 98767d61-b2e8-4d71-b661-e36783ee24c1
+    name: Gzip Archive Decode Via PowerShell
+    reason: Same GzipStream/IO.Compression decode primitive seen at process-creation level; confirms the script block is an inline decompress-and-run loader.
+  - id: 7eedcc9d-9fdb-4d94-9c54-474e8affc0c7
+    name: Invoke-Obfuscation COMPRESS OBFUSCATION
+    reason: Invoke-Obfuscation COMPRESS launcher builds DeflateStream+StreamReader chains, exactly the IO.Compression/StreamReader pattern in the 4104 block.
+  - id: e32d4572-9826-4738-b651-95fa63747e8a
+    name: Base64 Encoded PowerShell Command Detected
+    reason: Compressed payloads are almost always Base64-wrapped (FromBase64String -> DeflateStream); the encoded launch is the precursor command line.
+  - id: c4db14d9-7909-48b4-a054-aa14d89dbb19
+    name: Malicious PowerShell Process - Encoded Command
+    reason: The -enc launcher that delivers the compressed stage; precedes the 4104 decompression block.
+  - id: 30edb182-aa75-42c0-b0a9-e998bb29067c
+    name: Potential AMSI Bypass Via .NET Reflection
+    reason: Loaders that decompress in-memory .NET assemblies typically patch AMSI first so the decoded stage is not scanned.
+  - id: ea9bf0fa-edec-4fb8-8b78-b119f2528186
+    name: Windows Defender AMSI Trigger Detected
+    reason: Defender flagging the decompressed script/assembly via AMSI is direct corroboration that the stream held malicious content.
+  - id: 17769c90-230e-488b-a463-e05c08e9d48f
+    name: Powershell Defender Exclusion
+    reason: Follow-on defense evasion by the same PowerShell payload once it is running, to protect the dropped stage.
+  - id: c260b6db-48ba-4b4a-a76f-2f67644e99d2
+    name: HackTool - Covenant PowerShell Launcher
+    reason: Covenant/Empire-style launchers deliver gzip-compressed stagers decoded via IO.Compression; co-occurring launcher indicates C2 framework stage.
   window: 1h
   enrichment_searches:
-  # Rule-specific telemetry pivots the engine runs around an alert from this rule,
-  # scoped to the alert's host/user/IP within the window (behaviour-targeted, not a sweep).
-    - name: "Outbound connections by script interpreters on this host"
-      query: 'data_win_system_eventID:"3" AND data_win_eventdata_image:/.*(\\[Pp][Oo][Ww][Ee][Rr][Ss][Hh][Ee][Ll][Ll]\.[Ee][Xx][Ee]|\\[Pp][Ww][Ss][Hh]\.[Ee][Xx][Ee]|\\[Pp][Oo][Ww][Ee][Rr][Ss][Hh][Ee][Ll][Ll]_[Ii][Ss][Ee]\.[Ee][Xx][Ee]|\\[Cc][Mm][Dd]\.[Ee][Xx][Ee]|\\[Ww][Ss][Cc][Rr][Ii][Pp][Tt]\.[Ee][Xx][Ee]|\\[Cc][Ss][Cc][Rr][Ii][Pp][Tt]\.[Ee][Xx][Ee]|\\[Mm][Ss][Hh][Tt][Aa]\.[Ee][Xx][Ee]|\\[Rr][Uu][Nn][Dd][Ll][Ll]32\.[Ee][Xx][Ee]|\\[Rr][Ee][Gg][Ss][Vv][Rr]32\.[Ee][Xx][Ee])/'
-      pivot_on: [host]
-      window: 1h
-    - name: "Download / AMSI-bypass / encoded script blocks on this host"
-      query: 'data_win_system_eventID:"4104" AND (data_win_eventdata_scriptBlockText:/.*[Dd][Oo][Ww][Nn][Ll][Oo][Aa][Dd][Ss][Tt][Rr][Ii][Nn][Gg].*/ OR data_win_eventdata_scriptBlockText:/.*[Dd][Oo][Ww][Nn][Ll][Oo][Aa][Dd][Ff][Ii][Ll][Ee].*/ OR data_win_eventdata_scriptBlockText:/.*[Ii][Nn][Vv][Oo][Kk][Ee]-[Ww][Ee][Bb][Rr][Ee][Qq][Uu][Ee][Ss][Tt].*/ OR data_win_eventdata_scriptBlockText:/.*[Nn][Ee][Tt]\.[Ww][Ee][Bb][Cc][Ll][Ii][Ee][Nn][Tt].*/ OR data_win_eventdata_scriptBlockText:/.*[Ff][Rr][Oo][Mm][Bb][Aa][Ss][Ee]64[Ss][Tt][Rr][Ii][Nn][Gg].*/ OR data_win_eventdata_scriptBlockText:/.*[Ii][Ee][Xx].*/ OR data_win_eventdata_scriptBlockText:/.*[Ii][Nn][Vv][Oo][Kk][Ee]-[Ee][Xx][Pp][Rr][Ee][Ss][Ss][Ii][Oo][Nn].*/ OR data_win_eventdata_scriptBlockText:/.*[Ss][Tt][Aa][Rr][Tt]-[Bb][Ii][Tt][Ss][Tt][Rr][Aa][Nn][Ss][Ff][Ee][Rr].*/ OR data_win_eventdata_scriptBlockText:/.*[Aa][Mm][Ss][Ii][Uu][Tt][Ii][Ll][Ss].*/ OR data_win_eventdata_scriptBlockText:/.*-[Ee][Nn][Cc].*/ OR data_win_eventdata_scriptBlockText:/.*-[Ee][Nn][Cc][Oo][Dd][Ee][Dd][Cc][Oo][Mm][Mm][Aa][Nn][Dd].*/ OR data_win_eventdata_scriptBlockText:/.*[Rr][Ee][Ff][Ll][Ee][Cc][Tt][Ii][Oo][Nn]\.[Aa][Ss][Ss][Ee][Mm][Bb][Ll][Yy].*/)'
-      pivot_on: [host]
-      window: 1h
-    - name: "Follow-on LOLBin / signed-binary-proxy execution on this host"
-      query: 'data_win_system_eventID:"1" AND data_win_eventdata_image:/.*(\\[Rr][Uu][Nn][Dd][Ll][Ll]32\.[Ee][Xx][Ee]|\\[Rr][Ee][Gg][Ss][Vv][Rr]32\.[Ee][Xx][Ee]|\\[Mm][Ss][Hh][Tt][Aa]\.[Ee][Xx][Ee]|\\[Ii][Nn][Ss][Tt][Aa][Ll][Ll][Uu][Tt][Ii][Ll]\.[Ee][Xx][Ee]|\\[Rr][Ee][Gg][Aa][Ss][Mm]\.[Ee][Xx][Ee]|\\[Rr][Ee][Gg][Ss][Vv][Cc][Ss]\.[Ee][Xx][Ee]|\\[Mm][Ss][Bb][Uu][Ii][Ll][Dd]\.[Ee][Xx][Ee]|\\[Cc][Ee][Rr][Tt][Uu][Tt][Ii][Ll]\.[Ee][Xx][Ee]|\\[Bb][Ii][Tt][Ss][Aa][Dd][Mm][Ii][Nn]\.[Ee][Xx][Ee]|\\[Ww][Mm][Ii][Cc]\.[Ee][Xx][Ee]|\\[Cc][Mm][Ss][Tt][Pp]\.[Ee][Xx][Ee]|\\[Oo][Dd][Bb][Cc][Cc][Oo][Nn][Ff]\.[Ee][Xx][Ee]|\\[Ff][Oo][Rr][Ff][Ii][Ll][Ee][Ss]\.[Ee][Xx][Ee]|\\[Pp][Cc][Aa][Ll][Uu][Aa]\.[Ee][Xx][Ee]|\\[Mm][Aa][Vv][Ii][Nn][Jj][Ee][Cc][Tt]\.[Ee][Xx][Ee]|\\[Ss][Cc][Rr][Ii][Pp][Tt][Rr][Uu][Nn][Nn][Ee][Rr]\.[Ee][Xx][Ee])/'
-      pivot_on: [host]
-      window: 1h
+  # Behaviour-targeted hunts the engine runs around the alert (not a sweep).
+  - name: Download cradle, AMSI bypass or reflective load in script blocks
+    query: data_win_system_eventID:"4104" AND (data_win_eventdata_scriptBlockText:/.*[Ff]rom[Bb]ase64[Ss]tring.*/ OR data_win_eventdata_scriptBlockText:/.*[Nn]et\.[Ww]eb[Cc]lient.*/ OR data_win_eventdata_scriptBlockText:/.*[Ii]nvoke-[Ww]eb[Rr]equest.*/ OR data_win_eventdata_scriptBlockText:/.*[Dd]ownload[Ss]tring.*/ OR data_win_eventdata_scriptBlockText:/.*[Aa]msi[Uu]tils.*/ OR data_win_eventdata_scriptBlockText:/.*[Rr]eflection\.[Aa]ssembly.*/ OR data_win_eventdata_scriptBlockText:/.*[Ii]nvoke-[Ee]xpression.*/)
+    pivot_on:
+    - host
+    window: 1h
+  - name: PowerShell spawned by Office, script host or LOLBin parents
+    query: data_win_system_eventID:"1" AND data_win_eventdata_image:/.*\\([Pp]ower[Ss]hell|[Pp]wsh)\.[Ee][Xx][Ee]/ AND data_win_eventdata_parentImage:/.*\\([Ww][Ii][Nn][Ww][Oo][Rr][Dd]|[Ee][Xx][Cc][Ee][Ll]|[Mm][Ss][Hh][Tt][Aa]|[Ww][Ss][Cc][Rr][Ii][Pp][Tt]|[Cc][Ss][Cc][Rr][Ii][Pp][Tt]|[Rr][Uu][Nn][Dd][Ll][Ll]32|[Rr][Ee][Gg][Ss][Vv][Rr]32|[Ww][Mm][Ii][Pp][Rr][Vv][Ss][Ee])\.[Ee][Xx][Ee]/
+    pivot_on:
+    - host
+    window: 1h
+  - name: PowerShell outbound network connections
+    query: data_win_system_eventID:"3" AND data_win_eventdata_image:/.*\\([Pp]ower[Ss]hell|[Pp]wsh)\.[Ee][Xx][Ee]/
+    pivot_on:
+    - host
+    window: 1h
+  - name: Executables or scripts dropped by PowerShell
+    query: data_win_system_eventID:"11" AND data_win_eventdata_image:/.*\\([Pp]ower[Ss]hell|[Pp]wsh)\.[Ee][Xx][Ee]/ AND data_win_eventdata_targetFilename:/.*\.([Ee][Xx][Ee]|[Dd][Ll][Ll]|[Pp][Ss]1|[Bb][Aa][Tt]|[Vv][Bb][Ss]|[Jj][Ss]|[Ll][Nn][Kk])/
+    pivot_on:
+    - host
+    window: 2h
+  - name: Persistence or Defender tampering after PowerShell stage
+    query: data_win_system_eventID:"1" AND data_win_eventdata_commandLine:/.*([Ss][Cc][Hh][Tt][Aa][Ss][Kk][Ss]|[Aa][Dd][Dd]-[Mm][Pp][Pp][Rr][Ee][Ff][Ee][Rr][Ee][Nn][Cc][Ee]|[Ss][Ee][Tt]-[Mm][Pp][Pp][Rr][Ee][Ff][Ee][Rr][Ee][Nn][Cc][Ee]|[Cc][Uu][Rr][Rr][Ee][Nn][Tt][Vv][Ee][Rr][Ss][Ii][Oo][Nn]\\[Rr][Uu][Nn]).*/
+    pivot_on:
+    - host
+    window: 2h

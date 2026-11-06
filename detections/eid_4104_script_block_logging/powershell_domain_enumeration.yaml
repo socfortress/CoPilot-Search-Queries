@@ -155,58 +155,61 @@ graylog:
   query: (data_win_system_eventID:"1" AND (data_win_eventdata_commandLine:/.*get-netdomaintrust.*/ OR data_win_eventdata_commandLine:/.*get-netforesttrust.*/ OR data_win_eventdata_commandLine:/.*get-addomain.*/ OR data_win_eventdata_commandLine:/.*get-adgroupmember.*/ OR data_win_eventdata_commandLine:/.*get-domainuser.*/)) OR (data_win_system_eventID:"4104" AND (data_win_eventdata_scriptBlockText:/.*get-netdomaintrust.*/ OR data_win_eventdata_scriptBlockText:/.*get-netforesttrust.*/ OR data_win_eventdata_scriptBlockText:/.*get-addomain.*/ OR data_win_eventdata_scriptBlockText:/.*get-adgroupmember.*/ OR data_win_eventdata_scriptBlockText:/.*get-domainuser.*/))
 
 correlation:
-  # Authored by the correlation engine for review. Related CoPilot Searches to run
-  # around an alert from this rule, scoped to the same host/user/IP within the window.
+  # Authored per-rule (behaviour-researched) for the correlation engine. Related CoPilot
+  # Searches + telemetry pivots to run around an alert, scoped to its host/user/ip/domain.
   related_rules:
-    - id: de7fcadc-04f3-11ec-a241-acde48001122
-      name: "AdsiSearcher Account Discovery"
-      reason: "same analytic story: Data Destruction"
-    - id: 2452e632-9e0d-11eb-bacd-acde48001122
-      name: "DNS Exfiltration Using Nslookup App"
-      reason: "same analytic story: Compromised Windows Host"
-    - id: cc316032-924a-11eb-91a2-acde48001122
-      name: "DSQuery Domain Discovery"
-      reason: "same analytic story: Compromised Windows Host"
-    - id: 5ee2bcd0-b2ff-11eb-bb34-acde48001122
-      name: "Delete ShadowCopy With PowerShell"
-      reason: "same analytic story: Data Destruction"
-    - id: f533ca6c-9440-4686-80cb-7f294c07812a
-      name: "Detect Certify With PowerShell Script Block Logging"
-      reason: "same analytic story: Malicious PowerShell"
-    - id: bc1dc6b8-c954-11eb-bade-acde48001122
-      name: "Detect Empire with PowerShell Script Block Logging"
-      reason: "same analytic story: Hermetic Wiper"
-    - id: 9b3af1e6-5b68-11eb-ae93-0242ac130002
-      name: "Detect MSHTA Url in Command Line"
-      reason: "same analytic story: Compromised Windows Host"
-    - id: 8148c29c-c952-11eb-9255-acde48001122
-      name: "Detect Mimikatz With PowerShell Script Block Logging"
-      reason: "same analytic story: Hermetic Wiper"
-    - id: 72170ec5-f7d2-42f5-aefb-2b8be6aad15f
-      name: "Detect Regasm Spawning a Process"
-      reason: "same analytic story: Compromised Windows Host"
-    - id: bc477b57-5c21-4ab6-9c33-668772e7f114
-      name: "Detect Regsvcs Spawning a Process"
-      reason: "same analytic story: Compromised Windows Host"
-    - id: 070e9b80-6252-11eb-ae93-0242ac130002
-      name: "Detect Regsvr32 Application Control Bypass"
-      reason: "same analytic story: Compromised Windows Host"
-    - id: ccad96d7-a48c-4f13-8b9c-9f6a31cba454
-      name: "Detect Remote Access Software Usage FileInfo"
-      reason: "same analytic story: Interlock Ransomware"
-  window: 1h
+  - id: dcd74b95-3f36-4ed9-9598-0490951643aa
+    name: PowerView PowerShell Cmdlets - ScriptBlock
+    reason: Get-DomainUser/Get-NetDomainTrust are PowerView cmdlets; a loaded PowerView module in the same session confirms offensive tooling rather than admin scripting
+  - id: 89275e7e-0548-11ec-bf75-acde48001122
+    name: Get-DomainTrust with PowerShell Script Block
+    reason: Trust mapping (get-netdomaintrust/forest trust) is the same recon pass, used to find lateral-movement paths across domains
+  - id: 61994268-04f4-11ec-865c-acde48001122
+    name: Get-DomainUser with PowerShell Script Block
+    reason: Sibling user-enumeration cmdlet in the same PowerView recon sweep; several enumeration blocks close together raise confidence
+  - id: b0b34e2c-90de-11ec-baeb-acde48001122
+    name: Disabled Kerberos Pre-Authentication Discovery With PowerView
+    reason: After listing domain users, attackers hunt accounts without pre-auth to AS-REP roast
+  - id: a861d835-af37-4930-bcd6-5b178bfb54df
+    name: Suspicious Kerberos Ticket Request via PowerShell Script - ScriptBlock
+    reason: 'Typical next step: enumerated users/SPNs are Kerberoasted via ticket requests from PowerShell'
+  - id: f376c8a7-a2d0-4ddc-aa0c-16c17236d962
+    name: HackTool - Bloodhound/Sharphound Execution
+    reason: Manual AD enumeration is often followed or accompanied by SharpHound collection to graph attack paths
+  - id: 7b836d7f-179c-4ba4-90a7-a7e60afb48e6
+    name: Execute Invoke-command on Remote Host
+    reason: Having mapped groups and privileged members, the attacker pivots to targets via PowerShell remoting
+  - id: 189e3b02-82b2-4b90-9662-411eb64486d4
+    name: Potential Invoke-Mimikatz PowerShell Script
+    reason: Credential theft commonly follows domain recon, to obtain the privileged identities just enumerated
+  window: 2h
   enrichment_searches:
-  # Rule-specific telemetry pivots the engine runs around an alert from this rule,
-  # scoped to the alert's host/user/IP within the window (behaviour-targeted, not a sweep).
-    - name: "Outbound connections by script interpreters on this host"
-      query: 'data_win_system_eventID:"3" AND data_win_eventdata_image:/.*(\\[Pp][Oo][Ww][Ee][Rr][Ss][Hh][Ee][Ll][Ll]\.[Ee][Xx][Ee]|\\[Pp][Ww][Ss][Hh]\.[Ee][Xx][Ee]|\\[Pp][Oo][Ww][Ee][Rr][Ss][Hh][Ee][Ll][Ll]_[Ii][Ss][Ee]\.[Ee][Xx][Ee]|\\[Cc][Mm][Dd]\.[Ee][Xx][Ee]|\\[Ww][Ss][Cc][Rr][Ii][Pp][Tt]\.[Ee][Xx][Ee]|\\[Cc][Ss][Cc][Rr][Ii][Pp][Tt]\.[Ee][Xx][Ee]|\\[Mm][Ss][Hh][Tt][Aa]\.[Ee][Xx][Ee]|\\[Rr][Uu][Nn][Dd][Ll][Ll]32\.[Ee][Xx][Ee]|\\[Rr][Ee][Gg][Ss][Vv][Rr]32\.[Ee][Xx][Ee])/'
-      pivot_on: [host]
-      window: 1h
-    - name: "Download / AMSI-bypass / encoded script blocks on this host"
-      query: 'data_win_system_eventID:"4104" AND (data_win_eventdata_scriptBlockText:/.*[Dd][Oo][Ww][Nn][Ll][Oo][Aa][Dd][Ss][Tt][Rr][Ii][Nn][Gg].*/ OR data_win_eventdata_scriptBlockText:/.*[Dd][Oo][Ww][Nn][Ll][Oo][Aa][Dd][Ff][Ii][Ll][Ee].*/ OR data_win_eventdata_scriptBlockText:/.*[Ii][Nn][Vv][Oo][Kk][Ee]-[Ww][Ee][Bb][Rr][Ee][Qq][Uu][Ee][Ss][Tt].*/ OR data_win_eventdata_scriptBlockText:/.*[Nn][Ee][Tt]\.[Ww][Ee][Bb][Cc][Ll][Ii][Ee][Nn][Tt].*/ OR data_win_eventdata_scriptBlockText:/.*[Ff][Rr][Oo][Mm][Bb][Aa][Ss][Ee]64[Ss][Tt][Rr][Ii][Nn][Gg].*/ OR data_win_eventdata_scriptBlockText:/.*[Ii][Ee][Xx].*/ OR data_win_eventdata_scriptBlockText:/.*[Ii][Nn][Vv][Oo][Kk][Ee]-[Ee][Xx][Pp][Rr][Ee][Ss][Ss][Ii][Oo][Nn].*/ OR data_win_eventdata_scriptBlockText:/.*[Ss][Tt][Aa][Rr][Tt]-[Bb][Ii][Tt][Ss][Tt][Rr][Aa][Nn][Ss][Ff][Ee][Rr].*/ OR data_win_eventdata_scriptBlockText:/.*[Aa][Mm][Ss][Ii][Uu][Tt][Ii][Ll][Ss].*/ OR data_win_eventdata_scriptBlockText:/.*-[Ee][Nn][Cc].*/ OR data_win_eventdata_scriptBlockText:/.*-[Ee][Nn][Cc][Oo][Dd][Ee][Dd][Cc][Oo][Mm][Mm][Aa][Nn][Dd].*/ OR data_win_eventdata_scriptBlockText:/.*[Rr][Ee][Ff][Ll][Ee][Cc][Tt][Ii][Oo][Nn]\.[Aa][Ss][Ss][Ee][Mm][Bb][Ll][Yy].*/)'
-      pivot_on: [host]
-      window: 1h
-    - name: "Follow-on LOLBin / signed-binary-proxy execution on this host"
-      query: 'data_win_system_eventID:"1" AND data_win_eventdata_image:/.*(\\[Rr][Uu][Nn][Dd][Ll][Ll]32\.[Ee][Xx][Ee]|\\[Rr][Ee][Gg][Ss][Vv][Rr]32\.[Ee][Xx][Ee]|\\[Mm][Ss][Hh][Tt][Aa]\.[Ee][Xx][Ee]|\\[Ii][Nn][Ss][Tt][Aa][Ll][Ll][Uu][Tt][Ii][Ll]\.[Ee][Xx][Ee]|\\[Rr][Ee][Gg][Aa][Ss][Mm]\.[Ee][Xx][Ee]|\\[Rr][Ee][Gg][Ss][Vv][Cc][Ss]\.[Ee][Xx][Ee]|\\[Mm][Ss][Bb][Uu][Ii][Ll][Dd]\.[Ee][Xx][Ee]|\\[Cc][Ee][Rr][Tt][Uu][Tt][Ii][Ll]\.[Ee][Xx][Ee]|\\[Bb][Ii][Tt][Ss][Aa][Dd][Mm][Ii][Nn]\.[Ee][Xx][Ee]|\\[Ww][Mm][Ii][Cc]\.[Ee][Xx][Ee]|\\[Cc][Mm][Ss][Tt][Pp]\.[Ee][Xx][Ee]|\\[Oo][Dd][Bb][Cc][Cc][Oo][Nn][Ff]\.[Ee][Xx][Ee]|\\[Ff][Oo][Rr][Ff][Ii][Ll][Ee][Ss]\.[Ee][Xx][Ee]|\\[Pp][Cc][Aa][Ll][Uu][Aa]\.[Ee][Xx][Ee]|\\[Mm][Aa][Vv][Ii][Nn][Jj][Ee][Cc][Tt]\.[Ee][Xx][Ee]|\\[Ss][Cc][Rr][Ii][Pp][Tt][Rr][Uu][Nn][Nn][Ee][Rr]\.[Ee][Xx][Ee])/'
-      pivot_on: [host]
-      window: 1h
+  # Behaviour-targeted hunts the engine runs around the alert (not a sweep).
+  - name: PowerView / AD recon cmdlets in script blocks (beyond the five in the rule)
+    query: data_win_system_eventID:"4104" AND (data_win_eventdata_scriptBlockText:/.*[Gg]et-[Nn]et(User|Group|Computer|GPO|Session|LoggedOn|Share|Subnet|OU).*/ OR data_win_eventdata_scriptBlockText:/.*[Gg]et-[Dd]omain(Computer|Group|Controller|Policy|GPO|OU|SID|Trust).*/ OR data_win_eventdata_scriptBlockText:/.*[Ff]ind-[Ll]ocalAdminAccess.*/ OR data_win_eventdata_scriptBlockText:/.*[Ii]nvoke-(ShareFinder|UserHunter|ACLScanner).*/ OR data_win_eventdata_scriptBlockText:/.*[Gg]et-[Aa][Dd](User|Computer|Group|Forest|Trust|DefaultDomainPasswordPolicy).*/)
+    pivot_on:
+    - host
+    window: 2h
+  - name: Native AD discovery tools in process creation (nltest, dsquery, net group, setspn, adfind, sharphound)
+    query: data_win_system_eventID:"1" AND (data_win_eventdata_commandLine:/.*[Nn][Ll][Tt][Ee][Ss][Tt].*(dclist|domain_trusts|trusted_domains).*/ OR data_win_eventdata_commandLine:/.*[Dd][Ss][Qq][Uu][Ee][Rr][Yy].*/ OR data_win_eventdata_commandLine:/.*[Nn][Ee][Tt]1? +group.*domain.*/ OR data_win_eventdata_commandLine:/.*[Ss][Ee][Tt][Ss][Pp][Nn].*/ OR data_win_eventdata_commandLine:/.*[Aa][Dd][Ff][Ii][Nn][Dd].*/ OR data_win_eventdata_commandLine:/.*[Ss][Hh][Aa][Rr][Pp][Hh][Oo][Uu][Nn][Dd].*/)
+    pivot_on:
+    - host
+    - user
+    window: 2h
+  - name: Kerberoast / AS-REP roast and credential theft in script blocks
+    query: data_win_system_eventID:"4104" AND (data_win_eventdata_scriptBlockText:/.*[Ii]nvoke-[Kk]erberoast.*/ OR data_win_eventdata_scriptBlockText:/.*[Gg]et-[Dd]omain[Ss][Pp][Nn][Tt]icket.*/ OR data_win_eventdata_scriptBlockText:/.*KerberosRequestorSecurityToken.*/ OR data_win_eventdata_scriptBlockText:/.*[Ii]nvoke-[Aa][Ss][Rr][Ee][Pp][Rr][Oo][Aa][Ss][Tt].*/ OR data_win_eventdata_scriptBlockText:/.*[Ii]nvoke-[Mm]imikatz.*/ OR data_win_eventdata_scriptBlockText:/.*[Gg]et-[Aa][Dd][Rr][Ee][Pp][Ll][Aa]ccount.*/ OR data_win_eventdata_scriptBlockText:/.*DoesNotRequirePreAuth.*/)
+    pivot_on:
+    - host
+    - user
+    window: 4h
+  - name: LDAP/Kerberos network connections from script interpreters (389/636/3268/88)
+    query: data_win_system_eventID:"3" AND (data_win_eventdata_destinationPort:"389" OR data_win_eventdata_destinationPort:"636" OR data_win_eventdata_destinationPort:"3268" OR data_win_eventdata_destinationPort:"88") AND data_win_eventdata_image:/.*\\([Pp]ower[Ss]hell|[Pp]wsh|[Cc]md|[Ww]script|[Cc]script|[Rr]undll32)\.[Ee][Xx][Ee]/
+    pivot_on:
+    - host
+    window: 2h
+  - name: 'Lateral movement after recon: remoting, PsExec, WMI exec'
+    query: (data_win_system_eventID:"4104" AND (data_win_eventdata_scriptBlockText:/.*[Ii]nvoke-[Cc]ommand.*-[Cc]omputer[Nn]ame.*/ OR data_win_eventdata_scriptBlockText:/.*[Ee]nter-[Pp][Ss][Ss]ession.*/ OR data_win_eventdata_scriptBlockText:/.*[Nn]ew-[Pp][Ss][Ss]ession.*/ OR data_win_eventdata_scriptBlockText:/.*[Ii]nvoke-[Ww]mi[Mm]ethod.*/ OR data_win_eventdata_scriptBlockText:/.*[Ii]nvoke-[Cc]im[Mm]ethod.*/)) OR (data_win_system_eventID:"1" AND (data_win_eventdata_image:/.*\\[Pp][Ss][Ee][Xx][Ee][Cc]6?4?\.[Ee][Xx][Ee]/ OR data_win_eventdata_parentImage:/.*\\[Ww]mi[Pp]rv[Ss][Ee]\.[Ee][Xx][Ee]/ OR data_win_eventdata_parentImage:/.*\\[Ww]sm[Pp]rovhost\.[Ee][Xx][Ee]/))
+    pivot_on:
+    - host
+    - user
+    window: 4h

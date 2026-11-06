@@ -133,62 +133,58 @@ graylog:
   query: data_win_system_eventID:"4104" AND (data_win_eventdata_scriptBlockText:/.*System\.Net\.WebClient.*/ OR data_win_eventdata_scriptBlockText:/.*System\.Net\.WebRequest.*/) AND data_win_eventdata_scriptBlockText:/.*IO\.MemoryStream.*/
 
 correlation:
-  # Authored by the correlation engine for review. Related CoPilot Searches to run
-  # around an alert from this rule, scoped to the same host/user/IP within the window.
+  # Authored per-rule (behaviour-researched) for the correlation engine. Related CoPilot
+  # Searches + telemetry pivots to run around an alert, scoped to its host/user/ip/domain.
   related_rules:
-    - id: 2452e632-9e0d-11eb-bacd-acde48001122
-      name: "DNS Exfiltration Using Nslookup App"
-      reason: "same analytic story: Compromised Windows Host"
-    - id: cc316032-924a-11eb-91a2-acde48001122
-      name: "DSQuery Domain Discovery"
-      reason: "same analytic story: Compromised Windows Host"
-    - id: f533ca6c-9440-4686-80cb-7f294c07812a
-      name: "Detect Certify With PowerShell Script Block Logging"
-      reason: "same analytic story: Malicious PowerShell"
-    - id: bc1dc6b8-c954-11eb-bade-acde48001122
-      name: "Detect Empire with PowerShell Script Block Logging"
-      reason: "same analytic story: Malicious PowerShell"
-    - id: 9b3af1e6-5b68-11eb-ae93-0242ac130002
-      name: "Detect MSHTA Url in Command Line"
-      reason: "same analytic story: Compromised Windows Host"
-    - id: 8148c29c-c952-11eb-9255-acde48001122
-      name: "Detect Mimikatz With PowerShell Script Block Logging"
-      reason: "same analytic story: Malicious PowerShell"
-    - id: 27c3a83d-cada-47c6-9042-67baf19d2574
-      name: "Detect PsExec With accepteula Flag"
-      reason: "same analytic story: Medusa Ransomware"
-    - id: 72170ec5-f7d2-42f5-aefb-2b8be6aad15f
-      name: "Detect Regasm Spawning a Process"
-      reason: "same analytic story: Compromised Windows Host"
-    - id: bc477b57-5c21-4ab6-9c33-668772e7f114
-      name: "Detect Regsvcs Spawning a Process"
-      reason: "same analytic story: Compromised Windows Host"
-    - id: 070e9b80-6252-11eb-ae93-0242ac130002
-      name: "Detect Regsvr32 Application Control Bypass"
-      reason: "same analytic story: Compromised Windows Host"
-    - id: 683e6196-b8e8-11eb-9a79-acde48001122
-      name: "Detect Renamed PSExec"
-      reason: "same analytic story: Medusa Ransomware"
-    - id: a0873b32-5b68-11eb-ae93-0242ac130002
-      name: "Detect mshta inline hta execution"
-      reason: "same analytic story: Compromised Windows Host"
+  - id: 403c2cc0-7f6b-4925-9423-bfa573bed7eb
+    name: Suspicious PowerShell Download - Powershell Script
+    reason: Same 4104 download-cradle behaviour seen from another angle (DownloadString/DownloadFile); co-occurs when the stager fetches more than one payload.
+  - id: windows-powershell-using-memory-as-backing-store-001
+    name: Powershell Using memory As Backing Store
+    reason: 'Sibling MemoryStream abuse: the downloaded bytes are held in memory rather than written to disk, confirming fileless staging.'
+  - id: ddcd88cb-7f62-4ce5-86f9-1704190feb0a
+    name: Potential In-Memory Execution Using Reflection.Assembly
+    reason: 'Typical next step: the in-memory stream is passed to Assembly.Load to execute the downloaded .NET payload without touching disk.'
+  - id: windows-powershell-loading-dotnet-into-memory-via-reflection-001
+    name: PowerShell Loading DotNET into Memory via Reflection
+    reason: 'Follow-on execution of the memory-resident download: reflective load of a .NET assembly from the byte stream.'
+  - id: e0d6c087-2d1c-47fd-8799-3904103c5a98
+    name: AMSI Bypass Pattern Assembly GetType
+    reason: 'Common precursor: loaders patch AMSI in the same script/session before pulling and running the in-memory payload.'
+  - id: windows-powershell-fileless-process-injection-via-getprocaddress-001
+    name: Powershell Fileless Process Injection via GetProcAddress
+    reason: 'Follow-on when the downloaded payload is shellcode: PowerShell resolves WinAPI via GetProcAddress to allocate and run it in memory.'
+  - id: 16b37b70-6fcf-4814-a092-c36bd3aafcbd
+    name: PowerShell ShellCode
+    reason: Downloaded bytes copied into allocated memory and executed as shellcode, the Cobalt Strike/Gootloader-style stage after the stream is filled.
+  - id: windows-powershell-fileless-script-contains-base64-encoded-content-001
+    name: Powershell Fileless Script Contains Base64 Encoded Content
+    reason: Staged loaders often decode Base64/compressed content from the stream or wrap the cradle in encoded content, same fileless chain.
   window: 1h
   enrichment_searches:
-  # Rule-specific telemetry pivots the engine runs around an alert from this rule,
-  # scoped to the alert's host/user/IP within the window (behaviour-targeted, not a sweep).
-    - name: "Outbound connections by script interpreters on this host"
-      query: 'data_win_system_eventID:"3" AND data_win_eventdata_image:/.*(\\[Pp][Oo][Ww][Ee][Rr][Ss][Hh][Ee][Ll][Ll]\.[Ee][Xx][Ee]|\\[Pp][Ww][Ss][Hh]\.[Ee][Xx][Ee]|\\[Pp][Oo][Ww][Ee][Rr][Ss][Hh][Ee][Ll][Ll]_[Ii][Ss][Ee]\.[Ee][Xx][Ee]|\\[Cc][Mm][Dd]\.[Ee][Xx][Ee]|\\[Ww][Ss][Cc][Rr][Ii][Pp][Tt]\.[Ee][Xx][Ee]|\\[Cc][Ss][Cc][Rr][Ii][Pp][Tt]\.[Ee][Xx][Ee]|\\[Mm][Ss][Hh][Tt][Aa]\.[Ee][Xx][Ee]|\\[Rr][Uu][Nn][Dd][Ll][Ll]32\.[Ee][Xx][Ee]|\\[Rr][Ee][Gg][Ss][Vv][Rr]32\.[Ee][Xx][Ee])/'
-      pivot_on: [host]
-      window: 1h
-    - name: "Downloader / ingress-tool-transfer activity on this host"
-      query: '(data_win_system_eventID:"1" AND data_win_eventdata_image:/.*(\\[Cc][Ee][Rr][Tt][Uu][Tt][Ii][Ll]\.[Ee][Xx][Ee]|\\[Bb][Ii][Tt][Ss][Aa][Dd][Mm][Ii][Nn]\.[Ee][Xx][Ee]|\\[Cc][Uu][Rr][Ll]\.[Ee][Xx][Ee]|\\[Ww][Gg][Ee][Tt]\.[Ee][Xx][Ee])/) OR (data_win_eventdata_commandLine:/.*[Dd][Oo][Ww][Nn][Ll][Oo][Aa][Dd][Ss][Tt][Rr][Ii][Nn][Gg].*/ OR data_win_eventdata_commandLine:/.*[Dd][Oo][Ww][Nn][Ll][Oo][Aa][Dd][Ff][Ii][Ll][Ee].*/ OR data_win_eventdata_commandLine:/.*[Ii][Nn][Vv][Oo][Kk][Ee]-[Ww][Ee][Bb][Rr][Ee][Qq][Uu][Ee][Ss][Tt].*/ OR data_win_eventdata_commandLine:/.*[Nn][Ee][Tt]\.[Ww][Ee][Bb][Cc][Ll][Ii][Ee][Nn][Tt].*/ OR data_win_eventdata_commandLine:/.*[Ss][Tt][Aa][Rr][Tt]-[Bb][Ii][Tt][Ss][Tt][Rr][Aa][Nn][Ss][Ff][Ee][Rr].*/ OR data_win_eventdata_commandLine:/.*[Ii][Ww][Rr] .*/ OR data_win_eventdata_commandLine:/.*[Cc][Uu][Rr][Ll] .*/ OR data_win_eventdata_commandLine:/.*[Ww][Gg][Ee][Tt] .*/)'
-      pivot_on: [host]
-      window: 1h
-    - name: "Encoded / obfuscated script execution on this host"
-      query: 'data_win_system_eventID:"4104" AND (data_win_eventdata_scriptBlockText:/.*[Dd][Oo][Ww][Nn][Ll][Oo][Aa][Dd][Ss][Tt][Rr][Ii][Nn][Gg].*/ OR data_win_eventdata_scriptBlockText:/.*[Dd][Oo][Ww][Nn][Ll][Oo][Aa][Dd][Ff][Ii][Ll][Ee].*/ OR data_win_eventdata_scriptBlockText:/.*[Ii][Nn][Vv][Oo][Kk][Ee]-[Ww][Ee][Bb][Rr][Ee][Qq][Uu][Ee][Ss][Tt].*/ OR data_win_eventdata_scriptBlockText:/.*[Nn][Ee][Tt]\.[Ww][Ee][Bb][Cc][Ll][Ii][Ee][Nn][Tt].*/ OR data_win_eventdata_scriptBlockText:/.*[Ff][Rr][Oo][Mm][Bb][Aa][Ss][Ee]64[Ss][Tt][Rr][Ii][Nn][Gg].*/ OR data_win_eventdata_scriptBlockText:/.*[Ii][Ee][Xx].*/ OR data_win_eventdata_scriptBlockText:/.*[Ii][Nn][Vv][Oo][Kk][Ee]-[Ee][Xx][Pp][Rr][Ee][Ss][Ss][Ii][Oo][Nn].*/ OR data_win_eventdata_scriptBlockText:/.*[Ss][Tt][Aa][Rr][Tt]-[Bb][Ii][Tt][Ss][Tt][Rr][Aa][Nn][Ss][Ff][Ee][Rr].*/ OR data_win_eventdata_scriptBlockText:/.*[Aa][Mm][Ss][Ii][Uu][Tt][Ii][Ll][Ss].*/ OR data_win_eventdata_scriptBlockText:/.*-[Ee][Nn][Cc].*/ OR data_win_eventdata_scriptBlockText:/.*-[Ee][Nn][Cc][Oo][Dd][Ee][Dd][Cc][Oo][Mm][Mm][Aa][Nn][Dd].*/ OR data_win_eventdata_scriptBlockText:/.*[Rr][Ee][Ff][Ll][Ee][Cc][Tt][Ii][Oo][Nn]\.[Aa][Ss][Ss][Ee][Mm][Bb][Ll][Yy].*/)'
-      pivot_on: [host]
-      window: 1h
-    - name: "Download / AMSI-bypass / encoded script blocks on this host"
-      query: 'data_win_system_eventID:"4104" AND (data_win_eventdata_scriptBlockText:/.*[Dd][Oo][Ww][Nn][Ll][Oo][Aa][Dd][Ss][Tt][Rr][Ii][Nn][Gg].*/ OR data_win_eventdata_scriptBlockText:/.*[Dd][Oo][Ww][Nn][Ll][Oo][Aa][Dd][Ff][Ii][Ll][Ee].*/ OR data_win_eventdata_scriptBlockText:/.*[Ii][Nn][Vv][Oo][Kk][Ee]-[Ww][Ee][Bb][Rr][Ee][Qq][Uu][Ee][Ss][Tt].*/ OR data_win_eventdata_scriptBlockText:/.*[Nn][Ee][Tt]\.[Ww][Ee][Bb][Cc][Ll][Ii][Ee][Nn][Tt].*/ OR data_win_eventdata_scriptBlockText:/.*[Ff][Rr][Oo][Mm][Bb][Aa][Ss][Ee]64[Ss][Tt][Rr][Ii][Nn][Gg].*/ OR data_win_eventdata_scriptBlockText:/.*[Ii][Ee][Xx].*/ OR data_win_eventdata_scriptBlockText:/.*[Ii][Nn][Vv][Oo][Kk][Ee]-[Ee][Xx][Pp][Rr][Ee][Ss][Ss][Ii][Oo][Nn].*/ OR data_win_eventdata_scriptBlockText:/.*[Ss][Tt][Aa][Rr][Tt]-[Bb][Ii][Tt][Ss][Tt][Rr][Aa][Nn][Ss][Ff][Ee][Rr].*/ OR data_win_eventdata_scriptBlockText:/.*[Aa][Mm][Ss][Ii][Uu][Tt][Ii][Ll][Ss].*/ OR data_win_eventdata_scriptBlockText:/.*-[Ee][Nn][Cc].*/ OR data_win_eventdata_scriptBlockText:/.*-[Ee][Nn][Cc][Oo][Dd][Ee][Dd][Cc][Oo][Mm][Mm][Aa][Nn][Dd].*/ OR data_win_eventdata_scriptBlockText:/.*[Rr][Ee][Ff][Ll][Ee][Cc][Tt][Ii][Oo][Nn]\.[Aa][Ss][Ss][Ee][Mm][Bb][Ll][Yy].*/)'
-      pivot_on: [host]
-      window: 1h
+  # Behaviour-targeted hunts the engine runs around the alert (not a sweep).
+  - name: PowerShell reflective assembly load or Invoke-Expression of downloaded content
+    query: data_win_system_eventID:"4104" AND (data_win_eventdata_scriptBlockText:/.*[Rr]eflection\.[Aa]ssembly.*/ OR data_win_eventdata_scriptBlockText:/.*[Aa]ssembly\]::[Ll]oad.*/ OR data_win_eventdata_scriptBlockText:/.*[Ii]nvoke-[Ee]xpression.*/ OR data_win_eventdata_scriptBlockText:/.*[Ee]ntry[Pp]oint\.[Ii]nvoke.*/)
+    pivot_on:
+    - host
+    window: 1h
+  - name: AMSI/ETW tampering and shellcode WinAPI use in script blocks
+    query: data_win_system_eventID:"4104" AND (data_win_eventdata_scriptBlockText:/.*[Aa]msi[Ii]nit[Ff]ailed.*/ OR data_win_eventdata_scriptBlockText:/.*[Aa]msi[Uu]tils.*/ OR data_win_eventdata_scriptBlockText:/.*[Vv]irtual[Aa]lloc.*/ OR data_win_eventdata_scriptBlockText:/.*[Gg]et[Pp]roc[Aa]ddress.*/ OR data_win_eventdata_scriptBlockText:/.*[Mm]arshal\]::[Cc]opy.*/ OR data_win_eventdata_scriptBlockText:/.*[Cc]reate[Tt]hread.*/)
+    pivot_on:
+    - host
+    window: 1h
+  - name: Outbound connections from PowerShell (payload fetch / C2)
+    query: data_win_system_eventID:"3" AND data_win_eventdata_image:/.*\\([Pp]ower[Ss]hell|[Pp]wsh)\.[Ee][Xx][Ee]/
+    pivot_on:
+    - host
+    window: 1h
+  - name: DNS lookups by PowerShell for the download host
+    query: data_win_system_eventID:"22" AND data_win_eventdata_image:/.*\\([Pp]ower[Ss]hell|[Pp]wsh)\.[Ee][Xx][Ee]/
+    pivot_on:
+    - host
+    window: 1h
+  - name: PowerShell launched by script hosts or Office (initial access chain)
+    query: data_win_system_eventID:"1" AND data_win_eventdata_image:/.*\\([Pp]ower[Ss]hell|[Pp]wsh)\.[Ee][Xx][Ee]/ AND data_win_eventdata_parentImage:/.*\\([Ww][Ss][Cc][Rr][Ii][Pp][Tt]|[Cc][Ss][Cc][Rr][Ii][Pp][Tt]|[Mm][Ss][Hh][Tt][Aa]|[Ww][Ii][Nn][Ww][Oo][Rr][Dd]|[Ee][Xx][Cc][Ee][Ll]|[Cc][Mm][Dd])\.[Ee][Xx][Ee]/
+    pivot_on:
+    - host
+    window: 2h

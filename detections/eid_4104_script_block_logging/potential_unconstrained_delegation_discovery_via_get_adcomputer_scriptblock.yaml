@@ -167,44 +167,58 @@ graylog:
   query: data_win_system_eventID:"4104" AND (data_win_eventdata_scriptBlockText:/.*-[Pp][Rr][Oo][Pp][Ee][Rr][Tt][Ii][Ee][Ss].*[Tt][Rr][Uu][Ss][Tt][Ee][Dd][Ff][Oo][Rr][Dd][Ee][Ll][Ee][Gg][Aa][Tt][Ii][Oo][Nn].*/ OR data_win_eventdata_scriptBlockText:/.*-[Pp][Rr][Oo][Pp][Ee][Rr][Tt][Ii][Ee][Ss].*[Tt][Rr][Uu][Ss][Tt][Ee][Dd][Tt][Oo][Aa][Uu][Tt][Hh][Ff][Oo][Rr][Dd][Ee][Ll][Ee][Gg][Aa][Tt][Ii][Oo][Nn].*/ OR data_win_eventdata_scriptBlockText:/.*-[Pp][Rr][Oo][Pp][Ee][Rr][Tt][Ii][Ee][Ss].*[Mm][Ss][Dd][Ss]-[Aa][Ll][Ll][Oo][Ww][Ee][Dd][Tt][Oo][Dd][Ee][Ll][Ee][Gg][Aa][Tt][Ee][Tt][Oo].*/ OR data_win_eventdata_scriptBlockText:/.*-[Pp][Rr][Oo][Pp][Ee][Rr][Tt][Ii][Ee][Ss].*[Pp][Rr][Ii][Nn][Cc][Ii][Pp][Aa][Ll][Ss][Aa][Ll][Ll][Oo][Ww][Ee][Dd][Tt][Oo][Dd][Ee][Ll][Ee][Gg][Aa][Tt][Ee][Tt][Oo][Aa][Cc][Cc][Oo][Uu][Nn][Tt].*/ OR data_win_eventdata_scriptBlockText:/.*-[Ll][Dd][Aa][Pp][Ff][Ii][Ll][Tt][Ee][Rr].*\([Uu][Ss][Ee][Rr][Aa][Cc][Cc][Oo][Uu][Nn][Tt][Cc][Oo][Nn][Tt][Rr][Oo][Ll]:1\.2\.840\.113556\.1\.4\.803:=524288\).*/)
 
 correlation:
-  # Authored by the correlation engine for review. Related CoPilot Searches to run
-  # around an alert from this rule, scoped to the same host/user/IP within the window.
+  # Authored per-rule (behaviour-researched) for the correlation engine. Related CoPilot
+  # Searches + telemetry pivots to run around an alert, scoped to its host/user/ip/domain.
   related_rules:
-    - id: ec570e53-4c76-45a9-804d-dc3f355ff7a7
-      name: "7Zip Compressing Dump Files"
-      reason: "next kill-chain tactic: Collection"
-    - id: 0a1255c5-d732-4b62-ac02-b5152d34fb83
-      name: "ADExplorer Writing Complete AD Snapshot Into .dat File"
-      reason: "next kill-chain tactic: Discovery"
-    - id: 1ea13e8c-03ea-409b-877d-ce5c3d2c1cb3
-      name: "ADFS Database Named Pipe Connection By Uncommon Tool"
-      reason: "next kill-chain tactic: Collection"
-    - id: 75bf09fa-1dd7-4d18-9af9-dd9e492562eb
-      name: "ADSI-Cache File Creation By Uncommon Tool"
-      reason: "next kill-chain tactic: Command and Control"
-    - id: 33a2d1dd-f3b0-40bd-8baf-7974468927cc
-      name: "APT PRIVATELOG Image Load Pattern"
-      reason: "next kill-chain tactic: Privilege Escalation"
-    - id: 9aa01d62-7667-4d3b-acb8-8cb5103e2014
-      name: "APT27 - Emissary Panda Activity"
-      reason: "next kill-chain tactic: Execution"
+  - id: 9e620995-f2d8-4630-8430-4afd89f77604
+    name: Potential Active Directory Enumeration Using AD Module - PsScript
+    reason: Same ActiveDirectory-module cmdlet abuse in script blocks; the delegation query is usually one step of a wider AD enumeration session.
+  - id: dcd74b95-3f36-4ed9-9598-0490951643aa
+    name: PowerView PowerShell Cmdlets - ScriptBlock
+    reason: PowerView (Get-DomainComputer -Unconstrained) is the offensive equivalent of this query; attackers often switch between the AD module and PowerView.
+  - id: f64da023-b988-4775-8d57-38e512beb56e
+    name: Get-DomainComputer with PowerShell Script Block
+    reason: Computer-object enumeration that co-occurs with delegation hunting to pick target hosts.
+  - id: 7ec2c172-dceb-4c10-92c9-87c1881b7e18
+    name: HackTool - Rubeus Execution
+    reason: 'Follow-on: once an unconstrained delegation host is found, Rubeus monitors/harvests TGTs (monitor, tgtdeleg, s4u) from it.'
+  - id: a861d835-af37-4930-bcd6-5b178bfb54df
+    name: Suspicious Kerberos Ticket Request via PowerShell Script - ScriptBlock
+    reason: 'Follow-on: Kerberos ticket requests from PowerShell after identifying delegation-enabled targets (Kerberoasting / S4U abuse).'
+  - id: caa9a802-8bd8-4b9e-a5cd-4d6221670219
+    name: Suspicious Kerberos Ticket Request via CLI
+    reason: 'Follow-on: command-line ticket requests to exploit the discovered delegation configuration.'
+  - id: 1eeed653-dbc8-4187-ad0c-eeebb20e6599
+    name: Potential SPN Enumeration Via Setspn.EXE
+    reason: 'Co-occurring Kerberos-focused discovery: SPN enumeration often accompanies delegation discovery when choosing Kerberos attack paths.'
+  - id: a0bdd2f6-c2ff-11eb-b918-acde48001122
+    name: Detect SharpHound Command-Line Arguments
+    reason: BloodHound collection maps delegation edges too; either tool alongside this indicates systematic attack-path mapping.
   window: 1h
   enrichment_searches:
-  # Rule-specific telemetry pivots the engine runs around an alert from this rule,
-  # scoped to the alert's host/user/IP within the window (behaviour-targeted, not a sweep).
-    - name: "Host / domain reconnaissance commands on this host"
-      query: 'data_win_system_eventID:"1" AND data_win_eventdata_image:/.*(\\[Ww][Hh][Oo][Aa][Mm][Ii]\.[Ee][Xx][Ee]|\\[Nn][Ee][Tt]\.[Ee][Xx][Ee]|\\[Nn][Ee][Tt]1\.[Ee][Xx][Ee]|\\[Nn][Ll][Tt][Ee][Ss][Tt]\.[Ee][Xx][Ee]|\\[Ss][Yy][Ss][Tt][Ee][Mm][Ii][Nn][Ff][Oo]\.[Ee][Xx][Ee]|\\[Ii][Pp][Cc][Oo][Nn][Ff][Ii][Gg]\.[Ee][Xx][Ee]|\\[Aa][Rr][Pp]\.[Ee][Xx][Ee]|\\[Rr][Oo][Uu][Tt][Ee]\.[Ee][Xx][Ee]|\\[Tt][Aa][Ss][Kk][Ll][Ii][Ss][Tt]\.[Ee][Xx][Ee]|\\[Qq][Uu][Ss][Ee][Rr]\.[Ee][Xx][Ee]|\\[Qq][Ww][Ii][Nn][Ss][Tt][Aa]\.[Ee][Xx][Ee]|\\[Dd][Ss][Qq][Uu][Ee][Rr][Yy]\.[Ee][Xx][Ee]|\\[Nn][Bb][Tt][Ss][Tt][Aa][Tt]\.[Ee][Xx][Ee]|\\[Hh][Oo][Ss][Tt][Nn][Aa][Mm][Ee]\.[Ee][Xx][Ee]|\\[Nn][Ee][Tt][Ss][Tt][Aa][Tt]\.[Ee][Xx][Ee]|\\[Rr][Ee][Gg]\.[Ee][Xx][Ee])/'
-      pivot_on: [host]
-      window: 1h
-    - name: "Kerberos ticket requests for this account"
-      query: '(data_win_system_eventID:"4768" OR data_win_system_eventID:"4769" OR data_win_system_eventID:"4771")'
-      pivot_on: [user]
-      window: 6h
-    - name: "Remote-execution / lateral-movement tooling on this host"
-      query: '(data_win_system_eventID:"1" AND data_win_eventdata_image:/.*(\\[Pp][Ss][Ee][Xx][Ee][Cc]\.[Ee][Xx][Ee]|\\[Pp][Ss][Ee][Xx][Ee][Ss][Vv][Cc]\.[Ee][Xx][Ee]|\\[Pp][Aa][Ee][Xx][Ee][Cc]\.[Ee][Xx][Ee]|\\[Ww][Ii][Nn][Rr][Ss]\.[Ee][Xx][Ee]|\\[Mm][Ss][Tt][Ss][Cc]\.[Ee][Xx][Ee]|\\[Ww][Mm][Ii][Cc]\.[Ee][Xx][Ee])/) OR (data_win_system_eventID:"1" AND data_win_eventdata_image:/.*(\\[Pp][Oo][Ww][Ee][Rr][Ss][Hh][Ee][Ll][Ll]\.[Ee][Xx][Ee]|\\[Pp][Ww][Ss][Hh]\.[Ee][Xx][Ee])/ AND (data_win_eventdata_commandLine:/.*[Ii][Nn][Vv][Oo][Kk][Ee]-[Cc][Oo][Mm][Mm][Aa][Nn][Dd].*/ OR data_win_eventdata_commandLine:/.*[Nn][Ee][Ww]-[Pp][Ss][Ss][Ee][Ss][Ss][Ii][Oo][Nn].*/ OR data_win_eventdata_commandLine:/.*[Ee][Nn][Tt][Ee][Rr]-[Pp][Ss][Ss][Ee][Ss][Ss][Ii][Oo][Nn].*/ OR data_win_eventdata_commandLine:/.*-[Cc][Oo][Mm][Pp][Uu][Tt][Ee][Rr][Nn][Aa][Mm][Ee].*/))'
-      pivot_on: [host]
-      window: 2h
-    - name: "Download / AMSI-bypass / encoded script blocks on this host"
-      query: 'data_win_system_eventID:"4104" AND (data_win_eventdata_scriptBlockText:/.*[Dd][Oo][Ww][Nn][Ll][Oo][Aa][Dd][Ss][Tt][Rr][Ii][Nn][Gg].*/ OR data_win_eventdata_scriptBlockText:/.*[Dd][Oo][Ww][Nn][Ll][Oo][Aa][Dd][Ff][Ii][Ll][Ee].*/ OR data_win_eventdata_scriptBlockText:/.*[Ii][Nn][Vv][Oo][Kk][Ee]-[Ww][Ee][Bb][Rr][Ee][Qq][Uu][Ee][Ss][Tt].*/ OR data_win_eventdata_scriptBlockText:/.*[Nn][Ee][Tt]\.[Ww][Ee][Bb][Cc][Ll][Ii][Ee][Nn][Tt].*/ OR data_win_eventdata_scriptBlockText:/.*[Ff][Rr][Oo][Mm][Bb][Aa][Ss][Ee]64[Ss][Tt][Rr][Ii][Nn][Gg].*/ OR data_win_eventdata_scriptBlockText:/.*[Ii][Ee][Xx].*/ OR data_win_eventdata_scriptBlockText:/.*[Ii][Nn][Vv][Oo][Kk][Ee]-[Ee][Xx][Pp][Rr][Ee][Ss][Ss][Ii][Oo][Nn].*/ OR data_win_eventdata_scriptBlockText:/.*[Ss][Tt][Aa][Rr][Tt]-[Bb][Ii][Tt][Ss][Tt][Rr][Aa][Nn][Ss][Ff][Ee][Rr].*/ OR data_win_eventdata_scriptBlockText:/.*[Aa][Mm][Ss][Ii][Uu][Tt][Ii][Ll][Ss].*/ OR data_win_eventdata_scriptBlockText:/.*-[Ee][Nn][Cc].*/ OR data_win_eventdata_scriptBlockText:/.*-[Ee][Nn][Cc][Oo][Dd][Ee][Dd][Cc][Oo][Mm][Mm][Aa][Nn][Dd].*/ OR data_win_eventdata_scriptBlockText:/.*[Rr][Ee][Ff][Ll][Ee][Cc][Tt][Ii][Oo][Nn]\.[Aa][Ss][Ss][Ee][Mm][Bb][Ll][Yy].*/)'
-      pivot_on: [host]
-      window: 1h
+  # Behaviour-targeted hunts the engine runs around the alert (not a sweep).
+  - name: AD / delegation enumeration script blocks on this host
+    query: data_win_system_eventID:"4104" AND (data_win_eventdata_scriptBlockText:*Get-ADComputer* OR data_win_eventdata_scriptBlockText:*Get-ADUser* OR data_win_eventdata_scriptBlockText:*Get-DomainComputer* OR data_win_eventdata_scriptBlockText:*Get-NetComputer* OR data_win_eventdata_scriptBlockText:*Find-DomainObjectPropertyOutlier* OR data_win_eventdata_scriptBlockText:*Get-DomainController* OR data_win_eventdata_scriptBlockText:*Invoke-ShareFinder* OR data_win_eventdata_scriptBlockText:*Get-ADTrust* OR data_win_eventdata_scriptBlockText:*Get-ADDomainController*)
+    pivot_on:
+    - host
+    window: 2h
+  - name: Kerberos TGT/delegation abuse tooling (Rubeus, Kekeo, Mimikatz)
+    query: data_win_system_eventID:"1" AND (data_win_eventdata_commandLine:/.*([Rr]ubeus|[Kk]ekeo|[Tt][Gg][Tt][Dd][Ee][Ll][Ee][Gg]|[Ss]4[Uu]|kerberos::|sekurlsa::tickets|asktgt|asktgs).*/ OR data_win_eventdata_image:/.*(\\[Rr]ubeus|\\[Kk]ekeo|\\[Mm]imikatz)\\.[Ee][Xx][Ee]/)
+    pivot_on:
+    - host
+    window: 2h
+  - name: Kerberos ticket file creation or ticket injection artifacts
+    query: data_win_system_eventID:"11" AND (data_win_eventdata_targetFilename:*.kirbi OR data_win_eventdata_targetFilename:*.ccache)
+    pivot_on:
+    - host
+    window: 4h
+  - name: Print spooler / coercion tooling to force DC auth to delegation host
+    query: data_win_system_eventID:"1" AND (data_win_eventdata_commandLine:/.*([Ss]pooler[Ss]ample|[Ss]harp[Ss]pool[Hh]ound|[Pp]rinter[Bb]ug|[Pp]etit[Pp]otam|[Cc]oercer).*/ OR data_win_eventdata_image:/.*(\\[Ss]pooler[Ss]ample|\\[Ss]harp[Ss]pool[Hh]ound|\\[Pp]etit[Pp]otam)\\.[Ee][Xx][Ee]/)
+    pivot_on:
+    - host
+    window: 4h
+  - name: 'Credential access: LSASS access or ticket dumping after discovery'
+    query: data_win_system_eventID:"10" AND data_win_eventdata_targetImage:/.*\\[Ll][Ss][Aa][Ss][Ss]\\.[Ee][Xx][Ee]/
+    pivot_on:
+    - host
+    window: 4h

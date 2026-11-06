@@ -118,58 +118,59 @@ graylog:
   query: data_win_system_eventID:"4104" AND data_win_eventdata_scriptBlockText:/.*WSMan.*TrustedHosts.*/
 
 correlation:
-  # Authored by the correlation engine for review. Related CoPilot Searches to run
-  # around an alert from this rule, scoped to the same host/user/IP within the window.
+  # Authored per-rule (behaviour-researched) for the correlation engine. Related CoPilot
+  # Searches + telemetry pivots to run around an alert, scoped to its host/user/ip/domain.
   related_rules:
-    - id: a5d85486-b89c-11eb-8267-acde48001122
-      name: "Allow Inbound Traffic In Firewall Rule"
-      reason: "same analytic story: Lateral Movement"
-    - id: 2452e632-9e0d-11eb-bacd-acde48001122
-      name: "DNS Exfiltration Using Nslookup App"
-      reason: "same analytic story: Compromised Windows Host"
-    - id: cc316032-924a-11eb-91a2-acde48001122
-      name: "DSQuery Domain Discovery"
-      reason: "same analytic story: Compromised Windows Host"
-    - id: 5ee2bcd0-b2ff-11eb-bb34-acde48001122
-      name: "Delete ShadowCopy With PowerShell"
-      reason: "same analytic story: DarkGate Malware"
-    - id: 9b3af1e6-5b68-11eb-ae93-0242ac130002
-      name: "Detect MSHTA Url in Command Line"
-      reason: "same analytic story: Compromised Windows Host"
-    - id: 27c3a83d-cada-47c6-9042-67baf19d2574
-      name: "Detect PsExec With accepteula Flag"
-      reason: "same analytic story: DarkGate Malware"
-    - id: 72170ec5-f7d2-42f5-aefb-2b8be6aad15f
-      name: "Detect Regasm Spawning a Process"
-      reason: "same analytic story: DarkGate Malware"
-    - id: bc477b57-5c21-4ab6-9c33-668772e7f114
-      name: "Detect Regsvcs Spawning a Process"
-      reason: "same analytic story: Compromised Windows Host"
-    - id: 070e9b80-6252-11eb-ae93-0242ac130002
-      name: "Detect Regsvr32 Application Control Bypass"
-      reason: "same analytic story: Compromised Windows Host"
-    - id: 683e6196-b8e8-11eb-9a79-acde48001122
-      name: "Detect Renamed PSExec"
-      reason: "same analytic story: DarkGate Malware"
-    - id: a0873b32-5b68-11eb-ae93-0242ac130002
-      name: "Detect mshta inline hta execution"
-      reason: "same analytic story: Compromised Windows Host"
-    - id: 8943b567-f14d-4ee8-a0bb-2121d4ce3184
-      name: "Dump LSASS via comsvcs DLL"
-      reason: "same analytic story: Compromised Windows Host"
-  window: 1h
+  - id: 7d4c618e-4716-11ec-951c-3e22fbd008af
+    name: Remote Process Instantiation via WinRM and PowerShell Script Block
+    reason: 'Follow-on: once TrustedHosts lets the WinRM client talk to the target, the actor drives remote process creation via script blocks.'
+  - id: 734f8d9b-42b8-41b2-bcf5-abaf49d5a3c8
+    name: Remote PowerShell Session Host Process (WinRM)
+    reason: 'Follow-on: wsmprovhost.exe appears when the PS remoting session enabled by the TrustedHosts change is established.'
+  - id: 5cc2cda8-f261-4d88-a2de-e9e193c86716
+    name: Suspicious Processes Spawned by WinRM
+    reason: 'Follow-on: shells and tools spawned under WinRM show what the attacker ran through the newly trusted remote channel.'
+  - id: windows-winrm-spawning-process-001
+    name: Windows WinRM Spawning a Process
+    reason: 'Follow-on: child processes of the WinRM host confirm payload execution over the remoting channel.'
+  - id: 9fe55ea2-4cd6-4491-8a54-dd6871651b51
+    name: HackTool - Evil-WinRm Execution - PowerShell Module
+    reason: 'Co-occurring: Evil-WinRM is the common offensive WinRM client, pairing with a TrustedHosts change when attacker-driven remoting begins.'
+  - id: a5d85486-b89c-11eb-8267-acde48001122
+    name: Allow Inbound Traffic In Firewall Rule
+    reason: 'Co-occurring prep: opening inbound firewall rules for WinRM ports (5985/5986) is the other half of enabling remoting reachability.'
+  - id: cd5cfd80-aa5f-44c0-9c20-108c4ae12e3c
+    name: New Firewall Rule Added Via Netsh.EXE
+    reason: 'Co-occurring prep: netsh firewall rule creation allowing WinRM/RDP ports accompanies remoting setup on the same host.'
+  - id: 13acf386-b8c6-4fe0-9a6e-c4756b974698
+    name: Remote PowerShell Sessions Network Connections (WinRM)
+    reason: 'Follow-on: network connections to 5985/5986 show the remoting session actually opened to the newly trusted host.'
+  window: 2h
   enrichment_searches:
-  # Rule-specific telemetry pivots the engine runs around an alert from this rule,
-  # scoped to the alert's host/user/IP within the window (behaviour-targeted, not a sweep).
-    - name: "Remote-execution / lateral-movement tooling on this host"
-      query: '(data_win_system_eventID:"1" AND data_win_eventdata_image:/.*(\\[Pp][Ss][Ee][Xx][Ee][Cc]\.[Ee][Xx][Ee]|\\[Pp][Ss][Ee][Xx][Ee][Ss][Vv][Cc]\.[Ee][Xx][Ee]|\\[Pp][Aa][Ee][Xx][Ee][Cc]\.[Ee][Xx][Ee]|\\[Ww][Ii][Nn][Rr][Ss]\.[Ee][Xx][Ee]|\\[Mm][Ss][Tt][Ss][Cc]\.[Ee][Xx][Ee]|\\[Ww][Mm][Ii][Cc]\.[Ee][Xx][Ee])/) OR (data_win_system_eventID:"1" AND data_win_eventdata_image:/.*(\\[Pp][Oo][Ww][Ee][Rr][Ss][Hh][Ee][Ll][Ll]\.[Ee][Xx][Ee]|\\[Pp][Ww][Ss][Hh]\.[Ee][Xx][Ee])/ AND (data_win_eventdata_commandLine:/.*[Ii][Nn][Vv][Oo][Kk][Ee]-[Cc][Oo][Mm][Mm][Aa][Nn][Dd].*/ OR data_win_eventdata_commandLine:/.*[Nn][Ee][Ww]-[Pp][Ss][Ss][Ee][Ss][Ss][Ii][Oo][Nn].*/ OR data_win_eventdata_commandLine:/.*[Ee][Nn][Tt][Ee][Rr]-[Pp][Ss][Ss][Ee][Ss][Ss][Ii][Oo][Nn].*/ OR data_win_eventdata_commandLine:/.*-[Cc][Oo][Mm][Pp][Uu][Tt][Ee][Rr][Nn][Aa][Mm][Ee].*/))'
-      pivot_on: [host]
-      window: 2h
-    - name: "Download / AMSI-bypass / encoded script blocks on this host"
-      query: 'data_win_system_eventID:"4104" AND (data_win_eventdata_scriptBlockText:/.*[Dd][Oo][Ww][Nn][Ll][Oo][Aa][Dd][Ss][Tt][Rr][Ii][Nn][Gg].*/ OR data_win_eventdata_scriptBlockText:/.*[Dd][Oo][Ww][Nn][Ll][Oo][Aa][Dd][Ff][Ii][Ll][Ee].*/ OR data_win_eventdata_scriptBlockText:/.*[Ii][Nn][Vv][Oo][Kk][Ee]-[Ww][Ee][Bb][Rr][Ee][Qq][Uu][Ee][Ss][Tt].*/ OR data_win_eventdata_scriptBlockText:/.*[Nn][Ee][Tt]\.[Ww][Ee][Bb][Cc][Ll][Ii][Ee][Nn][Tt].*/ OR data_win_eventdata_scriptBlockText:/.*[Ff][Rr][Oo][Mm][Bb][Aa][Ss][Ee]64[Ss][Tt][Rr][Ii][Nn][Gg].*/ OR data_win_eventdata_scriptBlockText:/.*[Ii][Ee][Xx].*/ OR data_win_eventdata_scriptBlockText:/.*[Ii][Nn][Vv][Oo][Kk][Ee]-[Ee][Xx][Pp][Rr][Ee][Ss][Ss][Ii][Oo][Nn].*/ OR data_win_eventdata_scriptBlockText:/.*[Ss][Tt][Aa][Rr][Tt]-[Bb][Ii][Tt][Ss][Tt][Rr][Aa][Nn][Ss][Ff][Ee][Rr].*/ OR data_win_eventdata_scriptBlockText:/.*[Aa][Mm][Ss][Ii][Uu][Tt][Ii][Ll][Ss].*/ OR data_win_eventdata_scriptBlockText:/.*-[Ee][Nn][Cc].*/ OR data_win_eventdata_scriptBlockText:/.*-[Ee][Nn][Cc][Oo][Dd][Ee][Dd][Cc][Oo][Mm][Mm][Aa][Nn][Dd].*/ OR data_win_eventdata_scriptBlockText:/.*[Rr][Ee][Ff][Ll][Ee][Cc][Tt][Ii][Oo][Nn]\.[Aa][Ss][Ss][Ee][Mm][Bb][Ll][Yy].*/)'
-      pivot_on: [host]
-      window: 1h
-    - name: "Follow-on LOLBin / signed-binary-proxy execution on this host"
-      query: 'data_win_system_eventID:"1" AND data_win_eventdata_image:/.*(\\[Rr][Uu][Nn][Dd][Ll][Ll]32\.[Ee][Xx][Ee]|\\[Rr][Ee][Gg][Ss][Vv][Rr]32\.[Ee][Xx][Ee]|\\[Mm][Ss][Hh][Tt][Aa]\.[Ee][Xx][Ee]|\\[Ii][Nn][Ss][Tt][Aa][Ll][Ll][Uu][Tt][Ii][Ll]\.[Ee][Xx][Ee]|\\[Rr][Ee][Gg][Aa][Ss][Mm]\.[Ee][Xx][Ee]|\\[Rr][Ee][Gg][Ss][Vv][Cc][Ss]\.[Ee][Xx][Ee]|\\[Mm][Ss][Bb][Uu][Ii][Ll][Dd]\.[Ee][Xx][Ee]|\\[Cc][Ee][Rr][Tt][Uu][Tt][Ii][Ll]\.[Ee][Xx][Ee]|\\[Bb][Ii][Tt][Ss][Aa][Dd][Mm][Ii][Nn]\.[Ee][Xx][Ee]|\\[Ww][Mm][Ii][Cc]\.[Ee][Xx][Ee]|\\[Cc][Mm][Ss][Tt][Pp]\.[Ee][Xx][Ee]|\\[Oo][Dd][Bb][Cc][Cc][Oo][Nn][Ff]\.[Ee][Xx][Ee]|\\[Ff][Oo][Rr][Ff][Ii][Ll][Ee][Ss]\.[Ee][Xx][Ee]|\\[Pp][Cc][Aa][Ll][Uu][Aa]\.[Ee][Xx][Ee]|\\[Mm][Aa][Vv][Ii][Nn][Jj][Ee][Cc][Tt]\.[Ee][Xx][Ee]|\\[Ss][Cc][Rr][Ii][Pp][Tt][Rr][Uu][Nn][Nn][Ee][Rr]\.[Ee][Xx][Ee])/'
-      pivot_on: [host]
-      window: 1h
+  # Behaviour-targeted hunts the engine runs around the alert (not a sweep).
+  - name: WinRM/PS remoting setup commands (Enable-PSRemoting, winrm quickconfig, WSMan config)
+    query: data_win_system_eventID:"4104" AND (data_win_eventdata_scriptBlockText:/.*[Ee]nable-[Pp][Ss][Rr]emoting.*/ OR data_win_eventdata_scriptBlockText:/.*[Ss]et-[Ww][Ss][Mm]an[Ii]nstance.*/ OR data_win_eventdata_scriptBlockText:/.*[Ss]et-[Ww][Ss][Mm]an[Qq]uick[Cc]onfig.*/ OR data_win_eventdata_scriptBlockText:/.*[Ww][Ss][Mm]an:.*[Ll]ocalhost.*/ OR data_win_eventdata_scriptBlockText:/.*[Aa]llow[Uu]nencrypted.*/)
+    pivot_on:
+    - host
+    window: 2h
+  - name: winrm.cmd / winrm.exe / netsh used to configure remoting or ports
+    query: data_win_system_eventID:"1" AND (data_win_eventdata_commandLine:/.*[Ww]inrm.*(set|quickconfig|qc).*/ OR (data_win_eventdata_commandLine:/.*[Nn]etsh.*/ AND data_win_eventdata_commandLine:/.*(5985|5986|[Ww]inrm).*/) OR data_win_eventdata_commandLine:/.*[Tt]rusted[Hh]osts.*/)
+    pivot_on:
+    - host
+    window: 2h
+  - name: Remote PowerShell cmdlets (Invoke-Command, New-PSSession, Enter-PSSession) in script blocks
+    query: data_win_system_eventID:"4104" AND (data_win_eventdata_scriptBlockText:/.*[Ii]nvoke-[Cc]ommand.*/ OR data_win_eventdata_scriptBlockText:/.*[Nn]ew-[Pp][Ss][Ss]ession.*/ OR data_win_eventdata_scriptBlockText:/.*[Ee]nter-[Pp][Ss][Ss]ession.*/ OR data_win_eventdata_scriptBlockText:/.*[Ii]nvoke-[Ww]mi[Mm]ethod.*/)
+    pivot_on:
+    - host
+    window: 2h
+  - name: Outbound WinRM connections (TCP 5985/5986) from this host
+    query: data_win_system_eventID:"3" AND (data_win_eventdata_destinationPort:"5985" OR data_win_eventdata_destinationPort:"5986")
+    pivot_on:
+    - host
+    window: 4h
+  - name: Network logons (type 3) on this host/user after TrustedHosts change
+    query: data_win_system_eventID:"4624" AND data_win_eventdata_logonType:"3"
+    pivot_on:
+    - host
+    - user
+    window: 4h
