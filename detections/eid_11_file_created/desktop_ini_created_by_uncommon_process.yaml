@@ -195,44 +195,58 @@ graylog:
   query: data_win_system_eventID:"11" AND data_win_eventdata_targetFilename:/.*\\[Dd][Ee][Ss][Kk][Tt][Oo][Pp]\.[Ii][Nn][Ii]/ AND _exists_:data_win_eventdata_image AND _exists_:data_win_eventdata_targetFilename AND NOT (data_win_eventdata_image:/[Cc]:\\[Ww][Ii][Nn][Dd][Oo][Ww][Ss]\\.*/ OR data_win_eventdata_image:/[Cc]:\\[Pp][Rr][Oo][Gg][Rr][Aa][Mm] [Ff][Ii][Ll][Ee][Ss]\\.*/ OR data_win_eventdata_image:/[Cc]:\\[Pp][Rr][Oo][Gg][Rr][Aa][Mm] [Ff][Ii][Ll][Ee][Ss] \([Xx]86\)\\.*/ OR data_win_eventdata_targetFilename:/[Cc]:\\\$[Ww][Ii][Nn][Dd][Oo][Ww][Ss]\.\~[Bb][Tt]\\[Nn][Ee][Ww][Oo][Ss]\\.*/) AND _exists_:data_win_eventdata_image AND _exists_:data_win_eventdata_targetFilename AND NOT ((data_win_eventdata_image:/[Cc]:\\[Uu][Ss][Ee][Rr][Ss]\\.*/ AND data_win_eventdata_image:/.*\\[Aa][Pp][Pp][Dd][Aa][Tt][Aa]\\[Ll][Oo][Cc][Aa][Ll]\\[Jj][Ee][Tt][Bb][Rr][Aa][Ii][Nn][Ss]\\[Tt][Oo][Oo][Ll][Bb][Oo][Xx]\\[Bb][Ii][Nn]\\7[Zz]\.[Ee][Xx][Ee]/ AND data_win_eventdata_targetFilename:/.*\\[Jj][Ee][Tt][Bb][Rr][Aa][Ii][Nn][Ss]\\[Aa][Pp][Pp][Ss]\\.*/) OR (data_win_eventdata_image:/[Cc]:\\[Uu][Ss][Ee][Rr][Ss]\\.*/ AND data_win_eventdata_image:/.*\\[Aa][Pp][Pp][Dd][Aa][Tt][Aa]\\[Ll][Oo][Cc][Aa][Ll]\\[Mm][Ii][Cc][Rr][Oo][Ss][Oo][Ff][Tt]\\[Oo][Nn][Ee][Dd][Rr][Ii][Vv][Ee]\\.*/))
 
 correlation:
-  # Authored by the correlation engine for review. Related CoPilot Searches to run
-  # around an alert from this rule, scoped to the same host/user/IP within the window.
+  # Authored per-rule (behaviour-researched) for the correlation engine. Related CoPilot
+  # Searches + telemetry pivots to run around an alert, scoped to its host/user/ip/domain.
   related_rules:
-    - id: ec570e53-4c76-45a9-804d-dc3f355ff7a7
-      name: "7Zip Compressing Dump Files"
-      reason: "next kill-chain tactic: Collection"
-    - id: 0a1255c5-d732-4b62-ac02-b5152d34fb83
-      name: "ADExplorer Writing Complete AD Snapshot Into .dat File"
-      reason: "next kill-chain tactic: Discovery"
-    - id: 1ea13e8c-03ea-409b-877d-ce5c3d2c1cb3
-      name: "ADFS Database Named Pipe Connection By Uncommon Tool"
-      reason: "next kill-chain tactic: Collection"
-    - id: 75bf09fa-1dd7-4d18-9af9-dd9e492562eb
-      name: "ADSI-Cache File Creation By Uncommon Tool"
-      reason: "next kill-chain tactic: Command and Control"
-    - id: 33a2d1dd-f3b0-40bd-8baf-7974468927cc
-      name: "APT PRIVATELOG Image Load Pattern"
-      reason: "next kill-chain tactic: Privilege Escalation"
-    - id: 03e2746e-2b31-42f1-ab7a-eb39365b2422
-      name: "APT31 Judgement Panda Activity"
-      reason: "next kill-chain tactic: Credential Access"
+  - id: 2aa0a6b4-a865-495b-ab51-c28249537b75
+    name: Startup Folder File Write
+    reason: desktop.ini writes by an odd process often accompany dropping a payload or shortcut into a Startup folder; same persistence intent, same Sysmon EID 11 telemetry
+  - id: 92fa78e7-4d39-45f1-91a3-8b23f3f1088d
+    name: Potential Startup Shortcut Persistence Via PowerShell.EXE
+    reason: PowerShell-created .lnk in Startup is a common companion to folder-display tricks that disguise the planted file
+  - id: 35bc7e28-ee6b-492f-ab04-da58fcf6402e
+    name: Windows Network Access Suspicious desktop.ini Action
+    reason: same desktop.ini abuse seen over SMB shares; shows the technique spreading to network shares from this host
+  - id: 6e5a3ae4-90a3-462d-9aa6-0119f638c0f1
+    name: Hiding Files And Directories With Attrib exe
+    reason: desktop.ini only takes effect on folders with system/read-only attributes, and attackers pair it with attrib +h/+s to conceal the staged content
+  - id: efec536f-72e8-4656-8960-5e85d091345b
+    name: Set Suspicious Files as System Files Using Attrib.EXE
+    reason: marking the folder or desktop.ini as system is required for Explorer to honour the file, so this is the direct companion step
+  - id: a8f866e1-bdd4-425e-a27a-37619238d9c7
+    name: Potential Hidden Directory Creation Via NTFS INDEX_ALLOCATION Stream
+    reason: another way of disguising a folder holding attacker content, often used alongside folder-presentation tricks
+  - id: de587dce-915e-4218-aac4-835ca6af6f70
+    name: Potential Persistence Attempt Via Run Keys Using Reg.EXE
+    reason: the technique is tagged persistence; actors who tweak folder presentation typically also add Run-key autostarts for the same payload
+  - id: 74babdd6-a758-4549-9632-26535279e654
+    name: Suspicious Executable File Creation
+    reason: the uncommon process that wrote desktop.ini is usually the dropper that also writes the hidden executable payload into the same folder
   window: 1h
   enrichment_searches:
-  # Rule-specific telemetry pivots the engine runs around an alert from this rule,
-  # scoped to the alert's host/user/IP within the window (behaviour-targeted, not a sweep).
-    - name: "Autostart persistence written on this host (Run keys, services, IFEO)"
-      query: '(data_win_system_eventID:"12" OR data_win_system_eventID:"13") AND (data_win_eventdata_targetObject:/.*[Cc][Uu][Rr][Rr][Ee][Nn][Tt][Vv][Ee][Rr][Ss][Ii][Oo][Nn]\\[Rr][Uu][Nn].*/ OR data_win_eventdata_targetObject:/.*[Cc][Uu][Rr][Rr][Ee][Nn][Tt][Vv][Ee][Rr][Ss][Ii][Oo][Nn]\\[Rr][Uu][Nn][Oo][Nn][Cc][Ee].*/ OR data_win_eventdata_targetObject:/.*[Cc][Uu][Rr][Rr][Ee][Nn][Tt][Cc][Oo][Nn][Tt][Rr][Oo][Ll][Ss][Ee][Tt]\\[Ss][Ee][Rr][Vv][Ii][Cc][Ee][Ss]\\.*/ OR data_win_eventdata_targetObject:/.*[Ii][Mm][Aa][Gg][Ee] [Ff][Ii][Ll][Ee] [Ee][Xx][Ee][Cc][Uu][Tt][Ii][Oo][Nn] [Oo][Pp][Tt][Ii][Oo][Nn][Ss]\\.*/ OR data_win_eventdata_targetObject:/.*[Ww][Ii][Nn][Ll][Oo][Gg][Oo][Nn]\\[Ss][Hh][Ee][Ll][Ll].*/ OR data_win_eventdata_targetObject:/.*[Ww][Ii][Nn][Ll][Oo][Gg][Oo][Nn]\\[Uu][Ss][Ee][Rr][Ii][Nn][Ii][Tt].*/ OR data_win_eventdata_targetObject:/.*[Cc][Uu][Rr][Rr][Ee][Nn][Tt][Vv][Ee][Rr][Ss][Ii][Oo][Nn]\\[Ee][Xx][Pp][Ll][Oo][Rr][Ee][Rr]\\[Rr][Uu][Nn].*/ OR data_win_eventdata_targetObject:/.*[Pp][Oo][Ll][Ii][Cc][Ii][Ee][Ss]\\[Ee][Xx][Pp][Ll][Oo][Rr][Ee][Rr]\\[Rr][Uu][Nn].*/ OR data_win_eventdata_targetObject:/.*[Cc][Uu][Rr][Rr][Ee][Nn][Tt][Vv][Ee][Rr][Ss][Ii][Oo][Nn]\\[Ww][Ii][Nn][Dd][Oo][Ww][Ss]\\[Ll][Oo][Aa][Dd].*/)'
-      pivot_on: [host]
-      window: 2h
-    - name: "Other executions of this tool-set on this host (any arguments)"
-      query: 'data_win_system_eventID:"1" AND data_win_eventdata_image:/.*(\\7[Zz]\.[Ee][Xx][Ee])/'
-      pivot_on: [host]
-      window: 2h
-    - name: "Memory/credential-dump creation & LSASS access on this host"
-      query: '((data_win_system_eventID:"1" AND data_win_eventdata_image:/.*(\\[Pp][Rr][Oo][Cc][Dd][Uu][Mm][Pp]\.[Ee][Xx][Ee]|\\[Pp][Rr][Oo][Cc][Dd][Uu][Mm][Pp]64\.[Ee][Xx][Ee]|\\[Ss][Qq][Ll][Dd][Uu][Mm][Pp][Ee][Rr]\.[Ee][Xx][Ee]|\\[Cc][Rr][Ee][Aa][Tt][Ee][Dd][Uu][Mm][Pp]\.[Ee][Xx][Ee]|\\[Rr][Dd][Rr][Ll][Ee][Aa][Kk][Dd][Ii][Aa][Gg]\.[Ee][Xx][Ee]|\\[Dd][Uu][Mm][Pp][Ee][Rr][Tt]\.[Ee][Xx][Ee]|\\[Nn][Aa][Nn][Oo][Dd][Uu][Mm][Pp]\.[Ee][Xx][Ee]|\\[Aa][Vv][Dd][Uu][Mm][Pp]\.[Ee][Xx][Ee])/) OR (data_win_system_eventID:"1" AND (data_win_eventdata_commandLine:/.*[Cc][Oo][Mm][Ss][Vv][Cc][Ss]\.[Dd][Ll][Ll].*/ OR data_win_eventdata_commandLine:/.*[Mm][Ii][Nn][Ii][Dd][Uu][Mm][Pp].*/ OR data_win_eventdata_commandLine:/.*[Dd][Uu][Mm][Pp][Ee][Rr][Tt].*/ OR data_win_eventdata_commandLine:/.*[Nn][Aa][Nn][Oo][Dd][Uu][Mm][Pp].*/ OR data_win_eventdata_commandLine:/.*[Ll][Ss][Aa][Ss][Ss].*/ OR data_win_eventdata_commandLine:/.*[Ss][Ee][Kk][Uu][Rr][Ll][Ss][Aa].*/ OR data_win_eventdata_commandLine:/.*[Nn][Tt][Dd][Ss]\.[Dd][Ii][Tt].*/ OR data_win_eventdata_commandLine:/.*[Nn][Tt][Dd][Ss][Uu][Tt][Ii][Ll].*/)) OR (data_win_system_eventID:"10" AND data_win_eventdata_targetImage:/.*(\\[Ll][Ss][Aa][Ss][Ss]\.[Ee][Xx][Ee])/))'
-      pivot_on: [host]
-      window: 1h
-    - name: "Execution of programs from user-writable paths on this host"
-      query: 'data_win_system_eventID:"1" AND (data_win_eventdata_image:/.*\\[Uu][Ss][Ee][Rr][Ss]\\.*/ OR data_win_eventdata_image:/.*\\[Pp][Rr][Oo][Gg][Rr][Aa][Mm][Dd][Aa][Tt][Aa]\\.*/ OR data_win_eventdata_image:/.*\\[Ww][Ii][Nn][Dd][Oo][Ww][Ss]\\[Tt][Ee][Mm][Pp]\\.*/ OR data_win_eventdata_image:/.*\\[Aa][Pp][Pp][Dd][Aa][Tt][Aa]\\.*/ OR data_win_eventdata_image:/.*\\[Pp][Uu][Bb][Ll][Ii][Cc]\\.*/ OR data_win_eventdata_image:/.*\\\$[Rr][Ee][Cc][Yy][Cc][Ll][Ee].*/)'
-      pivot_on: [host]
-      window: 1h
+  # Behaviour-targeted hunts the engine runs around the alert (not a sweep).
+  - name: Other files written by the process that created desktop.ini
+    query: data_win_system_eventID:"11" AND (data_win_eventdata_targetFilename:/.*\.([Ee][Xx][Ee]|[Dd][Ll][Ll]|[Ll][Nn][Kk]|[Bb][Aa][Tt]|[Pp][Ss]1|[Vv][Bb][Ss]|[Jj][Ss]|[Hh][Tt][Aa]|[Cc][Mm][Dd]|[Ss][Cc][Rr])/)
+    pivot_on:
+    - host
+    window: 1h
+  - name: Attrib hiding or system-flagging of folders and files
+    query: data_win_system_eventID:"1" AND data_win_eventdata_image:/.*\\[Aa][Tt][Tt][Rr][Ii][Bb]\.[Ee][Xx][Ee]/ AND data_win_eventdata_commandLine:/.*\+[HhSs].*/
+    pivot_on:
+    - host
+    window: 2h
+  - name: Startup folder and autostart file writes
+    query: data_win_system_eventID:"11" AND data_win_eventdata_targetFilename:/.*[Mm][Ee][Nn][Uu]\\[Pp][Rr][Oo][Gg][Rr][Aa][Mm][Ss]\\[Ss][Tt][Aa][Rr][Tt][Uu][Pp]\\.*/
+    pivot_on:
+    - host
+    window: 2h
+  - name: Run key and logon-persistence registry writes
+    query: (data_win_system_eventID:"12" OR data_win_system_eventID:"13") AND (data_win_eventdata_targetObject:/.*[Cc][Uu][Rr][Rr][Ee][Nn][Tt][Vv][Ee][Rr][Ss][Ii][Oo][Nn]\\[Rr][Uu][Nn].*/ OR data_win_eventdata_targetObject:/.*[Ww][Ii][Nn][Ll][Oo][Gg][Oo][Nn]\\[Ss][Hh][Ee][Ll][Ll].*/ OR data_win_eventdata_targetObject:/.*[Ss][Hh][Ee][Ll][Ll] [Ff][Oo][Ll][Dd][Ee][Rr][Ss]\\.*/)
+    pivot_on:
+    - host
+    window: 2h
+  - name: Process lineage and command line of the desktop.ini writer
+    query: data_win_system_eventID:"1" AND (data_win_eventdata_commandLine:*desktop.ini* OR data_win_eventdata_commandLine:*[Ii]con[Rr]esource* OR data_win_eventdata_commandLine:*[Ll]ocalized[Rr]esource[Nn]ame*)
+    pivot_on:
+    - host
+    window: 1h

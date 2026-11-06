@@ -138,58 +138,59 @@ graylog:
   query: data_win_system_eventID:"4104" AND data_win_eventdata_scriptBlockText:/.*Get-DomainSPNTicket.*/
 
 correlation:
-  # Authored by the correlation engine for review. Related CoPilot Searches to run
-  # around an alert from this rule, scoped to the same host/user/IP within the window.
+  # Authored per-rule (behaviour-researched) for the correlation engine. Related CoPilot
+  # Searches + telemetry pivots to run around an alert, scoped to its host/user/ip/domain.
   related_rules:
-    - id: 27c3a83d-cada-47c6-9042-67baf19d2574
-      name: "Detect PsExec With accepteula Flag"
-      reason: "same analytic story: Rhysida Ransomware"
-    - id: 683e6196-b8e8-11eb-9a79-acde48001122
-      name: "Detect Renamed PSExec"
-      reason: "same analytic story: Rhysida Ransomware"
-    - id: 236e7c8e-c9d9-11eb-a824-acde48001122
-      name: "Disable Logs Using WevtUtil"
-      reason: "same analytic story: Rhysida Ransomware"
-    - id: 114c6bfe-9406-11ec-bcce-acde48001122
-      name: "Disabled Kerberos Pre-Authentication Discovery With Get-ADUser"
-      reason: "same analytic story: Active Directory Kerberos Attacks"
-    - id: b0b34e2c-90de-11ec-baeb-acde48001122
-      name: "Disabled Kerberos Pre-Authentication Discovery With PowerView"
-      reason: "same analytic story: Active Directory Kerberos Attacks"
-    - id: 41243735-89a7-4c83-bcdd-570aa78f00a1
-      name: "Domain Controller Discovery with Nltest"
-      reason: "same analytic story: Rhysida Ransomware"
-    - id: 59b51620-94c9-11ec-b3d5-acde48001122
-      name: "Kerberos Pre-Authentication Flag Disabled with PowerShell"
-      reason: "same analytic story: Active Directory Kerberos Attacks"
-    - id: 13bbd574-83ac-11ec-99d4-acde48001122
-      name: "Mimikatz PassTheTicket CommandLine Parameters"
-      reason: "same analytic story: Active Directory Kerberos Attacks"
-    - id: c3e05466-5f22-11eb-ae93-0242ac130002
-      name: "NLTest Domain Trust Discovery"
-      reason: "same analytic story: Rhysida Ransomware"
-    - id: da63bc76-61ae-11eb-ae93-0242ac130002
-      name: "Ntdsutil Export NTDS"
-      reason: "same analytic story: Rhysida Ransomware"
-    - id: windows-malicious-powershell-executed-as-a-service-001
-      name: "Powershell Executed As A Service"
-      reason: "same analytic story: Rhysida Ransomware"
-    - id: 13243068-2d38-11ec-8908-acde48001122
-      name: "ServicePrincipalNames Discovery with PowerShell"
-      reason: "same analytic story: Active Directory Kerberos Attacks"
+  - id: 13243068-2d38-11ec-8908-acde48001122
+    name: ServicePrincipalNames Discovery with PowerShell
+    reason: 'Precursor: attacker enumerates kerberoastable SPN accounts via PowerShell before requesting their service tickets with Get-DomainSPNTicket.'
+  - id: 1eeed653-dbc8-4187-ad0c-eeebb20e6599
+    name: Potential SPN Enumeration Via Setspn.EXE
+    reason: 'Precursor: setspn.exe -Q/-T is the native-binary way to find the same SPN targets that Get-DomainSPNTicket then requests tickets for.'
+  - id: 61994268-04f4-11ec-865c-acde48001122
+    name: Get-DomainUser with PowerShell Script Block
+    reason: 'Co-occurring PowerView recon: Get-DomainUser -SPN selects service accounts, usually in the same session right before the ticket request.'
+  - id: b0b34e2c-90de-11ec-baeb-acde48001122
+    name: Disabled Kerberos Pre-Authentication Discovery With PowerView
+    reason: 'Sibling Kerberos roasting path: same PowerView session often hunts AS-REP roastable accounts alongside Kerberoasting.'
+  - id: 3245cd30-e015-40ff-a31d-5cadd5f377ec
+    name: HackTool - Rubeus Execution - ScriptBlock
+    reason: Alternate/parallel kerberoasting tooling (Rubeus kerberoast) run by the same operator in memory via PowerShell.
+  - id: 7ec2c172-dceb-4c10-92c9-87c1881b7e18
+    name: HackTool - Rubeus Execution
+    reason: Process-level Rubeus execution (kerberoast, asktgs, ptt) is the likely compiled-tool follow-on or parallel to the PowerView ticket request.
+  - id: caa9a802-8bd8-4b9e-a5cd-4d6221670219
+    name: Suspicious Kerberos Ticket Request via CLI
+    reason: Command-line tooling requesting service tickets for SPNs is the same kerberoasting action done outside PowerShell script blocks.
+  - id: 13bbd574-83ac-11ec-99d4-acde48001122
+    name: Mimikatz PassTheTicket CommandLine Parameters
+    reason: 'Follow-on: once a service account is cracked or tickets are obtained, tickets are injected/reused via kerberos::ptt for lateral movement.'
   window: 1h
   enrichment_searches:
-  # Rule-specific telemetry pivots the engine runs around an alert from this rule,
-  # scoped to the alert's host/user/IP within the window (behaviour-targeted, not a sweep).
-    - name: "Kerberos ticket requests for this account"
-      query: '(data_win_system_eventID:"4768" OR data_win_system_eventID:"4769" OR data_win_system_eventID:"4771")'
-      pivot_on: [user]
-      window: 6h
-    - name: "Download / AMSI-bypass / encoded script blocks on this host"
-      query: 'data_win_system_eventID:"4104" AND (data_win_eventdata_scriptBlockText:/.*[Dd][Oo][Ww][Nn][Ll][Oo][Aa][Dd][Ss][Tt][Rr][Ii][Nn][Gg].*/ OR data_win_eventdata_scriptBlockText:/.*[Dd][Oo][Ww][Nn][Ll][Oo][Aa][Dd][Ff][Ii][Ll][Ee].*/ OR data_win_eventdata_scriptBlockText:/.*[Ii][Nn][Vv][Oo][Kk][Ee]-[Ww][Ee][Bb][Rr][Ee][Qq][Uu][Ee][Ss][Tt].*/ OR data_win_eventdata_scriptBlockText:/.*[Nn][Ee][Tt]\.[Ww][Ee][Bb][Cc][Ll][Ii][Ee][Nn][Tt].*/ OR data_win_eventdata_scriptBlockText:/.*[Ff][Rr][Oo][Mm][Bb][Aa][Ss][Ee]64[Ss][Tt][Rr][Ii][Nn][Gg].*/ OR data_win_eventdata_scriptBlockText:/.*[Ii][Ee][Xx].*/ OR data_win_eventdata_scriptBlockText:/.*[Ii][Nn][Vv][Oo][Kk][Ee]-[Ee][Xx][Pp][Rr][Ee][Ss][Ss][Ii][Oo][Nn].*/ OR data_win_eventdata_scriptBlockText:/.*[Ss][Tt][Aa][Rr][Tt]-[Bb][Ii][Tt][Ss][Tt][Rr][Aa][Nn][Ss][Ff][Ee][Rr].*/ OR data_win_eventdata_scriptBlockText:/.*[Aa][Mm][Ss][Ii][Uu][Tt][Ii][Ll][Ss].*/ OR data_win_eventdata_scriptBlockText:/.*-[Ee][Nn][Cc].*/ OR data_win_eventdata_scriptBlockText:/.*-[Ee][Nn][Cc][Oo][Dd][Ee][Dd][Cc][Oo][Mm][Mm][Aa][Nn][Dd].*/ OR data_win_eventdata_scriptBlockText:/.*[Rr][Ee][Ff][Ll][Ee][Cc][Tt][Ii][Oo][Nn]\.[Aa][Ss][Ss][Ee][Mm][Bb][Ll][Yy].*/)'
-      pivot_on: [host]
-      window: 1h
-    - name: "Follow-on LOLBin / signed-binary-proxy execution on this host"
-      query: 'data_win_system_eventID:"1" AND data_win_eventdata_image:/.*(\\[Rr][Uu][Nn][Dd][Ll][Ll]32\.[Ee][Xx][Ee]|\\[Rr][Ee][Gg][Ss][Vv][Rr]32\.[Ee][Xx][Ee]|\\[Mm][Ss][Hh][Tt][Aa]\.[Ee][Xx][Ee]|\\[Ii][Nn][Ss][Tt][Aa][Ll][Ll][Uu][Tt][Ii][Ll]\.[Ee][Xx][Ee]|\\[Rr][Ee][Gg][Aa][Ss][Mm]\.[Ee][Xx][Ee]|\\[Rr][Ee][Gg][Ss][Vv][Cc][Ss]\.[Ee][Xx][Ee]|\\[Mm][Ss][Bb][Uu][Ii][Ll][Dd]\.[Ee][Xx][Ee]|\\[Cc][Ee][Rr][Tt][Uu][Tt][Ii][Ll]\.[Ee][Xx][Ee]|\\[Bb][Ii][Tt][Ss][Aa][Dd][Mm][Ii][Nn]\.[Ee][Xx][Ee]|\\[Ww][Mm][Ii][Cc]\.[Ee][Xx][Ee]|\\[Cc][Mm][Ss][Tt][Pp]\.[Ee][Xx][Ee]|\\[Oo][Dd][Bb][Cc][Cc][Oo][Nn][Ff]\.[Ee][Xx][Ee]|\\[Ff][Oo][Rr][Ff][Ii][Ll][Ee][Ss]\.[Ee][Xx][Ee]|\\[Pp][Cc][Aa][Ll][Uu][Aa]\.[Ee][Xx][Ee]|\\[Mm][Aa][Vv][Ii][Nn][Jj][Ee][Cc][Tt]\.[Ee][Xx][Ee]|\\[Ss][Cc][Rr][Ii][Pp][Tt][Rr][Uu][Nn][Nn][Ee][Rr]\.[Ee][Xx][Ee])/'
-      pivot_on: [host]
-      window: 1h
+  # Behaviour-targeted hunts the engine runs around the alert (not a sweep).
+  - name: Other PowerView / AD recon cmdlets in script blocks
+    query: data_win_system_eventID:"4104" AND data_win_eventdata_scriptBlockText:(/.*[Gg]et-[Dd]omain([Uu]ser|[Cc]omputer|[Gg]roup|[Tt]rust|[Cc]ontroller|[Ff]ile[Ss]erver|[Gg][Pp][Oo]).*/ OR /.*[Ii]nvoke-[Kk]erberoast.*/ OR /.*[Ff]ind-[Ll]ocal[Aa]dmin[Aa]ccess.*/ OR /.*[Ii]nvoke-[Uu]ser[Hh]unter.*/ OR /.*[Gg]et-[Nn]et[Ss][Pp][Nn].*/ OR /.*[Pp]ower[Vv]iew.*/)
+    pivot_on:
+    - host
+    window: 2h
+  - name: Kerberoasting / hash cracking tooling executed
+    query: data_win_system_eventID:"1" AND (data_win_eventdata_image:/.*\\([Rr]ubeus|[Hh]ashcat|[Jj]ohn|[Ss]etspn|[Mm]imikatz|[Kk]erberoast).*/ OR data_win_eventdata_commandLine:/.*([Kk]erberoast|[Aa]sktgs|[Kk]erberos::ptt|[Kk]erberos::list|[Hh]ashcat|[Gg]et[Uu]ser[Ss][Pp][Nn]s|-[Tt]\s+[Hh]ashcat).*/)
+    pivot_on:
+    - host
+    window: 2h
+  - name: Kirbi / ticket / hash output files written
+    query: data_win_system_eventID:"11" AND data_win_eventdata_targetFilename:(/.*\.[Kk][Ii][Rr][Bb][Ii]/ OR /.*[Kk]erberoast.*/ OR /.*[Tt][Gg][Ss]_?[Hh]ash.*/ OR /.*[Ss][Pp][Nn]_?[Hh]ashes?.*/ OR /.*[Hh]ashcat.*/ OR /.*\.[Cc][Cc][Aa][Cc][Hh][Ee]/)
+    pivot_on:
+    - host
+    window: 2h
+  - name: Script blocks exporting or staging ticket hashes
+    query: data_win_system_eventID:"4104" AND data_win_eventdata_scriptBlockText:(/.*[Hh]ashcat.*/ OR /.*\$krb5tgs\$.*/ OR /.*[Ee]xport-[Cc]sv.*[Hh]ash.*/ OR /.*[Ii]nvoke-[Kk]erberoast.*/ OR /.*[Oo]ut-[Ff]ile.*[Hh]ash.*/ OR /.*-[Ff]ormat\s+[Hh]ashcat.*/)
+    pivot_on:
+    - host
+    - user
+    window: 1h
+  - name: Lateral movement or remote execution after ticket theft
+    query: data_win_system_eventID:"1" AND data_win_eventdata_image:/.*\\([Pp][Ss][Ee][Xx][Ee][Cc]|[Pp][Ss][Ee][Xx][Ee][Cc][Ss][Vv][Cc]|[Ww][Mm][Ii][Cc]|[Ww][Ii][Nn][Rr][Ss])\.?[Ee]?[Xx]?[Ee]?/
+    pivot_on:
+    - host
+    window: 4h

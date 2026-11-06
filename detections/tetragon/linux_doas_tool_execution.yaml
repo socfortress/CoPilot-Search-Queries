@@ -129,52 +129,55 @@ correlation:
   # Authored per-rule (behaviour-researched) for the correlation engine. Related CoPilot
   # Searches + telemetry pivots to run around an alert, scoped to its host/user/ip/domain.
   related_rules:
-  - id: lnx-doas-001
-    name: Linux doas Execution Detection
-    reason: Syslog/auditd view of the same doas execution; confirms the escalation from a second telemetry source
-  - id: 0f79c4d2-4e1f-4683-9c36-b5469a665e06
-    name: Access of Sudoers File Content
-    reason: 'Precursor recon: attacker reads privilege config (sudoers/doas.conf) to learn which escalation path is allowed before invoking doas'
-  - id: linux-sudo-or-su-execution-001
-    name: Linux Sudo Or Su Execution
-    reason: Sibling escalation primitive; attacker falling back from sudo to doas (or vice versa) on the same host
-  - id: f74107df-b6c6-4e80-bf00-4170b658162b
-    name: Sudo Privilege Escalation CVE-2019-14287
-    reason: Alternative privilege-escalation attempt on the same host when doas is not permitted
-  - id: linux-setuid-using-chmod-utility-001
-    name: Linux Setuid Using Chmod Utility
-    reason: 'Follow-on: after gaining root via doas, attackers plant SUID binaries for persistent root'
-  - id: 6b14bac8-3e3a-4324-8109-42f0546a347f
-    name: Scheduled Cron Task/Job - Linux
-    reason: 'Follow-on persistence: root cron job created after elevated execution'
   - id: 6a50f16c-3b7b-42d1-b081-0fdd3ba70a73
     name: User Added To Root/Sudoers Group Using Usermod
-    reason: 'Follow-on: root-level account/group change to keep privileged access after doas escalation'
-  window: 2h
+    reason: 'Alternative privilege grant: an attacker who can run doas as root often adds an account to root/sudoers groups to make elevated access durable.'
+  - id: 0f79c4d2-4e1f-4683-9c36-b5469a665e06
+    name: Access of Sudoers File Content
+    reason: 'Privilege-config discovery on the same host: reading sudoers/escalation config typically precedes or accompanies doas-based escalation attempts.'
+  - id: f74107df-b6c6-4e80-bf00-4170b658162b
+    name: Sudo Privilege Escalation CVE-2019-14287
+    reason: Sibling privilege-delegation abuse; attacker pivoting between sudo and doas on the same host while probing for a working escalation path.
+  - id: fa4aaed5-4fe0-498d-bbc0-08e3346387ba
+    name: Copy Passwd Or Shadow From TMP Path
+    reason: Root obtained via doas is commonly followed by credential staging (copying passwd/shadow) for offline cracking.
+  - id: 6419afd1-3742-47a5-a7e6-b50386cd15f8
+    name: Chmod Targeting Sensitive Directories
+    reason: Post-escalation permission tampering (chmod on /etc, /tmp, /opt) executed as root to plant or enable persistence.
+  - id: 6b14bac8-3e3a-4324-8109-42f0546a347f
+    name: Scheduled Cron Task/Job - Linux
+    reason: 'Root-level persistence follow-on: escalated attacker installing a cron job to keep elevated access.'
+  - id: 4e2a6c91-7f3d-4b6e-9a4f-1c8b0e5a92d4
+    name: Crontab Interactive Edit Execution
+    reason: Persistence via crontab editing, commonly run via a privilege wrapper such as doas after escalation.
+  - id: 1182f3b3-e716-4efa-99ab-d2685d04360f
+    name: History File Deletion
+    reason: 'Anti-forensics after root is gained: attackers wipe shell history to hide the doas-driven activity.'
+  window: 1h
   enrichment_searches:
   # Behaviour-targeted hunts the engine runs around the alert (not a sweep).
-  - name: Commands run with doas (what was elevated)
-    query: data_process_exec_parent_binary:"/usr/bin/doas"
+  - name: Commands run through doas (what was elevated)
+    query: data_process_exec_parent_binary:"/usr/bin/doas" AND NOT data_process_exec_process_binary:"/usr/bin/doas"
+    pivot_on:
+    - host
+    window: 1h
+  - name: Shell spawned under doas / interactive root shell
+    query: data_process_exec_parent_binary:"/usr/bin/doas" AND data_process_exec_process_binary:/.*\/(bash|sh|dash|zsh|ksh|ash)/
+    pivot_on:
+    - host
+    window: 1h
+  - name: Account and credential file manipulation
+    query: data_process_exec_process_binary:/.*\/(useradd|usermod|adduser|passwd|chpasswd|visudo|userdel|gpasswd)/ OR data_process_exec_process_arguments:/.*\/etc\/(shadow|passwd|sudoers|doas\.conf).*/
     pivot_on:
     - host
     window: 2h
-  - name: Reads/edits of doas.conf or sudoers config
-    query: data_process_exec_process_arguments:(*doas.conf* OR */etc/sudoers*)
-    pivot_on:
-    - host
-    window: 6h
-  - name: Account, SSH key and shadow tampering after elevation
-    query: data_process_exec_process_binary:("/usr/sbin/useradd" OR "/usr/sbin/usermod" OR "/usr/bin/passwd" OR "/usr/sbin/adduser") OR data_process_exec_process_arguments:(*authorized_keys* OR */etc/shadow* OR */etc/passwd*)
+  - name: Ingress tool download before or after escalation
+    query: data_process_exec_process_binary:/.*\/(wget|curl)/ AND data_process_exec_process_arguments:/.*(http|ftp|\/tmp\/|\/dev\/shm).*/
     pivot_on:
     - host
     window: 2h
-  - name: SUID/capability changes and root persistence
-    query: (data_process_exec_process_binary:"/usr/bin/chmod" AND data_process_exec_process_arguments:(*u+s* OR *4755* OR *+s*)) OR data_process_exec_process_binary:("/usr/sbin/setcap" OR "/usr/bin/crontab") OR data_process_exec_process_arguments:(*/etc/cron* OR */etc/systemd/system* OR *rc.local*)
-    pivot_on:
-    - host
-    window: 4h
-  - name: Download-and-execute tooling around elevation
-    query: data_process_exec_process_binary:("/usr/bin/wget" OR "/usr/bin/curl") AND data_process_exec_process_arguments:(*/tmp/* OR */dev/shm/* OR *|*sh* OR *http*)
+  - name: Persistence and SUID/permission tampering as root
+    query: (data_process_exec_process_binary:/.*\/(crontab|systemctl|chattr)/ OR (data_process_exec_process_binary:/.*\/(chmod|chown)/ AND data_process_exec_process_arguments:/.*(\+s|[0-7]?[4-7][0-7]{3}|\/etc\/|\/root\/).*/))
     pivot_on:
     - host
     window: 2h
