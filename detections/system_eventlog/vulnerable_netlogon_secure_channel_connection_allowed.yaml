@@ -127,44 +127,55 @@ graylog:
   query: data_win_system_providerName:/[Nn][Ee][Tt][Ll][Oo][Gg][Oo][Nn]/ AND data_win_system_eventID:"5829"
 
 correlation:
-  # Authored by the correlation engine for review. Related CoPilot Searches to run
-  # around an alert from this rule, scoped to the same host/user/IP within the window.
+  # Authored per-rule (behaviour-researched) for the correlation engine. Related CoPilot
+  # Searches + telemetry pivots to run around an alert, scoped to its host/user/ip/domain.
   related_rules:
-    - id: 0255a820-e564-4e40-af2b-6ac61160335c
-      name: "A New Trust Was Created To A Domain"
-      reason: "next kill-chain tactic: Privilege Escalation"
-    - id: 35ba1d85-724d-42a3-889f-2e2362bcaf23
-      name: "AD Privileged Users or Groups Reconnaissance"
-      reason: "next kill-chain tactic: Discovery"
-    - id: 9eb99343-d336-4020-a3cd-67f3819e68ee
-      name: "Account Tampering - Suspicious Failed Logon Reasons"
-      reason: "next kill-chain tactic: Privilege Escalation"
-    - id: 17d619c1-e020-4347-957e-1d1207455c93
-      name: "Active Directory Replication from Non Machine Account"
-      reason: "next kill-chain tactic: Credential Access"
-    - id: 300bac00-e041-4ee2-9c36-e262656a6ecc
-      name: "Active Directory User Backdoors"
-      reason: "next kill-chain tactic: Privilege Escalation"
-    - id: 2632954e-db1c-49cb-9936-67d1ef1d17d2
-      name: "Addition of SID History to Active Directory Object"
-      reason: "next kill-chain tactic: Privilege Escalation"
-  window: 1h
+  - id: dcc6a01e-9471-44a0-a699-71ea96f8ed8b
+    name: Exploitation Attempt Of CVE-2020-1472 - Execution of ZeroLogon PoC
+    reason: 'Same CVE-2020-1472 exploit: the PoC process (zerologon/cve-2020-1472 tooling) is what causes the DC to allow the vulnerable Netlogon secure channel logged as 5829.'
+  - id: 17d619c1-e020-4347-957e-1d1207455c93
+    name: Active Directory Replication from Non Machine Account
+    reason: 'Classic ZeroLogon follow-on: after blanking the DC machine account password the attacker DCSyncs all domain hashes via directory replication.'
+  - id: 611eab06-a145-4dfa-a295-3ccc5c20f59a
+    name: Mimikatz DC Sync
+    reason: DCSync using the DC machine account (spoofed via Netlogon) to pull krbtgt and admin hashes right after the Netlogon bypass.
+  - id: 6e2a900a-ced9-4e4a-a9c2-13e706f9518a
+    name: HackTool - Potential Remote Credential Dumping Activity Via CrackMapExec Or Impacket-Secretsdump
+    reason: Impacket secretsdump is the standard tool used with the ZeroLogon-reset DC account to remotely dump SAM/NTDS secrets.
+  - id: f8a66a02-4a16-46e5-b7fd-a42c8a93d137
+    name: LSASS Crash Via Netlogon Stack Buffer Overflow - CVE-2026-41089
+    reason: Another Netlogon-service exploitation signal on a DC; indicates active attack against the same Netlogon attack surface.
+  - id: e9d4ab66-a532-4ef7-a502-66a9e4a34f5d
+    name: NTLMv1 Logon Between Client and Server
+    reason: Co-occurring weak Netlogon/NTLM authentication in the same System log, indicating the vulnerable or downgraded client that can be abused or relayed.
+  - id: da63bc76-61ae-11eb-ae93-0242ac130002
+    name: Ntdsutil Export NTDS
+    reason: Alternative or follow-on domain credential extraction on the DC once Netlogon compromise has yielded privileged access.
+  window: 2h
   enrichment_searches:
-  # Rule-specific telemetry pivots the engine runs around an alert from this rule,
-  # scoped to the alert's host/user/IP within the window (behaviour-targeted, not a sweep).
-    - name: "UAC-bypass / privilege-escalation binaries on this host"
-      query: 'data_win_system_eventID:"1" AND (data_win_eventdata_image:/.*(\\[Ff][Oo][Dd][Hh][Ee][Ll][Pp][Ee][Rr]\.[Ee][Xx][Ee]|\\[Ee][Vv][Ee][Nn][Tt][Vv][Ww][Rr]\.[Ee][Xx][Ee]|\\[Ss][Dd][Cc][Ll][Tt]\.[Ee][Xx][Ee]|\\[Cc][Oo][Mm][Pp][Uu][Tt][Ee][Rr][Dd][Ee][Ff][Aa][Uu][Ll][Tt][Ss]\.[Ee][Xx][Ee]|\\[Ss][Ll][Uu][Ii]\.[Ee][Xx][Ee]|\\[Ww][Ss][Rr][Ee][Ss][Ee][Tt]\.[Ee][Xx][Ee])/ OR data_win_eventdata_parentImage:/.*(\\[Ff][Oo][Dd][Hh][Ee][Ll][Pp][Ee][Rr]\.[Ee][Xx][Ee]|\\[Ee][Vv][Ee][Nn][Tt][Vv][Ww][Rr]\.[Ee][Xx][Ee]|\\[Ss][Dd][Cc][Ll][Tt]\.[Ee][Xx][Ee]|\\[Cc][Oo][Mm][Pp][Uu][Tt][Ee][Rr][Dd][Ee][Ff][Aa][Uu][Ll][Tt][Ss]\.[Ee][Xx][Ee]|\\[Ss][Ll][Uu][Ii]\.[Ee][Xx][Ee]|\\[Ww][Ss][Rr][Ee][Ss][Ee][Tt]\.[Ee][Xx][Ee])/)'
-      pivot_on: [host]
-      window: 2h
-    - name: "Memory/credential-dump creation & LSASS access on this host"
-      query: '((data_win_system_eventID:"1" AND data_win_eventdata_image:/.*(\\[Pp][Rr][Oo][Cc][Dd][Uu][Mm][Pp]\.[Ee][Xx][Ee]|\\[Pp][Rr][Oo][Cc][Dd][Uu][Mm][Pp]64\.[Ee][Xx][Ee]|\\[Ss][Qq][Ll][Dd][Uu][Mm][Pp][Ee][Rr]\.[Ee][Xx][Ee]|\\[Cc][Rr][Ee][Aa][Tt][Ee][Dd][Uu][Mm][Pp]\.[Ee][Xx][Ee]|\\[Rr][Dd][Rr][Ll][Ee][Aa][Kk][Dd][Ii][Aa][Gg]\.[Ee][Xx][Ee]|\\[Dd][Uu][Mm][Pp][Ee][Rr][Tt]\.[Ee][Xx][Ee]|\\[Nn][Aa][Nn][Oo][Dd][Uu][Mm][Pp]\.[Ee][Xx][Ee]|\\[Aa][Vv][Dd][Uu][Mm][Pp]\.[Ee][Xx][Ee])/) OR (data_win_system_eventID:"1" AND (data_win_eventdata_commandLine:/.*[Cc][Oo][Mm][Ss][Vv][Cc][Ss]\.[Dd][Ll][Ll].*/ OR data_win_eventdata_commandLine:/.*[Mm][Ii][Nn][Ii][Dd][Uu][Mm][Pp].*/ OR data_win_eventdata_commandLine:/.*[Dd][Uu][Mm][Pp][Ee][Rr][Tt].*/ OR data_win_eventdata_commandLine:/.*[Nn][Aa][Nn][Oo][Dd][Uu][Mm][Pp].*/ OR data_win_eventdata_commandLine:/.*[Ll][Ss][Aa][Ss][Ss].*/ OR data_win_eventdata_commandLine:/.*[Ss][Ee][Kk][Uu][Rr][Ll][Ss][Aa].*/ OR data_win_eventdata_commandLine:/.*[Nn][Tt][Dd][Ss]\.[Dd][Ii][Tt].*/ OR data_win_eventdata_commandLine:/.*[Nn][Tt][Dd][Ss][Uu][Tt][Ii][Ll].*/)) OR (data_win_system_eventID:"10" AND data_win_eventdata_targetImage:/.*(\\[Ll][Ss][Aa][Ss][Ss]\.[Ee][Xx][Ee])/))'
-      pivot_on: [host]
-      window: 1h
-    - name: "Service installations on this host"
-      query: 'data_win_system_eventID:"7045"'
-      pivot_on: [host]
-      window: 6h
-    - name: "Follow-on LOLBin / signed-binary-proxy execution on this host"
-      query: 'data_win_system_eventID:"1" AND data_win_eventdata_image:/.*(\\[Rr][Uu][Nn][Dd][Ll][Ll]32\.[Ee][Xx][Ee]|\\[Rr][Ee][Gg][Ss][Vv][Rr]32\.[Ee][Xx][Ee]|\\[Mm][Ss][Hh][Tt][Aa]\.[Ee][Xx][Ee]|\\[Ii][Nn][Ss][Tt][Aa][Ll][Ll][Uu][Tt][Ii][Ll]\.[Ee][Xx][Ee]|\\[Rr][Ee][Gg][Aa][Ss][Mm]\.[Ee][Xx][Ee]|\\[Rr][Ee][Gg][Ss][Vv][Cc][Ss]\.[Ee][Xx][Ee]|\\[Mm][Ss][Bb][Uu][Ii][Ll][Dd]\.[Ee][Xx][Ee]|\\[Cc][Ee][Rr][Tt][Uu][Tt][Ii][Ll]\.[Ee][Xx][Ee]|\\[Bb][Ii][Tt][Ss][Aa][Dd][Mm][Ii][Nn]\.[Ee][Xx][Ee]|\\[Ww][Mm][Ii][Cc]\.[Ee][Xx][Ee]|\\[Cc][Mm][Ss][Tt][Pp]\.[Ee][Xx][Ee]|\\[Oo][Dd][Bb][Cc][Cc][Oo][Nn][Ff]\.[Ee][Xx][Ee]|\\[Ff][Oo][Rr][Ff][Ii][Ll][Ee][Ss]\.[Ee][Xx][Ee]|\\[Pp][Cc][Aa][Ll][Uu][Aa]\.[Ee][Xx][Ee]|\\[Mm][Aa][Vv][Ii][Nn][Jj][Ee][Cc][Tt]\.[Ee][Xx][Ee]|\\[Ss][Cc][Rr][Ii][Pp][Tt][Rr][Uu][Nn][Nn][Ee][Rr]\.[Ee][Xx][Ee])/'
-      pivot_on: [host]
-      window: 2h
+  # Behaviour-targeted hunts the engine runs around the alert (not a sweep).
+  - name: Other Netlogon secure-channel enforcement events (5827/5828/5830/5831)
+    query: data_win_system_providerName:/[Nn][Ee][Tt][Ll][Oo][Gg][Oo][Nn]/ AND (data_win_system_eventID:"5827" OR data_win_system_eventID:"5828" OR data_win_system_eventID:"5830" OR data_win_system_eventID:"5831")
+    pivot_on:
+    - host
+    window: 24h
+  - name: DC machine/computer account password or attribute change (4742)
+    query: data_win_system_eventID:"4742" AND (data_win_eventdata_targetUserName:*$ OR data_win_eventdata_passwordLastSet:*)
+    pivot_on:
+    - host
+    window: 2h
+  - name: Directory replication rights used (DCSync, 4662 DS-Replication-Get-Changes)
+    query: data_win_system_eventID:"4662" AND (data_win_eventdata_properties:*1131f6aa* OR data_win_eventdata_properties:*1131f6ad* OR data_win_eventdata_properties:*89e95b76*)
+    pivot_on:
+    - host
+    window: 2h
+  - name: Secretsdump / NTDS / ZeroLogon tooling process execution
+    query: data_win_system_eventID:"1" AND (data_win_eventdata_image:/.*([Ss][Ee][Cc][Rr][Ee][Tt][Ss][Dd][Uu][Mm][Pp]|[Zz][Ee][Rr][Oo][Ll][Oo][Gg][Oo][Nn]|[Nn][Tt][Dd][Ss][Uu][Tt][Ii][Ll]|[Mm][Ii][Mm][Ii][Kk][Aa][Tt][Zz]).*/ OR data_win_eventdata_commandLine:/.*([Ll][Ss][Aa][Dd][Uu][Mm][Pp]|[Zz][Ee][Rr][Oo][Ll][Oo][Gg][Oo][Nn]|[Dd][Cc][Ss][Yy][Nn][Cc]|[Nn][Tt][Dd][Ss]\.[Dd][Ii][Tt]|[Ss][Ee][Cc][Rr][Ee][Tt][Ss][Dd][Uu][Mm][Pp]).*/)
+    pivot_on:
+    - host
+    window: 2h
+  - name: Network logons to the DC by machine accounts / anonymous (4624 type 3)
+    query: data_win_system_eventID:"4624" AND data_win_eventdata_logonType:"3" AND (data_win_eventdata_targetUserName:*$ OR data_win_eventdata_targetUserName:"ANONYMOUS LOGON")
+    pivot_on:
+    - host
+    window: 2h

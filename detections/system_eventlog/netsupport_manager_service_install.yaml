@@ -139,19 +139,58 @@ graylog:
   query: data_win_system_providerName:/[Ss][Ee][Rr][Vv][Ii][Cc][Ee] [Cc][Oo][Nn][Tt][Rr][Oo][Ll] [Mm][Aa][Nn][Aa][Gg][Ee][Rr]/ AND data_win_system_eventID:"7045" AND (data_win_eventdata_imagePath:/.*\\[Nn][Ee][Tt][Ss][Uu][Pp][Pp][Oo][Rr][Tt] [Mm][Aa][Nn][Aa][Gg][Ee][Rr]\\[Cc][Ll][Ii][Ee][Nn][Tt]32\.[Ee][Xx][Ee].*/ OR data_win_eventdata_serviceName:/[Cc][Ll][Ii][Ee][Nn][Tt]32/)
 
 correlation:
-  # Authored by the correlation engine for review.
+  # Authored per-rule (behaviour-researched) for the correlation engine. Related CoPilot
+  # Searches + telemetry pivots to run around an alert, scoped to its host/user/ip/domain.
+  related_rules:
+  - id: 758ff488-18d5-4cbe-8ec4-02b6285a434f
+    name: Remote Access Tool - NetSupport Execution
+    reason: The installed Client32 service launches client32.exe; process-creation of NetSupport on the same host confirms the agent is actually running, not just registered.
+  - id: 37e8d358-6408-4853-82f4-98333fca7014
+    name: Remote Access Tool - NetSupport Execution From Unusual Location
+    reason: Malicious NetSupport RAT deployments drop client32.exe into user-writable paths (AppData, Temp, ProgramData); this separates abuse from a sanctioned install.
+  - id: 0afbd410-de03-4078-8491-f132303cb67d
+    name: Renamed NetSupport RAT Execution
+    reason: Attackers rename client32.exe to dodge name-based rules while keeping the Client32 service; same implant, evasion variant.
+  - id: Windows-NetSupport-RMM-DLL-Loaded-By-Uncommon-Process
+    name: Windows NetSupport RMM DLL Loaded By Uncommon Process
+    reason: NetSupport's support DLLs (pcicl32/HTCTL32) side-loaded by an unrelated process indicates a staged or loader-driven install preceding the service.
+  - id: 2f3039c8-e8fe-43a9-b5cf-dcd424a2522d
+    name: File Creation Related To RAT Clients
+    reason: Dropping of RAT client files (client32.ini, NSM.lic, etc.) immediately precedes service registration, showing the payload staging step.
+  - id: 1a31b18a-f00c-4061-9900-f735b96c99fc
+    name: Remote Access Tool Services Have Been Installed - System
+    reason: Same 7045 service-install telemetry for other remote-access tools; attackers frequently stack several RMM/RAT tools for redundant access.
+  - id: 4d07b1f4-cb00-4470-b9f8-b0191d48ff52
+    name: DNS Query To Remote Access Software Domain From Non-Browser App
+    reason: After install, the agent resolves NetSupport gateway/geo-lookup domains from a non-browser process, confirming outbound C2 check-in.
+  - id: 26481afe-db26-4228-b264-25a29fe6efc7
+    name: Uncommon Service Installation Image Path
+    reason: A service whose image path is outside standard directories is a co-occurring persistence-quality indicator on the same 7045 event.
+  window: 6h
   enrichment_searches:
-  # Rule-specific telemetry pivots the engine runs around an alert from this rule,
-  # scoped to the alert's host/user/IP within the window (behaviour-targeted, not a sweep).
-    - name: "Follow-on LOLBin / signed-binary-proxy execution on this host"
-      query: 'data_win_system_eventID:"1" AND data_win_eventdata_image:/.*(\\[Rr][Uu][Nn][Dd][Ll][Ll]32\.[Ee][Xx][Ee]|\\[Rr][Ee][Gg][Ss][Vv][Rr]32\.[Ee][Xx][Ee]|\\[Mm][Ss][Hh][Tt][Aa]\.[Ee][Xx][Ee]|\\[Ii][Nn][Ss][Tt][Aa][Ll][Ll][Uu][Tt][Ii][Ll]\.[Ee][Xx][Ee]|\\[Rr][Ee][Gg][Aa][Ss][Mm]\.[Ee][Xx][Ee]|\\[Rr][Ee][Gg][Ss][Vv][Cc][Ss]\.[Ee][Xx][Ee]|\\[Mm][Ss][Bb][Uu][Ii][Ll][Dd]\.[Ee][Xx][Ee]|\\[Cc][Ee][Rr][Tt][Uu][Tt][Ii][Ll]\.[Ee][Xx][Ee]|\\[Bb][Ii][Tt][Ss][Aa][Dd][Mm][Ii][Nn]\.[Ee][Xx][Ee]|\\[Ww][Mm][Ii][Cc]\.[Ee][Xx][Ee]|\\[Cc][Mm][Ss][Tt][Pp]\.[Ee][Xx][Ee]|\\[Oo][Dd][Bb][Cc][Cc][Oo][Nn][Ff]\.[Ee][Xx][Ee]|\\[Ff][Oo][Rr][Ff][Ii][Ll][Ee][Ss]\.[Ee][Xx][Ee]|\\[Pp][Cc][Aa][Ll][Uu][Aa]\.[Ee][Xx][Ee]|\\[Mm][Aa][Vv][Ii][Nn][Jj][Ee][Cc][Tt]\.[Ee][Xx][Ee]|\\[Ss][Cc][Rr][Ii][Pp][Tt][Rr][Uu][Nn][Nn][Ee][Rr]\.[Ee][Xx][Ee])/'
-      pivot_on: [host]
-      window: 1h
-    - name: "Service installations on this host"
-      query: 'data_win_system_eventID:"7045"'
-      pivot_on: [host]
-      window: 6h
-    - name: "Autostart persistence written on this host (Run keys, services, IFEO)"
-      query: '(data_win_system_eventID:"12" OR data_win_system_eventID:"13") AND (data_win_eventdata_targetObject:/.*[Cc][Uu][Rr][Rr][Ee][Nn][Tt][Vv][Ee][Rr][Ss][Ii][Oo][Nn]\\[Rr][Uu][Nn].*/ OR data_win_eventdata_targetObject:/.*[Cc][Uu][Rr][Rr][Ee][Nn][Tt][Vv][Ee][Rr][Ss][Ii][Oo][Nn]\\[Rr][Uu][Nn][Oo][Nn][Cc][Ee].*/ OR data_win_eventdata_targetObject:/.*[Cc][Uu][Rr][Rr][Ee][Nn][Tt][Cc][Oo][Nn][Tt][Rr][Oo][Ll][Ss][Ee][Tt]\\[Ss][Ee][Rr][Vv][Ii][Cc][Ee][Ss]\\.*/ OR data_win_eventdata_targetObject:/.*[Ii][Mm][Aa][Gg][Ee] [Ff][Ii][Ll][Ee] [Ee][Xx][Ee][Cc][Uu][Tt][Ii][Oo][Nn] [Oo][Pp][Tt][Ii][Oo][Nn][Ss]\\.*/ OR data_win_eventdata_targetObject:/.*[Ww][Ii][Nn][Ll][Oo][Gg][Oo][Nn]\\[Ss][Hh][Ee][Ll][Ll].*/ OR data_win_eventdata_targetObject:/.*[Ww][Ii][Nn][Ll][Oo][Gg][Oo][Nn]\\[Uu][Ss][Ee][Rr][Ii][Nn][Ii][Tt].*/ OR data_win_eventdata_targetObject:/.*[Cc][Uu][Rr][Rr][Ee][Nn][Tt][Vv][Ee][Rr][Ss][Ii][Oo][Nn]\\[Ee][Xx][Pp][Ll][Oo][Rr][Ee][Rr]\\[Rr][Uu][Nn].*/ OR data_win_eventdata_targetObject:/.*[Pp][Oo][Ll][Ii][Cc][Ii][Ee][Ss]\\[Ee][Xx][Pp][Ll][Oo][Rr][Ee][Rr]\\[Rr][Uu][Nn].*/ OR data_win_eventdata_targetObject:/.*[Cc][Uu][Rr][Rr][Ee][Nn][Tt][Vv][Ee][Rr][Ss][Ii][Oo][Nn]\\[Ww][Ii][Nn][Dd][Oo][Ww][Ss]\\[Ll][Oo][Aa][Dd].*/)'
-      pivot_on: [host]
-      window: 4h
+  # Behaviour-targeted hunts the engine runs around the alert (not a sweep).
+  - name: NetSupport client files dropped (client32, NSM.lic, pcicl32)
+    query: data_win_system_eventID:"11" AND (data_win_eventdata_targetFilename:/.*[Cc][Ll][Ii][Ee][Nn][Tt]32\.(exe|ini).*/ OR data_win_eventdata_targetFilename:/.*[Nn][Ss][Mm]\.[Ll][Ii][Cc].*/ OR data_win_eventdata_targetFilename:/.*[Pp][Cc][Ii][Cc][Ll]32\.[Dd][Ll][Ll].*/ OR data_win_eventdata_targetFilename:/.*[Hh][Tt][Cc][Tt][Ll]32\.[Dd][Ll][Ll].*/ OR data_win_eventdata_targetFilename:/.*[Rr][Ee][Mm][Cc][Mm][Dd][Ss][Tt][Uu][Bb]\.[Ee][Xx][Ee].*/)
+    pivot_on:
+    - host
+    window: 6h
+  - name: client32.exe process execution and its parent (dropper chain)
+    query: data_win_system_eventID:"1" AND (data_win_eventdata_image:/.*\\[Cc][Ll][Ii][Ee][Nn][Tt]32\.[Ee][Xx][Ee]/ OR data_win_eventdata_originalFileName:/[Cc][Ll][Ii][Ee][Nn][Tt]32\.[Ee][Xx][Ee]/ OR data_win_eventdata_description:*NetSupport*)
+    pivot_on:
+    - host
+    window: 6h
+  - name: Outbound connections from NetSupport client32 (gateway/C2)
+    query: data_win_system_eventID:"3" AND data_win_eventdata_image:/.*\\[Cc][Ll][Ii][Ee][Nn][Tt]32\.[Ee][Xx][Ee]/
+    pivot_on:
+    - host
+    window: 4h
+  - name: DNS lookups for NetSupport geo/gateway domains
+    query: data_win_system_eventID:"22" AND (data_win_eventdata_queryName:*netsupportsoftware.com* OR data_win_eventdata_queryName:*netsupport-manager* OR data_win_eventdata_queryName:*geo.netsupportsoftware*)
+    pivot_on:
+    - host
+    window: 4h
+  - name: Other remote-access tool installs or hands-on-keyboard shells after install
+    query: data_win_system_eventID:"1" AND (data_win_eventdata_parentImage:/.*\\[Cc][Ll][Ii][Ee][Nn][Tt]32\.[Ee][Xx][Ee]/ OR data_win_eventdata_image:/.*\\([Aa][Nn][Yy][Dd][Ee][Ss][Kk]|[Ss][Cc][Rr][Ee][Ee][Nn][Cc][Oo][Nn][Nn][Ee][Cc][Tt]|[Tt][Ee][Aa][Mm][Vv][Ii][Ee][Ww][Ee][Rr]|[Rr][Uu][Tt][Ss][Ee][Rr][Vv]|[Nn][Gg][Rr][Oo][Kk])[^\\]*\.[Ee][Xx][Ee]/)
+    pivot_on:
+    - host
+    window: 6h

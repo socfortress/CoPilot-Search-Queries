@@ -175,44 +175,55 @@ graylog:
   query: (data_win_system_eventID:"12" OR data_win_system_eventID:"13" OR data_win_system_eventID:"14") AND (data_win_eventdata_targetObject:/.*\\[Cc][Uu][Rr][Rr][Ee][Nn][Tt][Cc][Oo][Nn][Tt][Rr][Oo][Ll][Ss][Ee][Tt]\\[Ss][Ee][Rr][Vv][Ii][Cc][Ee][Ss]\\[Nn][Tt][Dd][Ss]\\[Dd][Ii][Rr][Ee][Cc][Tt][Oo][Rr][Yy][Ss][Ee][Rr][Vv][Ii][Cc][Ee][Ee][Xx][Tt][Pp][Tt].*/ OR data_win_eventdata_targetObject:/.*\\[Cc][Uu][Rr][Rr][Ee][Nn][Tt][Cc][Oo][Nn][Tt][Rr][Oo][Ll][Ss][Ee][Tt]\\[Ss][Ee][Rr][Vv][Ii][Cc][Ee][Ss]\\[Nn][Tt][Dd][Ss]\\[Ll][Ss][Aa][Dd][Bb][Ee][Xx][Tt][Pp][Tt].*/) AND _exists_:data_win_eventdata_image AND _exists_:data_win_eventdata_details AND NOT (data_win_eventdata_image:/[Cc]:\\[Ww][Ii][Nn][Dd][Oo][Ww][Ss]\\[Ss][Yy][Ss][Tt][Ee][Mm]32\\[Ll][Ss][Aa][Ss][Ss]\.[Ee][Xx][Ee]/ AND (data_win_eventdata_details:/%%[Ss][Yy][Ss][Tt][Ee][Mm][Rr][Oo][Oo][Tt]%%\\[Ss][Yy][Ss][Tt][Ee][Mm]32\\[Nn][Tt][Dd][Ss][Aa]\.[Dd][Ll][Ll]/ OR data_win_eventdata_details:/%%[Ss][Yy][Ss][Tt][Ee][Mm][Rr][Oo][Oo][Tt]%%\\[Ss][Yy][Ss][Tt][Ee][Mm]32\\[Ll][Ss][Aa][Dd][Bb]\.[Dd][Ll][Ll]/))
 
 correlation:
-  # Authored by the correlation engine for review. Related CoPilot Searches to run
-  # around an alert from this rule, scoped to the same host/user/IP within the window.
+  # Authored per-rule (behaviour-researched) for the correlation engine. Related CoPilot
+  # Searches + telemetry pivots to run around an alert, scoped to its host/user/ip/domain.
   related_rules:
-    - id: ec570e53-4c76-45a9-804d-dc3f355ff7a7
-      name: "7Zip Compressing Dump Files"
-      reason: "next kill-chain tactic: Collection"
-    - id: 0a1255c5-d732-4b62-ac02-b5152d34fb83
-      name: "ADExplorer Writing Complete AD Snapshot Into .dat File"
-      reason: "next kill-chain tactic: Discovery"
-    - id: 1ea13e8c-03ea-409b-877d-ce5c3d2c1cb3
-      name: "ADFS Database Named Pipe Connection By Uncommon Tool"
-      reason: "next kill-chain tactic: Collection"
-    - id: 75bf09fa-1dd7-4d18-9af9-dd9e492562eb
-      name: "ADSI-Cache File Creation By Uncommon Tool"
-      reason: "next kill-chain tactic: Command and Control"
-    - id: 33a2d1dd-f3b0-40bd-8baf-7974468927cc
-      name: "APT PRIVATELOG Image Load Pattern"
-      reason: "next kill-chain tactic: Privilege Escalation"
-    - id: 03e2746e-2b31-42f1-ab7a-eb39365b2422
-      name: "APT31 Judgement Panda Activity"
-      reason: "next kill-chain tactic: Credential Access"
+  - id: 857c8db3-c89b-42fb-882b-f681c7cf4da2
+    name: Unsigned Image Loaded Into LSASS Process
+    reason: 'Direct follow-on: once DirectoryServiceExtPt/LsaDbExtPt points at an attacker DLL, lsass loads it and Sysmon EID 7 shows the unsigned module inside lsass.'
+  - id: 41f6531d-af6e-4c6e-918f-b946f2b85a36
+    name: Potential Persistence Via LSA Extensions
+    reason: Sibling registry-based DLL load into lsass (LSA extensions); the same actor often sets several LSA load points.
+  - id: eeb30123-9fbd-4ee8-aaa0-2e545bbed6dc
+    name: Security Support Provider (SSP) Added to LSA Configuration
+    reason: Alternative lsass DLL-loading technique (mimilib/memssp style SSP) used alongside or instead of the NTDS extension-point key.
+  - id: b7966f4a-b333-455b-8370-8ca53c229762
+    name: Dropping Of Password Filter DLL
+    reason: 'Precursor/co-occurring: attacker stages a credential-harvesting DLL and registers it into lsass through the Lsa Notification Packages key.'
+  - id: a642964e-bead-4bed-8910-1bb4d63e3b4d
+    name: HackTool - Mimikatz Execution
+    reason: The key abuse comes from the Mimikatz/xpn research; Mimikatz running on the host is the likely writer of the key or payload.
+  - id: 5ef9853e-4d0e-4a70-846f-a9ca37d876da
+    name: Potential Credential Dumping Activity Via LSASS
+    reason: Attackers who plant a DLL in lsass usually also read lsass memory directly; confirms credential theft intent.
+  - id: 11b1ed55-154d-4e82-8ad7-83739298f720
+    name: NTDS.DIT Creation By Uncommon Process
+    reason: The key sits under the NTDS service of a domain controller; the next objective is typically ntds.dit extraction for domain-wide credentials.
   window: 1h
   enrichment_searches:
-  # Rule-specific telemetry pivots the engine runs around an alert from this rule,
-  # scoped to the alert's host/user/IP within the window (behaviour-targeted, not a sweep).
-    - name: "Autostart persistence written on this host (Run keys, services, IFEO)"
-      query: '(data_win_system_eventID:"12" OR data_win_system_eventID:"13") AND (data_win_eventdata_targetObject:/.*[Cc][Uu][Rr][Rr][Ee][Nn][Tt][Vv][Ee][Rr][Ss][Ii][Oo][Nn]\\[Rr][Uu][Nn].*/ OR data_win_eventdata_targetObject:/.*[Cc][Uu][Rr][Rr][Ee][Nn][Tt][Vv][Ee][Rr][Ss][Ii][Oo][Nn]\\[Rr][Uu][Nn][Oo][Nn][Cc][Ee].*/ OR data_win_eventdata_targetObject:/.*[Cc][Uu][Rr][Rr][Ee][Nn][Tt][Cc][Oo][Nn][Tt][Rr][Oo][Ll][Ss][Ee][Tt]\\[Ss][Ee][Rr][Vv][Ii][Cc][Ee][Ss]\\.*/ OR data_win_eventdata_targetObject:/.*[Ii][Mm][Aa][Gg][Ee] [Ff][Ii][Ll][Ee] [Ee][Xx][Ee][Cc][Uu][Tt][Ii][Oo][Nn] [Oo][Pp][Tt][Ii][Oo][Nn][Ss]\\.*/ OR data_win_eventdata_targetObject:/.*[Ww][Ii][Nn][Ll][Oo][Gg][Oo][Nn]\\[Ss][Hh][Ee][Ll][Ll].*/ OR data_win_eventdata_targetObject:/.*[Ww][Ii][Nn][Ll][Oo][Gg][Oo][Nn]\\[Uu][Ss][Ee][Rr][Ii][Nn][Ii][Tt].*/ OR data_win_eventdata_targetObject:/.*[Cc][Uu][Rr][Rr][Ee][Nn][Tt][Vv][Ee][Rr][Ss][Ii][Oo][Nn]\\[Ee][Xx][Pp][Ll][Oo][Rr][Ee][Rr]\\[Rr][Uu][Nn].*/ OR data_win_eventdata_targetObject:/.*[Pp][Oo][Ll][Ii][Cc][Ii][Ee][Ss]\\[Ee][Xx][Pp][Ll][Oo][Rr][Ee][Rr]\\[Rr][Uu][Nn].*/ OR data_win_eventdata_targetObject:/.*[Cc][Uu][Rr][Rr][Ee][Nn][Tt][Vv][Ee][Rr][Ss][Ii][Oo][Nn]\\[Ww][Ii][Nn][Dd][Oo][Ww][Ss]\\[Ll][Oo][Aa][Dd].*/)'
-      pivot_on: [host]
-      window: 2h
-    - name: "Other executions of this tool-set on this host (any arguments)"
-      query: 'data_win_system_eventID:"1" AND data_win_eventdata_image:/.*(\\[Ll][Ss][Aa][Ss][Ss]\.[Ee][Xx][Ee])/'
-      pivot_on: [host]
-      window: 2h
-    - name: "Memory/credential-dump creation & LSASS access on this host"
-      query: '((data_win_system_eventID:"1" AND data_win_eventdata_image:/.*(\\[Pp][Rr][Oo][Cc][Dd][Uu][Mm][Pp]\.[Ee][Xx][Ee]|\\[Pp][Rr][Oo][Cc][Dd][Uu][Mm][Pp]64\.[Ee][Xx][Ee]|\\[Ss][Qq][Ll][Dd][Uu][Mm][Pp][Ee][Rr]\.[Ee][Xx][Ee]|\\[Cc][Rr][Ee][Aa][Tt][Ee][Dd][Uu][Mm][Pp]\.[Ee][Xx][Ee]|\\[Rr][Dd][Rr][Ll][Ee][Aa][Kk][Dd][Ii][Aa][Gg]\.[Ee][Xx][Ee]|\\[Dd][Uu][Mm][Pp][Ee][Rr][Tt]\.[Ee][Xx][Ee]|\\[Nn][Aa][Nn][Oo][Dd][Uu][Mm][Pp]\.[Ee][Xx][Ee]|\\[Aa][Vv][Dd][Uu][Mm][Pp]\.[Ee][Xx][Ee])/) OR (data_win_system_eventID:"1" AND (data_win_eventdata_commandLine:/.*[Cc][Oo][Mm][Ss][Vv][Cc][Ss]\.[Dd][Ll][Ll].*/ OR data_win_eventdata_commandLine:/.*[Mm][Ii][Nn][Ii][Dd][Uu][Mm][Pp].*/ OR data_win_eventdata_commandLine:/.*[Dd][Uu][Mm][Pp][Ee][Rr][Tt].*/ OR data_win_eventdata_commandLine:/.*[Nn][Aa][Nn][Oo][Dd][Uu][Mm][Pp].*/ OR data_win_eventdata_commandLine:/.*[Ll][Ss][Aa][Ss][Ss].*/ OR data_win_eventdata_commandLine:/.*[Ss][Ee][Kk][Uu][Rr][Ll][Ss][Aa].*/ OR data_win_eventdata_commandLine:/.*[Nn][Tt][Dd][Ss]\.[Dd][Ii][Tt].*/ OR data_win_eventdata_commandLine:/.*[Nn][Tt][Dd][Ss][Uu][Tt][Ii][Ll].*/)) OR (data_win_system_eventID:"10" AND data_win_eventdata_targetImage:/.*(\\[Ll][Ss][Aa][Ss][Ss]\.[Ee][Xx][Ee])/))'
-      pivot_on: [host]
-      window: 1h
-    - name: "Autostart persistence written on this host"
-      query: '(data_win_system_eventID:"12" OR data_win_system_eventID:"13") AND (data_win_eventdata_targetObject:/.*[Cc][Uu][Rr][Rr][Ee][Nn][Tt][Vv][Ee][Rr][Ss][Ii][Oo][Nn]\\[Rr][Uu][Nn].*/ OR data_win_eventdata_targetObject:/.*[Cc][Uu][Rr][Rr][Ee][Nn][Tt][Vv][Ee][Rr][Ss][Ii][Oo][Nn]\\[Rr][Uu][Nn][Oo][Nn][Cc][Ee].*/ OR data_win_eventdata_targetObject:/.*[Cc][Uu][Rr][Rr][Ee][Nn][Tt][Cc][Oo][Nn][Tt][Rr][Oo][Ll][Ss][Ee][Tt]\\[Ss][Ee][Rr][Vv][Ii][Cc][Ee][Ss]\\.*/ OR data_win_eventdata_targetObject:/.*[Ii][Mm][Aa][Gg][Ee] [Ff][Ii][Ll][Ee] [Ee][Xx][Ee][Cc][Uu][Tt][Ii][Oo][Nn] [Oo][Pp][Tt][Ii][Oo][Nn][Ss]\\.*/ OR data_win_eventdata_targetObject:/.*[Ww][Ii][Nn][Ll][Oo][Gg][Oo][Nn]\\[Ss][Hh][Ee][Ll][Ll].*/ OR data_win_eventdata_targetObject:/.*[Ww][Ii][Nn][Ll][Oo][Gg][Oo][Nn]\\[Uu][Ss][Ee][Rr][Ii][Nn][Ii][Tt].*/ OR data_win_eventdata_targetObject:/.*[Cc][Uu][Rr][Rr][Ee][Nn][Tt][Vv][Ee][Rr][Ss][Ii][Oo][Nn]\\[Ee][Xx][Pp][Ll][Oo][Rr][Ee][Rr]\\[Rr][Uu][Nn].*/ OR data_win_eventdata_targetObject:/.*[Pp][Oo][Ll][Ii][Cc][Ii][Ee][Ss]\\[Ee][Xx][Pp][Ll][Oo][Rr][Ee][Rr]\\[Rr][Uu][Nn].*/ OR data_win_eventdata_targetObject:/.*[Cc][Uu][Rr][Rr][Ee][Nn][Tt][Vv][Ee][Rr][Ss][Ii][Oo][Nn]\\[Ww][Ii][Nn][Dd][Oo][Ww][Ss]\\[Ll][Oo][Aa][Dd].*/)'
-      pivot_on: [host]
-      window: 2h
+  # Behaviour-targeted hunts the engine runs around the alert (not a sweep).
+  - name: Non-system DLL loaded into lsass.exe
+    query: data_win_system_eventID:"7" AND data_win_eventdata_image:/.*\\[Ll][Ss][Aa][Ss][Ss]\.[Ee][Xx][Ee]/ AND NOT data_win_eventdata_imageLoaded:/[Cc]:\\[Ww][Ii][Nn][Dd][Oo][Ww][Ss]\\.*/
+    pivot_on:
+    - host
+    window: 4h
+  - name: DLL files dropped in user-writable or system32 paths
+    query: data_win_system_eventID:"11" AND data_win_eventdata_targetFilename:/.*\.[Dd][Ll][Ll]/ AND (data_win_eventdata_targetFilename:/.*\\[Tt][Ee][Mm][Pp]\\.*/ OR data_win_eventdata_targetFilename:/.*\\[Pp][Rr][Oo][Gg][Rr][Aa][Mm][Dd][Aa][Tt][Aa]\\.*/ OR data_win_eventdata_targetFilename:/.*\\[Uu][Ss][Ee][Rr][Ss]\\.*/ OR data_win_eventdata_targetFilename:/.*\\[Ww][Ii][Nn][Dd][Oo][Ww][Ss]\\[Ss][Yy][Ss][Tt][Ee][Mm]32\\.*/)
+    pivot_on:
+    - host
+    window: 4h
+  - name: Other LSA / security-provider / NTDS registry changes
+    query: (data_win_system_eventID:"12" OR data_win_system_eventID:"13") AND (data_win_eventdata_targetObject:/.*\\[Cc][Oo][Nn][Tt][Rr][Oo][Ll]\\[Ll][Ss][Aa]\\.*/ OR data_win_eventdata_targetObject:/.*\\[Cc][Oo][Nn][Tt][Rr][Oo][Ll]\\[Ss][Ee][Cc][Uu][Rr][Ii][Tt][Yy][Pp][Rr][Oo][Vv][Ii][Dd][Ee][Rr][Ss].*/ OR data_win_eventdata_targetObject:/.*\\[Nn][Ee][Tt][Ww][Oo][Rr][Kk][Pp][Rr][Oo][Vv][Ii][Dd][Ee][Rr]\\.*/ OR data_win_eventdata_targetObject:/.*\\[Nn][Tt][Dd][Ss]\\.*/)
+    pivot_on:
+    - host
+    window: 4h
+  - name: Credential-theft tooling and lsass process access
+    query: (data_win_system_eventID:"1" AND (data_win_eventdata_commandLine:/.*[Mm][Ii][Mm][Ii][Kk][Aa][Tt][Zz].*/ OR data_win_eventdata_commandLine:/.*[Ss][Ee][Kk][Uu][Rr][Ll][Ss][Aa].*/ OR data_win_eventdata_commandLine:/.*[Ll][Ss][Aa][Dd][Uu][Mm][Pp].*/ OR data_win_eventdata_commandLine:/.*[Cc][Oo][Mm][Ss][Vv][Cc][Ss].*[Mm][Ii][Nn][Ii][Dd][Uu][Mm][Pp].*/ OR data_win_eventdata_image:/.*\\[Pp][Rr][Oo][Cc][Dd][Uu][Mm][Pp](64)?\.[Ee][Xx][Ee]/)) OR (data_win_system_eventID:"10" AND data_win_eventdata_targetImage:/.*\\[Ll][Ss][Aa][Ss][Ss]\.[Ee][Xx][Ee]/)
+    pivot_on:
+    - host
+    window: 2h
+  - name: NTDS.dit extraction and ntdsutil activity
+    query: (data_win_system_eventID:"1" AND (data_win_eventdata_image:/.*\\[Nn][Tt][Dd][Ss][Uu][Tt][Ii][Ll]\.[Ee][Xx][Ee]/ OR data_win_eventdata_commandLine:/.*[Nn][Tt][Dd][Ss]\.[Dd][Ii][Tt].*/ OR data_win_eventdata_commandLine:/.*[Vv][Ss][Ss][Aa][Dd][Mm][Ii][Nn].*[Ss][Hh][Aa][Dd][Oo][Ww].*/)) OR (data_win_system_eventID:"11" AND data_win_eventdata_targetFilename:/.*[Nn][Tt][Dd][Ss]\.[Dd][Ii][Tt].*/)
+    pivot_on:
+    - host
+    window: 6h

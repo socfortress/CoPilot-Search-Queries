@@ -143,19 +143,58 @@ graylog:
   query: data_win_system_providerName:/[Aa][Pp][Pp][Ll][Ii][Cc][Aa][Tt][Ii][Oo][Nn] [Pp][Oo][Pp][Uu][Pp]/ AND data_win_system_eventID:"26" AND (data_win_eventdata_caption:/[Ss][Yy][Ss][Mm][Oo][Nn]64\.[Ee][Xx][Ee] - [Aa][Pp][Pp][Ll][Ii][Cc][Aa][Tt][Ii][Oo][Nn] [Ee][Rr][Rr][Oo][Rr]/ OR data_win_eventdata_caption:/[Ss][Yy][Ss][Mm][Oo][Nn]\.[Ee][Xx][Ee] - [Aa][Pp][Pp][Ll][Ii][Cc][Aa][Tt][Ii][Oo][Nn] [Ee][Rr][Rr][Oo][Rr]/)
 
 correlation:
-  # Authored by the correlation engine for review.
+  # Authored per-rule (behaviour-researched) for the correlation engine. Related CoPilot
+  # Searches + telemetry pivots to run around an alert, scoped to its host/user/ip/domain.
+  related_rules:
+  - id: 4d7cda18-1b12-4e52-b45c-d28653210df8
+    name: Sysmon Driver Unloaded Via Fltmc.EXE
+    reason: Unloading the SysmonDrv minifilter is the deliberate way to blind Sysmon; a crash popup right after it suggests the sensor was killed on purpose rather than by a fault.
+  - id: 6a5f68d1-c4b5-46b9-94ee-5324892ea939
+    name: Uninstall Sysinternals Sysmon
+    reason: sysmon -u after the service dies is the attacker's follow-through to remove the sensor permanently.
+  - id: 4916a35e-bfc4-47d0-8e25-a003d7067061
+    name: Sysmon Driver Altitude Change
+    reason: Changing the Sysmon driver altitude in the registry silently breaks its filter and can cause service failure; a precursor of the crash.
+  - id: 8ac03a65-6c84-4116-acad-dc1558ff7a77
+    name: Sysmon Configuration Change
+    reason: A config swap that excludes attacker tooling often precedes or accompanies a Sysmon service failure.
+  - id: 87911521-7098-470b-a459-9a57fc80bdfd
+    name: Sysmon Configuration Update
+    reason: sysmon -c on the command line shows who changed the config just before the service failed.
+  - id: 18beca67-ab3e-4ee3-ba7a-a46ca8d7d0cc
+    name: Sysmon Channel Reference Deletion
+    reason: Deleting the Sysmon channel registration blinds collection of its log; same defense-evasion goal as a killed Sysmon service.
+  - id: a62b37e0-45d3-48d9-a517-90c1a1b0186b
+    name: Eventlog Cleared
+    reason: Log clearing commonly follows sensor disruption to erase the window where telemetry was missing.
+  - id: windows-attempt-stop-security-service-001
+    name: Windows Attempt To Stop Security Service
+    reason: Attackers stopping security services (including Sysmon) co-occurs with the sensor failing.
+  window: 2h
   enrichment_searches:
-  # Rule-specific telemetry pivots the engine runs around an alert from this rule,
-  # scoped to the alert's host/user/IP within the window (behaviour-targeted, not a sweep).
-    - name: "Service installations on this host"
-      query: 'data_win_system_eventID:"7045"'
-      pivot_on: [host]
-      window: 6h
-    - name: "Follow-on LOLBin / signed-binary-proxy execution on this host"
-      query: 'data_win_system_eventID:"1" AND data_win_eventdata_image:/.*(\\[Rr][Uu][Nn][Dd][Ll][Ll]32\.[Ee][Xx][Ee]|\\[Rr][Ee][Gg][Ss][Vv][Rr]32\.[Ee][Xx][Ee]|\\[Mm][Ss][Hh][Tt][Aa]\.[Ee][Xx][Ee]|\\[Ii][Nn][Ss][Tt][Aa][Ll][Ll][Uu][Tt][Ii][Ll]\.[Ee][Xx][Ee]|\\[Rr][Ee][Gg][Aa][Ss][Mm]\.[Ee][Xx][Ee]|\\[Rr][Ee][Gg][Ss][Vv][Cc][Ss]\.[Ee][Xx][Ee]|\\[Mm][Ss][Bb][Uu][Ii][Ll][Dd]\.[Ee][Xx][Ee]|\\[Cc][Ee][Rr][Tt][Uu][Tt][Ii][Ll]\.[Ee][Xx][Ee]|\\[Bb][Ii][Tt][Ss][Aa][Dd][Mm][Ii][Nn]\.[Ee][Xx][Ee]|\\[Ww][Mm][Ii][Cc]\.[Ee][Xx][Ee]|\\[Cc][Mm][Ss][Tt][Pp]\.[Ee][Xx][Ee]|\\[Oo][Dd][Bb][Cc][Cc][Oo][Nn][Ff]\.[Ee][Xx][Ee]|\\[Ff][Oo][Rr][Ff][Ii][Ll][Ee][Ss]\.[Ee][Xx][Ee]|\\[Pp][Cc][Aa][Ll][Uu][Aa]\.[Ee][Xx][Ee]|\\[Mm][Aa][Vv][Ii][Nn][Jj][Ee][Cc][Tt]\.[Ee][Xx][Ee]|\\[Ss][Cc][Rr][Ii][Pp][Tt][Rr][Uu][Nn][Nn][Ee][Rr]\.[Ee][Xx][Ee])/'
-      pivot_on: [host]
-      window: 2h
-    - name: "Memory/credential-dump creation & LSASS access on this host"
-      query: '((data_win_system_eventID:"1" AND data_win_eventdata_image:/.*(\\[Pp][Rr][Oo][Cc][Dd][Uu][Mm][Pp]\.[Ee][Xx][Ee]|\\[Pp][Rr][Oo][Cc][Dd][Uu][Mm][Pp]64\.[Ee][Xx][Ee]|\\[Ss][Qq][Ll][Dd][Uu][Mm][Pp][Ee][Rr]\.[Ee][Xx][Ee]|\\[Cc][Rr][Ee][Aa][Tt][Ee][Dd][Uu][Mm][Pp]\.[Ee][Xx][Ee]|\\[Rr][Dd][Rr][Ll][Ee][Aa][Kk][Dd][Ii][Aa][Gg]\.[Ee][Xx][Ee]|\\[Dd][Uu][Mm][Pp][Ee][Rr][Tt]\.[Ee][Xx][Ee]|\\[Nn][Aa][Nn][Oo][Dd][Uu][Mm][Pp]\.[Ee][Xx][Ee]|\\[Aa][Vv][Dd][Uu][Mm][Pp]\.[Ee][Xx][Ee])/) OR (data_win_system_eventID:"1" AND (data_win_eventdata_commandLine:/.*[Cc][Oo][Mm][Ss][Vv][Cc][Ss]\.[Dd][Ll][Ll].*/ OR data_win_eventdata_commandLine:/.*[Mm][Ii][Nn][Ii][Dd][Uu][Mm][Pp].*/ OR data_win_eventdata_commandLine:/.*[Dd][Uu][Mm][Pp][Ee][Rr][Tt].*/ OR data_win_eventdata_commandLine:/.*[Nn][Aa][Nn][Oo][Dd][Uu][Mm][Pp].*/ OR data_win_eventdata_commandLine:/.*[Ll][Ss][Aa][Ss][Ss].*/ OR data_win_eventdata_commandLine:/.*[Ss][Ee][Kk][Uu][Rr][Ll][Ss][Aa].*/ OR data_win_eventdata_commandLine:/.*[Nn][Tt][Dd][Ss]\.[Dd][Ii][Tt].*/ OR data_win_eventdata_commandLine:/.*[Nn][Tt][Dd][Ss][Uu][Tt][Ii][Ll].*/)) OR (data_win_system_eventID:"10" AND data_win_eventdata_targetImage:/.*(\\[Ll][Ss][Aa][Ss][Ss]\.[Ee][Xx][Ee])/))'
-      pivot_on: [host]
-      window: 1h
+  # Behaviour-targeted hunts the engine runs around the alert (not a sweep).
+  - name: Sysmon service state changes and errors on this host
+    query: data_win_system_providerName:/.*[Ss][Yy][Ss][Mm][Oo][Nn].*/ AND (data_win_system_eventID:"4" OR data_win_system_eventID:"255" OR data_win_system_eventID:"16")
+    pivot_on:
+    - host
+    window: 2h
+  - name: Sysmon tampering commands (fltmc unload, sysmon -u/-c, sc stop/delete)
+    query: data_win_system_eventID:"1" AND (data_win_eventdata_commandLine:/.*[Ff][Ll][Tt][Mm][Cc].*[Uu][Nn][Ll][Oo][Aa][Dd].*/ OR data_win_eventdata_commandLine:/.*[Ss][Yy][Ss][Mm][Oo][Nn](64)?(\.[Ee][Xx][Ee])?"? +-[UuCc].*/ OR data_win_eventdata_commandLine:/.*[Ss][Cc] +(stop|delete|config).*[Ss][Yy][Ss][Mm][Oo][Nn].*/ OR data_win_eventdata_commandLine:/.*[Ss][Yy][Ss][Mm][Oo][Nn]Drv.*/)
+    pivot_on:
+    - host
+    window: 2h
+  - name: Registry tampering of Sysmon service, driver altitude or channel
+    query: (data_win_system_eventID:"12" OR data_win_system_eventID:"13" OR data_win_system_eventID:"14") AND data_win_eventdata_targetObject:/.*[Ss][Yy][Ss][Mm][Oo][Nn].*/
+    pivot_on:
+    - host
+    window: 2h
+  - name: Event log clearing after Sysmon failure
+    query: (data_win_system_eventID:"1102" OR data_win_system_eventID:"104" OR (data_win_system_eventID:"1" AND (data_win_eventdata_commandLine:/.*[Ww][Ee][Vv][Tt][Uu][Tt][Ii][Ll].* +(cl|clear-log).*/ OR data_win_eventdata_commandLine:/.*[Cc][Ll][Ee][Aa][Rr]-[Ee][Vv][Ee][Nn][Tt][Ll][Oo][Gg].*/)))
+    pivot_on:
+    - host
+    window: 4h
+  - name: Execution from user-writable paths while Sysmon was down
+    query: data_win_system_eventID:"1" AND data_win_eventdata_image:/.*\\([Tt][Ee][Mm][Pp]|[Pp][Rr][Oo][Gg][Rr][Aa][Mm][Dd][Aa][Tt][Aa]|[Pp][Uu][Bb][Ll][Ii][Cc]|[Aa][Pp][Pp][Dd][Aa][Tt][Aa])\\.*/
+    pivot_on:
+    - host
+    window: 2h

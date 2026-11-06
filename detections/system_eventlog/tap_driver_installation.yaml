@@ -136,35 +136,58 @@ graylog:
   query: data_win_system_providerName:/[Ss][Ee][Rr][Vv][Ii][Cc][Ee] [Cc][Oo][Nn][Tt][Rr][Oo][Ll] [Mm][Aa][Nn][Aa][Gg][Ee][Rr]/ AND data_win_system_eventID:"7045" AND data_win_eventdata_imagePath:/.*[Tt][Aa][Pp]0901.*/
 
 correlation:
-  # Authored by the correlation engine for review. Related CoPilot Searches to run
-  # around an alert from this rule, scoped to the same host/user/IP within the window.
+  # Authored per-rule (behaviour-researched) for the correlation engine. Related CoPilot
+  # Searches + telemetry pivots to run around an alert, scoped to its host/user/ip/domain.
   related_rules:
-    - id: 48d91a3a-2363-43ba-a456-ca71ac3da5c2
-      name: "Audit CVE Event"
-      reason: "next kill-chain tactic: Impact"
-    - id: eee8311f-a752-44f0-bf2f-6b007db16300
-      name: "BlueSky Ransomware Artefacts"
-      reason: "next kill-chain tactic: Impact"
-    - id: 3f2c93c7-7b2a-4d58-bb8d-6f39422d8148
-      name: "CVE-2024-49113 Exploitation Attempt - LDAP Nightmare"
-      reason: "next kill-chain tactic: Impact"
-  window: 1h
+  - id: 7b687634-ab20-11ea-bb37-0242ac130002
+    name: Windows Pcap Drivers
+    reason: Another network-driver install (Npcap/WinPcap) often dropped alongside TAP/VPN components when an attacker stages sniffing or tunnelling tooling
+  - id: 1a31b18a-f00c-4061-9900-f735b96c99fc
+    name: Remote Access Tool Services Have Been Installed - System
+    reason: Same 7045 service-install telemetry; a remote access service installed near a TAP driver indicates a persistent covert access channel, not a benign VPN client
+  - id: 71c276aa-49cd-43d2-b920-2dcd3e6962d5
+    name: Service Installed By Unusual Client - System
+    reason: A TAP driver service installed remotely (via SMB/service control from another host) points to an attacker staging a tunnel rather than a user installing OpenVPN
+  - id: ee37eb7c-a4e7-4cd5-8fa4-efa27f1c3f31
+    name: PUA - Ngrok Execution
+    reason: Ngrok is a co-occurring tunnelling alternative; both establish a covert egress/pivot channel on the same host
+  - id: 8b0e12da-d3c3-49db-bb4f-256703f380e5
+    name: PUA - Chisel Tunneling Tool Execution
+    reason: Chisel/other tunnel tools are typically run after or instead of a TAP VPN to carry traffic out of the network
+  - id: 322ed9ec-fcab-4f67-9a34-e7c6aef43614
+    name: New Port Forwarding Rule Added Via Netsh.EXE
+    reason: Once a virtual adapter exists, attackers use netsh portproxy to route internal services through it; follow-on pivoting step
+  - id: 7d1aaf3d-4304-425c-b7c3-162055e0b3ab
+    name: Potential Data Exfiltration Activity Via CommandLine Tools
+    reason: The stated purpose of TAP installation is exfiltration tunnelling; CLI transfer tools are the likely next step
+  - id: 431a1fdb-4799-4f3b-91c3-a683b003fc49
+    name: New Kernel Driver Via SC.EXE
+    reason: Driver services can be created via sc.exe instead of an installer; same kernel-driver staging behaviour seen through process creation
+  window: 2h
   enrichment_searches:
-  # Rule-specific telemetry pivots the engine runs around an alert from this rule,
-  # scoped to the alert's host/user/IP within the window (behaviour-targeted, not a sweep).
-    - name: "Outbound transfer / exfiltration tooling on this host"
-      query: '((data_win_system_eventID:"1" AND data_win_eventdata_image:/.*(\\[Rr][Cc][Ll][Oo][Nn][Ee]\.[Ee][Xx][Ee]|\\[Cc][Uu][Rr][Ll]\.[Ee][Xx][Ee]|\\[Ww][Gg][Ee][Tt]\.[Ee][Xx][Ee]|\\[Ww][Ii][Nn][Ss][Cc][Pp]\.[Ee][Xx][Ee]|\\[Pp][Ss][Cc][Pp]\.[Ee][Xx][Ee]|\\[Mm][Ee][Gg][Aa][Cc][Mm][Dd]\.[Ee][Xx][Ee]|\\[Mm][Ee][Gg][Aa][Ss][Yy][Nn][Cc]\.[Ee][Xx][Ee])/) OR ((data_win_eventdata_commandLine:/.*[Ii][Nn][Vv][Oo][Kk][Ee]-[Rr][Ee][Ss][Tt][Mm][Ee][Tt][Hh][Oo][Dd].*/ OR data_win_eventdata_commandLine:/.*[Ss][Tt][Aa][Rr][Tt]-[Bb][Ii][Tt][Ss][Tt][Rr][Aa][Nn][Ss][Ff][Ee][Rr].*/ OR data_win_eventdata_commandLine:/.*[Rr][Cc][Ll][Oo][Nn][Ee].*/ OR data_win_eventdata_commandLine:/.*[Tt][Rr][Aa][Nn][Ss][Ff][Ee][Rr]\.[Ss][Hh].*/ OR data_win_eventdata_commandLine:/.*[Aa][Nn][Oo][Nn][Ff][Ii][Ll][Ee][Ss].*/ OR data_win_eventdata_commandLine:/.*[Pp][Aa][Ss][Tt][Ee][Bb][Ii][Nn].*/ OR data_win_eventdata_commandLine:/.*[Mm][Ee][Gg][Aa]\.[Nn][Zz].*/ OR data_win_eventdata_commandLine:/.*-[Oo][Uu][Tt][Ff][Ii][Ll][Ee].*/ OR data_win_eventdata_commandLine:/.*[Uu][Pp][Ll][Oo][Aa][Dd][Ff][Ii][Ll][Ee].*/)))'
-      pivot_on: [host]
-      window: 2h
-    - name: "Service installations on this host"
-      query: 'data_win_system_eventID:"7045"'
-      pivot_on: [host]
-      window: 6h
-    - name: "Follow-on LOLBin / signed-binary-proxy execution on this host"
-      query: 'data_win_system_eventID:"1" AND data_win_eventdata_image:/.*(\\[Rr][Uu][Nn][Dd][Ll][Ll]32\.[Ee][Xx][Ee]|\\[Rr][Ee][Gg][Ss][Vv][Rr]32\.[Ee][Xx][Ee]|\\[Mm][Ss][Hh][Tt][Aa]\.[Ee][Xx][Ee]|\\[Ii][Nn][Ss][Tt][Aa][Ll][Ll][Uu][Tt][Ii][Ll]\.[Ee][Xx][Ee]|\\[Rr][Ee][Gg][Aa][Ss][Mm]\.[Ee][Xx][Ee]|\\[Rr][Ee][Gg][Ss][Vv][Cc][Ss]\.[Ee][Xx][Ee]|\\[Mm][Ss][Bb][Uu][Ii][Ll][Dd]\.[Ee][Xx][Ee]|\\[Cc][Ee][Rr][Tt][Uu][Tt][Ii][Ll]\.[Ee][Xx][Ee]|\\[Bb][Ii][Tt][Ss][Aa][Dd][Mm][Ii][Nn]\.[Ee][Xx][Ee]|\\[Ww][Mm][Ii][Cc]\.[Ee][Xx][Ee]|\\[Cc][Mm][Ss][Tt][Pp]\.[Ee][Xx][Ee]|\\[Oo][Dd][Bb][Cc][Cc][Oo][Nn][Ff]\.[Ee][Xx][Ee]|\\[Ff][Oo][Rr][Ff][Ii][Ll][Ee][Ss]\.[Ee][Xx][Ee]|\\[Pp][Cc][Aa][Ll][Uu][Aa]\.[Ee][Xx][Ee]|\\[Mm][Aa][Vv][Ii][Nn][Jj][Ee][Cc][Tt]\.[Ee][Xx][Ee]|\\[Ss][Cc][Rr][Ii][Pp][Tt][Rr][Uu][Nn][Nn][Ee][Rr]\.[Ee][Xx][Ee])/'
-      pivot_on: [host]
-      window: 2h
-    - name: "Archive / staging & outbound-transfer tooling on this host"
-      query: '(((data_win_system_eventID:"1" AND data_win_eventdata_image:/.*(\\7[Zz]\.[Ee][Xx][Ee]|\\7[Zz][Aa]\.[Ee][Xx][Ee]|\\7[Zz][Rr]\.[Ee][Xx][Ee]|\\[Rr][Aa][Rr]\.[Ee][Xx][Ee]|\\[Ww][Ii][Nn][Rr][Aa][Rr]\.[Ee][Xx][Ee]|\\[Ww][Zz][Zz][Ii][Pp]\.[Ee][Xx][Ee]|\\[Mm][Aa][Kk][Ee][Cc][Aa][Bb]\.[Ee][Xx][Ee])/) OR (data_win_eventdata_commandLine:/.*[Cc][Oo][Mm][Pp][Rr][Ee][Ss][Ss]-[Aa][Rr][Cc][Hh][Ii][Vv][Ee].*/ OR data_win_eventdata_commandLine:/.*\.7[Zz].*/ OR data_win_eventdata_commandLine:/.*\.[Rr][Aa][Rr].*/ OR data_win_eventdata_commandLine:/.* -[Hh][Pp].*/)) OR (((data_win_system_eventID:"1" AND data_win_eventdata_image:/.*(\\[Rr][Cc][Ll][Oo][Nn][Ee]\.[Ee][Xx][Ee]|\\[Cc][Uu][Rr][Ll]\.[Ee][Xx][Ee]|\\[Ww][Gg][Ee][Tt]\.[Ee][Xx][Ee]|\\[Ww][Ii][Nn][Ss][Cc][Pp]\.[Ee][Xx][Ee]|\\[Pp][Ss][Cc][Pp]\.[Ee][Xx][Ee]|\\[Mm][Ee][Gg][Aa][Cc][Mm][Dd]\.[Ee][Xx][Ee]|\\[Mm][Ee][Gg][Aa][Ss][Yy][Nn][Cc]\.[Ee][Xx][Ee])/) OR ((data_win_eventdata_commandLine:/.*[Ii][Nn][Vv][Oo][Kk][Ee]-[Rr][Ee][Ss][Tt][Mm][Ee][Tt][Hh][Oo][Dd].*/ OR data_win_eventdata_commandLine:/.*[Ss][Tt][Aa][Rr][Tt]-[Bb][Ii][Tt][Ss][Tt][Rr][Aa][Nn][Ss][Ff][Ee][Rr].*/ OR data_win_eventdata_commandLine:/.*[Rr][Cc][Ll][Oo][Nn][Ee].*/ OR data_win_eventdata_commandLine:/.*[Tt][Rr][Aa][Nn][Ss][Ff][Ee][Rr]\.[Ss][Hh].*/ OR data_win_eventdata_commandLine:/.*[Aa][Nn][Oo][Nn][Ff][Ii][Ll][Ee][Ss].*/ OR data_win_eventdata_commandLine:/.*[Pp][Aa][Ss][Tt][Ee][Bb][Ii][Nn].*/ OR data_win_eventdata_commandLine:/.*[Mm][Ee][Gg][Aa]\.[Nn][Zz].*/ OR data_win_eventdata_commandLine:/.*-[Oo][Uu][Tt][Ff][Ii][Ll][Ee].*/ OR data_win_eventdata_commandLine:/.*[Uu][Pp][Ll][Oo][Aa][Dd][Ff][Ii][Ll][Ee].*/)))))'
-      pivot_on: [host]
-      window: 2h
+  # Behaviour-targeted hunts the engine runs around the alert (not a sweep).
+  - name: OpenVPN / TAP installer and driver tooling execution
+    query: data_win_system_eventID:"1" AND (data_win_eventdata_image:/.*([Oo][Pp][Ee][Nn][Vv][Pp][Nn]|[Tt][Aa][Pp]-[Ww][Ii][Nn][Dd][Oo][Ww][Ss]|[Tt][Aa][Pp][Ii][Nn][Ss][Tt][Aa][Ll][Ll]|[Dd][Ee][Vv][Cc][Oo][Nn]|[Pp][Nn][Pp][Uu][Tt][Ii][Ll]|[Ww][Ii][Nn][Tt][Uu][Nn]).*/ OR data_win_eventdata_commandLine:/.*([Tt][Aa][Pp]0901|[Tt][Aa][Pp][Ii][Nn][Ss][Tt][Aa][Ll][Ll]|[Pp][Nn][Pp][Uu][Tt][Ii][Ll].*-[Aa]|[Ss][Cc].*[Cc][Rr][Ee][Aa][Tt][Ee].*[Tt][Yy][Pp][Ee]= *[Kk][Ee][Rr][Nn][Ee][Ll]).*/)
+    pivot_on:
+    - host
+    window: 2h
+  - name: Tunnelling / reverse-proxy tool execution
+    query: data_win_system_eventID:"1" AND (data_win_eventdata_image:/.*\\([Nn][Gg][Rr][Oo][Kk]|[Cc][Hh][Ii][Ss][Ee][Ll]|[Pp][Ll][Ii][Nn][Kk]|[Ff][Rr][Pp][Cc]|[Ll][Ii][Gg][Oo][Ll][Oo]|[Cc][Ll][Oo][Uu][Dd][Ff][Ll][Aa][Rr][Ee][Dd]|[Ii][Oo][Xx]|[Nn][Cc]|[Nn][Cc][Aa][Tt]|[Ss][Oo][Cc][Aa][Tt])\.[Ee][Xx][Ee]/ OR data_win_eventdata_commandLine:/.*([Pp][Oo][Rr][Tt][Pp][Rr][Oo][Xx][Yy]|-[Rr] +[0-9]+:|[Ss][Ee][Rr][Vv][Ee][Rr] +-[-]?[Rr][Ee][Vv][Ee][Rr][Ss][Ee]|[Tt][Uu][Nn][Nn][Ee][Ll]).*/)
+    pivot_on:
+    - host
+    window: 4h
+  - name: Network adapter / routing reconfiguration after virtual NIC install
+    query: data_win_system_eventID:"1" AND (data_win_eventdata_image:/.*\\([Nn][Ee][Tt][Ss][Hh]|[Rr][Oo][Uu][Tt][Ee]|[Nn][Ee][Tt][Ss][Tt][Aa][Tt]|[Gg][Ee][Tt][Mm][Aa][Cc])\.[Ee][Xx][Ee]/ AND data_win_eventdata_commandLine:/.*([Tt][Aa][Pp]|[Ww][Ii][Nn][Tt][Uu][Nn]|[Ii][Nn][Tt][Ee][Rr][Ff][Aa][Cc][Ee]|[Aa][Dd][Dd]|[Pp][Oo][Rr][Tt][Pp][Rr][Oo][Xx][Yy]|[Rr][Ee][Gg][Ii][Ss][Tt][Rr][Yy]).*/)
+    pivot_on:
+    - host
+    window: 2h
+  - name: Outbound connections from VPN/tunnel processes to unusual ports
+    query: data_win_system_eventID:"3" AND data_win_eventdata_initiated:"true" AND data_win_eventdata_image:/.*([Oo][Pp][Ee][Nn][Vv][Pp][Nn]|[Nn][Gg][Rr][Oo][Kk]|[Cc][Hh][Ii][Ss][Ee][Ll]|[Pp][Ll][Ii][Nn][Kk]|[Cc][Ll][Oo][Uu][Dd][Ff][Ll][Aa][Rr][Ee][Dd]|[Ff][Rr][Pp][Cc]).*/
+    pivot_on:
+    - host
+    window: 4h
+  - name: Archive and exfiltration tooling preceding or following tunnel setup
+    query: data_win_system_eventID:"1" AND (data_win_eventdata_image:/.*\\(7[Zz]|7[Zz][Aa]|[Rr][Aa][Rr]|[Ww][Ii][Nn][Rr][Aa][Rr]|[Rr][Cc][Ll][Oo][Nn][Ee]|[Ww][Ii][Nn][Ss][Cc][Pp]|[Pp][Ss][Cc][Pp]|[Cc][Uu][Rr][Ll])\.[Ee][Xx][Ee]/ OR data_win_eventdata_commandLine:/.*([Cc][Oo][Mm][Pp][Rr][Ee][Ss][Ss]-[Aa][Rr][Cc][Hh][Ii][Vv][Ee]|[Ss][Tt][Aa][Rr][Tt]-[Bb][Ii][Tt][Ss][Tt][Rr][Aa][Nn][Ss][Ff][Ee][Rr]|[Rr][Cc][Ll][Oo][Nn][Ee]|[Uu][Pp][Ll][Oo][Aa][Dd]).*/)
+    pivot_on:
+    - host
+    window: 6h

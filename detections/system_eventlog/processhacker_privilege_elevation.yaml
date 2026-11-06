@@ -145,41 +145,55 @@ graylog:
   query: data_win_system_providerName:/[Ss][Ee][Rr][Vv][Ii][Cc][Ee] [Cc][Oo][Nn][Tt][Rr][Oo][Ll] [Mm][Aa][Nn][Aa][Gg][Ee][Rr]/ AND data_win_system_eventID:"7045" AND data_win_eventdata_serviceName:/[Pp][Rr][Oo][Cc][Ee][Ss][Ss][Hh][Aa][Cc][Kk][Ee][Rr].*/ AND data_win_eventdata_accountName:/[Ll][Oo][Cc][Aa][Ll][Ss][Yy][Ss][Tt][Ee][Mm]/
 
 correlation:
-  # Authored by the correlation engine for review. Related CoPilot Searches to run
-  # around an alert from this rule, scoped to the same host/user/IP within the window.
+  # Authored per-rule (behaviour-researched) for the correlation engine. Related CoPilot
+  # Searches + telemetry pivots to run around an alert, scoped to its host/user/ip/domain.
   related_rules:
-    - id: 0255a820-e564-4e40-af2b-6ac61160335c
-      name: "A New Trust Was Created To A Domain"
-      reason: "next kill-chain tactic: Persistence"
-    - id: 35ba1d85-724d-42a3-889f-2e2362bcaf23
-      name: "AD Privileged Users or Groups Reconnaissance"
-      reason: "next kill-chain tactic: Discovery"
-    - id: 9eb99343-d336-4020-a3cd-67f3819e68ee
-      name: "Account Tampering - Suspicious Failed Logon Reasons"
-      reason: "next kill-chain tactic: Persistence"
-    - id: 17d619c1-e020-4347-957e-1d1207455c93
-      name: "Active Directory Replication from Non Machine Account"
-      reason: "next kill-chain tactic: Credential Access"
-    - id: 300bac00-e041-4ee2-9c36-e262656a6ecc
-      name: "Active Directory User Backdoors"
-      reason: "next kill-chain tactic: Persistence"
+  - id: 811e0002-b13b-4a15-9d00-a613fce66e42
+    name: PUA - Process Hacker Execution
+    reason: 'Direct precursor: the 7045 service is created when the ProcessHacker/System Informer binary is launched elevated, so the process-creation event shows who ran it and from where.'
+  - id: 67add051-9ee7-4ad3-93ba-42935615ae8d
+    name: PUA - Process Hacker Driver Load
+    reason: 'Co-occurring: the elevated service loads the kprocesshacker kernel driver, which gives the tool kernel-level process and token access.'
+  - id: 10cb6535-b31d-4512-9962-513dcbc42cc1
+    name: PUA - System Informer Driver Load
+    reason: Renamed successor of Process Hacker uses the same kernel driver path; same behaviour under a different service/driver name.
+  - id: 39b64854-5497-4b57-a448-40977b8c9679
+    name: Malicious Driver Load By Name
+    reason: Attackers who run Process Hacker as SYSTEM often load further vulnerable or malicious drivers (BYOVD) to kill EDR next.
+  - id: 5ef9853e-4d0e-4a70-846f-a9ca37d876da
+    name: Potential Credential Dumping Activity Via LSASS
+    reason: 'Likely follow-on: a SYSTEM-level Process Hacker can open and dump lsass memory for credentials.'
+  - id: a18dd26b-6450-46de-8c91-9659150cf088
+    name: Potentially Suspicious GrantedAccess Flags On LSASS
+    reason: Process Hacker reading lsass shows up as process-access with high-privilege GrantedAccess flags on the same host.
+  - id: b28e58e4-2a72-4fae-bdee-0fbe904db642
+    name: Windows Defender Real-time Protection Disabled
+    reason: With SYSTEM and kernel access the operator can terminate or tamper with security products; AV disablement is a typical next step.
   window: 1h
   enrichment_searches:
-  # Rule-specific telemetry pivots the engine runs around an alert from this rule,
-  # scoped to the alert's host/user/IP within the window (behaviour-targeted, not a sweep).
-    - name: "Service execution on this host"
-      query: '((data_win_system_eventID:"7045") OR (data_win_system_eventID:"1" AND data_win_eventdata_image:/.*(\\[Ss][Cc]\.[Ee][Xx][Ee])/ AND (data_win_eventdata_commandLine:/.*[Cc][Rr][Ee][Aa][Tt][Ee].*/ OR data_win_eventdata_commandLine:/.*[Cc][Oo][Nn][Ff][Ii][Gg].*/ OR data_win_eventdata_commandLine:/.*[Bb][Ii][Nn][Pp][Aa][Tt][Hh].*/ OR data_win_eventdata_commandLine:/.*[Bb][Ii][Nn][Pp][Aa][Tt][Hh].*/)))'
-      pivot_on: [host]
-      window: 4h
-    - name: "Service installation / creation on this host"
-      query: '((data_win_system_eventID:"7045") OR (data_win_system_eventID:"1" AND data_win_eventdata_image:/.*(\\[Ss][Cc]\.[Ee][Xx][Ee])/ AND (data_win_eventdata_commandLine:/.*[Cc][Rr][Ee][Aa][Tt][Ee].*/ OR data_win_eventdata_commandLine:/.*[Cc][Oo][Nn][Ff][Ii][Gg].*/ OR data_win_eventdata_commandLine:/.*[Bb][Ii][Nn][Pp][Aa][Tt][Hh].*/ OR data_win_eventdata_commandLine:/.*[Bb][Ii][Nn][Pp][Aa][Tt][Hh].*/)))'
-      pivot_on: [host]
-      window: 4h
-    - name: "Memory/credential-dump creation & LSASS access on this host"
-      query: '((data_win_system_eventID:"1" AND data_win_eventdata_image:/.*(\\[Pp][Rr][Oo][Cc][Dd][Uu][Mm][Pp]\.[Ee][Xx][Ee]|\\[Pp][Rr][Oo][Cc][Dd][Uu][Mm][Pp]64\.[Ee][Xx][Ee]|\\[Ss][Qq][Ll][Dd][Uu][Mm][Pp][Ee][Rr]\.[Ee][Xx][Ee]|\\[Cc][Rr][Ee][Aa][Tt][Ee][Dd][Uu][Mm][Pp]\.[Ee][Xx][Ee]|\\[Rr][Dd][Rr][Ll][Ee][Aa][Kk][Dd][Ii][Aa][Gg]\.[Ee][Xx][Ee]|\\[Dd][Uu][Mm][Pp][Ee][Rr][Tt]\.[Ee][Xx][Ee]|\\[Nn][Aa][Nn][Oo][Dd][Uu][Mm][Pp]\.[Ee][Xx][Ee]|\\[Aa][Vv][Dd][Uu][Mm][Pp]\.[Ee][Xx][Ee])/) OR (data_win_system_eventID:"1" AND (data_win_eventdata_commandLine:/.*[Cc][Oo][Mm][Ss][Vv][Cc][Ss]\.[Dd][Ll][Ll].*/ OR data_win_eventdata_commandLine:/.*[Mm][Ii][Nn][Ii][Dd][Uu][Mm][Pp].*/ OR data_win_eventdata_commandLine:/.*[Dd][Uu][Mm][Pp][Ee][Rr][Tt].*/ OR data_win_eventdata_commandLine:/.*[Nn][Aa][Nn][Oo][Dd][Uu][Mm][Pp].*/ OR data_win_eventdata_commandLine:/.*[Ll][Ss][Aa][Ss][Ss].*/ OR data_win_eventdata_commandLine:/.*[Ss][Ee][Kk][Uu][Rr][Ll][Ss][Aa].*/ OR data_win_eventdata_commandLine:/.*[Nn][Tt][Dd][Ss]\.[Dd][Ii][Tt].*/ OR data_win_eventdata_commandLine:/.*[Nn][Tt][Dd][Ss][Uu][Tt][Ii][Ll].*/)) OR (data_win_system_eventID:"10" AND data_win_eventdata_targetImage:/.*(\\[Ll][Ss][Aa][Ss][Ss]\.[Ee][Xx][Ee])/))'
-      pivot_on: [host]
-      window: 1h
-    - name: "Service installations on this host"
-      query: 'data_win_system_eventID:"7045"'
-      pivot_on: [host]
-      window: 6h
+  # Behaviour-targeted hunts the engine runs around the alert (not a sweep).
+  - name: Process Hacker / System Informer process launch and driver service
+    query: data_win_system_eventID:"1" AND (data_win_eventdata_image:/.*[Pp]rocess[Hh]acker.*/ OR data_win_eventdata_image:/.*[Ss]ystem[Ii]nformer.*/ OR data_win_eventdata_originalFileName:/.*[Pp]rocess[Hh]acker.*/ OR data_win_eventdata_commandLine:/.*[Kk][Pp]rocess[Hh]acker.*/)
+    pivot_on:
+    - host
+    window: 4h
+  - name: Kernel driver loads (kprocesshacker or unsigned/temp drivers)
+    query: data_win_system_eventID:"6" AND (data_win_eventdata_imageLoaded:/.*[Kk][Pp]rocess[Hh]acker.*/ OR data_win_eventdata_imageLoaded:/.*[Ss]ystem[Ii]nformer.*/ OR data_win_eventdata_imageLoaded:/.*\\[Tt]emp\\.*\.sys/ OR data_win_eventdata_signed:"false")
+    pivot_on:
+    - host
+    window: 2h
+  - name: Process access to LSASS (credential dumping after elevation)
+    query: data_win_system_eventID:"10" AND data_win_eventdata_targetImage:/.*\\[Ll][Ss][Aa][Ss][Ss]\.[Ee][Xx][Ee]/
+    pivot_on:
+    - host
+    window: 2h
+  - name: Security product tampering and service stop after elevation
+    query: (data_win_system_eventID:"1" AND (data_win_eventdata_commandLine:/.*[Ss]et-[Mm]p[Pp]reference.*/ OR data_win_eventdata_commandLine:/.*[Ss][Cc].*(stop|delete|config).*/ OR data_win_eventdata_commandLine:/.*[Tt]ask[Kk]ill.*/ OR data_win_eventdata_commandLine:/.*[Nn]et.*[Ss]top.*/)) OR (data_win_system_eventID:"13" AND data_win_eventdata_targetObject:/.*[Dd]efender.*/)
+    pivot_on:
+    - host
+    window: 2h
+  - name: Dump files written after Process Hacker activity
+    query: data_win_system_eventID:"11" AND (data_win_eventdata_targetFilename:/.*\.([Dd][Mm][Pp]|[Dd][Uu][Mm][Pp])/ OR data_win_eventdata_targetFilename:/.*[Ll][Ss][Aa][Ss][Ss].*/)
+    pivot_on:
+    - host
+    window: 2h

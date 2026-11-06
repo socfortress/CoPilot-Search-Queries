@@ -150,44 +150,58 @@ graylog:
   query: data_win_system_providerName:/[Ss][Ee][Rr][Vv][Ii][Cc][Ee] [Cc][Oo][Nn][Tt][Rr][Oo][Ll] [Mm][Aa][Nn][Aa][Gg][Ee][Rr]/ AND data_win_system_eventID:"7045" AND (data_win_eventdata_serviceName:/[Ss][Rr][Ss][Ee][Rr][Vv][Ii][Cc][Ee]/ OR data_win_eventdata_serviceName:/[Ii][Pp][Vv][Pp][Nn]/ OR data_win_eventdata_serviceName:/[Hh][Kk][Mm][Ss][Vv][Cc]/)
 
 correlation:
-  # Authored by the correlation engine for review. Related CoPilot Searches to run
-  # around an alert from this rule, scoped to the same host/user/IP within the window.
+  # Authored per-rule (behaviour-researched) for the correlation engine. Related CoPilot
+  # Searches + telemetry pivots to run around an alert, scoped to its host/user/ip/domain.
   related_rules:
-    - id: 0255a820-e564-4e40-af2b-6ac61160335c
-      name: "A New Trust Was Created To A Domain"
-      reason: "next kill-chain tactic: Persistence"
-    - id: 35ba1d85-724d-42a3-889f-2e2362bcaf23
-      name: "AD Privileged Users or Groups Reconnaissance"
-      reason: "next kill-chain tactic: Discovery"
-    - id: 9eb99343-d336-4020-a3cd-67f3819e68ee
-      name: "Account Tampering - Suspicious Failed Logon Reasons"
-      reason: "next kill-chain tactic: Persistence"
-    - id: 17d619c1-e020-4347-957e-1d1207455c93
-      name: "Active Directory Replication from Non Machine Account"
-      reason: "next kill-chain tactic: Credential Access"
-    - id: 300bac00-e041-4ee2-9c36-e262656a6ecc
-      name: "Active Directory User Backdoors"
-      reason: "next kill-chain tactic: Persistence"
-    - id: 2632954e-db1c-49cb-9936-67d1ef1d17d2
-      name: "Addition of SID History to Active Directory Object"
-      reason: "next kill-chain tactic: Privilege Escalation"
-  window: 1h
+  - id: 739915e4-1e70-4778-8b8a-17db02f66db1
+    name: Turla Group Named Pipes
+    reason: Carbon/Turla second-stage backdoor components talk over named pipes; pipe creation right after the service installs confirms the implant is running.
+  - id: 9e2e51c5-c699-4794-ba5a-29f5da40ac0c
+    name: Turla Group Commands May 2020
+    reason: Same actor's post-compromise discovery/staging commands; follow-on hands-on activity once Carbon service persistence is in place.
+  - id: c601f20d-570a-4cde-a7d6-e17f99cb8e7f
+    name: Turla Group Lateral Movement
+    reason: Turla uses the foothold to spread laterally; fires when the implant host is used to pivot to other systems.
+  - id: c4e92a97-a9ff-4392-9d2d-7a4c642768ca
+    name: Service Installed By Unusual Client - Security
+    reason: Same service creation seen in the Security log (4697) on the host; reveals the installing logon/client, e.g. remote SMB install versus local dropper.
+  - id: 4976aa50-8f41-45c6-8b15-ab3fc10e79ed
+    name: Credential Dumping Tools Service Execution - System
+    reason: 'Typical next step after persistence: credential theft tools run as services to harvest creds for lateral movement.'
+  - id: d26ce60c-2151-403c-9a42-49420d87b5e4
+    name: HackTool Service Registration or Execution
+    reason: Co-occurring malicious service registrations on the same host indicate a broader toolkit being deployed, not an isolated Carbon service.
+  - id: cb062102-587e-4414-8efa-dbe3c7bf19c6
+    name: CosmicDuke Service Installation
+    reason: Another APT backdoor persisting as a Windows service; same mechanism and often paired nation-state tooling on a compromised host.
+  - id: 61a7697c-cb79-42a8-a2ff-5f0cdfae0130
+    name: Potential CobaltStrike Service Installations - Registry
+    reason: Service key registry writes capture the same malicious service creation at registry level and expose the ImagePath of the dropped binary.
+  window: 4h
   enrichment_searches:
-  # Rule-specific telemetry pivots the engine runs around an alert from this rule,
-  # scoped to the alert's host/user/IP within the window (behaviour-targeted, not a sweep).
-    - name: "Service installation / creation on this host"
-      query: '((data_win_system_eventID:"7045") OR (data_win_system_eventID:"1" AND data_win_eventdata_image:/.*(\\[Ss][Cc]\.[Ee][Xx][Ee])/ AND (data_win_eventdata_commandLine:/.*[Cc][Rr][Ee][Aa][Tt][Ee].*/ OR data_win_eventdata_commandLine:/.*[Cc][Oo][Nn][Ff][Ii][Gg].*/ OR data_win_eventdata_commandLine:/.*[Bb][Ii][Nn][Pp][Aa][Tt][Hh].*/ OR data_win_eventdata_commandLine:/.*[Bb][Ii][Nn][Pp][Aa][Tt][Hh].*/)))'
-      pivot_on: [host]
-      window: 4h
-    - name: "Memory/credential-dump creation & LSASS access on this host"
-      query: '((data_win_system_eventID:"1" AND data_win_eventdata_image:/.*(\\[Pp][Rr][Oo][Cc][Dd][Uu][Mm][Pp]\.[Ee][Xx][Ee]|\\[Pp][Rr][Oo][Cc][Dd][Uu][Mm][Pp]64\.[Ee][Xx][Ee]|\\[Ss][Qq][Ll][Dd][Uu][Mm][Pp][Ee][Rr]\.[Ee][Xx][Ee]|\\[Cc][Rr][Ee][Aa][Tt][Ee][Dd][Uu][Mm][Pp]\.[Ee][Xx][Ee]|\\[Rr][Dd][Rr][Ll][Ee][Aa][Kk][Dd][Ii][Aa][Gg]\.[Ee][Xx][Ee]|\\[Dd][Uu][Mm][Pp][Ee][Rr][Tt]\.[Ee][Xx][Ee]|\\[Nn][Aa][Nn][Oo][Dd][Uu][Mm][Pp]\.[Ee][Xx][Ee]|\\[Aa][Vv][Dd][Uu][Mm][Pp]\.[Ee][Xx][Ee])/) OR (data_win_system_eventID:"1" AND (data_win_eventdata_commandLine:/.*[Cc][Oo][Mm][Ss][Vv][Cc][Ss]\.[Dd][Ll][Ll].*/ OR data_win_eventdata_commandLine:/.*[Mm][Ii][Nn][Ii][Dd][Uu][Mm][Pp].*/ OR data_win_eventdata_commandLine:/.*[Dd][Uu][Mm][Pp][Ee][Rr][Tt].*/ OR data_win_eventdata_commandLine:/.*[Nn][Aa][Nn][Oo][Dd][Uu][Mm][Pp].*/ OR data_win_eventdata_commandLine:/.*[Ll][Ss][Aa][Ss][Ss].*/ OR data_win_eventdata_commandLine:/.*[Ss][Ee][Kk][Uu][Rr][Ll][Ss][Aa].*/ OR data_win_eventdata_commandLine:/.*[Nn][Tt][Dd][Ss]\.[Dd][Ii][Tt].*/ OR data_win_eventdata_commandLine:/.*[Nn][Tt][Dd][Ss][Uu][Tt][Ii][Ll].*/)) OR (data_win_system_eventID:"10" AND data_win_eventdata_targetImage:/.*(\\[Ll][Ss][Aa][Ss][Ss]\.[Ee][Xx][Ee])/))'
-      pivot_on: [host]
-      window: 1h
-    - name: "Service installations on this host"
-      query: 'data_win_system_eventID:"7045"'
-      pivot_on: [host]
-      window: 6h
-    - name: "Follow-on LOLBin / signed-binary-proxy execution on this host"
-      query: 'data_win_system_eventID:"1" AND data_win_eventdata_image:/.*(\\[Rr][Uu][Nn][Dd][Ll][Ll]32\.[Ee][Xx][Ee]|\\[Rr][Ee][Gg][Ss][Vv][Rr]32\.[Ee][Xx][Ee]|\\[Mm][Ss][Hh][Tt][Aa]\.[Ee][Xx][Ee]|\\[Ii][Nn][Ss][Tt][Aa][Ll][Ll][Uu][Tt][Ii][Ll]\.[Ee][Xx][Ee]|\\[Rr][Ee][Gg][Aa][Ss][Mm]\.[Ee][Xx][Ee]|\\[Rr][Ee][Gg][Ss][Vv][Cc][Ss]\.[Ee][Xx][Ee]|\\[Mm][Ss][Bb][Uu][Ii][Ll][Dd]\.[Ee][Xx][Ee]|\\[Cc][Ee][Rr][Tt][Uu][Tt][Ii][Ll]\.[Ee][Xx][Ee]|\\[Bb][Ii][Tt][Ss][Aa][Dd][Mm][Ii][Nn]\.[Ee][Xx][Ee]|\\[Ww][Mm][Ii][Cc]\.[Ee][Xx][Ee]|\\[Cc][Mm][Ss][Tt][Pp]\.[Ee][Xx][Ee]|\\[Oo][Dd][Bb][Cc][Cc][Oo][Nn][Ff]\.[Ee][Xx][Ee]|\\[Ff][Oo][Rr][Ff][Ii][Ll][Ee][Ss]\.[Ee][Xx][Ee]|\\[Pp][Cc][Aa][Ll][Uu][Aa]\.[Ee][Xx][Ee]|\\[Mm][Aa][Vv][Ii][Nn][Jj][Ee][Cc][Tt]\.[Ee][Xx][Ee]|\\[Ss][Cc][Rr][Ii][Pp][Tt][Rr][Uu][Nn][Nn][Ee][Rr]\.[Ee][Xx][Ee])/'
-      pivot_on: [host]
-      window: 2h
+  # Behaviour-targeted hunts the engine runs around the alert (not a sweep).
+  - name: Service created via sc.exe or registry for srservice/ipvpn/hkmsvc
+    query: (data_win_system_eventID:"1" AND data_win_eventdata_image:/.*[Ss][Cc]\.[Ee][Xx][Ee]/ AND (data_win_eventdata_commandLine:*srservice* OR data_win_eventdata_commandLine:*ipvpn* OR data_win_eventdata_commandLine:*hkmsvc*)) OR (data_win_system_eventID:"13" AND (data_win_eventdata_targetObject:*srservice* OR data_win_eventdata_targetObject:*ipvpn* OR data_win_eventdata_targetObject:*hkmsvc*))
+    pivot_on:
+    - host
+    window: 2h
+  - name: Carbon service binary or DLL dropped to disk
+    query: data_win_system_eventID:"11" AND (data_win_eventdata_targetFilename:*srservice* OR data_win_eventdata_targetFilename:*ipvpn* OR data_win_eventdata_targetFilename:*hkmsvc* OR (data_win_eventdata_targetFilename:/.*[Ww][Ii][Nn][Dd][Oo][Ww][Ss].[Ss][Yy][Ss][Tt][Ee][Mm]32.*\.[Dd][Ll][Ll]/ AND data_win_eventdata_image:/.*(cmd|powershell|wscript|rundll32)\.[Ee][Xx][Ee]/))
+    pivot_on:
+    - host
+    window: 2h
+  - name: Implant outbound connections (C2 beaconing) from service-related processes
+    query: data_win_system_eventID:"3" AND data_win_eventdata_initiated:"true" AND (data_win_eventdata_image:*srservice* OR data_win_eventdata_image:*ipvpn* OR data_win_eventdata_image:*hkmsvc* OR data_win_eventdata_image:/.*(svchost|rundll32)\.[Ee][Xx][Ee]/) AND NOT data_win_eventdata_destinationIp:/(10\..*|192\.168\..*|127\..*)/
+    pivot_on:
+    - host
+    window: 4h
+  - name: Turla/Carbon named pipes and admin-share lateral movement
+    query: (data_win_system_eventID:("17" OR "18") AND (data_win_eventdata_pipeName:*atctl* OR data_win_eventdata_pipeName:*userpipe* OR data_win_eventdata_pipeName:*iehelper* OR data_win_eventdata_pipeName:*sdlrpc* OR data_win_eventdata_pipeName:*comnap*)) OR (data_win_system_eventID:"1" AND (data_win_eventdata_commandLine:*net\ use* OR data_win_eventdata_commandLine:*admin$* OR data_win_eventdata_commandLine:*tasklist\ \/v*))
+    pivot_on:
+    - host
+    window: 4h
+  - name: Credential access and discovery after service persistence
+    query: (data_win_system_eventID:"10" AND data_win_eventdata_targetImage:/.*[Ll][Ss][Aa][Ss][Ss]\.[Ee][Xx][Ee]/) OR (data_win_system_eventID:"1" AND data_win_eventdata_parentImage:/.*[Ss][Ee][Rr][Vv][Ii][Cc][Ee][Ss]\.[Ee][Xx][Ee]/ AND data_win_eventdata_image:/.*(cmd|powershell|net|net1|whoami|nslookup)\.[Ee][Xx][Ee]/)
+    pivot_on:
+    - host
+    window: 2h

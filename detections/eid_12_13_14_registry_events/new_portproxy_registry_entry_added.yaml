@@ -145,44 +145,58 @@ graylog:
   query: (data_win_system_eventID:"12" OR data_win_system_eventID:"13" OR data_win_system_eventID:"14") AND data_win_eventdata_targetObject:/.*\\[Ss][Ee][Rr][Vv][Ii][Cc][Ee][Ss]\\[Pp][Oo][Rr][Tt][Pp][Rr][Oo][Xx][Yy]\\[Vv]4[Tt][Oo][Vv]4\\[Tt][Cc][Pp]\\.*/
 
 correlation:
-  # Authored by the correlation engine for review. Related CoPilot Searches to run
-  # around an alert from this rule, scoped to the same host/user/IP within the window.
+  # Authored per-rule (behaviour-researched) for the correlation engine. Related CoPilot
+  # Searches + telemetry pivots to run around an alert, scoped to its host/user/ip/domain.
   related_rules:
-    - id: 75bf09fa-1dd7-4d18-9af9-dd9e492562eb
-      name: "ADSI-Cache File Creation By Uncommon Tool"
-      reason: "next kill-chain tactic: Command and Control"
-    - id: 639c9081-f482-47d3-a0bd-ddee3d4ecd76
-      name: "All Backups Deleted Via Wbadmin.EXE"
-      reason: "next kill-chain tactic: Impact"
-    - id: 0b9ad457-2554-44c1-82c2-d56a99c42377
-      name: "Anydesk Temporary Artefact"
-      reason: "next kill-chain tactic: Command and Control"
-    - id: 7cff77e1-9663-46a3-8260-17f2e1aa9d0a
-      name: "AppX Package Installation Attempts Via AppInstaller.EXE"
-      reason: "next kill-chain tactic: Command and Control"
-    - id: 1f0f6176-6482-4027-b151-00071af39d7e
-      name: "Arbitrary File Download Via ConfigSecurityPolicy.EXE"
-      reason: "next kill-chain tactic: Exfiltration"
-    - id: eee00933-a761-4cd0-be70-c42fe91731e7
-      name: "Arbitrary File Download Via GfxDownloadWrapper.EXE"
-      reason: "next kill-chain tactic: Command and Control"
+  - id: 322ed9ec-fcab-4f67-9a34-e7c6aef43614
+    name: New Port Forwarding Rule Added Via Netsh.EXE
+    reason: The netsh 'interface portproxy add v4tov4' command is what writes this PortProxy registry key; the process-creation event is the direct cause and shows the exact command line and parent.
+  - id: 782d6f3e-4c5d-4b8c-92a3-1d05fed72e63
+    name: RDP Port Forwarding Rule Added Via Netsh.EXE
+    reason: A portproxy rule to port 3389 means RDP is being relayed through this host as a pivot for lateral movement.
+  - id: cd5cfd80-aa5f-44c0-9c20-108c4ae12e3c
+    name: New Firewall Rule Added Via Netsh.EXE
+    reason: A listening portproxy only works if the listen port is allowed inbound, so attackers pair it with a netsh firewall allow rule.
+  - id: 01aeb693-138d-49d2-9403-c4f52d7d3d62
+    name: RDP Connection Allowed Via Netsh.EXE
+    reason: Opening the firewall for RDP alongside a portproxy shows the host is being prepared as an RDP relay.
+  - id: 3f6b7b62-61aa-45db-96bd-9c31b36b653c
+    name: RDP Sensitive Settings Changed
+    reason: Attackers enable or reconfigure RDP (fDenyTSConnections and similar) on the same host before forwarding traffic to it.
+  - id: f38ce0b9-5e97-4b47-a211-7dc8d8b871da
+    name: Potential RDP Tunneling Via Plink
+    reason: Plink is the alternative tunnelling method to portproxy for exposing RDP; both appearing on one host indicates layered pivoting.
+  - id: 327f48c1-a6db-4eb8-875a-f6981f1b0183
+    name: Port Forwarding Activity Via SSH.EXE
+    reason: SSH local/remote forwarding is the sibling tunnelling technique to a portproxy rule and often used by the same operator to chain pivots.
+  - id: 8a3038e8-9c9d-46f8-b184-66234a160f6f
+    name: Potential Remote Desktop Tunneling
+    reason: Detects RDP tunneled over a forwarded port, the follow-on traffic that the portproxy rule enables.
   window: 1h
   enrichment_searches:
-  # Rule-specific telemetry pivots the engine runs around an alert from this rule,
-  # scoped to the alert's host/user/IP within the window (behaviour-targeted, not a sweep).
-    - name: "Proxy / tunnelling tooling on this host"
-      query: '((data_win_system_eventID:"1" AND data_win_eventdata_image:/.*(\\[Nn][Gg][Rr][Oo][Kk]\.[Ee][Xx][Ee]|\\[Pp][Ll][Ii][Nn][Kk]\.[Ee][Xx][Ee]|\\[Ss][Ss][Hh]\.[Ee][Xx][Ee]|\\[Ff][Rr][Pp][Cc]\.[Ee][Xx][Ee]|\\[Cc][Hh][Ii][Ss][Ee][Ll]\.[Ee][Xx][Ee]|\\[Cc][Ll][Oo][Uu][Dd][Ff][Ll][Aa][Rr][Ee][Dd]\.[Ee][Xx][Ee])/) OR (data_win_system_eventID:"3" AND data_win_eventdata_image:/.*(\\[Nn][Gg][Rr][Oo][Kk]\.[Ee][Xx][Ee]|\\[Pp][Ll][Ii][Nn][Kk]\.[Ee][Xx][Ee]|\\[Ss][Ss][Hh]\.[Ee][Xx][Ee]|\\[Ff][Rr][Pp][Cc]\.[Ee][Xx][Ee]|\\[Cc][Hh][Ii][Ss][Ee][Ll]\.[Ee][Xx][Ee]|\\[Cc][Ll][Oo][Uu][Dd][Ff][Ll][Aa][Rr][Ee][Dd]\.[Ee][Xx][Ee])/) OR ((data_win_eventdata_commandLine:/.*-[Rr] 127\.0\.0\.1.*/ OR data_win_eventdata_commandLine:/.*[Ss][Ss][Hh] -[Rr].*/ OR data_win_eventdata_commandLine:/.*[Pp][Oo][Rr][Tt][Ff][Ww][Dd].*/ OR data_win_eventdata_commandLine:/.*[Ss][Oo][Cc][Kk][Ss].*/)))'
-      pivot_on: [host]
-      window: 1h
-    - name: "Memory/credential-dump creation & LSASS access on this host"
-      query: '((data_win_system_eventID:"1" AND data_win_eventdata_image:/.*(\\[Pp][Rr][Oo][Cc][Dd][Uu][Mm][Pp]\.[Ee][Xx][Ee]|\\[Pp][Rr][Oo][Cc][Dd][Uu][Mm][Pp]64\.[Ee][Xx][Ee]|\\[Ss][Qq][Ll][Dd][Uu][Mm][Pp][Ee][Rr]\.[Ee][Xx][Ee]|\\[Cc][Rr][Ee][Aa][Tt][Ee][Dd][Uu][Mm][Pp]\.[Ee][Xx][Ee]|\\[Rr][Dd][Rr][Ll][Ee][Aa][Kk][Dd][Ii][Aa][Gg]\.[Ee][Xx][Ee]|\\[Dd][Uu][Mm][Pp][Ee][Rr][Tt]\.[Ee][Xx][Ee]|\\[Nn][Aa][Nn][Oo][Dd][Uu][Mm][Pp]\.[Ee][Xx][Ee]|\\[Aa][Vv][Dd][Uu][Mm][Pp]\.[Ee][Xx][Ee])/) OR (data_win_system_eventID:"1" AND (data_win_eventdata_commandLine:/.*[Cc][Oo][Mm][Ss][Vv][Cc][Ss]\.[Dd][Ll][Ll].*/ OR data_win_eventdata_commandLine:/.*[Mm][Ii][Nn][Ii][Dd][Uu][Mm][Pp].*/ OR data_win_eventdata_commandLine:/.*[Dd][Uu][Mm][Pp][Ee][Rr][Tt].*/ OR data_win_eventdata_commandLine:/.*[Nn][Aa][Nn][Oo][Dd][Uu][Mm][Pp].*/ OR data_win_eventdata_commandLine:/.*[Ll][Ss][Aa][Ss][Ss].*/ OR data_win_eventdata_commandLine:/.*[Ss][Ee][Kk][Uu][Rr][Ll][Ss][Aa].*/ OR data_win_eventdata_commandLine:/.*[Nn][Tt][Dd][Ss]\.[Dd][Ii][Tt].*/ OR data_win_eventdata_commandLine:/.*[Nn][Tt][Dd][Ss][Uu][Tt][Ii][Ll].*/)) OR (data_win_system_eventID:"10" AND data_win_eventdata_targetImage:/.*(\\[Ll][Ss][Aa][Ss][Ss]\.[Ee][Xx][Ee])/))'
-      pivot_on: [host]
-      window: 1h
-    - name: "Autostart persistence written on this host"
-      query: '(data_win_system_eventID:"12" OR data_win_system_eventID:"13") AND (data_win_eventdata_targetObject:/.*[Cc][Uu][Rr][Rr][Ee][Nn][Tt][Vv][Ee][Rr][Ss][Ii][Oo][Nn]\\[Rr][Uu][Nn].*/ OR data_win_eventdata_targetObject:/.*[Cc][Uu][Rr][Rr][Ee][Nn][Tt][Vv][Ee][Rr][Ss][Ii][Oo][Nn]\\[Rr][Uu][Nn][Oo][Nn][Cc][Ee].*/ OR data_win_eventdata_targetObject:/.*[Cc][Uu][Rr][Rr][Ee][Nn][Tt][Cc][Oo][Nn][Tt][Rr][Oo][Ll][Ss][Ee][Tt]\\[Ss][Ee][Rr][Vv][Ii][Cc][Ee][Ss]\\.*/ OR data_win_eventdata_targetObject:/.*[Ii][Mm][Aa][Gg][Ee] [Ff][Ii][Ll][Ee] [Ee][Xx][Ee][Cc][Uu][Tt][Ii][Oo][Nn] [Oo][Pp][Tt][Ii][Oo][Nn][Ss]\\.*/ OR data_win_eventdata_targetObject:/.*[Ww][Ii][Nn][Ll][Oo][Gg][Oo][Nn]\\[Ss][Hh][Ee][Ll][Ll].*/ OR data_win_eventdata_targetObject:/.*[Ww][Ii][Nn][Ll][Oo][Gg][Oo][Nn]\\[Uu][Ss][Ee][Rr][Ii][Nn][Ii][Tt].*/ OR data_win_eventdata_targetObject:/.*[Cc][Uu][Rr][Rr][Ee][Nn][Tt][Vv][Ee][Rr][Ss][Ii][Oo][Nn]\\[Ee][Xx][Pp][Ll][Oo][Rr][Ee][Rr]\\[Rr][Uu][Nn].*/ OR data_win_eventdata_targetObject:/.*[Pp][Oo][Ll][Ii][Cc][Ii][Ee][Ss]\\[Ee][Xx][Pp][Ll][Oo][Rr][Ee][Rr]\\[Rr][Uu][Nn].*/ OR data_win_eventdata_targetObject:/.*[Cc][Uu][Rr][Rr][Ee][Nn][Tt][Vv][Ee][Rr][Ss][Ii][Oo][Nn]\\[Ww][Ii][Nn][Dd][Oo][Ww][Ss]\\[Ll][Oo][Aa][Dd].*/)'
-      pivot_on: [host]
-      window: 2h
-    - name: "Security-tool / Defender tampering on this host"
-      query: 'data_win_system_eventID:"1" AND (data_win_eventdata_commandLine:/.*[Ss][Ee][Tt]-[Mm][Pp][Pp][Rr][Ee][Ff][Ee][Rr][Ee][Nn][Cc][Ee].*/ OR data_win_eventdata_commandLine:/.*[Dd][Ii][Ss][Aa][Bb][Ll][Ee][Rr][Ee][Aa][Ll][Tt][Ii][Mm][Ee][Mm][Oo][Nn][Ii][Tt][Oo][Rr][Ii][Nn][Gg].*/ OR data_win_eventdata_commandLine:/.*[Dd][Ii][Ss][Aa][Bb][Ll][Ee][Aa][Nn][Tt][Ii][Ss][Pp][Yy][Ww][Aa][Rr][Ee].*/ OR data_win_eventdata_commandLine:/.*[Aa][Dd][Dd]-[Mm][Pp][Pp][Rr][Ee][Ff][Ee][Rr][Ee][Nn][Cc][Ee] -[Ee][Xx][Cc][Ll][Uu][Ss][Ii][Oo][Nn][Pp][Aa][Tt][Hh].*/ OR data_win_eventdata_commandLine:/.*[Ww][Ee][Vv][Tt][Uu][Tt][Ii][Ll].*/ OR data_win_eventdata_commandLine:/.*[Cc][Ll][Ee][Aa][Rr]-[Ee][Vv][Ee][Nn][Tt][Ll][Oo][Gg].*/ OR data_win_eventdata_commandLine:/.*[Ff][Ss][Uu][Tt][Ii][Ll] [Uu][Ss][Nn] [Dd][Ee][Ll][Ee][Tt][Ee][Jj][Oo][Uu][Rr][Nn][Aa][Ll].*/ OR data_win_eventdata_commandLine:/.*[Vv][Ss][Ss][Aa][Dd][Mm][Ii][Nn].*/ OR data_win_eventdata_commandLine:/.*[Ss][Tt][Oo][Pp]-[Ss][Ee][Rr][Vv][Ii][Cc][Ee].*/ OR data_win_eventdata_commandLine:/.*[Ss][Cc] [Ss][Tt][Oo][Pp].*/ OR data_win_eventdata_commandLine:/.*[Ss][Cc] [Cc][Oo][Nn][Ff][Ii][Gg].*/)'
-      pivot_on: [host]
-      window: 2h
+  # Behaviour-targeted hunts the engine runs around the alert (not a sweep).
+  - name: netsh portproxy / port-forward command and parent process
+    query: data_win_system_eventID:"1" AND data_win_eventdata_commandLine:/.*[Pp][Oo][Rr][Tt][Pp][Rr][Oo][Xx][Yy].*/
+    pivot_on:
+    - host
+    window: 1h
+  - name: Firewall opened or RDP enabled to support the relay
+    query: (data_win_system_eventID:"1" AND data_win_eventdata_commandLine:/.*[Aa][Dd][Vv][Ff][Ii][Rr][Ee][Ww][Aa][Ll][Ll].*[Aa][Dd][Dd].*/) OR ((data_win_system_eventID:"12" OR data_win_system_eventID:"13") AND (data_win_eventdata_targetObject:/.*[Ff][Dd][Ee][Nn][Yy][Tt][Ss][Cc][Oo][Nn][Nn][Ee][Cc][Tt][Ii][Oo][Nn][Ss].*/ OR data_win_eventdata_targetObject:/.*[Ss][Hh][Aa][Rr][Ee][Dd][Aa][Cc][Cc][Ee][Ss][Ss]\\[Ff][Ii][Rr][Ee][Ww][Aa][Ll][Ll].*/))
+    pivot_on:
+    - host
+    window: 2h
+  - name: Inbound connections to the relay from internal hosts on forwarded ports
+    query: data_win_system_eventID:"3" AND data_win_eventdata_initiated:"false" AND (data_win_eventdata_destinationPort:"3389" OR data_win_eventdata_destinationPort:"445" OR data_win_eventdata_destinationPort:"5985" OR data_win_eventdata_destinationPort:"22" OR data_win_eventdata_destinationPort:"1433")
+    pivot_on:
+    - host
+    window: 4h
+  - name: Network logons to this host after relay set up
+    query: data_win_system_eventID:"4624" AND (data_win_eventdata_logonType:"3" OR data_win_eventdata_logonType:"10")
+    pivot_on:
+    - host
+    window: 4h
+  - name: Alternate tunnelling tools on this host
+    query: data_win_system_eventID:"1" AND (data_win_eventdata_image:/.*\\(plink|chisel|ngrok|frpc|socat)\.exe/ OR data_win_eventdata_commandLine:/.*[Ss][Ss][Hh].* -[LlRrDd] .*/)
+    pivot_on:
+    - host
+    window: 2h

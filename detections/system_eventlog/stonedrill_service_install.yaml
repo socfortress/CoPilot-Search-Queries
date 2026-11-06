@@ -145,44 +145,58 @@ graylog:
   query: data_win_system_providerName:/[Ss][Ee][Rr][Vv][Ii][Cc][Ee] [Cc][Oo][Nn][Tt][Rr][Oo][Ll] [Mm][Aa][Nn][Aa][Gg][Ee][Rr]/ AND data_win_system_eventID:"7045" AND data_win_eventdata_serviceName:/[Nn][Tt][Ss][Ss][Rr][Vv]/ AND data_win_eventdata_imagePath:/.* [Ll][Oo][Cc][Aa][Ll][Ss][Ee][Rr][Vv][Ii][Cc][Ee]/
 
 correlation:
-  # Authored by the correlation engine for review. Related CoPilot Searches to run
-  # around an alert from this rule, scoped to the same host/user/IP within the window.
+  # Authored per-rule (behaviour-researched) for the correlation engine. Related CoPilot
+  # Searches + telemetry pivots to run around an alert, scoped to its host/user/ip/domain.
   related_rules:
-    - id: 0255a820-e564-4e40-af2b-6ac61160335c
-      name: "A New Trust Was Created To A Domain"
-      reason: "next kill-chain tactic: Persistence"
-    - id: 35ba1d85-724d-42a3-889f-2e2362bcaf23
-      name: "AD Privileged Users or Groups Reconnaissance"
-      reason: "next kill-chain tactic: Discovery"
-    - id: 9eb99343-d336-4020-a3cd-67f3819e68ee
-      name: "Account Tampering - Suspicious Failed Logon Reasons"
-      reason: "next kill-chain tactic: Persistence"
-    - id: 17d619c1-e020-4347-957e-1d1207455c93
-      name: "Active Directory Replication from Non Machine Account"
-      reason: "next kill-chain tactic: Credential Access"
-    - id: 300bac00-e041-4ee2-9c36-e262656a6ecc
-      name: "Active Directory User Backdoors"
-      reason: "next kill-chain tactic: Persistence"
-    - id: 2632954e-db1c-49cb-9936-67d1ef1d17d2
-      name: "Addition of SID History to Active Directory Object"
-      reason: "next kill-chain tactic: Privilege Escalation"
-  window: 1h
+  - id: 17a1be64-8d88-40bf-b5ff-a4f7a50ebcc8
+    name: Suspicious New Service Creation
+    reason: The 7045 event is the result of a service creation; the sc.exe/New-Service process-creation event on the same host identifies the installing process and parent (dropper, psexec, WMI).
+  - id: 883faa95-175a-4e22-8181-e5761aeb373c
+    name: Suspicious Service Binary Directory
+    reason: StoneDrill's NtsSrv service masquerades as a Microsoft inspection service; a service binary in a non-standard directory corroborates the rogue install.
+  - id: d26ce60c-2151-403c-9a42-49420d87b5e4
+    name: HackTool Service Registration or Execution
+    reason: Co-occurring 7045/7036 service events from attacker tooling on the same host indicate the same intrusion staging more malicious services.
+  - id: 4976aa50-8f41-45c6-8b15-ab3fc10e79ed
+    name: Credential Dumping Tools Service Execution - System
+    reason: Shamoon/StoneDrill operators harvest credentials to spread across the domain before wiping; credential-dump tool services are a direct precursor/follow-on.
+  - id: c947b146-0abc-4c87-9c64-b17e9d7274a2
+    name: Shadow Copies Deletion Using Operating Systems Utilities
+    reason: StoneDrill is a destructive wiper family; deleting shadow copies removes recovery options just before or during the destructive phase.
+  - id: c9fbe8e9-119d-40a6-9b59-dd58a5d84429
+    name: Potential Ransomware or Unauthorized MBR Tampering Via Bcdedit.EXE
+    reason: Boot configuration tampering is a typical wiper/destructive pre-step once the persistent service is established.
+  - id: 2f974656-6d83-4059-bbdf-68ac5403422f
+    name: Hermetic Wiper TG Process Patterns
+    reason: Another wiper-family process pattern; co-firing indicates the destructive payload is executing after the persistence service was installed.
+  - id: a62b37e0-45d3-48d9-a517-90c1a1b0186b
+    name: Eventlog Cleared
+    reason: Wiper operators clear event logs to hinder forensics after installing the service and before/while destroying data.
+  window: 2h
   enrichment_searches:
-  # Rule-specific telemetry pivots the engine runs around an alert from this rule,
-  # scoped to the alert's host/user/IP within the window (behaviour-targeted, not a sweep).
-    - name: "Service installation / creation on this host"
-      query: '((data_win_system_eventID:"7045") OR (data_win_system_eventID:"1" AND data_win_eventdata_image:/.*(\\[Ss][Cc]\.[Ee][Xx][Ee])/ AND (data_win_eventdata_commandLine:/.*[Cc][Rr][Ee][Aa][Tt][Ee].*/ OR data_win_eventdata_commandLine:/.*[Cc][Oo][Nn][Ff][Ii][Gg].*/ OR data_win_eventdata_commandLine:/.*[Bb][Ii][Nn][Pp][Aa][Tt][Hh].*/ OR data_win_eventdata_commandLine:/.*[Bb][Ii][Nn][Pp][Aa][Tt][Hh].*/)))'
-      pivot_on: [host]
-      window: 4h
-    - name: "Memory/credential-dump creation & LSASS access on this host"
-      query: '((data_win_system_eventID:"1" AND data_win_eventdata_image:/.*(\\[Pp][Rr][Oo][Cc][Dd][Uu][Mm][Pp]\.[Ee][Xx][Ee]|\\[Pp][Rr][Oo][Cc][Dd][Uu][Mm][Pp]64\.[Ee][Xx][Ee]|\\[Ss][Qq][Ll][Dd][Uu][Mm][Pp][Ee][Rr]\.[Ee][Xx][Ee]|\\[Cc][Rr][Ee][Aa][Tt][Ee][Dd][Uu][Mm][Pp]\.[Ee][Xx][Ee]|\\[Rr][Dd][Rr][Ll][Ee][Aa][Kk][Dd][Ii][Aa][Gg]\.[Ee][Xx][Ee]|\\[Dd][Uu][Mm][Pp][Ee][Rr][Tt]\.[Ee][Xx][Ee]|\\[Nn][Aa][Nn][Oo][Dd][Uu][Mm][Pp]\.[Ee][Xx][Ee]|\\[Aa][Vv][Dd][Uu][Mm][Pp]\.[Ee][Xx][Ee])/) OR (data_win_system_eventID:"1" AND (data_win_eventdata_commandLine:/.*[Cc][Oo][Mm][Ss][Vv][Cc][Ss]\.[Dd][Ll][Ll].*/ OR data_win_eventdata_commandLine:/.*[Mm][Ii][Nn][Ii][Dd][Uu][Mm][Pp].*/ OR data_win_eventdata_commandLine:/.*[Dd][Uu][Mm][Pp][Ee][Rr][Tt].*/ OR data_win_eventdata_commandLine:/.*[Nn][Aa][Nn][Oo][Dd][Uu][Mm][Pp].*/ OR data_win_eventdata_commandLine:/.*[Ll][Ss][Aa][Ss][Ss].*/ OR data_win_eventdata_commandLine:/.*[Ss][Ee][Kk][Uu][Rr][Ll][Ss][Aa].*/ OR data_win_eventdata_commandLine:/.*[Nn][Tt][Dd][Ss]\.[Dd][Ii][Tt].*/ OR data_win_eventdata_commandLine:/.*[Nn][Tt][Dd][Ss][Uu][Tt][Ii][Ll].*/)) OR (data_win_system_eventID:"10" AND data_win_eventdata_targetImage:/.*(\\[Ll][Ss][Aa][Ss][Ss]\.[Ee][Xx][Ee])/))'
-      pivot_on: [host]
-      window: 1h
-    - name: "Service installations on this host"
-      query: 'data_win_system_eventID:"7045"'
-      pivot_on: [host]
-      window: 6h
-    - name: "Follow-on LOLBin / signed-binary-proxy execution on this host"
-      query: 'data_win_system_eventID:"1" AND data_win_eventdata_image:/.*(\\[Rr][Uu][Nn][Dd][Ll][Ll]32\.[Ee][Xx][Ee]|\\[Rr][Ee][Gg][Ss][Vv][Rr]32\.[Ee][Xx][Ee]|\\[Mm][Ss][Hh][Tt][Aa]\.[Ee][Xx][Ee]|\\[Ii][Nn][Ss][Tt][Aa][Ll][Ll][Uu][Tt][Ii][Ll]\.[Ee][Xx][Ee]|\\[Rr][Ee][Gg][Aa][Ss][Mm]\.[Ee][Xx][Ee]|\\[Rr][Ee][Gg][Ss][Vv][Cc][Ss]\.[Ee][Xx][Ee]|\\[Mm][Ss][Bb][Uu][Ii][Ll][Dd]\.[Ee][Xx][Ee]|\\[Cc][Ee][Rr][Tt][Uu][Tt][Ii][Ll]\.[Ee][Xx][Ee]|\\[Bb][Ii][Tt][Ss][Aa][Dd][Mm][Ii][Nn]\.[Ee][Xx][Ee]|\\[Ww][Mm][Ii][Cc]\.[Ee][Xx][Ee]|\\[Cc][Mm][Ss][Tt][Pp]\.[Ee][Xx][Ee]|\\[Oo][Dd][Bb][Cc][Cc][Oo][Nn][Ff]\.[Ee][Xx][Ee]|\\[Ff][Oo][Rr][Ff][Ii][Ll][Ee][Ss]\.[Ee][Xx][Ee]|\\[Pp][Cc][Aa][Ll][Uu][Aa]\.[Ee][Xx][Ee]|\\[Mm][Aa][Vv][Ii][Nn][Jj][Ee][Cc][Tt]\.[Ee][Xx][Ee]|\\[Ss][Cc][Rr][Ii][Pp][Tt][Rr][Uu][Nn][Nn][Ee][Rr]\.[Ee][Xx][Ee])/'
-      pivot_on: [host]
-      window: 2h
+  # Behaviour-targeted hunts the engine runs around the alert (not a sweep).
+  - name: Service creation activity by sc.exe or PowerShell on this host
+    query: (data_win_system_eventID:"1" AND (data_win_eventdata_commandLine:/.*[Ss][Cc]\.[Ee][Xx][Ee].*[Cc][Rr][Ee][Aa][Tt][Ee].*/ OR data_win_eventdata_commandLine:/.*[Nn][Ee][Ww]-[Ss][Ee][Rr][Vv][Ii][Cc][Ee].*/ OR data_win_eventdata_commandLine:/.*[Nn][Tt][Ss][Ss][Rr][Vv].*/))
+    pivot_on:
+    - host
+    window: 2h
+  - name: NtsSrv binary dropped or masquerading Microsoft Network Realtime Inspection file
+    query: data_win_system_eventID:"11" AND (data_win_eventdata_targetFilename:/.*[Nn][Tt][Ss][Ss][Rr][Vv].*/ OR data_win_eventdata_targetFilename:/.*[Nn][Rr][Ii][Ss].*/ OR data_win_eventdata_targetFilename:/.*[Ss][Yy][Ss][Tt][Ee][Mm]32.*\.[Ee][Xx][Ee]/)
+    pivot_on:
+    - host
+    window: 2h
+  - name: Remote execution tooling spreading to or from this host (psexec, WMI, admin shares)
+    query: data_win_system_eventID:"1" AND (data_win_eventdata_image:/.*[Pp][Ss][Ee][Xx][Ee][Cc].*/ OR data_win_eventdata_image:/.*[Ww][Mm][Ii][Cc]\.[Ee][Xx][Ee]/ OR data_win_eventdata_commandLine:/.*[Aa][Dd][Mm][Ii][Nn]\$.*/ OR data_win_eventdata_commandLine:/.*[Cc]\$\\.*/ OR data_win_eventdata_commandLine:/.*[Pp][Rr][Oo][Cc][Ee][Ss][Ss] [Cc][Aa][Ll][Ll] [Cc][Rr][Ee][Aa][Tt][Ee].*/)
+    pivot_on:
+    - host
+    window: 4h
+  - name: 'Destructive precursors: shadow copy deletion, boot config and disk wiping'
+    query: data_win_system_eventID:"1" AND (data_win_eventdata_commandLine:/.*[Vv][Ss][Ss][Aa][Dd][Mm][Ii][Nn].*[Dd][Ee][Ll][Ee][Tt][Ee].*/ OR data_win_eventdata_commandLine:/.*[Bb][Cc][Dd][Ee][Dd][Ii][Tt].*/ OR data_win_eventdata_commandLine:/.*[Ww][Bb][Aa][Dd][Mm][Ii][Nn].*[Dd][Ee][Ll][Ee][Tt][Ee].*/ OR data_win_eventdata_commandLine:/.*[Ww][Ee][Vv][Tt][Uu][Tt][Ii][Ll].*[Cc][Ll].*/ OR data_win_eventdata_commandLine:/.*[Cc][Ii][Pp][Hh][Ee][Rr].*\/[Ww].*/ OR data_win_eventdata_commandLine:/.*\\\\\.\\[Pp][Hh][Yy][Ss][Ii][Cc][Aa][Ll][Dd][Rr][Ii][Vv][Ee].*/)
+    pivot_on:
+    - host
+    window: 6h
+  - name: Other service installs and unexpected service stops on this host
+    query: data_win_system_providerName:"Service Control Manager" AND (data_win_system_eventID:"7045" OR data_win_system_eventID:"7034" OR data_win_system_eventID:"7036")
+    pivot_on:
+    - host
+    window: 6h
