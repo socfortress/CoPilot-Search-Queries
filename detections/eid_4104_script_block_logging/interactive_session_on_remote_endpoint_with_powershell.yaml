@@ -142,62 +142,58 @@ graylog:
   query: data_win_system_eventID:"4104" AND data_win_eventdata_scriptBlockText:/.*Enter-PSSession.*/ AND data_win_eventdata_scriptBlockText:/.*-ComputerName.*/
 
 correlation:
-  # Authored by the correlation engine for review. Related CoPilot Searches to run
-  # around an alert from this rule, scoped to the same host/user/IP within the window.
+  # Authored per-rule (behaviour-researched) for the correlation engine. Related CoPilot
+  # Searches + telemetry pivots to run around an alert, scoped to its host/user/ip/domain.
   related_rules:
-    - id: a5d85486-b89c-11eb-8267-acde48001122
-      name: "Allow Inbound Traffic In Firewall Rule"
-      reason: "same analytic story: Lateral Movement"
-    - id: 27c3a83d-cada-47c6-9042-67baf19d2574
-      name: "Detect PsExec With accepteula Flag"
-      reason: "same analytic story: Active Directory Lateral Movement"
-    - id: 683e6196-b8e8-11eb-9a79-acde48001122
-      name: "Detect Renamed PSExec"
-      reason: "same analytic story: Active Directory Lateral Movement"
-    - id: f64da023-b988-4775-8d57-38e512beb56e
-      name: "Get-DomainComputer with PowerShell Script Block"
-      reason: "same analytic story: Lateral Movement"
-    - id: 89275e7e-0548-11ec-bf75-acde48001122
-      name: "Get-DomainTrust with PowerShell Script Block"
-      reason: "same analytic story: Lateral Movement"
-    - id: 70fac80e-0bf1-11ec-9ba0-acde48001122
-      name: "Get-ForestTrust with PowerShell Script Block"
-      reason: "same analytic story: Lateral Movement"
-    - id: 8ce07472-496f-11ec-ab3b-3e22fbd008af
-      name: "Impacket Lateral Movement Commandline Parameters"
-      reason: "same analytic story: Active Directory Lateral Movement"
-    - id: d6e464e4-5c6a-474e-82d2-aed616a3a492
-      name: "Impacket Lateral Movement WMIExec Commandline Parameters"
-      reason: "same analytic story: Active Directory Lateral Movement"
-    - id: bb3c1bac-6bdf-4aa0-8dc9-068b8b712a76
-      name: "Impacket Lateral Movement smbexec CommandLine Parameters"
-      reason: "same analytic story: Active Directory Lateral Movement"
-    - id: cb909b3e-512b-11ec-aa31-3e22fbd008af
-      name: "Possible Lateral Movement PowerShell Spawn"
-      reason: "same analytic story: Active Directory Lateral Movement"
-    - id: windows-powershell-invoke-cimmethod-cimsession-001
-      name: "PowerShell Invoke CIMMethod CIMSession"
-      reason: "same analytic story: Active Directory Lateral Movement"
-    - id: windows-powershell-invoke-wmiexec-usage-001
-      name: "PowerShell Invoke WmiExec Usage"
-      reason: "same analytic story: Lateral Movement"
+  - id: 7b836d7f-179c-4ba4-90a7-a7e60afb48e6
+    name: Execute Invoke-command on Remote Host
+    reason: 'Sibling WinRM remoting from the same source host: Invoke-Command is the non-interactive twin of Enter-PSSession and is often used by the same operator for batch execution across targets.'
+  - id: 991a9744-f2f0-44f2-bd33-9092eba17dc3
+    name: Enable Windows Remote Management
+    reason: 'Precursor: attackers enable/configure WinRM (Enable-PSRemoting, WSMan settings) on a host before pivoting into it with Enter-PSSession.'
+  - id: 8148c29c-c952-11eb-9255-acde48001122
+    name: Detect Mimikatz With PowerShell Script Block Logging
+    reason: 'Precursor: stolen credentials or hashes harvested via Invoke-Mimikatz are what authenticate the remote PSSession to the next host.'
+  - id: 734f8d9b-42b8-41b2-bcf5-abaf49d5a3c8
+    name: Remote PowerShell Session Host Process (WinRM)
+    reason: 'Target-side mirror: the destination of Enter-PSSession spawns wsmprovhost.exe, confirming the session landed.'
+  - id: 5cc2cda8-f261-4d88-a2de-e9e193c86716
+    name: Suspicious Processes Spawned by WinRM
+    reason: 'Follow-on: commands typed in the interactive session execute as children of the WinRM host process on the target.'
+  - id: windows-winrm-spawning-process-001
+    name: Windows WinRM Spawning a Process
+    reason: 'Follow-on: process creation under WinRM on the remote endpoint is the hands-on-keyboard activity after the session opens.'
+  - id: 79df3f68-dccb-48e9-9171-b75cbc37c51d
+    name: Potential Lateral Movement via Windows Remote Shell
+    reason: Co-occurring WinRM lateral movement variant (winrs.exe) using the same transport; operators switch between the two.
+  - id: 9fe55ea2-4cd6-4491-8a54-dd6871651b51
+    name: HackTool - Evil-WinRm Execution - PowerShell Module
+    reason: Offensive WinRM tooling indicator; its presence turns an admin-looking Enter-PSSession into attacker-driven remoting.
   window: 1h
   enrichment_searches:
-  # Rule-specific telemetry pivots the engine runs around an alert from this rule,
-  # scoped to the alert's host/user/IP within the window (behaviour-targeted, not a sweep).
-    - name: "Remote-execution / lateral-movement tooling on this host"
-      query: '(data_win_system_eventID:"1" AND data_win_eventdata_image:/.*(\\[Pp][Ss][Ee][Xx][Ee][Cc]\.[Ee][Xx][Ee]|\\[Pp][Ss][Ee][Xx][Ee][Ss][Vv][Cc]\.[Ee][Xx][Ee]|\\[Pp][Aa][Ee][Xx][Ee][Cc]\.[Ee][Xx][Ee]|\\[Ww][Ii][Nn][Rr][Ss]\.[Ee][Xx][Ee]|\\[Mm][Ss][Tt][Ss][Cc]\.[Ee][Xx][Ee]|\\[Ww][Mm][Ii][Cc]\.[Ee][Xx][Ee])/) OR (data_win_system_eventID:"1" AND data_win_eventdata_image:/.*(\\[Pp][Oo][Ww][Ee][Rr][Ss][Hh][Ee][Ll][Ll]\.[Ee][Xx][Ee]|\\[Pp][Ww][Ss][Hh]\.[Ee][Xx][Ee])/ AND (data_win_eventdata_commandLine:/.*[Ii][Nn][Vv][Oo][Kk][Ee]-[Cc][Oo][Mm][Mm][Aa][Nn][Dd].*/ OR data_win_eventdata_commandLine:/.*[Nn][Ee][Ww]-[Pp][Ss][Ss][Ee][Ss][Ss][Ii][Oo][Nn].*/ OR data_win_eventdata_commandLine:/.*[Ee][Nn][Tt][Ee][Rr]-[Pp][Ss][Ss][Ee][Ss][Ss][Ii][Oo][Nn].*/ OR data_win_eventdata_commandLine:/.*-[Cc][Oo][Mm][Pp][Uu][Tt][Ee][Rr][Nn][Aa][Mm][Ee].*/))'
-      pivot_on: [host]
-      window: 2h
-    - name: "Memory/credential-dump creation & LSASS access on this host"
-      query: '((data_win_system_eventID:"1" AND data_win_eventdata_image:/.*(\\[Pp][Rr][Oo][Cc][Dd][Uu][Mm][Pp]\.[Ee][Xx][Ee]|\\[Pp][Rr][Oo][Cc][Dd][Uu][Mm][Pp]64\.[Ee][Xx][Ee]|\\[Ss][Qq][Ll][Dd][Uu][Mm][Pp][Ee][Rr]\.[Ee][Xx][Ee]|\\[Cc][Rr][Ee][Aa][Tt][Ee][Dd][Uu][Mm][Pp]\.[Ee][Xx][Ee]|\\[Rr][Dd][Rr][Ll][Ee][Aa][Kk][Dd][Ii][Aa][Gg]\.[Ee][Xx][Ee]|\\[Dd][Uu][Mm][Pp][Ee][Rr][Tt]\.[Ee][Xx][Ee]|\\[Nn][Aa][Nn][Oo][Dd][Uu][Mm][Pp]\.[Ee][Xx][Ee]|\\[Aa][Vv][Dd][Uu][Mm][Pp]\.[Ee][Xx][Ee])/) OR (data_win_system_eventID:"1" AND (data_win_eventdata_commandLine:/.*[Cc][Oo][Mm][Ss][Vv][Cc][Ss]\.[Dd][Ll][Ll].*/ OR data_win_eventdata_commandLine:/.*[Mm][Ii][Nn][Ii][Dd][Uu][Mm][Pp].*/ OR data_win_eventdata_commandLine:/.*[Dd][Uu][Mm][Pp][Ee][Rr][Tt].*/ OR data_win_eventdata_commandLine:/.*[Nn][Aa][Nn][Oo][Dd][Uu][Mm][Pp].*/ OR data_win_eventdata_commandLine:/.*[Ll][Ss][Aa][Ss][Ss].*/ OR data_win_eventdata_commandLine:/.*[Ss][Ee][Kk][Uu][Rr][Ll][Ss][Aa].*/ OR data_win_eventdata_commandLine:/.*[Nn][Tt][Dd][Ss]\.[Dd][Ii][Tt].*/ OR data_win_eventdata_commandLine:/.*[Nn][Tt][Dd][Ss][Uu][Tt][Ii][Ll].*/)) OR (data_win_system_eventID:"10" AND data_win_eventdata_targetImage:/.*(\\[Ll][Ss][Aa][Ss][Ss]\.[Ee][Xx][Ee])/))'
-      pivot_on: [host]
-      window: 1h
-    - name: "Download / AMSI-bypass / encoded script blocks on this host"
-      query: 'data_win_system_eventID:"4104" AND (data_win_eventdata_scriptBlockText:/.*[Dd][Oo][Ww][Nn][Ll][Oo][Aa][Dd][Ss][Tt][Rr][Ii][Nn][Gg].*/ OR data_win_eventdata_scriptBlockText:/.*[Dd][Oo][Ww][Nn][Ll][Oo][Aa][Dd][Ff][Ii][Ll][Ee].*/ OR data_win_eventdata_scriptBlockText:/.*[Ii][Nn][Vv][Oo][Kk][Ee]-[Ww][Ee][Bb][Rr][Ee][Qq][Uu][Ee][Ss][Tt].*/ OR data_win_eventdata_scriptBlockText:/.*[Nn][Ee][Tt]\.[Ww][Ee][Bb][Cc][Ll][Ii][Ee][Nn][Tt].*/ OR data_win_eventdata_scriptBlockText:/.*[Ff][Rr][Oo][Mm][Bb][Aa][Ss][Ee]64[Ss][Tt][Rr][Ii][Nn][Gg].*/ OR data_win_eventdata_scriptBlockText:/.*[Ii][Ee][Xx].*/ OR data_win_eventdata_scriptBlockText:/.*[Ii][Nn][Vv][Oo][Kk][Ee]-[Ee][Xx][Pp][Rr][Ee][Ss][Ss][Ii][Oo][Nn].*/ OR data_win_eventdata_scriptBlockText:/.*[Ss][Tt][Aa][Rr][Tt]-[Bb][Ii][Tt][Ss][Tt][Rr][Aa][Nn][Ss][Ff][Ee][Rr].*/ OR data_win_eventdata_scriptBlockText:/.*[Aa][Mm][Ss][Ii][Uu][Tt][Ii][Ll][Ss].*/ OR data_win_eventdata_scriptBlockText:/.*-[Ee][Nn][Cc].*/ OR data_win_eventdata_scriptBlockText:/.*-[Ee][Nn][Cc][Oo][Dd][Ee][Dd][Cc][Oo][Mm][Mm][Aa][Nn][Dd].*/ OR data_win_eventdata_scriptBlockText:/.*[Rr][Ee][Ff][Ll][Ee][Cc][Tt][Ii][Oo][Nn]\.[Aa][Ss][Ss][Ee][Mm][Bb][Ll][Yy].*/)'
-      pivot_on: [host]
-      window: 1h
-    - name: "Follow-on LOLBin / signed-binary-proxy execution on this host"
-      query: 'data_win_system_eventID:"1" AND data_win_eventdata_image:/.*(\\[Rr][Uu][Nn][Dd][Ll][Ll]32\.[Ee][Xx][Ee]|\\[Rr][Ee][Gg][Ss][Vv][Rr]32\.[Ee][Xx][Ee]|\\[Mm][Ss][Hh][Tt][Aa]\.[Ee][Xx][Ee]|\\[Ii][Nn][Ss][Tt][Aa][Ll][Ll][Uu][Tt][Ii][Ll]\.[Ee][Xx][Ee]|\\[Rr][Ee][Gg][Aa][Ss][Mm]\.[Ee][Xx][Ee]|\\[Rr][Ee][Gg][Ss][Vv][Cc][Ss]\.[Ee][Xx][Ee]|\\[Mm][Ss][Bb][Uu][Ii][Ll][Dd]\.[Ee][Xx][Ee]|\\[Cc][Ee][Rr][Tt][Uu][Tt][Ii][Ll]\.[Ee][Xx][Ee]|\\[Bb][Ii][Tt][Ss][Aa][Dd][Mm][Ii][Nn]\.[Ee][Xx][Ee]|\\[Ww][Mm][Ii][Cc]\.[Ee][Xx][Ee]|\\[Cc][Mm][Ss][Tt][Pp]\.[Ee][Xx][Ee]|\\[Oo][Dd][Bb][Cc][Cc][Oo][Nn][Ff]\.[Ee][Xx][Ee]|\\[Ff][Oo][Rr][Ff][Ii][Ll][Ee][Ss]\.[Ee][Xx][Ee]|\\[Pp][Cc][Aa][Ll][Uu][Aa]\.[Ee][Xx][Ee]|\\[Mm][Aa][Vv][Ii][Nn][Jj][Ee][Cc][Tt]\.[Ee][Xx][Ee]|\\[Ss][Cc][Rr][Ii][Pp][Tt][Rr][Uu][Nn][Nn][Ee][Rr]\.[Ee][Xx][Ee])/'
-      pivot_on: [host]
-      window: 1h
+  # Behaviour-targeted hunts the engine runs around the alert (not a sweep).
+  - name: WinRM network connections (5985/5986) from this host
+    query: data_win_system_eventID:"3" AND (data_win_eventdata_destinationPort:"5985" OR data_win_eventdata_destinationPort:"5986")
+    pivot_on:
+    - host
+    window: 1h
+  - name: Other PowerShell remoting and trusted-host/credential setup script blocks
+    query: data_win_system_eventID:"4104" AND (data_win_eventdata_scriptBlockText:/.*[Nn]ew-[Pp][Ss][Ss]ession.*/ OR data_win_eventdata_scriptBlockText:/.*[Ii]nvoke-[Cc]ommand.*/ OR data_win_eventdata_scriptBlockText:/.*[Gg]et-[Cc]redential.*/ OR data_win_eventdata_scriptBlockText:/.*[Pp][Ss][Cc]redential.*/ OR data_win_eventdata_scriptBlockText:/.*[Tt]rusted[Hh]osts.*/ OR data_win_eventdata_scriptBlockText:/.*[Ee]nable-[Pp][Ss][Rr]emoting.*/)
+    pivot_on:
+    - host
+    window: 2h
+  - name: 'Credential theft precursors: LSASS access or credential-dumping script blocks'
+    query: (data_win_system_eventID:"10" AND data_win_eventdata_targetImage:/.*\\[Ll][Ss][Aa][Ss][Ss]\.[Ee][Xx][Ee]/) OR (data_win_system_eventID:"4104" AND (data_win_eventdata_scriptBlockText:/.*[Ii]nvoke-[Mm]imikatz.*/ OR data_win_eventdata_scriptBlockText:/.*[Ss][Ee][Kk][Uu][Rr][Ll][Ss][Aa].*/ OR data_win_eventdata_scriptBlockText:/.*[Mm][Ii][Nn][Ii][Dd][Uu][Mm][Pp].*/))
+    pivot_on:
+    - host
+    window: 4h
+  - name: Explicit-credential logons and network logons by this user
+    query: data_win_system_eventID:"4648" OR (data_win_system_eventID:"4624" AND data_win_eventdata_logonType:"3")
+    pivot_on:
+    - user
+    window: 2h
+  - name: Processes spawned under WinRM host (wsmprovhost) on this host
+    query: data_win_system_eventID:"1" AND data_win_eventdata_parentImage:/.*\\[Ww][Ss][Mm][Pp][Rr][Oo][Vv][Hh][Oo][Ss][Tt]\.[Ee][Xx][Ee]/
+    pivot_on:
+    - host
+    window: 1h

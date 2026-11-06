@@ -139,44 +139,58 @@ graylog:
   query: data_win_system_eventID:"4662" AND data_win_eventdata_objectType:/[Ww][Mm][Ii] [Nn][Aa][Mm][Ee][Ss][Pp][Aa][Cc][Ee]/ AND data_win_eventdata_objectName:/.*[Ss][Uu][Bb][Ss][Cc][Rr][Ii][Pp][Tt][Ii][Oo][Nn].*/
 
 correlation:
-  # Authored by the correlation engine for review. Related CoPilot Searches to run
-  # around an alert from this rule, scoped to the same host/user/IP within the window.
+  # Authored per-rule (behaviour-researched) for the correlation engine. Related CoPilot
+  # Searches + telemetry pivots to run around an alert, scoped to its host/user/ip/domain.
   related_rules:
-    - id: 0255a820-e564-4e40-af2b-6ac61160335c
-      name: "A New Trust Was Created To A Domain"
-      reason: "next kill-chain tactic: Persistence"
-    - id: 35ba1d85-724d-42a3-889f-2e2362bcaf23
-      name: "AD Privileged Users or Groups Reconnaissance"
-      reason: "next kill-chain tactic: Discovery"
-    - id: 9eb99343-d336-4020-a3cd-67f3819e68ee
-      name: "Account Tampering - Suspicious Failed Logon Reasons"
-      reason: "next kill-chain tactic: Persistence"
-    - id: 17d619c1-e020-4347-957e-1d1207455c93
-      name: "Active Directory Replication from Non Machine Account"
-      reason: "next kill-chain tactic: Credential Access"
-    - id: 300bac00-e041-4ee2-9c36-e262656a6ecc
-      name: "Active Directory User Backdoors"
-      reason: "next kill-chain tactic: Persistence"
-    - id: 2632954e-db1c-49cb-9936-67d1ef1d17d2
-      name: "Addition of SID History to Active Directory Object"
-      reason: "next kill-chain tactic: Privilege Escalation"
+  - id: 0f06a3a5-6a09-413f-8743-e6cf35561297
+    name: WMI Event Subscription
+    reason: Sysmon 19/20/21 records the actual filter, consumer and binding objects whose subscription-namespace access this 4662 audit saw; confirms a subscription was really created and shows its contents
+  - id: fe21810c-2a8c-478f-8dd3-5a287fb2a0e0
+    name: Suspicious Scripting in a WMI Consumer
+    reason: Reveals whether the new consumer carries script content (ActiveScriptEventConsumer VBS/JS), the payload half of the persistence
+  - id: 83844185-1c5b-45bc-bcf3-b5bf3084ca5b
+    name: Suspicious Encoded Scripts in a WMI Consumer
+    reason: Consumer with encoded/obfuscated payload turns subscription access into confirmed malicious persistence
+  - id: 05936ce2-ee05-4dae-9d03-9a391cf2d2c6
+    name: WMI Persistence - Command Line Event Consumer
+    reason: A CommandLineEventConsumer firing loads wbemcons.dll in wmiprvse; follow-on execution of the persisted subscription
+  - id: b439f47d-ef52-4b29-9a2f-57d8a96cb6b8
+    name: WMI ActiveScriptEventConsumers Activity Via Scrcons.EXE DLL Load
+    reason: scrcons.exe loading scripting engines is the runtime trigger of a script-based subscription created in the audited namespace
+  - id: ebef4391-1a81-4761-a40a-1db446c0e625
+    name: NewActiveScriptEventConsumer Creation Attempt via Wmic.EXE
+    reason: Command-line creation of the consumer is the likely cause of the namespace access; shows who and with what parent
+  - id: 9e07f6e7-83aa-45c6-998e-0af26efd0a85
+    name: Powershell WMI Persistence
+    reason: PowerShell Set-WmiInstance for __EventFilter/consumer/binding is the other common way the subscription is installed
+  - id: 8a582fe2-0882-4b89-a82a-da6b2dc32937
+    name: Suspicious WmiPrvSE Child Process
+    reason: When the subscription triggers, WmiPrvSE/scrcons spawns the payload process; follow-on execution of the persisted action
   window: 1h
   enrichment_searches:
-  # Rule-specific telemetry pivots the engine runs around an alert from this rule,
-  # scoped to the alert's host/user/IP within the window (behaviour-targeted, not a sweep).
-    - name: "Autostart persistence written on this host (Run keys, services, IFEO)"
-      query: '(data_win_system_eventID:"12" OR data_win_system_eventID:"13") AND (data_win_eventdata_targetObject:/.*[Cc][Uu][Rr][Rr][Ee][Nn][Tt][Vv][Ee][Rr][Ss][Ii][Oo][Nn]\\[Rr][Uu][Nn].*/ OR data_win_eventdata_targetObject:/.*[Cc][Uu][Rr][Rr][Ee][Nn][Tt][Vv][Ee][Rr][Ss][Ii][Oo][Nn]\\[Rr][Uu][Nn][Oo][Nn][Cc][Ee].*/ OR data_win_eventdata_targetObject:/.*[Cc][Uu][Rr][Rr][Ee][Nn][Tt][Cc][Oo][Nn][Tt][Rr][Oo][Ll][Ss][Ee][Tt]\\[Ss][Ee][Rr][Vv][Ii][Cc][Ee][Ss]\\.*/ OR data_win_eventdata_targetObject:/.*[Ii][Mm][Aa][Gg][Ee] [Ff][Ii][Ll][Ee] [Ee][Xx][Ee][Cc][Uu][Tt][Ii][Oo][Nn] [Oo][Pp][Tt][Ii][Oo][Nn][Ss]\\.*/ OR data_win_eventdata_targetObject:/.*[Ww][Ii][Nn][Ll][Oo][Gg][Oo][Nn]\\[Ss][Hh][Ee][Ll][Ll].*/ OR data_win_eventdata_targetObject:/.*[Ww][Ii][Nn][Ll][Oo][Gg][Oo][Nn]\\[Uu][Ss][Ee][Rr][Ii][Nn][Ii][Tt].*/ OR data_win_eventdata_targetObject:/.*[Cc][Uu][Rr][Rr][Ee][Nn][Tt][Vv][Ee][Rr][Ss][Ii][Oo][Nn]\\[Ee][Xx][Pp][Ll][Oo][Rr][Ee][Rr]\\[Rr][Uu][Nn].*/ OR data_win_eventdata_targetObject:/.*[Pp][Oo][Ll][Ii][Cc][Ii][Ee][Ss]\\[Ee][Xx][Pp][Ll][Oo][Rr][Ee][Rr]\\[Rr][Uu][Nn].*/ OR data_win_eventdata_targetObject:/.*[Cc][Uu][Rr][Rr][Ee][Nn][Tt][Vv][Ee][Rr][Ss][Ii][Oo][Nn]\\[Ww][Ii][Nn][Dd][Oo][Ww][Ss]\\[Ll][Oo][Aa][Dd].*/)'
-      pivot_on: [host]
-      window: 2h
-    - name: "Memory/credential-dump creation & LSASS access on this host"
-      query: '((data_win_system_eventID:"1" AND data_win_eventdata_image:/.*(\\[Pp][Rr][Oo][Cc][Dd][Uu][Mm][Pp]\.[Ee][Xx][Ee]|\\[Pp][Rr][Oo][Cc][Dd][Uu][Mm][Pp]64\.[Ee][Xx][Ee]|\\[Ss][Qq][Ll][Dd][Uu][Mm][Pp][Ee][Rr]\.[Ee][Xx][Ee]|\\[Cc][Rr][Ee][Aa][Tt][Ee][Dd][Uu][Mm][Pp]\.[Ee][Xx][Ee]|\\[Rr][Dd][Rr][Ll][Ee][Aa][Kk][Dd][Ii][Aa][Gg]\.[Ee][Xx][Ee]|\\[Dd][Uu][Mm][Pp][Ee][Rr][Tt]\.[Ee][Xx][Ee]|\\[Nn][Aa][Nn][Oo][Dd][Uu][Mm][Pp]\.[Ee][Xx][Ee]|\\[Aa][Vv][Dd][Uu][Mm][Pp]\.[Ee][Xx][Ee])/) OR (data_win_system_eventID:"1" AND (data_win_eventdata_commandLine:/.*[Cc][Oo][Mm][Ss][Vv][Cc][Ss]\.[Dd][Ll][Ll].*/ OR data_win_eventdata_commandLine:/.*[Mm][Ii][Nn][Ii][Dd][Uu][Mm][Pp].*/ OR data_win_eventdata_commandLine:/.*[Dd][Uu][Mm][Pp][Ee][Rr][Tt].*/ OR data_win_eventdata_commandLine:/.*[Nn][Aa][Nn][Oo][Dd][Uu][Mm][Pp].*/ OR data_win_eventdata_commandLine:/.*[Ll][Ss][Aa][Ss][Ss].*/ OR data_win_eventdata_commandLine:/.*[Ss][Ee][Kk][Uu][Rr][Ll][Ss][Aa].*/ OR data_win_eventdata_commandLine:/.*[Nn][Tt][Dd][Ss]\.[Dd][Ii][Tt].*/ OR data_win_eventdata_commandLine:/.*[Nn][Tt][Dd][Ss][Uu][Tt][Ii][Ll].*/)) OR (data_win_system_eventID:"10" AND data_win_eventdata_targetImage:/.*(\\[Ll][Ss][Aa][Ss][Ss]\.[Ee][Xx][Ee])/))'
-      pivot_on: [host]
-      window: 1h
-    - name: "This account's logon activity across hosts"
-      query: '(data_win_system_eventID:"4624" OR data_win_system_eventID:"4625")'
-      pivot_on: [user]
-      window: 6h
-    - name: "Account / group / privilege changes involving this account"
-      query: '(data_win_system_eventID:"4720" OR data_win_system_eventID:"4722" OR data_win_system_eventID:"4724" OR data_win_system_eventID:"4728" OR data_win_system_eventID:"4732" OR data_win_system_eventID:"4756" OR data_win_system_eventID:"4672")'
-      pivot_on: [user]
-      window: 6h
+  # Behaviour-targeted hunts the engine runs around the alert (not a sweep).
+  - name: WMI filter/consumer/binding objects registered on this host
+    query: (data_win_system_eventID:"19" OR data_win_system_eventID:"20" OR data_win_system_eventID:"21")
+    pivot_on:
+    - host
+    window: 4h
+  - name: Subscription creation via wmic, mofcomp or WMI PowerShell
+    query: data_win_system_eventID:"1" AND (data_win_eventdata_commandLine:/.*(__[Ee][Vv][Ee][Nn][Tt][Ff][Ii][Ll][Tt][Ee][Rr]|[Cc][Oo][Mm][Mm][Aa][Nn][Dd][Ll][Ii][Nn][Ee][Ee][Vv][Ee][Nn][Tt][Cc][Oo][Nn][Ss][Uu][Mm][Ee][Rr]|[Aa][Cc][Tt][Ii][Vv][Ee][Ss][Cc][Rr][Ii][Pp][Tt][Ee][Vv][Ee][Nn][Tt][Cc][Oo][Nn][Ss][Uu][Mm][Ee][Rr]|__[Ff][Ii][Ll][Tt][Ee][Rr][Tt][Oo][Cc][Oo][Nn][Ss][Uu][Mm][Ee][Rr][Bb][Ii][Nn][Dd][Ii][Nn][Gg]|[Ss][Ee][Tt]-[Ww][Mm][Ii][Ii][Nn][Ss][Tt][Aa][Nn][Cc][Ee]|[Mm][Oo][Ff][Cc][Oo][Mm][Pp]).*/ OR data_win_eventdata_image:/.*\\[Mm][Oo][Ff][Cc][Oo][Mm][Pp]\.[Ee][Xx][Ee]/)
+    pivot_on:
+    - host
+    window: 2h
+  - name: Processes spawned by WMI consumer hosts (scrcons/WmiPrvSE)
+    query: data_win_system_eventID:"1" AND (data_win_eventdata_parentImage:/.*\\[Ss][Cc][Rr][Cc][Oo][Nn][Ss]\.[Ee][Xx][Ee]/ OR data_win_eventdata_parentImage:/.*\\[Ww][Mm][Ii][Pp][Rr][Vv][Ss][Ee]\.[Ee][Xx][Ee]/)
+    pivot_on:
+    - host
+    window: 4h
+  - name: Script blocks referencing WMI subscription classes
+    query: data_win_system_eventID:"4104" AND data_win_eventdata_scriptBlockText:/.*(__[Ee][Vv][Ee][Nn][Tt][Ff][Ii][Ll][Tt][Ee][Rr]|[Ee][Vv][Ee][Nn][Tt][Cc][Oo][Nn][Ss][Uu][Mm][Ee][Rr]|__[Ff][Ii][Ll][Tt][Ee][Rr][Tt][Oo][Cc][Oo][Nn][Ss][Uu][Mm][Ee][Rr]).*/
+    pivot_on:
+    - host
+    window: 2h
+  - name: Network logons by this account (remote WMI subscription origin)
+    query: data_win_system_eventID:"4624" AND data_win_eventdata_logonType:"3"
+    pivot_on:
+    - user
+    window: 2h

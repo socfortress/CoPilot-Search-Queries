@@ -168,19 +168,58 @@ graylog:
   query: data_win_system_eventID:"4104" AND (data_win_eventdata_scriptBlockText:/.*[Cc][Ll][Ee][Aa][Rr]-[Hh][Ii][Ss][Tt][Oo][Rr][Yy].*/ OR ((data_win_eventdata_scriptBlockText:/.*[Rr][Ee][Mm][Oo][Vv][Ee]-[Ii][Tt][Ee][Mm].*/ OR data_win_eventdata_scriptBlockText:/.*[Rr][Mm].*/) AND (data_win_eventdata_scriptBlockText:/.*[Cc][Oo][Nn][Ss][Oo][Ll][Ee][Hh][Oo][Ss][Tt]_[Hh][Ii][Ss][Tt][Oo][Rr][Yy]\.[Tt][Xx][Tt].*/ OR data_win_eventdata_scriptBlockText:/.*\([Gg][Ee][Tt]-[Pp][Ss][Rr][Ee][Aa][Dd][Ll][Ii][Nn][Ee][Oo][Pp][Tt][Ii][Oo][Nn]\)\.[Hh][Ii][Ss][Tt][Oo][Rr][Yy][Ss][Aa][Vv][Ee][Pp][Aa][Tt][Hh].*/)))
 
 correlation:
-  # Authored by the correlation engine for review.
+  # Authored per-rule (behaviour-researched) for the correlation engine. Related CoPilot
+  # Searches + telemetry pivots to run around an alert, scoped to its host/user/ip/domain.
+  related_rules:
+  - id: 26b692dc-1722-49b2-b496-a8258aa6371d
+    name: Clear PowerShell History - PowerShell
+    reason: Sibling script-block detection of the same Clear-History/history-file wipe; a second hit confirms deliberate repeated history cleanup rather than a one-off admin command.
+  - id: 602f5669-6927-4688-84db-0d4b7afb2150
+    name: Disable Powershell Command History
+    reason: Attacker may turn off PSReadLine history saving instead of (or before) deleting it; both aim at leaving no PowerShell command trail.
+  - id: f4ff7323-b5fc-4323-8b52-6b9408e15788
+    name: Potential PowerShell Console History Access Attempt via History File
+    reason: 'Precursor: ConsoleHost_history.txt is read first to harvest secrets typed on the host, then removed to hide the access.'
+  - id: cc36992a-4671-4f21-a91d-6c2b72a2edf5
+    name: Suspicious Eventlog Clearing or Configuration Change Activity
+    reason: 'Same anti-forensic phase: after wiping shell history, operators commonly clear Windows event logs to remove the remaining record.'
+  - id: fdb829a8-db84-4832-b64b-3e964cd44f01
+    name: Windows Eventlog Cleared Via Wevtutil
+    reason: Wevtutil cl is the usual companion to history deletion at the end of an intrusion, covering the process and security channel traces.
+  - id: 115fdba9-f017-42e6-84cf-d5573bf2ddf8
+    name: Disable of ETW Trace - Powershell
+    reason: 'Defence-evasion pairing in PowerShell: ETW tampering blinds telemetry just as history clearing removes local artefacts.'
+  - id: c148a894-dd93-11eb-bf2a-acde48001122
+    name: Powershell Disable Security Monitoring
+    reason: Defender tampering via PowerShell typically occurs in the same session whose history is later wiped.
+  - id: e0d6c087-2d1c-47fd-8799-3904103c5a98
+    name: AMSI Bypass Pattern Assembly GetType
+    reason: AMSI bypass in script blocks marks hostile PowerShell activity that the history wipe is meant to conceal.
+  window: 2h
   enrichment_searches:
-  # Rule-specific telemetry pivots the engine runs around an alert from this rule,
-  # scoped to the alert's host/user/IP within the window (behaviour-targeted, not a sweep).
-    - name: "Log-clearing / anti-forensic activity on this host"
-      query: '(((data_win_eventdata_commandLine:/.*[Ww][Ee][Vv][Tt][Uu][Tt][Ii][Ll] [Cc][Ll].*/ OR data_win_eventdata_commandLine:/.*[Cc][Ll][Ee][Aa][Rr]-[Ee][Vv][Ee][Nn][Tt][Ll][Oo][Gg].*/ OR data_win_eventdata_commandLine:/.*[Ff][Ss][Uu][Tt][Ii][Ll] [Uu][Ss][Nn] [Dd][Ee][Ll][Ee][Tt][Ee][Jj][Oo][Uu][Rr][Nn][Aa][Ll].*/ OR data_win_eventdata_commandLine:/.*[Vv][Ss][Ss][Aa][Dd][Mm][Ii][Nn] [Dd][Ee][Ll][Ee][Tt][Ee].*/ OR data_win_eventdata_commandLine:/.*[Ww][Ee][Vv][Tt][Uu][Tt][Ii][Ll] [Cc][Ll][Ee][Aa][Rr]-[Ll][Oo][Gg].*/)) OR ((data_win_system_eventID:"1102" OR data_win_system_eventID:"104")))'
-      pivot_on: [host]
-      window: 2h
-    - name: "Download / AMSI-bypass / encoded script blocks on this host"
-      query: 'data_win_system_eventID:"4104" AND (data_win_eventdata_scriptBlockText:/.*[Dd][Oo][Ww][Nn][Ll][Oo][Aa][Dd][Ss][Tt][Rr][Ii][Nn][Gg].*/ OR data_win_eventdata_scriptBlockText:/.*[Dd][Oo][Ww][Nn][Ll][Oo][Aa][Dd][Ff][Ii][Ll][Ee].*/ OR data_win_eventdata_scriptBlockText:/.*[Ii][Nn][Vv][Oo][Kk][Ee]-[Ww][Ee][Bb][Rr][Ee][Qq][Uu][Ee][Ss][Tt].*/ OR data_win_eventdata_scriptBlockText:/.*[Nn][Ee][Tt]\.[Ww][Ee][Bb][Cc][Ll][Ii][Ee][Nn][Tt].*/ OR data_win_eventdata_scriptBlockText:/.*[Ff][Rr][Oo][Mm][Bb][Aa][Ss][Ee]64[Ss][Tt][Rr][Ii][Nn][Gg].*/ OR data_win_eventdata_scriptBlockText:/.*[Ii][Ee][Xx].*/ OR data_win_eventdata_scriptBlockText:/.*[Ii][Nn][Vv][Oo][Kk][Ee]-[Ee][Xx][Pp][Rr][Ee][Ss][Ss][Ii][Oo][Nn].*/ OR data_win_eventdata_scriptBlockText:/.*[Ss][Tt][Aa][Rr][Tt]-[Bb][Ii][Tt][Ss][Tt][Rr][Aa][Nn][Ss][Ff][Ee][Rr].*/ OR data_win_eventdata_scriptBlockText:/.*[Aa][Mm][Ss][Ii][Uu][Tt][Ii][Ll][Ss].*/ OR data_win_eventdata_scriptBlockText:/.*-[Ee][Nn][Cc].*/ OR data_win_eventdata_scriptBlockText:/.*-[Ee][Nn][Cc][Oo][Dd][Ee][Dd][Cc][Oo][Mm][Mm][Aa][Nn][Dd].*/ OR data_win_eventdata_scriptBlockText:/.*[Rr][Ee][Ff][Ll][Ee][Cc][Tt][Ii][Oo][Nn]\.[Aa][Ss][Ss][Ee][Mm][Bb][Ll][Yy].*/)'
-      pivot_on: [host]
-      window: 1h
-    - name: "Follow-on LOLBin / signed-binary-proxy execution on this host"
-      query: 'data_win_system_eventID:"1" AND data_win_eventdata_image:/.*(\\[Rr][Uu][Nn][Dd][Ll][Ll]32\.[Ee][Xx][Ee]|\\[Rr][Ee][Gg][Ss][Vv][Rr]32\.[Ee][Xx][Ee]|\\[Mm][Ss][Hh][Tt][Aa]\.[Ee][Xx][Ee]|\\[Ii][Nn][Ss][Tt][Aa][Ll][Ll][Uu][Tt][Ii][Ll]\.[Ee][Xx][Ee]|\\[Rr][Ee][Gg][Aa][Ss][Mm]\.[Ee][Xx][Ee]|\\[Rr][Ee][Gg][Ss][Vv][Cc][Ss]\.[Ee][Xx][Ee]|\\[Mm][Ss][Bb][Uu][Ii][Ll][Dd]\.[Ee][Xx][Ee]|\\[Cc][Ee][Rr][Tt][Uu][Tt][Ii][Ll]\.[Ee][Xx][Ee]|\\[Bb][Ii][Tt][Ss][Aa][Dd][Mm][Ii][Nn]\.[Ee][Xx][Ee]|\\[Ww][Mm][Ii][Cc]\.[Ee][Xx][Ee]|\\[Cc][Mm][Ss][Tt][Pp]\.[Ee][Xx][Ee]|\\[Oo][Dd][Bb][Cc][Cc][Oo][Nn][Ff]\.[Ee][Xx][Ee]|\\[Ff][Oo][Rr][Ff][Ii][Ll][Ee][Ss]\.[Ee][Xx][Ee]|\\[Pp][Cc][Aa][Ll][Uu][Aa]\.[Ee][Xx][Ee]|\\[Mm][Aa][Vv][Ii][Nn][Jj][Ee][Cc][Tt]\.[Ee][Xx][Ee]|\\[Ss][Cc][Rr][Ii][Pp][Tt][Rr][Uu][Nn][Nn][Ee][Rr]\.[Ee][Xx][Ee])/'
-      pivot_on: [host]
-      window: 1h
+  # Behaviour-targeted hunts the engine runs around the alert (not a sweep).
+  - name: Event log clearing or audit-policy tampering (wevtutil, Clear-EventLog, 1102/104)
+    query: (data_win_system_eventID:"1102" OR data_win_system_eventID:"104" OR (data_win_system_eventID:"1" AND (data_win_eventdata_commandLine:/.*[Ww][Ee][Vv][Tt][Uu][Tt][Ii][Ll].*[Cc][Ll].*/ OR data_win_eventdata_commandLine:/.*[Cc][Ll][Ee][Aa][Rr]-[Ee][Vv][Ee][Nn][Tt][Ll][Oo][Gg].*/ OR data_win_eventdata_commandLine:/.*[Aa][Uu][Dd][Ii][Tt][Pp][Oo][Ll].*[Cc][Ll][Ee][Aa][Rr].*/)))
+    pivot_on:
+    - host
+    window: 2h
+  - name: PowerShell history file access, deletion or logging disablement
+    query: ((data_win_system_eventID:"4104" AND (data_win_eventdata_scriptBlockText:/.*[Ss][Ee][Tt]-[Pp][Ss][Rr][Ee][Aa][Dd][Ll][Ii][Nn][Ee][Oo][Pp][Tt][Ii][Oo][Nn].*[Ss][Aa][Vv][Ee][Nn][Oo][Nn][Ee].*/ OR data_win_eventdata_scriptBlockText:/.*[Hh][Ii][Ss][Tt][Oo][Rr][Yy][Ss][Aa][Vv][Ee][Ss][Tt][Yy][Ll][Ee].*/ OR data_win_eventdata_scriptBlockText:/.*[Cc][Oo][Nn][Ss][Oo][Ll][Ee][Hh][Oo][Ss][Tt]_[Hh][Ii][Ss][Tt][Oo][Rr][Yy].*/)) OR (data_win_system_eventID:"23" AND data_win_eventdata_targetFilename:/.*[Cc][Oo][Nn][Ss][Oo][Ll][Ee][Hh][Oo][Ss][Tt]_[Hh][Ii][Ss][Tt][Oo][Rr][Yy].*/) OR (data_win_system_eventID:"1" AND data_win_eventdata_commandLine:/.*[Cc][Oo][Nn][Ss][Oo][Ll][Ee][Hh][Oo][Ss][Tt]_[Hh][Ii][Ss][Tt][Oo][Rr][Yy].*/))
+    pivot_on:
+    - host
+    window: 2h
+  - name: Defense-evasion tampering in PowerShell (Defender, AMSI, ETW) before the cleanup
+    query: data_win_system_eventID:"4104" AND (data_win_eventdata_scriptBlockText:/.*[Ss][Ee][Tt]-[Mm][Pp][Pp][Rr][Ee][Ff][Ee][Rr][Ee][Nn][Cc][Ee].*/ OR data_win_eventdata_scriptBlockText:/.*[Aa][Dd][Dd]-[Mm][Pp][Pp][Rr][Ee][Ff][Ee][Rr][Ee][Nn][Cc][Ee].*/ OR data_win_eventdata_scriptBlockText:/.*[Aa][Mm][Ss][Ii][Uu][Tt][Ii][Ll][Ss].*/ OR data_win_eventdata_scriptBlockText:/.*[Aa][Mm][Ss][Ii][Ii][Nn][Ii][Tt][Ff][Aa][Ii][Ll][Ee][Dd].*/ OR data_win_eventdata_scriptBlockText:/.*[Ee][Tt][Ww][Pp][Rr][Oo][Vv][Ii][Dd][Ee][Rr].*/ OR data_win_eventdata_scriptBlockText:/.*[Ll][Oo][Gg][Pp][Ii][Pp][Ee][Ll][Ii][Nn][Ee][Ee][Xx][Ee][Cc][Uu][Tt][Ii][Oo][Nn].*/)
+    pivot_on:
+    - host
+    window: 4h
+  - name: Download cradles and encoded PowerShell executed earlier in the session
+    query: data_win_system_eventID:"4104" AND (data_win_eventdata_scriptBlockText:/.*[Ii][Nn][Vv][Oo][Kk][Ee]-[Ww][Ee][Bb][Rr][Ee][Qq][Uu][Ee][Ss][Tt].*/ OR data_win_eventdata_scriptBlockText:/.*[Nn][Ee][Tt]\.[Ww][Ee][Bb][Cc][Ll][Ii][Ee][Nn][Tt].*/ OR data_win_eventdata_scriptBlockText:/.*[Dd][Oo][Ww][Nn][Ll][Oo][Aa][Dd][Ss][Tt][Rr][Ii][Nn][Gg].*/ OR data_win_eventdata_scriptBlockText:/.*[Ff][Rr][Oo][Mm][Bb][Aa][Ss][Ee]64[Ss][Tt][Rr][Ii][Nn][Gg].*/ OR data_win_eventdata_scriptBlockText:/.*[Ss][Tt][Aa][Rr][Tt]-[Bb][Ii][Tt][Ss][Tt][Rr][Aa][Nn][Ss][Ff][Ee][Rr].*/ OR data_win_eventdata_scriptBlockText:/.*[Ii][Nn][Vv][Oo][Kk][Ee]-[Ee][Xx][Pp][Rr][Ee][Ss][Ss][Ii][Oo][Nn].*/)
+    pivot_on:
+    - host
+    window: 4h
+  - name: Credential access and discovery commands in PowerShell on this host
+    query: data_win_system_eventID:"4104" AND (data_win_eventdata_scriptBlockText:/.*[Ii][Nn][Vv][Oo][Kk][Ee]-[Mm][Ii][Mm][Ii][Kk][Aa][Tt][Zz].*/ OR data_win_eventdata_scriptBlockText:/.*[Mm][Ii][Nn][Ii][Dd][Uu][Mm][Pp].*/ OR data_win_eventdata_scriptBlockText:/.*[Gg][Ee][Tt]-[Cc][Rr][Ee][Dd][Ee][Nn][Tt][Ii][Aa][Ll].*/ OR data_win_eventdata_scriptBlockText:/.*[Ll][Ss][Aa][Ss][Ss].*/ OR data_win_eventdata_scriptBlockText:/.*[Gg][Ee][Tt]-[Aa][Dd][Uu][Ss][Ee][Rr].*/ OR data_win_eventdata_scriptBlockText:/.*[Nn][Ee][Tt] [Gg][Rr][Oo][Uu][Pp].*/)
+    pivot_on:
+    - host
+    window: 6h

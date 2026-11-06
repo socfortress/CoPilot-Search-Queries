@@ -158,58 +158,59 @@ graylog:
   query: data_win_system_eventID:"4104" AND (data_win_eventdata_scriptBlockText:/.*New-MailboxExportRequest.*/ OR data_win_eventdata_scriptBlockText:/.*New-ManagementRoleAssignment.*/ OR data_win_eventdata_scriptBlockText:/.*New-MailboxSearch.*/ OR data_win_eventdata_scriptBlockText:/.*Get-Recipient.*/ OR data_win_eventdata_scriptBlockText:/.*Search-Mailbox.*/)
 
 correlation:
-  # Authored by the correlation engine for review. Related CoPilot Searches to run
-  # around an alert from this rule, scoped to the same host/user/IP within the window.
+  # Authored per-rule (behaviour-researched) for the correlation engine. Related CoPilot
+  # Searches + telemetry pivots to run around an alert, scoped to its host/user/ip/domain.
   related_rules:
-    - id: 8148c29c-c952-11eb-9255-acde48001122
-      name: "Detect Mimikatz With PowerShell Script Block Logging"
-      reason: "same analytic story: CISA AA22-264A"
-    - id: 27c3a83d-cada-47c6-9042-67baf19d2574
-      name: "Detect PsExec With accepteula Flag"
-      reason: "same analytic story: BlackByte Ransomware"
-    - id: 070e9b80-6252-11eb-ae93-0242ac130002
-      name: "Detect Regsvr32 Application Control Bypass"
-      reason: "same analytic story: BlackByte Ransomware"
-    - id: ccad96d7-a48c-4f13-8b9c-9f6a31cba454
-      name: "Detect Remote Access Software Usage FileInfo"
-      reason: "same analytic story: Scattered Spider"
-    - id: 683e6196-b8e8-11eb-9a79-acde48001122
-      name: "Detect Renamed PSExec"
-      reason: "same analytic story: BlackByte Ransomware"
-    - id: 1b7bfb2c-b8e6-11eb-99ac-acde48001122
-      name: "Detect Renamed WinRAR"
-      reason: "same analytic story: CISA AA22-277A"
-    - id: 6860a62c-9203-11eb-9e05-acde48001122
-      name: "Disabling Firewall with Netsh"
-      reason: "same analytic story: BlackByte Ransomware"
-    - id: 8943b567-f14d-4ee8-a0bb-2121d4ce3184
-      name: "Dump LSASS via comsvcs DLL"
-      reason: "same analytic story: CISA AA22-264A"
-    - id: 9a8f63a8-43ac-11ec-904c-acde48001122
-      name: "Firewall Allowed Program Enable"
-      reason: "same analytic story: BlackByte Ransomware"
-    - id: 8ce07472-496f-11ec-ab3b-3e22fbd008af
-      name: "Impacket Lateral Movement Commandline Parameters"
-      reason: "same analytic story: CISA AA22-277A"
-    - id: d6e464e4-5c6a-474e-82d2-aed616a3a492
-      name: "Impacket Lateral Movement WMIExec Commandline Parameters"
-      reason: "same analytic story: CISA AA22-277A"
-    - id: bb3c1bac-6bdf-4aa0-8dc9-068b8b712a76
-      name: "Impacket Lateral Movement smbexec CommandLine Parameters"
-      reason: "same analytic story: CISA AA22-277A"
-  window: 1h
+  - id: 25676e10-2121-446e-80a4-71ff8506af47
+    name: Exchange PowerShell Snap-Ins Usage
+    reason: Operators load the Exchange snap-in (Add-PSSnapin) immediately before running mailbox cmdlets like New-MailboxExportRequest/Search-Mailbox from a non-EMS shell, so the two fire back to back.
+  - id: 4a241dea-235b-4a7e-8d76-50d817b146c4
+    name: Suspicious PowerShell Mailbox Export to Share - PS
+    reason: Same New-MailboxExportRequest abuse seen at script-block level with a UNC share target; confirms the mailbox PST is being staged for exfiltration.
+  - id: 889719ef-dd62-43df-86c3-768fb08dc7c0
+    name: Suspicious PowerShell Mailbox Export to Share
+    reason: Process-creation view of the same mailbox export to a network share; corroborates the 4104 cmdlet with the actual powershell.exe command line.
+  - id: a55349d8-9588-4c5a-8e3b-1925fe2a4ffe
+    name: Exchange PowerShell Cmdlet History Deleted
+    reason: Attackers who ran mailbox cmdlets delete the PowerShell history file afterwards to hide them; a follow-on anti-forensics step.
+  - id: 7280c9f3-a5af-45d0-916a-bc01cb4151c9
+    name: Suspicious MSExchangeMailboxReplication ASPX Write
+    reason: ProxyShell uses New-MailboxExportRequest to make MSExchangeMailboxReplication write an ASPX webshell; this is the file-write evidence of that precursor/result.
+  - id: bd1212e5-78da-431e-95fa-c58e3237a8e6
+    name: Suspicious ASPX File Drop by Exchange
+    reason: Exchange worker process dropping an .aspx file is the webshell planted via ProxyShell before or after these cmdlets run.
+  - id: 83809e84-4475-4b69-bc3e-4aad8568612f
+    name: MSExchange Transport Agent Installation
+    reason: 'Post-exploitation persistence on the same Exchange server: a malicious transport agent installed once the actor has Exchange admin rights (e.g. via New-ManagementRoleAssignment).'
+  - id: bbb2dedd-a0e3-46ab-ba6c-6c82ae7a9aa7
+    name: HAFNIUM Exchange Exploitation Activity
+    reason: Exchange server exploitation (w3wp/UMWorkerProcess spawning shells) that typically precedes the mailbox cmdlet abuse on the same host.
+  window: 4h
   enrichment_searches:
-  # Rule-specific telemetry pivots the engine runs around an alert from this rule,
-  # scoped to the alert's host/user/IP within the window (behaviour-targeted, not a sweep).
-    - name: "Outbound connections by script interpreters on this host"
-      query: 'data_win_system_eventID:"3" AND data_win_eventdata_image:/.*(\\[Pp][Oo][Ww][Ee][Rr][Ss][Hh][Ee][Ll][Ll]\.[Ee][Xx][Ee]|\\[Pp][Ww][Ss][Hh]\.[Ee][Xx][Ee]|\\[Pp][Oo][Ww][Ee][Rr][Ss][Hh][Ee][Ll][Ll]_[Ii][Ss][Ee]\.[Ee][Xx][Ee]|\\[Cc][Mm][Dd]\.[Ee][Xx][Ee]|\\[Ww][Ss][Cc][Rr][Ii][Pp][Tt]\.[Ee][Xx][Ee]|\\[Cc][Ss][Cc][Rr][Ii][Pp][Tt]\.[Ee][Xx][Ee]|\\[Mm][Ss][Hh][Tt][Aa]\.[Ee][Xx][Ee]|\\[Rr][Uu][Nn][Dd][Ll][Ll]32\.[Ee][Xx][Ee]|\\[Rr][Ee][Gg][Ss][Vv][Rr]32\.[Ee][Xx][Ee])/'
-      pivot_on: [host]
-      window: 1h
-    - name: "Download / AMSI-bypass / encoded script blocks on this host"
-      query: 'data_win_system_eventID:"4104" AND (data_win_eventdata_scriptBlockText:/.*[Dd][Oo][Ww][Nn][Ll][Oo][Aa][Dd][Ss][Tt][Rr][Ii][Nn][Gg].*/ OR data_win_eventdata_scriptBlockText:/.*[Dd][Oo][Ww][Nn][Ll][Oo][Aa][Dd][Ff][Ii][Ll][Ee].*/ OR data_win_eventdata_scriptBlockText:/.*[Ii][Nn][Vv][Oo][Kk][Ee]-[Ww][Ee][Bb][Rr][Ee][Qq][Uu][Ee][Ss][Tt].*/ OR data_win_eventdata_scriptBlockText:/.*[Nn][Ee][Tt]\.[Ww][Ee][Bb][Cc][Ll][Ii][Ee][Nn][Tt].*/ OR data_win_eventdata_scriptBlockText:/.*[Ff][Rr][Oo][Mm][Bb][Aa][Ss][Ee]64[Ss][Tt][Rr][Ii][Nn][Gg].*/ OR data_win_eventdata_scriptBlockText:/.*[Ii][Ee][Xx].*/ OR data_win_eventdata_scriptBlockText:/.*[Ii][Nn][Vv][Oo][Kk][Ee]-[Ee][Xx][Pp][Rr][Ee][Ss][Ss][Ii][Oo][Nn].*/ OR data_win_eventdata_scriptBlockText:/.*[Ss][Tt][Aa][Rr][Tt]-[Bb][Ii][Tt][Ss][Tt][Rr][Aa][Nn][Ss][Ff][Ee][Rr].*/ OR data_win_eventdata_scriptBlockText:/.*[Aa][Mm][Ss][Ii][Uu][Tt][Ii][Ll][Ss].*/ OR data_win_eventdata_scriptBlockText:/.*-[Ee][Nn][Cc].*/ OR data_win_eventdata_scriptBlockText:/.*-[Ee][Nn][Cc][Oo][Dd][Ee][Dd][Cc][Oo][Mm][Mm][Aa][Nn][Dd].*/ OR data_win_eventdata_scriptBlockText:/.*[Rr][Ee][Ff][Ll][Ee][Cc][Tt][Ii][Oo][Nn]\.[Aa][Ss][Ss][Ee][Mm][Bb][Ll][Yy].*/)'
-      pivot_on: [host]
-      window: 1h
-    - name: "Follow-on LOLBin / signed-binary-proxy execution on this host"
-      query: 'data_win_system_eventID:"1" AND data_win_eventdata_image:/.*(\\[Rr][Uu][Nn][Dd][Ll][Ll]32\.[Ee][Xx][Ee]|\\[Rr][Ee][Gg][Ss][Vv][Rr]32\.[Ee][Xx][Ee]|\\[Mm][Ss][Hh][Tt][Aa]\.[Ee][Xx][Ee]|\\[Ii][Nn][Ss][Tt][Aa][Ll][Ll][Uu][Tt][Ii][Ll]\.[Ee][Xx][Ee]|\\[Rr][Ee][Gg][Aa][Ss][Mm]\.[Ee][Xx][Ee]|\\[Rr][Ee][Gg][Ss][Vv][Cc][Ss]\.[Ee][Xx][Ee]|\\[Mm][Ss][Bb][Uu][Ii][Ll][Dd]\.[Ee][Xx][Ee]|\\[Cc][Ee][Rr][Tt][Uu][Tt][Ii][Ll]\.[Ee][Xx][Ee]|\\[Bb][Ii][Tt][Ss][Aa][Dd][Mm][Ii][Nn]\.[Ee][Xx][Ee]|\\[Ww][Mm][Ii][Cc]\.[Ee][Xx][Ee]|\\[Cc][Mm][Ss][Tt][Pp]\.[Ee][Xx][Ee]|\\[Oo][Dd][Bb][Cc][Cc][Oo][Nn][Ff]\.[Ee][Xx][Ee]|\\[Ff][Oo][Rr][Ff][Ii][Ll][Ee][Ss]\.[Ee][Xx][Ee]|\\[Pp][Cc][Aa][Ll][Uu][Aa]\.[Ee][Xx][Ee]|\\[Mm][Aa][Vv][Ii][Nn][Jj][Ee][Cc][Tt]\.[Ee][Xx][Ee]|\\[Ss][Cc][Rr][Ii][Pp][Tt][Rr][Uu][Nn][Nn][Ee][Rr]\.[Ee][Xx][Ee])/'
-      pivot_on: [host]
-      window: 1h
+  # Behaviour-targeted hunts the engine runs around the alert (not a sweep).
+  - name: Exchange worker processes spawning shells or recon tools
+    query: data_win_system_eventID:"1" AND data_win_eventdata_parentImage:(*w3wp.exe OR *UMWorkerProcess.exe OR *MSExchangeMailboxReplication.exe OR *umservice.exe) AND data_win_eventdata_image:(*cmd.exe OR *powershell.exe OR *pwsh.exe OR *whoami.exe OR *net.exe OR *net1.exe OR *certutil.exe OR *bitsadmin.exe)
+    pivot_on:
+    - host
+    window: 4h
+  - name: Webshell files written under Exchange paths
+    query: data_win_system_eventID:"11" AND data_win_eventdata_targetFilename:(*.aspx OR *.ashx OR *.asmx OR *.asp) AND (data_win_eventdata_targetFilename:*inetpub* OR data_win_eventdata_targetFilename:*FrontEnd* OR data_win_eventdata_targetFilename:*ExchangeServer* OR data_win_eventdata_targetFilename:*Exchange*)
+    pivot_on:
+    - host
+    window: 4h
+  - name: Mailbox export, role assignment and mailbox-permission script blocks
+    query: data_win_system_eventID:"4104" AND (data_win_eventdata_scriptBlockText:*.pst* OR data_win_eventdata_scriptBlockText:*FilePath* OR data_win_eventdata_scriptBlockText:*Add-MailboxPermission* OR data_win_eventdata_scriptBlockText:*Add-RoleGroupMember* OR data_win_eventdata_scriptBlockText:*Mailbox\ Import\ Export* OR data_win_eventdata_scriptBlockText:*Add-PSSnapin*)
+    pivot_on:
+    - host
+    - user
+    window: 4h
+  - name: Archive staging and exfil tooling after mailbox export
+    query: data_win_system_eventID:"1" AND (data_win_eventdata_commandLine:*.pst* OR (data_win_eventdata_image:(*rar.exe OR *7z.exe OR *7za.exe OR *tar.exe) AND data_win_eventdata_commandLine:(*.pst* OR *-p* OR *a\ *)) OR data_win_eventdata_image:(*rclone.exe OR *megacmd.exe OR *curl.exe))
+    pivot_on:
+    - host
+    window: 6h
+  - name: Exchange server outbound connections from shells and tunnels
+    query: data_win_system_eventID:"3" AND data_win_eventdata_image:(*powershell.exe OR *pwsh.exe OR *cmd.exe OR *certutil.exe OR *rundll32.exe OR *w3wp.exe) AND data_win_eventdata_initiated:"true"
+    pivot_on:
+    - host
+    window: 4h

@@ -131,48 +131,53 @@ correlation:
   related_rules:
   - id: lnx-doas-001
     name: Linux doas Execution Detection
-    reason: Syslog/auditd view of the same doas invocation; confirms the escalation from a second telemetry source and may show the target user/command
+    reason: Syslog/auditd view of the same doas execution; confirms the elevation and carries the command line and invoking user.
   - id: 0f79c4d2-4e1f-4683-9c36-b5469a665e06
     name: Access of Sudoers File Content
-    reason: Attacker reading sudoers/doas policy to learn which escalation paths exist is a typical precursor to invoking doas
-  - id: 86157017-c2b1-4d4a-8c33-93b8e67e4af4
-    name: Potential Suspicious Change To Sensitive/Critical Files
-    reason: Modification of /etc/doas.conf, sudoers or passwd/shadow to grant or persist elevated rights is the usual follow-on or enabler of doas abuse
-  - id: 6b14bac8-3e3a-4324-8109-42f0546a347f
-    name: Scheduled Cron Task/Job - Linux
-    reason: Once root is obtained via doas, cron persistence is a common next step
+    reason: Attacker reads privilege-delegation config (sudoers) to learn what elevation paths exist before choosing doas.
+  - id: linux-setuid-using-chmod-utility-001
+    name: Linux Setuid Using Chmod Utility
+    reason: 'Alternative or follow-on privilege persistence: setting SUID bits on a binary after gaining root via doas.'
   - id: fa4aaed5-4fe0-498d-bbc0-08e3346387ba
     name: Copy Passwd Or Shadow From TMP Path
-    reason: Elevated privileges via doas are often used to read/copy shadow and passwd for credential access
-  - id: 6419afd1-3742-47a5-a7e6-b50386cd15f8
-    name: Chmod Targeting Sensitive Directories
-    reason: Root-level permission changes after doas escalation, e.g. to open sensitive paths or set up backdoors
+    reason: 'Typical post-elevation credential theft: root via doas lets the actor read and stage /etc/shadow.'
+  - id: 759d0d51-bc99-4b5e-9add-8f5b2c8e7512
+    name: Creation Of An User Account
+    reason: Root obtained through doas is commonly used to add a backdoor account for persistence.
   - id: 1182f3b3-e716-4efa-99ab-d2685d04360f
     name: History File Deletion
-    reason: Defense evasion commonly following a successful root escalation to hide the doas-run commands
-  - id: 80915f59-9b56-4616-9de0-fd0dea6c12fe
-    name: Linux Logs Clearing Attempts
-    reason: Log clearing as root after escalation is a typical cleanup step
+    reason: 'Defense evasion after elevated activity: clearing shell history to hide doas-run commands.'
+  - id: 4e2a6c91-7f3d-4b6e-9a4f-1c8b0e5a92d4
+    name: Crontab Interactive Edit Execution
+    reason: 'Root persistence follow-on: editing crontab with elevated rights after doas execution.'
+  - id: db1ac3be-f606-4e3a-89e0-9607cbe6b98a
+    name: Capsh Shell Invocation - Linux
+    reason: Parallel privilege-escalation shell technique often tried alongside doas/sudo abuse on the same host.
   window: 1h
   enrichment_searches:
   # Behaviour-targeted hunts the engine runs around the alert (not a sweep).
-  - name: Commands run through doas with a different user or shell
-    query: data_process_exec_parent_binary:"/usr/bin/doas" AND (data_process_exec_process_binary:("/bin/sh" OR "/bin/bash" OR "/usr/bin/bash" OR "/usr/bin/sh" OR "/bin/dash" OR "/usr/bin/python3" OR "/usr/bin/perl") OR data_process_exec_process_binary:/.*/(vi|vim|nano|cat|cp|mv|tee|chmod|chown|useradd|usermod|passwd).*/)
+  - name: Shell spawned by doas (root shell)
+    query: data_process_exec_parent_binary:"/usr/bin/doas" AND data_process_exec_process_binary:("/bin/bash" OR "/bin/sh" OR "/usr/bin/bash" OR "/usr/bin/sh" OR "/bin/dash" OR "/usr/bin/zsh")
     pivot_on:
     - host
     window: 1h
-  - name: Edits or reads of doas/sudoers policy and passwd/shadow
-    query: data_process_exec_process_arguments:(*doas.conf* OR */etc/sudoers* OR */etc/shadow* OR */etc/passwd* OR */etc/sudoers.d*)
+  - name: Credential and sudoers file access
+    query: (data_process_exec_process_arguments:*\/etc\/shadow* OR data_process_exec_process_arguments:*\/etc\/sudoers* OR data_process_exec_process_arguments:*\/etc\/doas.conf* OR data_process_exec_process_arguments:*\/etc\/passwd*)
     pivot_on:
     - host
     window: 2h
-  - name: Account creation or group changes granting admin
-    query: data_process_exec_process_binary:/.*/(useradd|adduser|usermod|passwd|chpasswd|gpasswd)/ AND (data_process_exec_process_arguments:(*wheel* OR *sudo* OR *root* OR *-G* OR *-aG*) OR data_process_exec_process_binary:/.*/(useradd|adduser)/)
+  - name: Persistence and backdoor account creation
+    query: data_process_exec_process_binary:("/usr/sbin/useradd" OR "/usr/sbin/adduser" OR "/usr/sbin/usermod" OR "/usr/bin/crontab" OR "/usr/bin/chattr" OR "/usr/bin/systemctl")
     pivot_on:
     - host
     window: 2h
-  - name: SUID/capability changes and persistence after escalation
-    query: (data_process_exec_process_binary:/.*/chmod/ AND data_process_exec_process_arguments:(*u+s* OR *4755* OR *+s*)) OR data_process_exec_process_binary:/.*/(setcap|crontab|systemctl)/ OR data_process_exec_process_arguments:(*authorized_keys* OR */etc/cron* OR */etc/systemd/system*)
+  - name: SUID or permission tampering and tool download
+    query: (data_process_exec_process_binary:("/usr/bin/chmod" OR "/bin/chmod" OR "/usr/sbin/setcap") AND (data_process_exec_process_arguments:*+s* OR data_process_exec_process_arguments:*4755* OR data_process_exec_process_arguments:*777* OR data_process_exec_process_arguments:*cap_setuid*)) OR data_process_exec_process_binary:("/usr/bin/wget" OR "/usr/bin/curl")
     pivot_on:
     - host
-    window: 4h
+    window: 2h
+  - name: 'Anti-forensics: history or log removal'
+    query: data_process_exec_process_binary:("/usr/bin/rm" OR "/bin/rm" OR "/usr/bin/shred" OR "/usr/bin/truncate") AND (data_process_exec_process_arguments:*.bash_history* OR data_process_exec_process_arguments:*\/var\/log* OR data_process_exec_process_arguments:*.zsh_history*)
+    pivot_on:
+    - host
+    window: 2h
