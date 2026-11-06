@@ -139,19 +139,58 @@ graylog:
   query: data_win_system_providerName:/[Mm][Ss][Ii][Ii][Nn][Ss][Tt][Aa][Ll][Ll][Ee][Rr]/ AND (data_win_system_eventID:"1040" OR data_win_system_eventID:"1042") AND data_win_eventdata_data:/.*:\/\/.*/
 
 correlation:
-  # Authored by the correlation engine for review.
+  # Authored per-rule (behaviour-researched) for the correlation engine. Related CoPilot
+  # Searches + telemetry pivots to run around an alert, scoped to its host/user/ip/domain.
+  related_rules:
+  - id: f7b5f842-a6af-4da5-9e95-e32478f3cd2f
+    name: MsiExec Web Install
+    reason: 'Process-creation view of the same act: msiexec /i http(s)://... produces the MsiInstaller URL event and exposes the launching parent and command line.'
+  - id: 79a87aa6-e4bd-42fc-a5bb-5e6fbdcd62f5
+    name: Msiexec Quiet Installation
+    reason: Remote MSI fetch is paired with /q silent switches so no UI appears; co-occurring quiet msiexec indicates unattended payload deployment.
+  - id: 222720a7-047f-4054-baa5-bab9be757db0
+    name: PowerShell MSI Install via WindowsInstaller COM From Remote Location
+    reason: Scripted alternative delivery of a remote MSI via the WindowsInstaller COM object, producing the same MsiInstaller URL event.
+  - id: c7c8aa1c-5aff-408e-828b-998e3620b341
+    name: MSI Installation From Suspicious Locations
+    reason: 'Sibling MsiInstaller event: a downloaded MSI cached under Temp/Downloads/AppData then installed from that staging path.'
+  - id: 90d50722-0483-4065-8e35-57efaadd354d
+    name: Arbitrary MSI Download Via Devinit.EXE
+    reason: LOLBin that fetches and installs a remote MSI; an alternative precursor yielding the same web-sourced install.
+  - id: 87261fb2-69d0-42fe-b9de-88c6b5f65a43
+    name: Atera Agent Installation
+    reason: Remote MSIs commonly deliver RMM agents such as Atera, giving the attacker persistent interactive access right after install.
+  - id: 114e7f1c-f137-48c8-8f54-3088c24ce4b9
+    name: Remote Access Tool - AnyDesk Silent Installation
+    reason: Another remote-access payload pushed as a silent installer after a web download, establishing hands-on-keyboard access.
+  - id: 57b649ef-ff42-4fb0-8bf6-62da243a1708
+    name: Windows Defender Threat Detected
+    reason: Defender flagging the dropped installer or its payload around install time confirms the MSI was malicious, not a legitimate rollout.
+  window: 2h
   enrichment_searches:
-  # Rule-specific telemetry pivots the engine runs around an alert from this rule,
-  # scoped to the alert's host/user/IP within the window (behaviour-targeted, not a sweep).
-    - name: "Follow-on LOLBin / signed-binary-proxy execution on this host"
-      query: 'data_win_system_eventID:"1" AND data_win_eventdata_image:/.*(\\[Rr][Uu][Nn][Dd][Ll][Ll]32\.[Ee][Xx][Ee]|\\[Rr][Ee][Gg][Ss][Vv][Rr]32\.[Ee][Xx][Ee]|\\[Mm][Ss][Hh][Tt][Aa]\.[Ee][Xx][Ee]|\\[Ii][Nn][Ss][Tt][Aa][Ll][Ll][Uu][Tt][Ii][Ll]\.[Ee][Xx][Ee]|\\[Rr][Ee][Gg][Aa][Ss][Mm]\.[Ee][Xx][Ee]|\\[Rr][Ee][Gg][Ss][Vv][Cc][Ss]\.[Ee][Xx][Ee]|\\[Mm][Ss][Bb][Uu][Ii][Ll][Dd]\.[Ee][Xx][Ee]|\\[Cc][Ee][Rr][Tt][Uu][Tt][Ii][Ll]\.[Ee][Xx][Ee]|\\[Bb][Ii][Tt][Ss][Aa][Dd][Mm][Ii][Nn]\.[Ee][Xx][Ee]|\\[Ww][Mm][Ii][Cc]\.[Ee][Xx][Ee]|\\[Cc][Mm][Ss][Tt][Pp]\.[Ee][Xx][Ee]|\\[Oo][Dd][Bb][Cc][Cc][Oo][Nn][Ff]\.[Ee][Xx][Ee]|\\[Ff][Oo][Rr][Ff][Ii][Ll][Ee][Ss]\.[Ee][Xx][Ee]|\\[Pp][Cc][Aa][Ll][Uu][Aa]\.[Ee][Xx][Ee]|\\[Mm][Aa][Vv][Ii][Nn][Jj][Ee][Cc][Tt]\.[Ee][Xx][Ee]|\\[Ss][Cc][Rr][Ii][Pp][Tt][Rr][Uu][Nn][Nn][Ee][Rr]\.[Ee][Xx][Ee])/'
-      pivot_on: [host]
-      window: 1h
-    - name: "Outbound connections by script interpreters on this host"
-      query: 'data_win_system_eventID:"3" AND data_win_eventdata_image:/.*(\\[Pp][Oo][Ww][Ee][Rr][Ss][Hh][Ee][Ll][Ll]\.[Ee][Xx][Ee]|\\[Pp][Ww][Ss][Hh]\.[Ee][Xx][Ee]|\\[Pp][Oo][Ww][Ee][Rr][Ss][Hh][Ee][Ll][Ll]_[Ii][Ss][Ee]\.[Ee][Xx][Ee]|\\[Cc][Mm][Dd]\.[Ee][Xx][Ee]|\\[Ww][Ss][Cc][Rr][Ii][Pp][Tt]\.[Ee][Xx][Ee]|\\[Cc][Ss][Cc][Rr][Ii][Pp][Tt]\.[Ee][Xx][Ee]|\\[Mm][Ss][Hh][Tt][Aa]\.[Ee][Xx][Ee]|\\[Rr][Uu][Nn][Dd][Ll][Ll]32\.[Ee][Xx][Ee]|\\[Rr][Ee][Gg][Ss][Vv][Rr]32\.[Ee][Xx][Ee])/'
-      pivot_on: [host]
-      window: 1h
-    - name: "Memory/credential-dump creation & LSASS access on this host"
-      query: '((data_win_system_eventID:"1" AND data_win_eventdata_image:/.*(\\[Pp][Rr][Oo][Cc][Dd][Uu][Mm][Pp]\.[Ee][Xx][Ee]|\\[Pp][Rr][Oo][Cc][Dd][Uu][Mm][Pp]64\.[Ee][Xx][Ee]|\\[Ss][Qq][Ll][Dd][Uu][Mm][Pp][Ee][Rr]\.[Ee][Xx][Ee]|\\[Cc][Rr][Ee][Aa][Tt][Ee][Dd][Uu][Mm][Pp]\.[Ee][Xx][Ee]|\\[Rr][Dd][Rr][Ll][Ee][Aa][Kk][Dd][Ii][Aa][Gg]\.[Ee][Xx][Ee]|\\[Dd][Uu][Mm][Pp][Ee][Rr][Tt]\.[Ee][Xx][Ee]|\\[Nn][Aa][Nn][Oo][Dd][Uu][Mm][Pp]\.[Ee][Xx][Ee]|\\[Aa][Vv][Dd][Uu][Mm][Pp]\.[Ee][Xx][Ee])/) OR (data_win_system_eventID:"1" AND (data_win_eventdata_commandLine:/.*[Cc][Oo][Mm][Ss][Vv][Cc][Ss]\.[Dd][Ll][Ll].*/ OR data_win_eventdata_commandLine:/.*[Mm][Ii][Nn][Ii][Dd][Uu][Mm][Pp].*/ OR data_win_eventdata_commandLine:/.*[Dd][Uu][Mm][Pp][Ee][Rr][Tt].*/ OR data_win_eventdata_commandLine:/.*[Nn][Aa][Nn][Oo][Dd][Uu][Mm][Pp].*/ OR data_win_eventdata_commandLine:/.*[Ll][Ss][Aa][Ss][Ss].*/ OR data_win_eventdata_commandLine:/.*[Ss][Ee][Kk][Uu][Rr][Ll][Ss][Aa].*/ OR data_win_eventdata_commandLine:/.*[Nn][Tt][Dd][Ss]\.[Dd][Ii][Tt].*/ OR data_win_eventdata_commandLine:/.*[Nn][Tt][Dd][Ss][Uu][Tt][Ii][Ll].*/)) OR (data_win_system_eventID:"10" AND data_win_eventdata_targetImage:/.*(\\[Ll][Ss][Aa][Ss][Ss]\.[Ee][Xx][Ee])/))'
-      pivot_on: [host]
-      window: 1h
+  # Behaviour-targeted hunts the engine runs around the alert (not a sweep).
+  - name: msiexec launched with remote URL or silent switch
+    query: data_win_system_eventID:"1" AND data_win_eventdata_image:/.*(\\[Mm][Ss][Ii][Ee][Xx][Ee][Cc]\.[Ee][Xx][Ee])/ AND (data_win_eventdata_commandLine:/.*[Hh][Tt][Tt][Pp][Ss]?:\/\/.*/ OR data_win_eventdata_commandLine:/.*[Qq][Uu][Ii][Ee][Tt].*/ OR data_win_eventdata_commandLine:/.* \/[Qq][Nn]?[Bb]?( .*)?/)
+    pivot_on:
+    - host
+    window: 2h
+  - name: Script/Office/downloader parent invoking an MSI install
+    query: data_win_system_eventID:"1" AND data_win_eventdata_parentImage:/.*(\\[Pp][Oo][Ww][Ee][Rr][Ss][Hh][Ee][Ll][Ll]|\\[Pp][Ww][Ss][Hh]|\\[Cc][Mm][Dd]|\\[Ww][Ss][Cc][Rr][Ii][Pp][Tt]|\\[Cc][Ss][Cc][Rr][Ii][Pp][Tt]|\\[Mm][Ss][Hh][Tt][Aa]|\\[Ww][Ii][Nn][Ww][Oo][Rr][Dd]|\\[Ee][Xx][Cc][Ee][Ll]|\\[Cc][Uu][Rr][Ll]|\\[Bb][Ii][Tt][Ss][Aa][Dd][Mm][Ii][Nn]|\\[Rr][Uu][Nn][Dd][Ll][Ll]32).*/ AND data_win_eventdata_commandLine:/.*([Mm][Ss][Ii][Ee][Xx][Ee][Cc]|\.[Mm][Ss][Ii]).*/
+    pivot_on:
+    - host
+    window: 2h
+  - name: Suspicious children of msiexec (MSI custom action payload)
+    query: data_win_system_eventID:"1" AND data_win_eventdata_parentImage:/.*\\[Mm][Ss][Ii][Ee][Xx][Ee][Cc]\.[Ee][Xx][Ee]/ AND (data_win_eventdata_image:/.*(\\[Cc][Mm][Dd]\.[Ee][Xx][Ee]|\\[Pp][Oo][Ww][Ee][Rr][Ss][Hh][Ee][Ll][Ll]\.[Ee][Xx][Ee]|\\[Pp][Ww][Ss][Hh]\.[Ee][Xx][Ee]|\\[Rr][Uu][Nn][Dd][Ll][Ll]32\.[Ee][Xx][Ee]|\\[Rr][Ee][Gg][Ss][Vv][Rr]32\.[Ee][Xx][Ee]|\\[Ww][Ss][Cc][Rr][Ii][Pp][Tt]\.[Ee][Xx][Ee]|\\[Cc][Ss][Cc][Rr][Ii][Pp][Tt]\.[Ee][Xx][Ee]|\\[Mm][Ss][Hh][Tt][Aa]\.[Ee][Xx][Ee]|\\[Ss][Cc]\.[Ee][Xx][Ee]|\\[Ss][Cc][Hh][Tt][Aa][Ss][Kk][Ss]\.[Ee][Xx][Ee]|\\[Cc][Ee][Rr][Tt][Uu][Tt][Ii][Ll]\.[Ee][Xx][Ee])/ OR data_win_eventdata_image:/.*\\([Tt][Ee][Mm][Pp]|[Aa][Pp][Pp][Dd][Aa][Tt][Aa]|[Pp][Rr][Oo][Gg][Rr][Aa][Mm][Dd][Aa][Tt][Aa])\\.*/)
+    pivot_on:
+    - host
+    window: 2h
+  - name: Outbound network or DNS activity from msiexec
+    query: (data_win_system_eventID:"3" OR data_win_system_eventID:"22") AND data_win_eventdata_image:/.*(\\[Mm][Ss][Ii][Ee][Xx][Ee][Cc]\.[Ee][Xx][Ee])/
+    pivot_on:
+    - host
+    window: 2h
+  - name: Persistence or RMM agent set up after MSI install
+    query: (data_win_system_eventID:"1" AND (data_win_eventdata_commandLine:/.*[Ss][Cc][Hh][Tt][Aa][Ss][Kk][Ss].*\/[Cc][Rr][Ee][Aa][Tt][Ee].*/ OR data_win_eventdata_commandLine:/.*[Ss][Cc]( |\.[Ee][Xx][Ee] )+[Cc][Rr][Ee][Aa][Tt][Ee].*/ OR data_win_eventdata_image:/.*(\\[Aa][Nn][Yy][Dd][Ee][Ss][Kk]\.[Ee][Xx][Ee]|\\[Ss][Cc][Rr][Ee][Ee][Nn][Cc][Oo][Nn][Nn][Ee][Cc][Tt]\.[Cc][Ll][Ii][Ee][Nn][Tt][Ss][Ee][Rr][Vv][Ii][Cc][Ee]\.[Ee][Xx][Ee]|\\[Aa][Tt][Ee][Rr][Aa][Aa][Gg][Ee][Nn][Tt]\.[Ee][Xx][Ee]|\\[Mm][Ee][Ss][Hh][Aa][Gg][Ee][Nn][Tt]\.[Ee][Xx][Ee]|\\[Tt][Ee][Aa][Mm][Vv][Ii][Ee][Ww][Ee][Rr]_[Ss][Ee][Rr][Vv][Ii][Cc][Ee]\.[Ee][Xx][Ee])/)) OR (data_win_system_eventID:"13" AND data_win_eventdata_image:/.*(\\[Mm][Ss][Ii][Ee][Xx][Ee][Cc]\.[Ee][Xx][Ee])/ AND data_win_eventdata_targetObject:/.*\\([Rr][Uu][Nn]|[Ss][Ee][Rr][Vv][Ii][Cc][Ee][Ss])\\.*/)
+    pivot_on:
+    - host
+    window: 4h

@@ -146,44 +146,58 @@ graylog:
   query: data_win_system_eventID:"4103" AND data_win_eventdata_contextInfo:/.*[Ss][Yy][Ss][Tt][Ee][Mm]\.[Nn][Ee][Tt]\.[Ww][Ee][Bb][Cc][Ll][Ii][Ee][Nn][Tt].*/ AND (data_win_eventdata_contextInfo:/.*\.[Dd][Oo][Ww][Nn][Ll][Oo][Aa][Dd][Ff][Ii][Ll][Ee]\(.*/ OR data_win_eventdata_contextInfo:/.*\.[Dd][Oo][Ww][Nn][Ll][Oo][Aa][Dd][Ss][Tt][Rr][Ii][Nn][Gg]\(.*/)
 
 correlation:
-  # Authored by the correlation engine for review. Related CoPilot Searches to run
-  # around an alert from this rule, scoped to the same host/user/IP within the window.
+  # Authored per-rule (behaviour-researched) for the correlation engine. Related CoPilot
+  # Searches + telemetry pivots to run around an alert, scoped to its host/user/ip/domain.
   related_rules:
-    - id: ec570e53-4c76-45a9-804d-dc3f355ff7a7
-      name: "7Zip Compressing Dump Files"
-      reason: "next kill-chain tactic: Collection"
-    - id: 0a1255c5-d732-4b62-ac02-b5152d34fb83
-      name: "ADExplorer Writing Complete AD Snapshot Into .dat File"
-      reason: "next kill-chain tactic: Discovery"
-    - id: 1ea13e8c-03ea-409b-877d-ce5c3d2c1cb3
-      name: "ADFS Database Named Pipe Connection By Uncommon Tool"
-      reason: "next kill-chain tactic: Collection"
-    - id: 75bf09fa-1dd7-4d18-9af9-dd9e492562eb
-      name: "ADSI-Cache File Creation By Uncommon Tool"
-      reason: "next kill-chain tactic: Command and Control"
-    - id: 33a2d1dd-f3b0-40bd-8baf-7974468927cc
-      name: "APT PRIVATELOG Image Load Pattern"
-      reason: "next kill-chain tactic: Privilege Escalation"
-    - id: 9aa01d62-7667-4d3b-acb8-8cb5103e2014
-      name: "APT27 - Emissary Panda Activity"
-      reason: "next kill-chain tactic: Execution"
+  - id: e0d6c087-2d1c-47fd-8799-3904103c5a98
+    name: AMSI Bypass Pattern Assembly GetType
+    reason: Download cradles are commonly preceded in the same session by an AMSI bypass that blinds script scanning before the payload is fetched.
+  - id: bbb80e91-5746-4fbe-8898-122e2cafdbf4
+    name: Suspicious PowerShell Invocations - Generic - PowerShell Module
+    reason: Same 4103 module-logging telemetry; generic cradle/obfuscation invocations (IEX, encoded, hidden) in the same pipeline often co-occur with WebClient downloads.
+  - id: 3c7d1587-3b13-439f-9941-7d14313dbdfe
+    name: Potential COM Objects Download Cradles Usage - PS Script
+    reason: Alternate download cradle (COM objects) used by the same operator when WebClient is blocked or alerted on; confirms staged-download intent in script blocks.
+  - id: 85b0b087-eddf-4a2b-b033-d771fa2b9775
+    name: PowerShell Download and Execution Cradles
+    reason: 'Process-creation view of the same cradle: the powershell.exe command line that produced the WebClient DownloadString/DownloadFile call, revealing parent and full URL.'
+  - id: ddcd88cb-7f62-4ce5-86f9-1704190feb0a
+    name: Potential In-Memory Execution Using Reflection.Assembly
+    reason: DownloadString/DownloadFile output is frequently loaded straight into memory via Reflection.Assembly::Load, the usual next step for a fileless payload.
+  - id: 17769c90-230e-488b-a463-e05c08e9d48f
+    name: Powershell Defender Exclusion
+    reason: After a payload lands, attackers add Defender exclusions via PowerShell to protect the dropped file from AV.
+  - id: 9c5037d1-c568-49b3-88c7-9846a5bdc2be
+    name: Suspicious Run Key from Download
+    reason: A downloaded file being registered in a Run key is the direct persistence follow-on to a PowerShell DownloadFile.
+  - id: b6e04788-29e1-4557-bb14-77f761848ab8
+    name: Potentially Suspicious File Download From File Sharing Domain Via PowerShell.EXE
+    reason: Same download behavior viewed from process creation, flagging when the source is a file-sharing/paste host typical of payload staging.
   window: 1h
   enrichment_searches:
-  # Rule-specific telemetry pivots the engine runs around an alert from this rule,
-  # scoped to the alert's host/user/IP within the window (behaviour-targeted, not a sweep).
-    - name: "Outbound connections by script interpreters on this host"
-      query: 'data_win_system_eventID:"3" AND data_win_eventdata_image:/.*(\\[Pp][Oo][Ww][Ee][Rr][Ss][Hh][Ee][Ll][Ll]\.[Ee][Xx][Ee]|\\[Pp][Ww][Ss][Hh]\.[Ee][Xx][Ee]|\\[Pp][Oo][Ww][Ee][Rr][Ss][Hh][Ee][Ll][Ll]_[Ii][Ss][Ee]\.[Ee][Xx][Ee]|\\[Cc][Mm][Dd]\.[Ee][Xx][Ee]|\\[Ww][Ss][Cc][Rr][Ii][Pp][Tt]\.[Ee][Xx][Ee]|\\[Cc][Ss][Cc][Rr][Ii][Pp][Tt]\.[Ee][Xx][Ee]|\\[Mm][Ss][Hh][Tt][Aa]\.[Ee][Xx][Ee]|\\[Rr][Uu][Nn][Dd][Ll][Ll]32\.[Ee][Xx][Ee]|\\[Rr][Ee][Gg][Ss][Vv][Rr]32\.[Ee][Xx][Ee])/'
-      pivot_on: [host]
-      window: 1h
-    - name: "Autostart persistence written on this host (Run keys, services, IFEO)"
-      query: '(data_win_system_eventID:"12" OR data_win_system_eventID:"13") AND (data_win_eventdata_targetObject:/.*[Cc][Uu][Rr][Rr][Ee][Nn][Tt][Vv][Ee][Rr][Ss][Ii][Oo][Nn]\\[Rr][Uu][Nn].*/ OR data_win_eventdata_targetObject:/.*[Cc][Uu][Rr][Rr][Ee][Nn][Tt][Vv][Ee][Rr][Ss][Ii][Oo][Nn]\\[Rr][Uu][Nn][Oo][Nn][Cc][Ee].*/ OR data_win_eventdata_targetObject:/.*[Cc][Uu][Rr][Rr][Ee][Nn][Tt][Cc][Oo][Nn][Tt][Rr][Oo][Ll][Ss][Ee][Tt]\\[Ss][Ee][Rr][Vv][Ii][Cc][Ee][Ss]\\.*/ OR data_win_eventdata_targetObject:/.*[Ii][Mm][Aa][Gg][Ee] [Ff][Ii][Ll][Ee] [Ee][Xx][Ee][Cc][Uu][Tt][Ii][Oo][Nn] [Oo][Pp][Tt][Ii][Oo][Nn][Ss]\\.*/ OR data_win_eventdata_targetObject:/.*[Ww][Ii][Nn][Ll][Oo][Gg][Oo][Nn]\\[Ss][Hh][Ee][Ll][Ll].*/ OR data_win_eventdata_targetObject:/.*[Ww][Ii][Nn][Ll][Oo][Gg][Oo][Nn]\\[Uu][Ss][Ee][Rr][Ii][Nn][Ii][Tt].*/ OR data_win_eventdata_targetObject:/.*[Cc][Uu][Rr][Rr][Ee][Nn][Tt][Vv][Ee][Rr][Ss][Ii][Oo][Nn]\\[Ee][Xx][Pp][Ll][Oo][Rr][Ee][Rr]\\[Rr][Uu][Nn].*/ OR data_win_eventdata_targetObject:/.*[Pp][Oo][Ll][Ii][Cc][Ii][Ee][Ss]\\[Ee][Xx][Pp][Ll][Oo][Rr][Ee][Rr]\\[Rr][Uu][Nn].*/ OR data_win_eventdata_targetObject:/.*[Cc][Uu][Rr][Rr][Ee][Nn][Tt][Vv][Ee][Rr][Ss][Ii][Oo][Nn]\\[Ww][Ii][Nn][Dd][Oo][Ww][Ss]\\[Ll][Oo][Aa][Dd].*/)'
-      pivot_on: [host]
-      window: 4h
-    - name: "Download / AMSI-bypass / encoded script blocks on this host"
-      query: 'data_win_system_eventID:"4104" AND (data_win_eventdata_scriptBlockText:/.*[Dd][Oo][Ww][Nn][Ll][Oo][Aa][Dd][Ss][Tt][Rr][Ii][Nn][Gg].*/ OR data_win_eventdata_scriptBlockText:/.*[Dd][Oo][Ww][Nn][Ll][Oo][Aa][Dd][Ff][Ii][Ll][Ee].*/ OR data_win_eventdata_scriptBlockText:/.*[Ii][Nn][Vv][Oo][Kk][Ee]-[Ww][Ee][Bb][Rr][Ee][Qq][Uu][Ee][Ss][Tt].*/ OR data_win_eventdata_scriptBlockText:/.*[Nn][Ee][Tt]\.[Ww][Ee][Bb][Cc][Ll][Ii][Ee][Nn][Tt].*/ OR data_win_eventdata_scriptBlockText:/.*[Ff][Rr][Oo][Mm][Bb][Aa][Ss][Ee]64[Ss][Tt][Rr][Ii][Nn][Gg].*/ OR data_win_eventdata_scriptBlockText:/.*[Ii][Ee][Xx].*/ OR data_win_eventdata_scriptBlockText:/.*[Ii][Nn][Vv][Oo][Kk][Ee]-[Ee][Xx][Pp][Rr][Ee][Ss][Ss][Ii][Oo][Nn].*/ OR data_win_eventdata_scriptBlockText:/.*[Ss][Tt][Aa][Rr][Tt]-[Bb][Ii][Tt][Ss][Tt][Rr][Aa][Nn][Ss][Ff][Ee][Rr].*/ OR data_win_eventdata_scriptBlockText:/.*[Aa][Mm][Ss][Ii][Uu][Tt][Ii][Ll][Ss].*/ OR data_win_eventdata_scriptBlockText:/.*-[Ee][Nn][Cc].*/ OR data_win_eventdata_scriptBlockText:/.*-[Ee][Nn][Cc][Oo][Dd][Ee][Dd][Cc][Oo][Mm][Mm][Aa][Nn][Dd].*/ OR data_win_eventdata_scriptBlockText:/.*[Rr][Ee][Ff][Ll][Ee][Cc][Tt][Ii][Oo][Nn]\.[Aa][Ss][Ss][Ee][Mm][Bb][Ll][Yy].*/)'
-      pivot_on: [host]
-      window: 1h
-    - name: "Follow-on LOLBin / signed-binary-proxy execution on this host"
-      query: 'data_win_system_eventID:"1" AND data_win_eventdata_image:/.*(\\[Rr][Uu][Nn][Dd][Ll][Ll]32\.[Ee][Xx][Ee]|\\[Rr][Ee][Gg][Ss][Vv][Rr]32\.[Ee][Xx][Ee]|\\[Mm][Ss][Hh][Tt][Aa]\.[Ee][Xx][Ee]|\\[Ii][Nn][Ss][Tt][Aa][Ll][Ll][Uu][Tt][Ii][Ll]\.[Ee][Xx][Ee]|\\[Rr][Ee][Gg][Aa][Ss][Mm]\.[Ee][Xx][Ee]|\\[Rr][Ee][Gg][Ss][Vv][Cc][Ss]\.[Ee][Xx][Ee]|\\[Mm][Ss][Bb][Uu][Ii][Ll][Dd]\.[Ee][Xx][Ee]|\\[Cc][Ee][Rr][Tt][Uu][Tt][Ii][Ll]\.[Ee][Xx][Ee]|\\[Bb][Ii][Tt][Ss][Aa][Dd][Mm][Ii][Nn]\.[Ee][Xx][Ee]|\\[Ww][Mm][Ii][Cc]\.[Ee][Xx][Ee]|\\[Cc][Mm][Ss][Tt][Pp]\.[Ee][Xx][Ee]|\\[Oo][Dd][Bb][Cc][Cc][Oo][Nn][Ff]\.[Ee][Xx][Ee]|\\[Ff][Oo][Rr][Ff][Ii][Ll][Ee][Ss]\.[Ee][Xx][Ee]|\\[Pp][Cc][Aa][Ll][Uu][Aa]\.[Ee][Xx][Ee]|\\[Mm][Aa][Vv][Ii][Nn][Jj][Ee][Cc][Tt]\.[Ee][Xx][Ee]|\\[Ss][Cc][Rr][Ii][Pp][Tt][Rr][Uu][Nn][Nn][Ee][Rr]\.[Ee][Xx][Ee])/'
-      pivot_on: [host]
-      window: 1h
+  # Behaviour-targeted hunts the engine runs around the alert (not a sweep).
+  - name: Network connections initiated by PowerShell (download destination)
+    query: data_win_system_eventID:"3" AND data_win_eventdata_image:/.*[Pp][Oo][Ww][Ee][Rr][Ss][Hh][Ee][Ll][Ll].*/
+    pivot_on:
+    - host
+    window: 1h
+  - name: DNS lookups by PowerShell for payload host
+    query: data_win_system_eventID:"22" AND data_win_eventdata_image:/.*[Pp][Oo][Ww][Ee][Rr][Ss][Hh][Ee][Ll][Ll].*/
+    pivot_on:
+    - host
+    window: 1h
+  - name: Files created by PowerShell in staging locations
+    query: data_win_system_eventID:"11" AND data_win_eventdata_image:/.*[Pp][Oo][Ww][Ee][Rr][Ss][Hh][Ee][Ll][Ll].*/ AND data_win_eventdata_targetFilename:/.*([Tt][Ee][Mm][Pp]|[Aa][Pp][Pp][Dd][Aa][Tt][Aa]|[Pp][Uu][Bb][Ll][Ii][Cc]|[Pp][Rr][Oo][Gg][Rr][Aa][Mm][Dd][Aa][Tt][Aa]).*\.(exe|dll|ps1|bat|vbs|js|hta|scr)/
+    pivot_on:
+    - host
+    window: 2h
+  - name: Script blocks with cradle, in-memory load or AMSI tampering
+    query: data_win_system_eventID:"4104" AND (data_win_eventdata_scriptBlockText:*DownloadString* OR data_win_eventdata_scriptBlockText:*DownloadFile* OR data_win_eventdata_scriptBlockText:*Reflection.Assembly* OR data_win_eventdata_scriptBlockText:*AmsiUtils* OR data_win_eventdata_scriptBlockText:*FromBase64String*)
+    pivot_on:
+    - host
+    window: 1h
+  - name: Child processes launched by PowerShell after download
+    query: data_win_system_eventID:"1" AND data_win_eventdata_parentImage:/.*[Pp][Oo][Ww][Ee][Rr][Ss][Hh][Ee][Ll][Ll].*/ AND NOT data_win_eventdata_image:/.*[Cc][Oo][Nn][Hh][Oo][Ss][Tt]\.[Ee][Xx][Ee]/
+    pivot_on:
+    - host
+    window: 2h

@@ -136,41 +136,58 @@ graylog:
   query: data_win_system_eventID:"1033" AND data_win_system_providerName:/[Mm][Ss][Ii][Ii][Nn][Ss][Tt][Aa][Ll][Ll][Ee][Rr]/ AND data_win_eventdata_data:/.*[Tt][Ee][Ss][Tt] [Pp][Kk][Gg].*/
 
 correlation:
-  # Authored by the correlation engine for review. Related CoPilot Searches to run
-  # around an alert from this rule, scoped to the same host/user/IP within the window.
+  # Authored per-rule (behaviour-researched) for the correlation engine. Related CoPilot
+  # Searches + telemetry pivots to run around an alert, scoped to its host/user/ip/domain.
   related_rules:
-    - id: 0255a820-e564-4e40-af2b-6ac61160335c
-      name: "A New Trust Was Created To A Domain"
-      reason: "next kill-chain tactic: Persistence"
-    - id: 35ba1d85-724d-42a3-889f-2e2362bcaf23
-      name: "AD Privileged Users or Groups Reconnaissance"
-      reason: "next kill-chain tactic: Discovery"
-    - id: 9eb99343-d336-4020-a3cd-67f3819e68ee
-      name: "Account Tampering - Suspicious Failed Logon Reasons"
-      reason: "next kill-chain tactic: Initial Access"
-    - id: 17d619c1-e020-4347-957e-1d1207455c93
-      name: "Active Directory Replication from Non Machine Account"
-      reason: "next kill-chain tactic: Credential Access"
-    - id: 300bac00-e041-4ee2-9c36-e262656a6ecc
-      name: "Active Directory User Backdoors"
-      reason: "next kill-chain tactic: Persistence"
+  - id: c7c8aa1c-5aff-408e-828b-998e3620b341
+    name: MSI Installation From Suspicious Locations
+    reason: The PoC drives a crafted MSI (product 'test pkg'); the same attacker-staged package often runs from a user-writable path such as Temp or Downloads, so this confirms the dropper stage.
+  - id: 5594e67a-7f92-4a04-b65d-1a42fd824a60
+    name: MSI Installation From Web
+    reason: 'Precursor: the exploit MSI/binary is frequently downloaded to the host just before the Windows Installer rollback abuse is triggered.'
+  - id: 79a87aa6-e4bd-42fc-a5bb-5e6fbdcd62f5
+    name: Msiexec Quiet Installation
+    reason: The same msiexec /i /q invocation that produces the MsiInstaller 1033 event; process-creation view of the exploit trigger with its command line.
+  - id: cd951fdc-4b2f-47f5-ba99-a33bf61e3770
+    name: Always Install Elevated Windows Installer
+    reason: Alternative Windows Installer privilege-escalation route; seeing both means the actor is trying multiple installer-based paths to SYSTEM.
+  - id: 1e53dd56-8d83-4eb4-a43e-b790a05510aa
+    name: Always Install Elevated MSI Spawned Cmd And Powershell
+    reason: 'Outcome of installer-based LPE: msiexec running as SYSTEM spawns cmd/powershell, the same elevated-shell result the CVE-2021-41379 exploit produces.'
+  - id: 178e615d-e666-498b-9630-9ed363038101
+    name: Elevated System Shell Spawned From Uncommon Parent Location
+    reason: The exploit overwrites an elevation service binary so a SYSTEM cmd shell is spawned from an unusual parent; this detects that resulting shell.
+  - id: 97a80ec7-0e2f-4d05-9ef4-65760e634f6b
+    name: Security Privileges Enumeration Via Whoami.EXE
+    reason: Immediately after a successful LPE the operator runs whoami /priv or /all in the new SYSTEM shell to confirm elevation.
+  - id: 89ca78fd-b37c-4310-b3d3-81a023f83936
+    name: Schtasks Creation Or Modification With SYSTEM Privileges
+    reason: 'Likely next step with SYSTEM rights: persistence through a SYSTEM scheduled task.'
   window: 1h
   enrichment_searches:
-  # Rule-specific telemetry pivots the engine runs around an alert from this rule,
-  # scoped to the alert's host/user/IP within the window (behaviour-targeted, not a sweep).
-    - name: "Exploited-service child processes on this host"
-      query: 'data_win_system_eventID:"1" AND data_win_eventdata_parentImage:/.*(\\[Ww]3[Ww][Pp]\.[Ee][Xx][Ee]|\\[Hh][Tt][Tt][Pp][Dd]\.[Ee][Xx][Ee]|\\[Nn][Gg][Ii][Nn][Xx]\.[Ee][Xx][Ee]|\\[Pp][Hh][Pp]-[Cc][Gg][Ii]\.[Ee][Xx][Ee]|\\[Pp][Hh][Pp]\.[Ee][Xx][Ee]|\\[Tt][Oo][Mm][Cc][Aa][Tt]9\.[Ee][Xx][Ee]|\\[Jj][Aa][Vv][Aa]\.[Ee][Xx][Ee]|\\[Ss][Qq][Ll][Ss][Ee][Rr][Vv][Rr]\.[Ee][Xx][Ee])/'
-      pivot_on: [host]
-      window: 1h
-    - name: "Autostart persistence written on this host (Run keys, services, IFEO)"
-      query: '(data_win_system_eventID:"12" OR data_win_system_eventID:"13") AND (data_win_eventdata_targetObject:/.*[Cc][Uu][Rr][Rr][Ee][Nn][Tt][Vv][Ee][Rr][Ss][Ii][Oo][Nn]\\[Rr][Uu][Nn].*/ OR data_win_eventdata_targetObject:/.*[Cc][Uu][Rr][Rr][Ee][Nn][Tt][Vv][Ee][Rr][Ss][Ii][Oo][Nn]\\[Rr][Uu][Nn][Oo][Nn][Cc][Ee].*/ OR data_win_eventdata_targetObject:/.*[Cc][Uu][Rr][Rr][Ee][Nn][Tt][Cc][Oo][Nn][Tt][Rr][Oo][Ll][Ss][Ee][Tt]\\[Ss][Ee][Rr][Vv][Ii][Cc][Ee][Ss]\\.*/ OR data_win_eventdata_targetObject:/.*[Ii][Mm][Aa][Gg][Ee] [Ff][Ii][Ll][Ee] [Ee][Xx][Ee][Cc][Uu][Tt][Ii][Oo][Nn] [Oo][Pp][Tt][Ii][Oo][Nn][Ss]\\.*/ OR data_win_eventdata_targetObject:/.*[Ww][Ii][Nn][Ll][Oo][Gg][Oo][Nn]\\[Ss][Hh][Ee][Ll][Ll].*/ OR data_win_eventdata_targetObject:/.*[Ww][Ii][Nn][Ll][Oo][Gg][Oo][Nn]\\[Uu][Ss][Ee][Rr][Ii][Nn][Ii][Tt].*/ OR data_win_eventdata_targetObject:/.*[Cc][Uu][Rr][Rr][Ee][Nn][Tt][Vv][Ee][Rr][Ss][Ii][Oo][Nn]\\[Ee][Xx][Pp][Ll][Oo][Rr][Ee][Rr]\\[Rr][Uu][Nn].*/ OR data_win_eventdata_targetObject:/.*[Pp][Oo][Ll][Ii][Cc][Ii][Ee][Ss]\\[Ee][Xx][Pp][Ll][Oo][Rr][Ee][Rr]\\[Rr][Uu][Nn].*/ OR data_win_eventdata_targetObject:/.*[Cc][Uu][Rr][Rr][Ee][Nn][Tt][Vv][Ee][Rr][Ss][Ii][Oo][Nn]\\[Ww][Ii][Nn][Dd][Oo][Ww][Ss]\\[Ll][Oo][Aa][Dd].*/)'
-      pivot_on: [host]
-      window: 4h
-    - name: "Follow-on LOLBin / signed-binary-proxy execution on this host"
-      query: 'data_win_system_eventID:"1" AND data_win_eventdata_image:/.*(\\[Rr][Uu][Nn][Dd][Ll][Ll]32\.[Ee][Xx][Ee]|\\[Rr][Ee][Gg][Ss][Vv][Rr]32\.[Ee][Xx][Ee]|\\[Mm][Ss][Hh][Tt][Aa]\.[Ee][Xx][Ee]|\\[Ii][Nn][Ss][Tt][Aa][Ll][Ll][Uu][Tt][Ii][Ll]\.[Ee][Xx][Ee]|\\[Rr][Ee][Gg][Aa][Ss][Mm]\.[Ee][Xx][Ee]|\\[Rr][Ee][Gg][Ss][Vv][Cc][Ss]\.[Ee][Xx][Ee]|\\[Mm][Ss][Bb][Uu][Ii][Ll][Dd]\.[Ee][Xx][Ee]|\\[Cc][Ee][Rr][Tt][Uu][Tt][Ii][Ll]\.[Ee][Xx][Ee]|\\[Bb][Ii][Tt][Ss][Aa][Dd][Mm][Ii][Nn]\.[Ee][Xx][Ee]|\\[Ww][Mm][Ii][Cc]\.[Ee][Xx][Ee]|\\[Cc][Mm][Ss][Tt][Pp]\.[Ee][Xx][Ee]|\\[Oo][Dd][Bb][Cc][Cc][Oo][Nn][Ff]\.[Ee][Xx][Ee]|\\[Ff][Oo][Rr][Ff][Ii][Ll][Ee][Ss]\.[Ee][Xx][Ee]|\\[Pp][Cc][Aa][Ll][Uu][Aa]\.[Ee][Xx][Ee]|\\[Mm][Aa][Vv][Ii][Nn][Jj][Ee][Cc][Tt]\.[Ee][Xx][Ee]|\\[Ss][Cc][Rr][Ii][Pp][Tt][Rr][Uu][Nn][Nn][Ee][Rr]\.[Ee][Xx][Ee])/'
-      pivot_on: [host]
-      window: 1h
-    - name: "Outbound connections by script interpreters on this host"
-      query: 'data_win_system_eventID:"3" AND data_win_eventdata_image:/.*(\\[Pp][Oo][Ww][Ee][Rr][Ss][Hh][Ee][Ll][Ll]\.[Ee][Xx][Ee]|\\[Pp][Ww][Ss][Hh]\.[Ee][Xx][Ee]|\\[Pp][Oo][Ww][Ee][Rr][Ss][Hh][Ee][Ll][Ll]_[Ii][Ss][Ee]\.[Ee][Xx][Ee]|\\[Cc][Mm][Dd]\.[Ee][Xx][Ee]|\\[Ww][Ss][Cc][Rr][Ii][Pp][Tt]\.[Ee][Xx][Ee]|\\[Cc][Ss][Cc][Rr][Ii][Pp][Tt]\.[Ee][Xx][Ee]|\\[Mm][Ss][Hh][Tt][Aa]\.[Ee][Xx][Ee]|\\[Rr][Uu][Nn][Dd][Ll][Ll]32\.[Ee][Xx][Ee]|\\[Rr][Ee][Gg][Ss][Vv][Rr]32\.[Ee][Xx][Ee])/'
-      pivot_on: [host]
-      window: 1h
+  # Behaviour-targeted hunts the engine runs around the alert (not a sweep).
+  - name: Windows Installer (msiexec) launched from user-writable path or with quiet switch
+    query: data_win_system_eventID:"1" AND data_win_eventdata_image:/.*[Mm][Ss][Ii][Ee][Xx][Ee][Cc]\.[Ee][Xx][Ee]/ AND data_win_eventdata_commandLine:/.*(\\[Tt][Ee][Mm][Pp]\\|\\[Dd][Oo][Ww][Nn][Ll][Oo][Aa][Dd][Ss]\\|\\[Aa][Pp][Pp][Dd][Aa][Tt][Aa]\\|\\[Pp][Uu][Bb][Ll][Ii][Cc]\\|[ ]\/[Qq]|[ ]\/[Pp][Aa][Ss][Ss][Ii][Vv][Ee]).*/
+    pivot_on:
+    - host
+    window: 1h
+  - name: Edge elevation service binary replaced or spawning child processes (exploit target)
+    query: (data_win_system_eventID:"11" AND data_win_eventdata_targetFilename:/.*[Ee][Ll][Ee][Vv][Aa][Tt][Ii][Oo][Nn]_[Ss][Ee][Rr][Vv][Ii][Cc][Ee]\.[Ee][Xx][Ee]/) OR (data_win_system_eventID:"1" AND data_win_eventdata_parentImage:/.*[Ee][Ll][Ee][Vv][Aa][Tt][Ii][Oo][Nn]_[Ss][Ee][Rr][Vv][Ii][Cc][Ee]\.[Ee][Xx][Ee]/)
+    pivot_on:
+    - host
+    window: 1h
+  - name: SYSTEM shell and privilege confirmation commands after exploitation
+    query: data_win_system_eventID:"1" AND data_win_eventdata_user:/.*[Ss][Yy][Ss][Tt][Ee][Mm]/ AND data_win_eventdata_image:/.*\\([Cc][Mm][Dd]|[Pp][Oo][Ww][Ee][Rr][Ss][Hh][Ee][Ll][Ll]|[Ww][Hh][Oo][Aa][Mm][Ii])\.[Ee][Xx][Ee]/
+    pivot_on:
+    - host
+    window: 2h
+  - name: Local account creation or admin group changes after privilege escalation
+    query: data_win_system_eventID:"1" AND data_win_eventdata_commandLine:/.*([Nn][Ee][Tt]1? +([Uu][Ss][Ee][Rr]|[Ll][Oo][Cc][Aa][Ll][Gg][Rr][Oo][Uu][Pp]).*(\/[Aa][Dd][Dd]|[Aa][Dd][Mm][Ii][Nn][Ii][Ss][Tt][Rr][Aa][Tt][Oo][Rr][Ss])).*/
+    pivot_on:
+    - host
+    window: 4h
+  - name: SYSTEM-level persistence via scheduled task or new service
+    query: data_win_system_eventID:"1" AND data_win_eventdata_commandLine:/.*([Ss][Cc][Hh][Tt][Aa][Ss][Kk][Ss].*\/[Cc][Rr][Ee][Aa][Tt][Ee].*\/[Rr][Uu] +["']?[Ss][Yy][Ss][Tt][Ee][Mm]|[Ss][Cc]\.[Ee][Xx][Ee].* [Cc][Rr][Ee][Aa][Tt][Ee] ).*/
+    pivot_on:
+    - host
+    window: 4h

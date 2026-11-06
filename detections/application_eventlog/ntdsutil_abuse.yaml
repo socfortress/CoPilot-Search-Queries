@@ -145,35 +145,58 @@ graylog:
   query: data_win_system_providerName:/[Ee][Ss][Ee][Nn][Tt]/ AND (data_win_system_eventID:"216" OR data_win_system_eventID:"325" OR data_win_system_eventID:"326" OR data_win_system_eventID:"327") AND data_win_eventdata_data:/.*[Nn][Tt][Dd][Ss]\.[Dd][Ii][Tt].*/
 
 correlation:
-  # Authored by the correlation engine for review. Related CoPilot Searches to run
-  # around an alert from this rule, scoped to the same host/user/IP within the window.
+  # Authored per-rule (behaviour-researched) for the correlation engine. Related CoPilot
+  # Searches + telemetry pivots to run around an alert, scoped to its host/user/ip/domain.
   related_rules:
-    - id: 35ba1d85-724d-42a3-889f-2e2362bcaf23
-      name: "AD Privileged Users or Groups Reconnaissance"
-      reason: "next kill-chain tactic: Discovery"
-    - id: 17d619c1-e020-4347-957e-1d1207455c93
-      name: "Active Directory Replication from Non Machine Account"
-      reason: "next kill-chain tactic: Credential Access"
-    - id: 87261fb2-69d0-42fe-b9de-88c6b5f65a43
-      name: "Atera Agent Installation"
-      reason: "next kill-chain tactic: Command and Control"
+  - id: 2afafd61-6aae-4df4-baed-139fa1f4c345
+    name: Invocation of Active Directory Diagnostic Tool (ntdsutil.exe)
+    reason: Process-creation view of the same ntdsutil.exe execution whose ESENT database-access events fired this alert; confirms the operator and command line.
+  - id: da63bc76-61ae-11eb-ae93-0242ac130002
+    name: Ntdsutil Export NTDS
+    reason: The 'ac i ntds' + 'ifm' + 'create full' command line is exactly what makes ESENT log ntds.dit snapshot events; direct cause of this alert.
+  - id: a58353df-af43-4753-bad0-cd83ef35eef5
+    name: Suspicious Usage Of Active Directory Diagnostic Tool (ntdsutil.exe)
+    reason: Flags ntdsutil with IFM/snapshot arguments; co-occurs with the ESENT ntds.dit events as the same dump operation.
+  - id: 94dc4390-6b7c-4784-8ffc-335334404650
+    name: Dump Ntds.dit To Suspicious Location
+    reason: Same ESENT application-log source; fires when the ntds.dit dump (IFM/snapshot) is written to a staging path such as Temp or ProgramData.
+  - id: 11b1ed55-154d-4e82-8ad7-83739298f720
+    name: NTDS.DIT Creation By Uncommon Process
+    reason: The exported ntds.dit copy lands on disk; file-creation telemetry corroborates the dump and names the writing process.
+  - id: c73124a7-3e89-44a3-bdc1-25fe4df754b1
+    name: Copy From VolumeShadowCopy Via Cmd.EXE
+    reason: Alternative ntds.dit theft path (vssadmin/shadow copy then copy) attackers use alongside or instead of ntdsutil on a DC.
+  - id: 3a8da4e0-36c1-40d2-8b29-b3e890d5172a
+    name: NTDS Exfiltration Filename Patterns
+    reason: After the dump, the ntds.dit/SYSTEM hive is staged under characteristic filenames for exfiltration; direct follow-on.
+  - id: fd877b94-9bb5-4191-bb25-d79cbd93c167
+    name: Dumping of Sensitive Hives Via Reg.EXE
+    reason: ntds.dit is useless offline without the SYSTEM hive boot key; attackers run reg save SYSTEM/SAM in the same operation.
   window: 1h
   enrichment_searches:
-  # Rule-specific telemetry pivots the engine runs around an alert from this rule,
-  # scoped to the alert's host/user/IP within the window (behaviour-targeted, not a sweep).
-    - name: "Memory/credential-dump creation & LSASS access on this host"
-      query: '((data_win_system_eventID:"1" AND data_win_eventdata_image:/.*(\\[Pp][Rr][Oo][Cc][Dd][Uu][Mm][Pp]\.[Ee][Xx][Ee]|\\[Pp][Rr][Oo][Cc][Dd][Uu][Mm][Pp]64\.[Ee][Xx][Ee]|\\[Ss][Qq][Ll][Dd][Uu][Mm][Pp][Ee][Rr]\.[Ee][Xx][Ee]|\\[Cc][Rr][Ee][Aa][Tt][Ee][Dd][Uu][Mm][Pp]\.[Ee][Xx][Ee]|\\[Rr][Dd][Rr][Ll][Ee][Aa][Kk][Dd][Ii][Aa][Gg]\.[Ee][Xx][Ee]|\\[Dd][Uu][Mm][Pp][Ee][Rr][Tt]\.[Ee][Xx][Ee]|\\[Nn][Aa][Nn][Oo][Dd][Uu][Mm][Pp]\.[Ee][Xx][Ee]|\\[Aa][Vv][Dd][Uu][Mm][Pp]\.[Ee][Xx][Ee])/) OR (data_win_system_eventID:"1" AND (data_win_eventdata_commandLine:/.*[Cc][Oo][Mm][Ss][Vv][Cc][Ss]\.[Dd][Ll][Ll].*/ OR data_win_eventdata_commandLine:/.*[Mm][Ii][Nn][Ii][Dd][Uu][Mm][Pp].*/ OR data_win_eventdata_commandLine:/.*[Dd][Uu][Mm][Pp][Ee][Rr][Tt].*/ OR data_win_eventdata_commandLine:/.*[Nn][Aa][Nn][Oo][Dd][Uu][Mm][Pp].*/ OR data_win_eventdata_commandLine:/.*[Ll][Ss][Aa][Ss][Ss].*/ OR data_win_eventdata_commandLine:/.*[Ss][Ee][Kk][Uu][Rr][Ll][Ss][Aa].*/ OR data_win_eventdata_commandLine:/.*[Nn][Tt][Dd][Ss]\.[Dd][Ii][Tt].*/ OR data_win_eventdata_commandLine:/.*[Nn][Tt][Dd][Ss][Uu][Tt][Ii][Ll].*/)) OR (data_win_system_eventID:"10" AND data_win_eventdata_targetImage:/.*(\\[Ll][Ss][Aa][Ss][Ss]\.[Ee][Xx][Ee])/))'
-      pivot_on: [host]
-      window: 1h
-    - name: "This account's logon activity across hosts (harvested-credential use)"
-      query: '(data_win_system_eventID:"4624" OR data_win_system_eventID:"4625")'
-      pivot_on: [user]
-      window: 6h
-    - name: "Remote-execution / lateral-movement tooling on this host"
-      query: '(data_win_system_eventID:"1" AND data_win_eventdata_image:/.*(\\[Pp][Ss][Ee][Xx][Ee][Cc]\.[Ee][Xx][Ee]|\\[Pp][Ss][Ee][Xx][Ee][Ss][Vv][Cc]\.[Ee][Xx][Ee]|\\[Pp][Aa][Ee][Xx][Ee][Cc]\.[Ee][Xx][Ee]|\\[Ww][Ii][Nn][Rr][Ss]\.[Ee][Xx][Ee]|\\[Mm][Ss][Tt][Ss][Cc]\.[Ee][Xx][Ee]|\\[Ww][Mm][Ii][Cc]\.[Ee][Xx][Ee])/) OR (data_win_system_eventID:"1" AND data_win_eventdata_image:/.*(\\[Pp][Oo][Ww][Ee][Rr][Ss][Hh][Ee][Ll][Ll]\.[Ee][Xx][Ee]|\\[Pp][Ww][Ss][Hh]\.[Ee][Xx][Ee])/ AND (data_win_eventdata_commandLine:/.*[Ii][Nn][Vv][Oo][Kk][Ee]-[Cc][Oo][Mm][Mm][Aa][Nn][Dd].*/ OR data_win_eventdata_commandLine:/.*[Nn][Ee][Ww]-[Pp][Ss][Ss][Ee][Ss][Ss][Ii][Oo][Nn].*/ OR data_win_eventdata_commandLine:/.*[Ee][Nn][Tt][Ee][Rr]-[Pp][Ss][Ss][Ee][Ss][Ss][Ii][Oo][Nn].*/ OR data_win_eventdata_commandLine:/.*-[Cc][Oo][Mm][Pp][Uu][Tt][Ee][Rr][Nn][Aa][Mm][Ee].*/))'
-      pivot_on: [host]
-      window: 2h
-    - name: "Follow-on LOLBin / signed-binary-proxy execution on this host"
-      query: 'data_win_system_eventID:"1" AND data_win_eventdata_image:/.*(\\[Rr][Uu][Nn][Dd][Ll][Ll]32\.[Ee][Xx][Ee]|\\[Rr][Ee][Gg][Ss][Vv][Rr]32\.[Ee][Xx][Ee]|\\[Mm][Ss][Hh][Tt][Aa]\.[Ee][Xx][Ee]|\\[Ii][Nn][Ss][Tt][Aa][Ll][Ll][Uu][Tt][Ii][Ll]\.[Ee][Xx][Ee]|\\[Rr][Ee][Gg][Aa][Ss][Mm]\.[Ee][Xx][Ee]|\\[Rr][Ee][Gg][Ss][Vv][Cc][Ss]\.[Ee][Xx][Ee]|\\[Mm][Ss][Bb][Uu][Ii][Ll][Dd]\.[Ee][Xx][Ee]|\\[Cc][Ee][Rr][Tt][Uu][Tt][Ii][Ll]\.[Ee][Xx][Ee]|\\[Bb][Ii][Tt][Ss][Aa][Dd][Mm][Ii][Nn]\.[Ee][Xx][Ee]|\\[Ww][Mm][Ii][Cc]\.[Ee][Xx][Ee]|\\[Cc][Mm][Ss][Tt][Pp]\.[Ee][Xx][Ee]|\\[Oo][Dd][Bb][Cc][Cc][Oo][Nn][Ff]\.[Ee][Xx][Ee]|\\[Ff][Oo][Rr][Ff][Ii][Ll][Ee][Ss]\.[Ee][Xx][Ee]|\\[Pp][Cc][Aa][Ll][Uu][Aa]\.[Ee][Xx][Ee]|\\[Mm][Aa][Vv][Ii][Nn][Jj][Ee][Cc][Tt]\.[Ee][Xx][Ee]|\\[Ss][Cc][Rr][Ii][Pp][Tt][Rr][Uu][Nn][Nn][Ee][Rr]\.[Ee][Xx][Ee])/'
-      pivot_on: [host]
-      window: 1h
+  # Behaviour-targeted hunts the engine runs around the alert (not a sweep).
+  - name: ntdsutil / IFM / shadow-copy commands on this DC
+    query: data_win_system_eventID:"1" AND (data_win_eventdata_image:/.*[Nn][Tt][Dd][Ss][Uu][Tt][Ii][Ll]\.[Ee][Xx][Ee]/ OR data_win_eventdata_commandLine:/.*([Nn][Tt][Dd][Ss][Uu][Tt][Ii][Ll]|[Vv][Ss][Ss][Aa][Dd][Mm][Ii][Nn].*[Cc][Rr][Ee][Aa][Tt][Ee] [Ss][Hh][Aa][Dd][Oo][Ww]|[Dd][Ii][Ss][Kk][Ss][Hh][Aa][Dd][Oo][Ww]|[Ww][Bb][Aa][Dd][Mm][Ii][Nn].*[Nn][Tt][Dd][Ss]|[Aa][Cc][Tt][Ii][Vv][Aa][Tt][Ee] [Ii][Nn][Ss][Tt][Aa][Nn][Cc][Ee]|[Ii][Ff][Mm]).*/)
+    pivot_on:
+    - host
+    window: 1h
+  - name: ntds.dit / SYSTEM hive files created or copied (staging)
+    query: data_win_system_eventID:"11" AND (data_win_eventdata_targetFilename:/.*[Nn][Tt][Dd][Ss]\.[Dd][Ii][Tt].*/ OR data_win_eventdata_targetFilename:/.*[Ee][Ss][Ee][Nn][Tt]\.[Dd][Ii][Tt].*/ OR data_win_eventdata_targetFilename:/.*\\[Rr]egistry\\[Ss][Yy][Ss][Tt][Ee][Mm].*/ OR data_win_eventdata_targetFilename:/.*[Ss][Yy][Ss][Tt][Ee][Mm]\.[Hh][Ii][Vv][Ee].*/)
+    pivot_on:
+    - host
+    window: 2h
+  - name: Archiving or exfil tooling after dump (compress/transfer)
+    query: data_win_system_eventID:"1" AND (data_win_eventdata_image:/.*\\([Rr][Aa][Rr]|7[Zz]|7[Zz][Aa]|[Ww][Ii][Nn][Rr][Aa][Rr]|[Cc][Uu][Rr][Ll]|[Bb][Ii][Tt][Ss][Aa][Dd][Mm][Ii][Nn]|[Ss][Cc][Pp]|[Rr][Cc][Ll][Oo][Nn][Ee])\.[Ee][Xx][Ee]/ OR data_win_eventdata_commandLine:/.*([Cc]ompress-[Aa]rchive|[Ii]nvoke-[Ww]eb[Rr]equest|[Nn]et [Uu]se|[Tt]ar -).*/)
+    pivot_on:
+    - host
+    window: 4h
+  - name: Credential tooling / DCSync-style activity after ntds access
+    query: data_win_system_eventID:"1" AND data_win_eventdata_commandLine:/.*([Ss]ecretsdump|[Mm]imikatz|[Ll]sadump|[Dd][Cc][Ss]ync|[Dd][Ss][Ii][Nn][Tt][Ee][Rr][Nn][Aa][Ll][Ss]|[Dd][Ss][Ii][Nn][Tt][Ee][Rr][Nn][Aa][Ll][Ss]|[Ll][Ss][Aa][Dd][Uu][Mm][Pp]|[Rr][Ee][Gg](\.[Ee][Xx][Ee])? [Ss][Aa][Vv][Ee]).*/
+    pivot_on:
+    - host
+    window: 4h
+  - name: Domain admin / privileged logons from this account (credential reuse)
+    query: data_win_system_eventID:"4624" AND (data_win_eventdata_logonType:"3" OR data_win_eventdata_logonType:"10" OR data_win_eventdata_logonType:"9")
+    pivot_on:
+    - user
+    window: 6h

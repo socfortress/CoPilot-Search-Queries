@@ -151,35 +151,58 @@ graylog:
   query: data_win_system_providerName:/[Mm][Ss][Ss][Qq][Ll][Ss][Ee][Rr][Vv][Ee][Rr]\$[Aa][Uu][Dd][Ii][Tt]/ AND data_win_system_eventID:"33205" AND (data_win_eventdata_data:/.*[Ss][Tt][Aa][Tt][Ee][Mm][Ee][Nn][Tt]:[Tt][Rr][Uu][Nn][Cc][Aa][Tt][Ee] [Tt][Aa][Bb][Ll][Ee].*/ OR data_win_eventdata_data:/.*[Ss][Tt][Aa][Tt][Ee][Mm][Ee][Nn][Tt]:[Dd][Rr][Oo][Pp] [Tt][Aa][Bb][Ll][Ee].*/ OR data_win_eventdata_data:/.*[Ss][Tt][Aa][Tt][Ee][Mm][Ee][Nn][Tt]:[Dd][Rr][Oo][Pp] [Dd][Aa][Tt][Aa][Bb][Aa][Ss][Ee].*/)
 
 correlation:
-  # Authored by the correlation engine for review. Related CoPilot Searches to run
-  # around an alert from this rule, scoped to the same host/user/IP within the window.
+  # Authored per-rule (behaviour-researched) for the correlation engine. Related CoPilot
+  # Searches + telemetry pivots to run around an alert, scoped to its host/user/ip/domain.
   related_rules:
-    - id: 48d91a3a-2363-43ba-a456-ca71ac3da5c2
-      name: "Audit CVE Event"
-      reason: "next kill-chain tactic: Impact"
-    - id: eee8311f-a752-44f0-bf2f-6b007db16300
-      name: "BlueSky Ransomware Artefacts"
-      reason: "next kill-chain tactic: Impact"
-    - id: 3f2c93c7-7b2a-4d58-bb8d-6f39422d8148
-      name: "CVE-2024-49113 Exploitation Attempt - LDAP Nightmare"
-      reason: "next kill-chain tactic: Impact"
-  window: 1h
+  - id: ebfe73c2-5bc9-4ed9-aaa8-8b54b2b4777d
+    name: MSSQL Server Failed Logon From External Network
+    reason: 'Precursor: brute-forced or sprayed SQL logins from outside are a common way the attacker gained the session that later issues DROP/TRUNCATE.'
+  - id: 08200f85-2678-463e-9c32-88dce2f073d1
+    name: MSSQL Add Account To Sysadmin Role
+    reason: 'Precursor: privilege escalation to sysadmin gives the attacker the rights needed to drop databases and tables.'
+  - id: d08dd86f-681e-4a00-a92c-1db218754417
+    name: MSSQL XPCmdshell Option Change
+    reason: 'Precursor: enabling xp_cmdshell turns SQL access into OS command execution, commonly staged before data destruction.'
+  - id: 7f103213-a04e-4d59-8261-213dddf22314
+    name: MSSQL XPCmdshell Suspicious Execution
+    reason: 'Co-occurring: xp_cmdshell running suspicious commands on the same SQL instance suggests a hands-on attacker, not a DBA mistake.'
+  - id: 350dfb37-3706-4cdc-9e2e-5e24bc3a46df
+    name: MSSQL Disable Audit Settings
+    reason: 'Defense evasion: attacker disables SQL audit before or after destructive statements to hide the 33205 trail.'
+  - id: 869b9ca7-9ea2-4a5a-8325-e80e62f75445
+    name: Suspicious Child Process Of SQL Server
+    reason: 'Follow-on: sqlservr.exe spawning shells or tools shows the SQL compromise pivoting to the OS.'
+  - id: c615d676-f655-46b9-b913-78729021e5d7
+    name: Data Export From MSSQL Table Via BCP.EXE
+    reason: 'Precursor: bulk export of tables before dropping them indicates data theft plus destruction (extortion pattern).'
+  - id: c947b146-0abc-4c87-9c64-b17e9d7274a2
+    name: Shadow Copies Deletion Using Operating Systems Utilities
+    reason: 'Follow-on: destroying DB data is often paired with deleting shadow copies to block recovery in ransomware/wiper impact.'
+  window: 2h
   enrichment_searches:
-  # Rule-specific telemetry pivots the engine runs around an alert from this rule,
-  # scoped to the alert's host/user/IP within the window (behaviour-targeted, not a sweep).
-    - name: "Follow-on LOLBin / signed-binary-proxy execution on this host"
-      query: 'data_win_system_eventID:"1" AND data_win_eventdata_image:/.*(\\[Rr][Uu][Nn][Dd][Ll][Ll]32\.[Ee][Xx][Ee]|\\[Rr][Ee][Gg][Ss][Vv][Rr]32\.[Ee][Xx][Ee]|\\[Mm][Ss][Hh][Tt][Aa]\.[Ee][Xx][Ee]|\\[Ii][Nn][Ss][Tt][Aa][Ll][Ll][Uu][Tt][Ii][Ll]\.[Ee][Xx][Ee]|\\[Rr][Ee][Gg][Aa][Ss][Mm]\.[Ee][Xx][Ee]|\\[Rr][Ee][Gg][Ss][Vv][Cc][Ss]\.[Ee][Xx][Ee]|\\[Mm][Ss][Bb][Uu][Ii][Ll][Dd]\.[Ee][Xx][Ee]|\\[Cc][Ee][Rr][Tt][Uu][Tt][Ii][Ll]\.[Ee][Xx][Ee]|\\[Bb][Ii][Tt][Ss][Aa][Dd][Mm][Ii][Nn]\.[Ee][Xx][Ee]|\\[Ww][Mm][Ii][Cc]\.[Ee][Xx][Ee]|\\[Cc][Mm][Ss][Tt][Pp]\.[Ee][Xx][Ee]|\\[Oo][Dd][Bb][Cc][Cc][Oo][Nn][Ff]\.[Ee][Xx][Ee]|\\[Ff][Oo][Rr][Ff][Ii][Ll][Ee][Ss]\.[Ee][Xx][Ee]|\\[Pp][Cc][Aa][Ll][Uu][Aa]\.[Ee][Xx][Ee]|\\[Mm][Aa][Vv][Ii][Nn][Jj][Ee][Cc][Tt]\.[Ee][Xx][Ee]|\\[Ss][Cc][Rr][Ii][Pp][Tt][Rr][Uu][Nn][Nn][Ee][Rr]\.[Ee][Xx][Ee])/'
-      pivot_on: [host]
-      window: 1h
-    - name: "Outbound connections by script interpreters on this host"
-      query: 'data_win_system_eventID:"3" AND data_win_eventdata_image:/.*(\\[Pp][Oo][Ww][Ee][Rr][Ss][Hh][Ee][Ll][Ll]\.[Ee][Xx][Ee]|\\[Pp][Ww][Ss][Hh]\.[Ee][Xx][Ee]|\\[Pp][Oo][Ww][Ee][Rr][Ss][Hh][Ee][Ll][Ll]_[Ii][Ss][Ee]\.[Ee][Xx][Ee]|\\[Cc][Mm][Dd]\.[Ee][Xx][Ee]|\\[Ww][Ss][Cc][Rr][Ii][Pp][Tt]\.[Ee][Xx][Ee]|\\[Cc][Ss][Cc][Rr][Ii][Pp][Tt]\.[Ee][Xx][Ee]|\\[Mm][Ss][Hh][Tt][Aa]\.[Ee][Xx][Ee]|\\[Rr][Uu][Nn][Dd][Ll][Ll]32\.[Ee][Xx][Ee]|\\[Rr][Ee][Gg][Ss][Vv][Rr]32\.[Ee][Xx][Ee])/'
-      pivot_on: [host]
-      window: 1h
-    - name: "Archive / staging & outbound-transfer tooling on this host"
-      query: '(((data_win_system_eventID:"1" AND data_win_eventdata_image:/.*(\\7[Zz]\.[Ee][Xx][Ee]|\\7[Zz][Aa]\.[Ee][Xx][Ee]|\\7[Zz][Rr]\.[Ee][Xx][Ee]|\\[Rr][Aa][Rr]\.[Ee][Xx][Ee]|\\[Ww][Ii][Nn][Rr][Aa][Rr]\.[Ee][Xx][Ee]|\\[Ww][Zz][Zz][Ii][Pp]\.[Ee][Xx][Ee]|\\[Mm][Aa][Kk][Ee][Cc][Aa][Bb]\.[Ee][Xx][Ee])/) OR (data_win_eventdata_commandLine:/.*[Cc][Oo][Mm][Pp][Rr][Ee][Ss][Ss]-[Aa][Rr][Cc][Hh][Ii][Vv][Ee].*/ OR data_win_eventdata_commandLine:/.*\.7[Zz].*/ OR data_win_eventdata_commandLine:/.*\.[Rr][Aa][Rr].*/ OR data_win_eventdata_commandLine:/.* -[Hh][Pp].*/)) OR (((data_win_system_eventID:"1" AND data_win_eventdata_image:/.*(\\[Rr][Cc][Ll][Oo][Nn][Ee]\.[Ee][Xx][Ee]|\\[Cc][Uu][Rr][Ll]\.[Ee][Xx][Ee]|\\[Ww][Gg][Ee][Tt]\.[Ee][Xx][Ee]|\\[Ww][Ii][Nn][Ss][Cc][Pp]\.[Ee][Xx][Ee]|\\[Pp][Ss][Cc][Pp]\.[Ee][Xx][Ee]|\\[Mm][Ee][Gg][Aa][Cc][Mm][Dd]\.[Ee][Xx][Ee]|\\[Mm][Ee][Gg][Aa][Ss][Yy][Nn][Cc]\.[Ee][Xx][Ee])/) OR ((data_win_eventdata_commandLine:/.*[Ii][Nn][Vv][Oo][Kk][Ee]-[Rr][Ee][Ss][Tt][Mm][Ee][Tt][Hh][Oo][Dd].*/ OR data_win_eventdata_commandLine:/.*[Ss][Tt][Aa][Rr][Tt]-[Bb][Ii][Tt][Ss][Tt][Rr][Aa][Nn][Ss][Ff][Ee][Rr].*/ OR data_win_eventdata_commandLine:/.*[Rr][Cc][Ll][Oo][Nn][Ee].*/ OR data_win_eventdata_commandLine:/.*[Tt][Rr][Aa][Nn][Ss][Ff][Ee][Rr]\.[Ss][Hh].*/ OR data_win_eventdata_commandLine:/.*[Aa][Nn][Oo][Nn][Ff][Ii][Ll][Ee][Ss].*/ OR data_win_eventdata_commandLine:/.*[Pp][Aa][Ss][Tt][Ee][Bb][Ii][Nn].*/ OR data_win_eventdata_commandLine:/.*[Mm][Ee][Gg][Aa]\.[Nn][Zz].*/ OR data_win_eventdata_commandLine:/.*-[Oo][Uu][Tt][Ff][Ii][Ll][Ee].*/ OR data_win_eventdata_commandLine:/.*[Uu][Pp][Ll][Oo][Aa][Dd][Ff][Ii][Ll][Ee].*/)))))'
-      pivot_on: [host]
-      window: 2h
-    - name: "Ransomware / recovery-inhibition behaviour on this host"
-      query: '(data_win_eventdata_commandLine:/.*[Vv][Ss][Ss][Aa][Dd][Mm][Ii][Nn].*/ OR data_win_eventdata_commandLine:/.*[Ss][Hh][Aa][Dd][Oo][Ww][Cc][Oo][Pp][Yy].*/ OR data_win_eventdata_commandLine:/.*[Bb][Cc][Dd][Ee][Dd][Ii][Tt].*/ OR data_win_eventdata_commandLine:/.*[Ww][Bb][Aa][Dd][Mm][Ii][Nn].*/ OR data_win_eventdata_commandLine:/.*[Cc][Ii][Pp][Hh][Ee][Rr] \/[Ww].*/ OR data_win_eventdata_commandLine:/.*[Ww][Mm][Ii][Cc] [Ss][Hh][Aa][Dd][Oo][Ww][Cc][Oo][Pp][Yy] [Dd][Ee][Ll][Ee][Tt][Ee].*/) OR (data_win_system_eventID:"1" AND data_win_eventdata_image:/.*(\\[Vv][Ss][Ss][Aa][Dd][Mm][Ii][Nn]\.[Ee][Xx][Ee]|\\[Ww][Bb][Aa][Dd][Mm][Ii][Nn]\.[Ee][Xx][Ee])/)'
-      pivot_on: [host]
-      window: 2h
+  # Behaviour-targeted hunts the engine runs around the alert (not a sweep).
+  - name: Other SQL Server audit statements by the same instance (backup/offline/delete/permission changes)
+    query: data_win_system_providerName:/[Mm][Ss][Ss][Qq][Ll][Ss][Ee][Rr][Vv][Ee][Rr]\$[Aa][Uu][Dd][Ii][Tt]/ AND data_win_system_eventID:"33205" AND (data_win_eventdata_data:/.*[Ss][Tt][Aa][Tt][Ee][Mm][Ee][Nn][Tt]:(([Aa][Ll][Tt][Ee][Rr] [Dd][Aa][Tt][Aa][Bb][Aa][Ss][Ee])|([Dd][Ee][Ll][Ee][Tt][Ee] [Ff][Rr][Oo][Mm])|([Bb][Aa][Cc][Kk][Uu][Pp])|([Ee][Xx][Ee][Cc]).*([Ss][Pp]_[Aa][Dd][Dd][Ss][Rr][Vv][Rr][Oo][Ll][Ee][Mm][Ee][Mm][Bb][Ee][Rr]|[Xx][Pp]_[Cc][Mm][Dd][Ss][Hh][Ee][Ll][Ll])|([Cc][Rr][Ee][Aa][Tt][Ee] [Ll][Oo][Gg][Ii][Nn])|([Aa][Ll][Tt][Ee][Rr] [Ll][Oo][Gg][Ii][Nn])).*/)
+    pivot_on:
+    - host
+    window: 2h
+  - name: Processes spawned by sqlservr.exe (OS pivot from SQL)
+    query: data_win_system_eventID:"1" AND data_win_eventdata_parentImage:/.*\\[Ss][Qq][Ll][Ss][Ee][Rr][Vv][Rr]\.[Ee][Xx][Ee]/ AND data_win_eventdata_image:/.*\\([Cc][Mm][Dd]|[Pp][Oo][Ww][Ee][Rr][Ss][Hh][Ee][Ll][Ll]|[Pp][Ww][Ss][Hh]|[Ww][Hh][Oo][Aa][Mm][Ii]|[Nn][Ee][Tt]1?|[Cc][Ee][Rr][Tt][Uu][Tt][Ii][Ll]|[Bb][Ii][Tt][Ss][Aa][Dd][Mm][Ii][Nn]|[Cc][Uu][Rr][Ll]|[Mm][Ss][Hh][Tt][Aa]|[Rr][Uu][Nn][Dd][Ll][Ll]32)\.[Ee][Xx][Ee]/
+    pivot_on:
+    - host
+    window: 2h
+  - name: 'Recovery inhibition: backup, shadow copy and boot-recovery destruction'
+    query: data_win_system_eventID:"1" AND (data_win_eventdata_commandLine:/.*[Vv][Ss][Ss][Aa][Dd][Mm][Ii][Nn].*[Dd][Ee][Ll][Ee][Tt][Ee].*[Ss][Hh][Aa][Dd][Oo][Ww][Ss].*/ OR data_win_eventdata_commandLine:/.*[Ww][Bb][Aa][Dd][Mm][Ii][Nn].*[Dd][Ee][Ll][Ee][Tt][Ee].*/ OR data_win_eventdata_commandLine:/.*[Bb][Cc][Dd][Ee][Dd][Ii][Tt].*([Rr][Ee][Cc][Oo][Vv][Ee][Rr][Yy][Ee][Nn][Aa][Bb][Ll][Ee][Dd]|[Ii][Gg][Nn][Oo][Rr][Ee][Aa][Ll][Ll][Ff][Aa][Ii][Ll][Uu][Rr][Ee][Ss]).*/ OR data_win_eventdata_commandLine:/.*[Ww][Mm][Ii][Cc].*[Ss][Hh][Aa][Dd][Oo][Ww][Cc][Oo][Pp][Yy].*[Dd][Ee][Ll][Ee][Tt][Ee].*/ OR data_win_eventdata_commandLine:/.*[Rr][Ee][Aa][Gg][Ee][Nn][Tt][Cc].*\/[Dd][Ii][Ss][Aa][Bb][Ll][Ee].*/)
+    pivot_on:
+    - host
+    window: 2h
+  - name: SQL data export or dump tooling (bcp, sqlcmd, osql) before destruction
+    query: data_win_system_eventID:"1" AND data_win_eventdata_image:/.*\\([Bb][Cc][Pp]|[Ss][Qq][Ll][Cc][Mm][Dd]|[Oo][Ss][Qq][Ll]|[Ss][Qq][Ll][Dd][Uu][Mm][Pp][Ee][Rr])\.[Ee][Xx][Ee]/ AND (data_win_eventdata_commandLine:/.* (out|queryout) .*/ OR data_win_eventdata_commandLine:/.*[Ss][Ee][Ll][Ee][Cc][Tt] .* [Ff][Rr][Oo][Mm] .*/ OR data_win_eventdata_commandLine:/.*[Bb][Aa][Cc][Kk][Uu][Pp] [Dd][Aa][Tt][Aa][Bb][Aa][Ss][Ee].*/ OR data_win_eventdata_commandLine:/.*[Ss][Qq][Ll][Dd][Uu][Mm][Pp][Ee][Rr].*/)
+    pivot_on:
+    - host
+    window: 4h
+  - name: Failed or remote logons against the SQL host (credential attack precursor)
+    query: (data_win_system_eventID:"4625" OR (data_win_system_eventID:"4624" AND data_win_eventdata_logonType:("3" OR "10")) OR (data_win_system_providerName:/[Mm][Ss][Ss][Qq][Ll][Ss][Ee][Rr][Vv][Ee][Rr]/ AND data_win_system_eventID:"18456"))
+    pivot_on:
+    - host
+    window: 6h

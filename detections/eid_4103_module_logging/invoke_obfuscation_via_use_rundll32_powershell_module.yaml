@@ -166,44 +166,58 @@ graylog:
   query: data_win_system_eventID:"4103" AND data_win_eventdata_payload:/.*\&\&.*/ AND data_win_eventdata_payload:/.*[Rr][Uu][Nn][Dd][Ll][Ll]32.*/ AND data_win_eventdata_payload:/.*[Ss][Hh][Ee][Ll][Ll]32\.[Dd][Ll][Ll].*/ AND data_win_eventdata_payload:/.*[Ss][Hh][Ee][Ll][Ll][Ee][Xx][Ee][Cc]_[Rr][Uu][Nn][Dd][Ll][Ll].*/ AND (data_win_eventdata_payload:/.*[Vv][Aa][Ll][Uu][Ee].*/ OR data_win_eventdata_payload:/.*[Ii][Nn][Vv][Oo][Kk][Ee].*/ OR data_win_eventdata_payload:/.*[Cc][Oo][Mm][Ss][Pp][Ee][Cc].*/ OR data_win_eventdata_payload:/.*[Ii][Ee][Xx].*/)
 
 correlation:
-  # Authored by the correlation engine for review. Related CoPilot Searches to run
-  # around an alert from this rule, scoped to the same host/user/IP within the window.
+  # Authored per-rule (behaviour-researched) for the correlation engine. Related CoPilot
+  # Searches + telemetry pivots to run around an alert, scoped to its host/user/ip/domain.
   related_rules:
-    - id: ec570e53-4c76-45a9-804d-dc3f355ff7a7
-      name: "7Zip Compressing Dump Files"
-      reason: "next kill-chain tactic: Collection"
-    - id: 0a1255c5-d732-4b62-ac02-b5152d34fb83
-      name: "ADExplorer Writing Complete AD Snapshot Into .dat File"
-      reason: "next kill-chain tactic: Discovery"
-    - id: 1ea13e8c-03ea-409b-877d-ce5c3d2c1cb3
-      name: "ADFS Database Named Pipe Connection By Uncommon Tool"
-      reason: "next kill-chain tactic: Collection"
-    - id: 75bf09fa-1dd7-4d18-9af9-dd9e492562eb
-      name: "ADSI-Cache File Creation By Uncommon Tool"
-      reason: "next kill-chain tactic: Command and Control"
-    - id: 33a2d1dd-f3b0-40bd-8baf-7974468927cc
-      name: "APT PRIVATELOG Image Load Pattern"
-      reason: "next kill-chain tactic: Privilege Escalation"
-    - id: 9aa01d62-7667-4d3b-acb8-8cb5103e2014
-      name: "APT27 - Emissary Panda Activity"
-      reason: "next kill-chain tactic: Execution"
+  - id: a5a30a6e-75ca-4233-8b8c-42e0f2037d3b
+    name: Invoke-Obfuscation Via Use Rundll32 - PowerShell
+    reason: Same Invoke-Obfuscation rundll32/shell32 ShellExec_RunDLL launcher seen in 4104 script-block logging; confirms the decoded script text for the same execution.
+  - id: a23791fe-8846-485a-b16b-ca691e1b03d4
+    name: Invoke-Obfuscation RUNDLL LAUNCHER - PowerShell Module
+    reason: Sibling Invoke-Obfuscation RUNDLL launcher variant in 4103; the operator often tries several launcher styles in sequence on the same host.
+  - id: f241cf1b-3a6b-4e1a-b4f9-133c00dd95ca
+    name: Invoke-Obfuscation RUNDLL LAUNCHER - Security
+    reason: Same rundll32 launcher captured at process creation (4688); shows the parent process that spawned the obfuscated launcher.
+  - id: 2f211361-7dce-442d-b78a-c04039677378
+    name: Invoke-Obfuscation Obfuscated IEX Invocation - PowerShell Module
+    reason: Obfuscated IEX is the usual payload-execution stage inside an Invoke-Obfuscation wrapper; co-occurs with the rundll32 launcher.
+  - id: 07ad2ea8-6a55-4ac6-bf3e-91b8e59676eb
+    name: Invoke-Obfuscation Via Use MSHTA - PowerShell Module
+    reason: Alternative Invoke-Obfuscation LOLBin launcher (mshta) from the same toolkit, commonly cycled when one launcher is blocked.
+  - id: de41232e-12e8-49fa-86bc-c05c7e722df9
+    name: Suspicious PowerShell Download - PoshModule
+    reason: The deobfuscated payload usually fetches a second stage (DownloadString/WebClient); this is the likely next step after the launcher runs.
+  - id: ea9bf0fa-edec-4fb8-8b78-b119f2528186
+    name: Windows Defender AMSI Trigger Detected
+    reason: Obfuscated PowerShell content frequently trips AMSI on deobfuscation; an AMSI hit at the same time corroborates malicious script content.
+  - id: 8d85cf08-bf97-4260-ba49-986a2a65129c
+    name: Suspicious PowerShell In Registry Run Keys
+    reason: 'Persistence follow-on: obfuscated PowerShell is commonly planted in Run keys after the initial execution succeeds.'
   window: 1h
   enrichment_searches:
-  # Rule-specific telemetry pivots the engine runs around an alert from this rule,
-  # scoped to the alert's host/user/IP within the window (behaviour-targeted, not a sweep).
-    - name: "Outbound connections by script interpreters on this host"
-      query: 'data_win_system_eventID:"3" AND data_win_eventdata_image:/.*(\\[Pp][Oo][Ww][Ee][Rr][Ss][Hh][Ee][Ll][Ll]\.[Ee][Xx][Ee]|\\[Pp][Ww][Ss][Hh]\.[Ee][Xx][Ee]|\\[Pp][Oo][Ww][Ee][Rr][Ss][Hh][Ee][Ll][Ll]_[Ii][Ss][Ee]\.[Ee][Xx][Ee]|\\[Cc][Mm][Dd]\.[Ee][Xx][Ee]|\\[Ww][Ss][Cc][Rr][Ii][Pp][Tt]\.[Ee][Xx][Ee]|\\[Cc][Ss][Cc][Rr][Ii][Pp][Tt]\.[Ee][Xx][Ee]|\\[Mm][Ss][Hh][Tt][Aa]\.[Ee][Xx][Ee]|\\[Rr][Uu][Nn][Dd][Ll][Ll]32\.[Ee][Xx][Ee]|\\[Rr][Ee][Gg][Ss][Vv][Rr]32\.[Ee][Xx][Ee])/'
-      pivot_on: [host]
-      window: 1h
-    - name: "Encoded / obfuscated script execution on this host"
-      query: 'data_win_system_eventID:"4104" AND (data_win_eventdata_scriptBlockText:/.*[Dd][Oo][Ww][Nn][Ll][Oo][Aa][Dd][Ss][Tt][Rr][Ii][Nn][Gg].*/ OR data_win_eventdata_scriptBlockText:/.*[Dd][Oo][Ww][Nn][Ll][Oo][Aa][Dd][Ff][Ii][Ll][Ee].*/ OR data_win_eventdata_scriptBlockText:/.*[Ii][Nn][Vv][Oo][Kk][Ee]-[Ww][Ee][Bb][Rr][Ee][Qq][Uu][Ee][Ss][Tt].*/ OR data_win_eventdata_scriptBlockText:/.*[Nn][Ee][Tt]\.[Ww][Ee][Bb][Cc][Ll][Ii][Ee][Nn][Tt].*/ OR data_win_eventdata_scriptBlockText:/.*[Ff][Rr][Oo][Mm][Bb][Aa][Ss][Ee]64[Ss][Tt][Rr][Ii][Nn][Gg].*/ OR data_win_eventdata_scriptBlockText:/.*[Ii][Ee][Xx].*/ OR data_win_eventdata_scriptBlockText:/.*[Ii][Nn][Vv][Oo][Kk][Ee]-[Ee][Xx][Pp][Rr][Ee][Ss][Ss][Ii][Oo][Nn].*/ OR data_win_eventdata_scriptBlockText:/.*[Ss][Tt][Aa][Rr][Tt]-[Bb][Ii][Tt][Ss][Tt][Rr][Aa][Nn][Ss][Ff][Ee][Rr].*/ OR data_win_eventdata_scriptBlockText:/.*[Aa][Mm][Ss][Ii][Uu][Tt][Ii][Ll][Ss].*/ OR data_win_eventdata_scriptBlockText:/.*-[Ee][Nn][Cc].*/ OR data_win_eventdata_scriptBlockText:/.*-[Ee][Nn][Cc][Oo][Dd][Ee][Dd][Cc][Oo][Mm][Mm][Aa][Nn][Dd].*/ OR data_win_eventdata_scriptBlockText:/.*[Rr][Ee][Ff][Ll][Ee][Cc][Tt][Ii][Oo][Nn]\.[Aa][Ss][Ss][Ee][Mm][Bb][Ll][Yy].*/)'
-      pivot_on: [host]
-      window: 1h
-    - name: "Autostart persistence written on this host (Run keys, services, IFEO)"
-      query: '(data_win_system_eventID:"12" OR data_win_system_eventID:"13") AND (data_win_eventdata_targetObject:/.*[Cc][Uu][Rr][Rr][Ee][Nn][Tt][Vv][Ee][Rr][Ss][Ii][Oo][Nn]\\[Rr][Uu][Nn].*/ OR data_win_eventdata_targetObject:/.*[Cc][Uu][Rr][Rr][Ee][Nn][Tt][Vv][Ee][Rr][Ss][Ii][Oo][Nn]\\[Rr][Uu][Nn][Oo][Nn][Cc][Ee].*/ OR data_win_eventdata_targetObject:/.*[Cc][Uu][Rr][Rr][Ee][Nn][Tt][Cc][Oo][Nn][Tt][Rr][Oo][Ll][Ss][Ee][Tt]\\[Ss][Ee][Rr][Vv][Ii][Cc][Ee][Ss]\\.*/ OR data_win_eventdata_targetObject:/.*[Ii][Mm][Aa][Gg][Ee] [Ff][Ii][Ll][Ee] [Ee][Xx][Ee][Cc][Uu][Tt][Ii][Oo][Nn] [Oo][Pp][Tt][Ii][Oo][Nn][Ss]\\.*/ OR data_win_eventdata_targetObject:/.*[Ww][Ii][Nn][Ll][Oo][Gg][Oo][Nn]\\[Ss][Hh][Ee][Ll][Ll].*/ OR data_win_eventdata_targetObject:/.*[Ww][Ii][Nn][Ll][Oo][Gg][Oo][Nn]\\[Uu][Ss][Ee][Rr][Ii][Nn][Ii][Tt].*/ OR data_win_eventdata_targetObject:/.*[Cc][Uu][Rr][Rr][Ee][Nn][Tt][Vv][Ee][Rr][Ss][Ii][Oo][Nn]\\[Ee][Xx][Pp][Ll][Oo][Rr][Ee][Rr]\\[Rr][Uu][Nn].*/ OR data_win_eventdata_targetObject:/.*[Pp][Oo][Ll][Ii][Cc][Ii][Ee][Ss]\\[Ee][Xx][Pp][Ll][Oo][Rr][Ee][Rr]\\[Rr][Uu][Nn].*/ OR data_win_eventdata_targetObject:/.*[Cc][Uu][Rr][Rr][Ee][Nn][Tt][Vv][Ee][Rr][Ss][Ii][Oo][Nn]\\[Ww][Ii][Nn][Dd][Oo][Ww][Ss]\\[Ll][Oo][Aa][Dd].*/)'
-      pivot_on: [host]
-      window: 4h
-    - name: "Download / AMSI-bypass / encoded script blocks on this host"
-      query: 'data_win_system_eventID:"4104" AND (data_win_eventdata_scriptBlockText:/.*[Dd][Oo][Ww][Nn][Ll][Oo][Aa][Dd][Ss][Tt][Rr][Ii][Nn][Gg].*/ OR data_win_eventdata_scriptBlockText:/.*[Dd][Oo][Ww][Nn][Ll][Oo][Aa][Dd][Ff][Ii][Ll][Ee].*/ OR data_win_eventdata_scriptBlockText:/.*[Ii][Nn][Vv][Oo][Kk][Ee]-[Ww][Ee][Bb][Rr][Ee][Qq][Uu][Ee][Ss][Tt].*/ OR data_win_eventdata_scriptBlockText:/.*[Nn][Ee][Tt]\.[Ww][Ee][Bb][Cc][Ll][Ii][Ee][Nn][Tt].*/ OR data_win_eventdata_scriptBlockText:/.*[Ff][Rr][Oo][Mm][Bb][Aa][Ss][Ee]64[Ss][Tt][Rr][Ii][Nn][Gg].*/ OR data_win_eventdata_scriptBlockText:/.*[Ii][Ee][Xx].*/ OR data_win_eventdata_scriptBlockText:/.*[Ii][Nn][Vv][Oo][Kk][Ee]-[Ee][Xx][Pp][Rr][Ee][Ss][Ss][Ii][Oo][Nn].*/ OR data_win_eventdata_scriptBlockText:/.*[Ss][Tt][Aa][Rr][Tt]-[Bb][Ii][Tt][Ss][Tt][Rr][Aa][Nn][Ss][Ff][Ee][Rr].*/ OR data_win_eventdata_scriptBlockText:/.*[Aa][Mm][Ss][Ii][Uu][Tt][Ii][Ll][Ss].*/ OR data_win_eventdata_scriptBlockText:/.*-[Ee][Nn][Cc].*/ OR data_win_eventdata_scriptBlockText:/.*-[Ee][Nn][Cc][Oo][Dd][Ee][Dd][Cc][Oo][Mm][Mm][Aa][Nn][Dd].*/ OR data_win_eventdata_scriptBlockText:/.*[Rr][Ee][Ff][Ll][Ee][Cc][Tt][Ii][Oo][Nn]\.[Aa][Ss][Ss][Ee][Mm][Bb][Ll][Yy].*/)'
-      pivot_on: [host]
-      window: 1h
+  # Behaviour-targeted hunts the engine runs around the alert (not a sweep).
+  - name: Rundll32 shell32 ShellExec_RunDLL process launches
+    query: data_win_system_eventID:"1" AND data_win_eventdata_image:/.*[Rr][Uu][Nn][Dd][Ll][Ll]32\.[Ee][Xx][Ee]/ AND data_win_eventdata_commandLine:/.*[Ss][Hh][Ee][Ll][Ll]32.*[Ss][Hh][Ee][Ll][Ll][Ee][Xx][Ee][Cc]_[Rr][Uu][Nn][Dd][Ll][Ll].*/
+    pivot_on:
+    - host
+    window: 1h
+  - name: PowerShell/cmd child processes spawned by rundll32
+    query: data_win_system_eventID:"1" AND data_win_eventdata_parentImage:/.*[Rr][Uu][Nn][Dd][Ll][Ll]32\.[Ee][Xx][Ee]/ AND (data_win_eventdata_image:/.*[Pp][Oo][Ww][Ee][Rr][Ss][Hh][Ee][Ll][Ll]\.[Ee][Xx][Ee]/ OR data_win_eventdata_image:/.*[Pp][Ww][Ss][Hh]\.[Ee][Xx][Ee]/ OR data_win_eventdata_image:/.*[Cc][Mm][Dd]\.[Ee][Xx][Ee]/)
+    pivot_on:
+    - host
+    window: 1h
+  - name: Script blocks with IEX, download cradles or AMSI bypass
+    query: data_win_system_eventID:"4104" AND (data_win_eventdata_scriptBlockText:/.*[Dd][Oo][Ww][Nn][Ll][Oo][Aa][Dd][Ss][Tt][Rr][Ii][Nn][Gg].*/ OR data_win_eventdata_scriptBlockText:/.*[Nn][Ee][Tt]\.[Ww][Ee][Bb][Cc][Ll][Ii][Ee][Nn][Tt].*/ OR data_win_eventdata_scriptBlockText:/.*[Ii][Nn][Vv][Oo][Kk][Ee]-[Ee][Xx][Pp][Rr][Ee][Ss][Ss][Ii][Oo][Nn].*/ OR data_win_eventdata_scriptBlockText:/.*[Ff][Rr][Oo][Mm][Bb][Aa][Ss][Ee]64[Ss][Tt][Rr][Ii][Nn][Gg].*/ OR data_win_eventdata_scriptBlockText:/.*[Aa][Mm][Ss][Ii][Uu][Tt][Ii][Ll][Ss].*/)
+    pivot_on:
+    - host
+    window: 1h
+  - name: Outbound network connections from PowerShell or rundll32
+    query: data_win_system_eventID:"3" AND (data_win_eventdata_image:/.*[Pp][Oo][Ww][Ee][Rr][Ss][Hh][Ee][Ll][Ll]\.[Ee][Xx][Ee]/ OR data_win_eventdata_image:/.*[Pp][Ww][Ss][Hh]\.[Ee][Xx][Ee]/ OR data_win_eventdata_image:/.*[Rr][Uu][Nn][Dd][Ll][Ll]32\.[Ee][Xx][Ee]/)
+    pivot_on:
+    - host
+    window: 2h
+  - name: Executable or script files dropped by PowerShell
+    query: data_win_system_eventID:"11" AND data_win_eventdata_image:/.*[Pp][Oo][Ww][Ee][Rr][Ss][Hh][Ee][Ll][Ll]\.[Ee][Xx][Ee]/ AND (data_win_eventdata_targetFilename:/.*\.[Ee][Xx][Ee]/ OR data_win_eventdata_targetFilename:/.*\.[Dd][Ll][Ll]/ OR data_win_eventdata_targetFilename:/.*\.[Pp][Ss]1/ OR data_win_eventdata_targetFilename:/.*\.[Bb][Aa][Tt]/ OR data_win_eventdata_targetFilename:/.*\.[Vv][Bb][Ss]/)
+    pivot_on:
+    - host
+    window: 4h

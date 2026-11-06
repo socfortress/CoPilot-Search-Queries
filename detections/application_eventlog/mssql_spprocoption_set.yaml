@@ -138,19 +138,53 @@ graylog:
   query: data_win_system_providerName:/.*[Mm][Ss][Ss][Qq][Ll].*/ AND data_win_system_eventID:"33205" AND data_win_eventdata_data:/.*[Oo][Bb][Jj][Ee][Cc][Tt]_[Nn][Aa][Mm][Ee]:[Ss][Pp]_[Pp][Rr][Oo][Cc][Oo][Pp][Tt][Ii][Oo][Nn].*/ AND data_win_eventdata_data:/.*[Ss][Tt][Aa][Tt][Ee][Mm][Ee][Nn][Tt]:[Ee][Xx][Ee][Cc].*/
 
 correlation:
-  # Authored by the correlation engine for review.
+  # Authored per-rule (behaviour-researched) for the correlation engine. Related CoPilot
+  # Searches + telemetry pivots to run around an alert, scoped to its host/user/ip/domain.
+  related_rules:
+  - id: 08200f85-2678-463e-9c32-88dce2f073d1
+    name: MSSQL Add Account To Sysadmin Role
+    reason: sp_procoption needs sysadmin; a just-added sysadmin login is the usual precursor to planting a startup procedure
+  - id: d08dd86f-681e-4a00-a92c-1db218754417
+    name: MSSQL XPCmdshell Option Change
+    reason: Attackers enable xp_cmdshell so the startup procedure can run OS commands; same SQL session, same host
+  - id: 7f103213-a04e-4d59-8261-213dddf22314
+    name: MSSQL XPCmdshell Suspicious Execution
+    reason: A startup proc is typically a wrapper around xp_cmdshell; this shows the payload actually executing
+  - id: 711ab2fe-c9ba-4746-8840-5228a58c3cb8
+    name: MSSQL Extended Stored Procedure Backdoor Maggie
+    reason: Alternate SQL Server persistence implant; co-occurs when the attacker stacks persistence mechanisms
+  - id: 350dfb37-3706-4cdc-9e2e-5e24bc3a46df
+    name: MSSQL Disable Audit Settings
+    reason: Attackers disable auditing to hide the proc registration or its follow-on activity
+  - id: 869b9ca7-9ea2-4a5a-8325-e80e62f75445
+    name: Suspicious Child Process Of SQL Server
+    reason: Startup procedure or xp_cmdshell payload surfaces as cmd/powershell spawned by sqlservr.exe
+  - id: ebfe73c2-5bc9-4ed9-aaa8-8b54b2b4777d
+    name: MSSQL Server Failed Logon From External Network
+    reason: Brute force or spraying of SA/SQL logins is a common initial access path preceding this persistence
+  - id: 00321fee-ca72-4cce-b011-5415af3b9960
+    name: MSSQL Destructive Query
+    reason: Post-persistence or ransomware-style destructive SQL activity on the same instance
+  window: 4h
   enrichment_searches:
-  # Rule-specific telemetry pivots the engine runs around an alert from this rule,
-  # scoped to the alert's host/user/IP within the window (behaviour-targeted, not a sweep).
-    - name: "Follow-on LOLBin / signed-binary-proxy execution on this host"
-      query: 'data_win_system_eventID:"1" AND data_win_eventdata_image:/.*(\\[Rr][Uu][Nn][Dd][Ll][Ll]32\.[Ee][Xx][Ee]|\\[Rr][Ee][Gg][Ss][Vv][Rr]32\.[Ee][Xx][Ee]|\\[Mm][Ss][Hh][Tt][Aa]\.[Ee][Xx][Ee]|\\[Ii][Nn][Ss][Tt][Aa][Ll][Ll][Uu][Tt][Ii][Ll]\.[Ee][Xx][Ee]|\\[Rr][Ee][Gg][Aa][Ss][Mm]\.[Ee][Xx][Ee]|\\[Rr][Ee][Gg][Ss][Vv][Cc][Ss]\.[Ee][Xx][Ee]|\\[Mm][Ss][Bb][Uu][Ii][Ll][Dd]\.[Ee][Xx][Ee]|\\[Cc][Ee][Rr][Tt][Uu][Tt][Ii][Ll]\.[Ee][Xx][Ee]|\\[Bb][Ii][Tt][Ss][Aa][Dd][Mm][Ii][Nn]\.[Ee][Xx][Ee]|\\[Ww][Mm][Ii][Cc]\.[Ee][Xx][Ee]|\\[Cc][Mm][Ss][Tt][Pp]\.[Ee][Xx][Ee]|\\[Oo][Dd][Bb][Cc][Cc][Oo][Nn][Ff]\.[Ee][Xx][Ee]|\\[Ff][Oo][Rr][Ff][Ii][Ll][Ee][Ss]\.[Ee][Xx][Ee]|\\[Pp][Cc][Aa][Ll][Uu][Aa]\.[Ee][Xx][Ee]|\\[Mm][Aa][Vv][Ii][Nn][Jj][Ee][Cc][Tt]\.[Ee][Xx][Ee]|\\[Ss][Cc][Rr][Ii][Pp][Tt][Rr][Uu][Nn][Nn][Ee][Rr]\.[Ee][Xx][Ee])/'
-      pivot_on: [host]
-      window: 1h
-    - name: "Outbound connections by script interpreters on this host"
-      query: 'data_win_system_eventID:"3" AND data_win_eventdata_image:/.*(\\[Pp][Oo][Ww][Ee][Rr][Ss][Hh][Ee][Ll][Ll]\.[Ee][Xx][Ee]|\\[Pp][Ww][Ss][Hh]\.[Ee][Xx][Ee]|\\[Pp][Oo][Ww][Ee][Rr][Ss][Hh][Ee][Ll][Ll]_[Ii][Ss][Ee]\.[Ee][Xx][Ee]|\\[Cc][Mm][Dd]\.[Ee][Xx][Ee]|\\[Ww][Ss][Cc][Rr][Ii][Pp][Tt]\.[Ee][Xx][Ee]|\\[Cc][Ss][Cc][Rr][Ii][Pp][Tt]\.[Ee][Xx][Ee]|\\[Mm][Ss][Hh][Tt][Aa]\.[Ee][Xx][Ee]|\\[Rr][Uu][Nn][Dd][Ll][Ll]32\.[Ee][Xx][Ee]|\\[Rr][Ee][Gg][Ss][Vv][Rr]32\.[Ee][Xx][Ee])/'
-      pivot_on: [host]
-      window: 1h
-    - name: "Autostart persistence written on this host (Run keys, services, IFEO)"
-      query: '(data_win_system_eventID:"12" OR data_win_system_eventID:"13") AND (data_win_eventdata_targetObject:/.*[Cc][Uu][Rr][Rr][Ee][Nn][Tt][Vv][Ee][Rr][Ss][Ii][Oo][Nn]\\[Rr][Uu][Nn].*/ OR data_win_eventdata_targetObject:/.*[Cc][Uu][Rr][Rr][Ee][Nn][Tt][Vv][Ee][Rr][Ss][Ii][Oo][Nn]\\[Rr][Uu][Nn][Oo][Nn][Cc][Ee].*/ OR data_win_eventdata_targetObject:/.*[Cc][Uu][Rr][Rr][Ee][Nn][Tt][Cc][Oo][Nn][Tt][Rr][Oo][Ll][Ss][Ee][Tt]\\[Ss][Ee][Rr][Vv][Ii][Cc][Ee][Ss]\\.*/ OR data_win_eventdata_targetObject:/.*[Ii][Mm][Aa][Gg][Ee] [Ff][Ii][Ll][Ee] [Ee][Xx][Ee][Cc][Uu][Tt][Ii][Oo][Nn] [Oo][Pp][Tt][Ii][Oo][Nn][Ss]\\.*/ OR data_win_eventdata_targetObject:/.*[Ww][Ii][Nn][Ll][Oo][Gg][Oo][Nn]\\[Ss][Hh][Ee][Ll][Ll].*/ OR data_win_eventdata_targetObject:/.*[Ww][Ii][Nn][Ll][Oo][Gg][Oo][Nn]\\[Uu][Ss][Ee][Rr][Ii][Nn][Ii][Tt].*/ OR data_win_eventdata_targetObject:/.*[Cc][Uu][Rr][Rr][Ee][Nn][Tt][Vv][Ee][Rr][Ss][Ii][Oo][Nn]\\[Ee][Xx][Pp][Ll][Oo][Rr][Ee][Rr]\\[Rr][Uu][Nn].*/ OR data_win_eventdata_targetObject:/.*[Pp][Oo][Ll][Ii][Cc][Ii][Ee][Ss]\\[Ee][Xx][Pp][Ll][Oo][Rr][Ee][Rr]\\[Rr][Uu][Nn].*/ OR data_win_eventdata_targetObject:/.*[Cc][Uu][Rr][Rr][Ee][Nn][Tt][Vv][Ee][Rr][Ss][Ii][Oo][Nn]\\[Ww][Ii][Nn][Dd][Oo][Ww][Ss]\\[Ll][Oo][Aa][Dd].*/)'
-      pivot_on: [host]
-      window: 4h
+  # Behaviour-targeted hunts the engine runs around the alert (not a sweep).
+  - name: Processes spawned by sqlservr.exe (startup proc / xp_cmdshell payload)
+    query: data_win_system_eventID:"1" AND data_win_eventdata_parentImage:/.*[Ss][Qq][Ll][Ss][Ee][Rr][Vv][Rr]\.[Ee][Xx][Ee]/
+    pivot_on:
+    - host
+    window: 4h
+  - name: SQL Server audit events for xp_cmdshell, sysadmin grants and sp_configure
+    query: data_win_system_providerName:/.*[Mm][Ss][Ss][Qq][Ll].*/ AND data_win_eventdata_data:(*xp_cmdshell* OR *sp_addsrvrolemember* OR *sp_configure* OR *sp_procoption* OR *sp_OACreate* OR *ALTER\ SERVER\ ROLE*)
+    pivot_on:
+    - host
+    window: 4h
+  - name: Network connections initiated by sqlservr.exe
+    query: data_win_system_eventID:"3" AND data_win_eventdata_image:/.*[Ss][Qq][Ll][Ss][Ee][Rr][Vv][Rr]\.[Ee][Xx][Ee]/
+    pivot_on:
+    - host
+    window: 4h
+  - name: Files dropped by sqlservr.exe (webshell, payload, dumps)
+    query: data_win_system_eventID:"11" AND data_win_eventdata_image:/.*[Ss][Qq][Ll][Ss][Ee][Rr][Vv][Rr]\.[Ee][Xx][Ee]/
+    pivot_on:
+    - host
+    window: 4h

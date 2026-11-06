@@ -129,55 +129,55 @@ correlation:
   # Authored per-rule (behaviour-researched) for the correlation engine. Related CoPilot
   # Searches + telemetry pivots to run around an alert, scoped to its host/user/ip/domain.
   related_rules:
+  - id: lnx-doas-001
+    name: Linux doas Execution Detection
+    reason: Same doas execution seen through auditd/syslog; confirms the invocation and gives the invoking user and exe context
+  - id: linux-sudo-or-su-execution-001
+    name: Linux Sudo Or Su Execution
+    reason: Attacker probing other privilege-delegation tools (sudo/su) on the same host alongside doas
   - id: 0f79c4d2-4e1f-4683-9c36-b5469a665e06
     name: Access of Sudoers File Content
-    reason: Attacker reads sudoers/privilege config to learn which escalation path (sudo vs doas) is permitted just before invoking doas
-  - id: f74107df-b6c6-4e80-bf00-4170b658162b
-    name: Sudo Privilege Escalation CVE-2019-14287
-    reason: Alternative privilege-escalation attempt on the same host; failed or blocked doas often leads to sudo-based escalation
-  - id: 6a50f16c-3b7b-42d1-b081-0fdd3ba70a73
-    name: User Added To Root/Sudoers Group Using Usermod
-    reason: Once escalated via doas, attacker commonly grants a persistent account root/sudo membership
+    reason: Reading sudoers/delegation config is the usual recon before or after using doas to check what elevation is permitted
+  - id: 86157017-c2b1-4d4a-8c33-93b8e67e4af4
+    name: Potential Suspicious Change To Sensitive/Critical Files
+    reason: Once elevated via doas, attackers modify sensitive files such as doas.conf, sudoers, passwd to persist root access
   - id: fa4aaed5-4fe0-498d-bbc0-08e3346387ba
     name: Copy Passwd Or Shadow From TMP Path
-    reason: 'Root-level follow-on: credential files copied out after doas gives access to /etc/shadow'
-  - id: 1182f3b3-e716-4efa-99ab-d2685d04360f
-    name: History File Deletion
-    reason: 'Post-escalation defense evasion: shell history wiped to hide the doas commands'
+    reason: Root obtained through doas is commonly used to stage passwd/shadow for credential cracking
   - id: 6b14bac8-3e3a-4324-8109-42f0546a347f
     name: Scheduled Cron Task/Job - Linux
-    reason: Root persistence via cron following elevated execution through doas
-  - id: 880973f3-9708-491c-a77b-2a35a1921158
-    name: Linux Shell Pipe to Shell
-    reason: 'Precursor/follow-on: payload fetched and piped to a shell, then run elevated with doas'
-  - id: 312b42b1-bded-4441-8b58-163a3af58775
-    name: Potentially Suspicious Execution From Tmp Folder
-    reason: Dropped binary in /tmp executed under doas to run attacker tooling as root
+    reason: 'Follow-on persistence: root cron job installed after privilege escalation with doas'
+  - id: 759d0d51-bc99-4b5e-9add-8f5b2c8e7512
+    name: Creation Of An User Account
+    reason: Elevated doas session often followed by creating a backdoor local account
+  - id: 1182f3b3-e716-4efa-99ab-d2685d04360f
+    name: History File Deletion
+    reason: 'Post-escalation anti-forensics: clearing shell history after privileged commands'
   window: 1h
   enrichment_searches:
   # Behaviour-targeted hunts the engine runs around the alert (not a sweep).
-  - name: Commands executed via doas (child of doas)
+  - name: Commands launched as children of doas
     query: data_process_exec_parent_binary:"/usr/bin/doas"
     pivot_on:
     - host
     window: 1h
-  - name: Sudoers/doas config and shadow file access
-    query: (data_process_exec_process_arguments:*\/etc\/doas.conf* OR data_process_exec_process_arguments:*\/etc\/sudoers* OR data_process_exec_process_arguments:*\/etc\/shadow* OR data_process_exec_process_arguments:*\/etc\/passwd*)
-    pivot_on:
-    - host
-    window: 4h
-  - name: Account creation and group privilege changes
-    query: (data_process_exec_process_binary:("/usr/sbin/useradd" OR "/usr/sbin/usermod" OR "/usr/sbin/adduser" OR "/usr/bin/passwd" OR "/usr/sbin/visudo" OR "/usr/bin/gpasswd"))
+  - name: Edits or reads of doas/sudoers delegation config
+    query: (data_process_exec_process_arguments:*doas.conf* OR data_process_exec_process_arguments:*sudoers* OR data_process_exec_process_arguments:*\/etc\/pam.d*)
     pivot_on:
     - host
     window: 2h
-  - name: Persistence and defense evasion after elevation
-    query: (data_process_exec_process_binary:("/usr/bin/crontab" OR "/usr/bin/systemctl" OR "/usr/bin/chattr") OR data_process_exec_process_arguments:*.bash_history* OR data_process_exec_process_arguments:*authorized_keys*)
-    pivot_on:
-    - host
-    window: 2h
-  - name: Download and execute from temp paths
-    query: (data_process_exec_process_binary:("/usr/bin/wget" OR "/usr/bin/curl") OR data_process_exec_process_binary:\/tmp\/* OR data_process_exec_process_binary:\/dev\/shm\/*)
+  - name: Account and credential file manipulation after elevation
+    query: (data_process_exec_process_binary:("/usr/sbin/useradd" OR "/usr/sbin/usermod" OR "/usr/bin/passwd" OR "/usr/sbin/adduser" OR "/usr/bin/chpasswd") OR data_process_exec_process_arguments:(*\/etc\/shadow* OR *\/etc\/passwd* OR *authorized_keys*))
     pivot_on:
     - host
     window: 4h
+  - name: SUID/permission tampering and persistence setup
+    query: ((data_process_exec_process_binary:("/usr/bin/chmod" OR "/usr/bin/chown" OR "/usr/bin/crontab" OR "/usr/bin/systemctl") AND data_process_exec_process_arguments:(*u+s* OR *4755* OR *6755* OR *\/etc\/cron* OR *enable* OR *\/etc\/systemd*)))
+    pivot_on:
+    - host
+    window: 4h
+  - name: Download-and-execute tooling around doas use
+    query: data_process_exec_process_binary:("/usr/bin/wget" OR "/usr/bin/curl" OR "/usr/bin/nc" OR "/usr/bin/ncat" OR "/usr/bin/scp")
+    pivot_on:
+    - host
+    window: 2h

@@ -136,19 +136,58 @@ graylog:
   query: data_win_system_providerName:/.*[Mm][Ss][Ss][Qq][Ll].*/ AND data_win_system_eventID:"33205" AND data_win_eventdata_data:/.*[Oo][Bb][Jj][Ee][Cc][Tt]_[Nn][Aa][Mm][Ee]:[Xx][Pp]_[Cc][Mm][Dd][Ss][Hh][Ee][Ll][Ll].*/ AND data_win_eventdata_data:/.*[Ss][Tt][Aa][Tt][Ee][Mm][Ee][Nn][Tt]:[Ee][Xx][Ee][Cc].*/
 
 correlation:
-  # Authored by the correlation engine for review.
+  # Authored per-rule (behaviour-researched) for the correlation engine. Related CoPilot
+  # Searches + telemetry pivots to run around an alert, scoped to its host/user/ip/domain.
+  related_rules:
+  - id: d08dd86f-681e-4a00-a92c-1db218754417
+    name: MSSQL XPCmdshell Option Change
+    reason: 'Precursor: xp_cmdshell is disabled by default, so an attacker must first enable it via sp_configure before EXEC xp_cmdshell can run.'
+  - id: 08200f85-2678-463e-9c32-88dce2f073d1
+    name: MSSQL Add Account To Sysadmin Role
+    reason: 'Precursor: xp_cmdshell needs sysadmin; a compromised or SQLi-escalated login is often added to sysadmin right before command execution.'
+  - id: ebfe73c2-5bc9-4ed9-aaa8-8b54b2b4777d
+    name: MSSQL Server Failed Logon From External Network
+    reason: 'Precursor: brute-force or password-spray of the sa/SQL login from outside is the common initial access that ends in xp_cmdshell.'
+  - id: 869b9ca7-9ea2-4a5a-8325-e80e62f75445
+    name: Suspicious Child Process Of SQL Server
+    reason: 'Same-moment process telemetry: xp_cmdshell executes commands as cmd.exe spawned by sqlservr.exe, confirming what the statement actually ran.'
+  - id: 350dfb37-3706-4cdc-9e2e-5e24bc3a46df
+    name: MSSQL Disable Audit Settings
+    reason: 'Defense evasion follow-on: attackers disable SQL Server audit after getting command execution to hide their activity.'
+  - id: 711ab2fe-c9ba-4746-8840-5228a58c3cb8
+    name: MSSQL Extended Stored Procedure Backdoor Maggie
+    reason: 'Persistence follow-on: after xp_cmdshell access, attackers may install a backdoor extended stored procedure on the same server.'
+  - id: b3d57a5c-c92e-4b48-9a79-5f124b7cf964
+    name: MSSQL SPProcoption Set
+    reason: 'Persistence follow-on: sp_procoption startup procedures re-run attacker payloads at every SQL Server start (the NetSPI reference technique).'
+  - id: c615d676-f655-46b9-b913-78729021e5d7
+    name: Data Export From MSSQL Table Via BCP.EXE
+    reason: 'Impact follow-on: xp_cmdshell is commonly used to launch bcp.exe to dump database tables out for exfiltration.'
+  window: 1h
   enrichment_searches:
-  # Rule-specific telemetry pivots the engine runs around an alert from this rule,
-  # scoped to the alert's host/user/IP within the window (behaviour-targeted, not a sweep).
-    - name: "Follow-on LOLBin / signed-binary-proxy execution on this host"
-      query: 'data_win_system_eventID:"1" AND data_win_eventdata_image:/.*(\\[Rr][Uu][Nn][Dd][Ll][Ll]32\.[Ee][Xx][Ee]|\\[Rr][Ee][Gg][Ss][Vv][Rr]32\.[Ee][Xx][Ee]|\\[Mm][Ss][Hh][Tt][Aa]\.[Ee][Xx][Ee]|\\[Ii][Nn][Ss][Tt][Aa][Ll][Ll][Uu][Tt][Ii][Ll]\.[Ee][Xx][Ee]|\\[Rr][Ee][Gg][Aa][Ss][Mm]\.[Ee][Xx][Ee]|\\[Rr][Ee][Gg][Ss][Vv][Cc][Ss]\.[Ee][Xx][Ee]|\\[Mm][Ss][Bb][Uu][Ii][Ll][Dd]\.[Ee][Xx][Ee]|\\[Cc][Ee][Rr][Tt][Uu][Tt][Ii][Ll]\.[Ee][Xx][Ee]|\\[Bb][Ii][Tt][Ss][Aa][Dd][Mm][Ii][Nn]\.[Ee][Xx][Ee]|\\[Ww][Mm][Ii][Cc]\.[Ee][Xx][Ee]|\\[Cc][Mm][Ss][Tt][Pp]\.[Ee][Xx][Ee]|\\[Oo][Dd][Bb][Cc][Cc][Oo][Nn][Ff]\.[Ee][Xx][Ee]|\\[Ff][Oo][Rr][Ff][Ii][Ll][Ee][Ss]\.[Ee][Xx][Ee]|\\[Pp][Cc][Aa][Ll][Uu][Aa]\.[Ee][Xx][Ee]|\\[Mm][Aa][Vv][Ii][Nn][Jj][Ee][Cc][Tt]\.[Ee][Xx][Ee]|\\[Ss][Cc][Rr][Ii][Pp][Tt][Rr][Uu][Nn][Nn][Ee][Rr]\.[Ee][Xx][Ee])/'
-      pivot_on: [host]
-      window: 1h
-    - name: "Outbound connections by script interpreters on this host"
-      query: 'data_win_system_eventID:"3" AND data_win_eventdata_image:/.*(\\[Pp][Oo][Ww][Ee][Rr][Ss][Hh][Ee][Ll][Ll]\.[Ee][Xx][Ee]|\\[Pp][Ww][Ss][Hh]\.[Ee][Xx][Ee]|\\[Pp][Oo][Ww][Ee][Rr][Ss][Hh][Ee][Ll][Ll]_[Ii][Ss][Ee]\.[Ee][Xx][Ee]|\\[Cc][Mm][Dd]\.[Ee][Xx][Ee]|\\[Ww][Ss][Cc][Rr][Ii][Pp][Tt]\.[Ee][Xx][Ee]|\\[Cc][Ss][Cc][Rr][Ii][Pp][Tt]\.[Ee][Xx][Ee]|\\[Mm][Ss][Hh][Tt][Aa]\.[Ee][Xx][Ee]|\\[Rr][Uu][Nn][Dd][Ll][Ll]32\.[Ee][Xx][Ee]|\\[Rr][Ee][Gg][Ss][Vv][Rr]32\.[Ee][Xx][Ee])/'
-      pivot_on: [host]
-      window: 1h
-    - name: "Autostart persistence written on this host (Run keys, services, IFEO)"
-      query: '(data_win_system_eventID:"12" OR data_win_system_eventID:"13") AND (data_win_eventdata_targetObject:/.*[Cc][Uu][Rr][Rr][Ee][Nn][Tt][Vv][Ee][Rr][Ss][Ii][Oo][Nn]\\[Rr][Uu][Nn].*/ OR data_win_eventdata_targetObject:/.*[Cc][Uu][Rr][Rr][Ee][Nn][Tt][Vv][Ee][Rr][Ss][Ii][Oo][Nn]\\[Rr][Uu][Nn][Oo][Nn][Cc][Ee].*/ OR data_win_eventdata_targetObject:/.*[Cc][Uu][Rr][Rr][Ee][Nn][Tt][Cc][Oo][Nn][Tt][Rr][Oo][Ll][Ss][Ee][Tt]\\[Ss][Ee][Rr][Vv][Ii][Cc][Ee][Ss]\\.*/ OR data_win_eventdata_targetObject:/.*[Ii][Mm][Aa][Gg][Ee] [Ff][Ii][Ll][Ee] [Ee][Xx][Ee][Cc][Uu][Tt][Ii][Oo][Nn] [Oo][Pp][Tt][Ii][Oo][Nn][Ss]\\.*/ OR data_win_eventdata_targetObject:/.*[Ww][Ii][Nn][Ll][Oo][Gg][Oo][Nn]\\[Ss][Hh][Ee][Ll][Ll].*/ OR data_win_eventdata_targetObject:/.*[Ww][Ii][Nn][Ll][Oo][Gg][Oo][Nn]\\[Uu][Ss][Ee][Rr][Ii][Nn][Ii][Tt].*/ OR data_win_eventdata_targetObject:/.*[Cc][Uu][Rr][Rr][Ee][Nn][Tt][Vv][Ee][Rr][Ss][Ii][Oo][Nn]\\[Ee][Xx][Pp][Ll][Oo][Rr][Ee][Rr]\\[Rr][Uu][Nn].*/ OR data_win_eventdata_targetObject:/.*[Pp][Oo][Ll][Ii][Cc][Ii][Ee][Ss]\\[Ee][Xx][Pp][Ll][Oo][Rr][Ee][Rr]\\[Rr][Uu][Nn].*/ OR data_win_eventdata_targetObject:/.*[Cc][Uu][Rr][Rr][Ee][Nn][Tt][Vv][Ee][Rr][Ss][Ii][Oo][Nn]\\[Ww][Ii][Nn][Dd][Oo][Ww][Ss]\\[Ll][Oo][Aa][Dd].*/)'
-      pivot_on: [host]
-      window: 4h
+  # Behaviour-targeted hunts the engine runs around the alert (not a sweep).
+  - name: Shell and tooling spawned by sqlservr.exe (xp_cmdshell child processes)
+    query: data_win_system_eventID:"1" AND data_win_eventdata_parentImage:/.*[Ss][Qq][Ll][Ss][Ee][Rr][Vv][Rr]\.[Ee][Xx][Ee]/ AND data_win_eventdata_image:/.*\\([Cc][Mm][Dd]|[Pp][Oo][Ww][Ee][Rr][Ss][Hh][Ee][Ll][Ll]|[Pp][Ww][Ss][Hh]|[Ww][Hh][Oo][Aa][Mm][Ii]|[Nn][Ee][Tt]1?|[Cc][Uu][Rr][Ll]|[Cc][Ee][Rr][Tt][Uu][Tt][Ii][Ll]|[Bb][Ii][Tt][Ss][Aa][Dd][Mm][Ii][Nn]|[Mm][Ss][Hh][Tt][Aa]|[Rr][Ee][Gg][Ss][Vv][Rr]32|[Nn][Ss][Ll][Oo][Oo][Kk][Uu][Pp]|[Pp][Ii][Nn][Gg]|[Tt][Aa][Ss][Kk][Ll][Ii][Ss][Tt]|[Ss][Cc][Hh][Tt][Aa][Ss][Kk][Ss])\.[Ee][Xx][Ee]/
+    pivot_on:
+    - host
+    window: 1h
+  - name: Discovery and account/privilege commands issued under SQL Server
+    query: data_win_system_eventID:"1" AND data_win_eventdata_parentImage:/.*[Ss][Qq][Ll][Ss][Ee][Rr][Vv][Rr]\.[Ee][Xx][Ee]/ AND (data_win_eventdata_commandLine:/.*([Ww][Hh][Oo][Aa][Mm][Ii]|[Ii][Pp][Cc][Oo][Nn][Ff][Ii][Gg]|[Nn][Ee][Tt] +([Uu][Ss][Ee][Rr]|[Ll][Oo][Cc][Aa][Ll][Gg][Rr][Oo][Uu][Pp])|[Nn][Ll][Tt][Ee][Ss][Tt]|[Qq][Uu][Ee][Rr][Yy] +[Uu][Ss][Ee][Rr]|[Ss][Yy][Ss][Tt][Ee][Mm][Ii][Nn][Ff][Oo]).*/ OR data_win_eventdata_commandLine:/.*[Ff][Rr][Oo][Mm] +[Ss][Yy][Ss][Aa][Dd][Mm][Ii][Nn].*/)
+    pivot_on:
+    - host
+    window: 2h
+  - name: Payload download or staging by SQL Server service (network and file writes)
+    query: (data_win_system_eventID:"3" OR data_win_system_eventID:"11") AND (data_win_eventdata_image:/.*[Ss][Qq][Ll][Ss][Ee][Rr][Vv][Rr]\.[Ee][Xx][Ee]/ OR data_win_eventdata_image:/.*\\([Cc][Mm][Dd]|[Pp][Oo][Ww][Ee][Rr][Ss][Hh][Ee][Ll][Ll]|[Cc][Ee][Rr][Tt][Uu][Tt][Ii][Ll]|[Bb][Ii][Tt][Ss][Aa][Dd][Mm][Ii][Nn]|[Cc][Uu][Rr][Ll])\.[Ee][Xx][Ee]/)
+    pivot_on:
+    - host
+    window: 1h
+  - name: PowerShell script blocks with download or execution cradles
+    query: data_win_system_eventID:"4104" AND data_win_eventdata_scriptBlockText:/.*([Ii][Ee][Xx]|[Ii][Nn][Vv][Oo][Kk][Ee]-[Ee][Xx][Pp][Rr][Ee][Ss][Ss][Ii][Oo][Nn]|[Dd][Oo][Ww][Nn][Ll][Oo][Aa][Dd][Ss][Tt][Rr][Ii][Nn][Gg]|[Dd][Oo][Ww][Nn][Ll][Oo][Aa][Dd][Ff][Ii][Ll][Ee]|[Ff][Rr][Oo][Mm][Bb][Aa][Ss][Ee]64[Ss][Tt][Rr][Ii][Nn][Gg]|[Nn][Ee][Tt]\.[Ww][Ee][Bb][Cc][Ll][Ii][Ee][Nn][Tt]).*/
+    pivot_on:
+    - host
+    window: 2h
+  - name: Persistence and service-account tampering after SQL command execution
+    query: (data_win_system_eventID:"12" OR data_win_system_eventID:"13") AND (data_win_eventdata_targetObject:/.*[Cc][Uu][Rr][Rr][Ee][Nn][Tt][Vv][Ee][Rr][Ss][Ii][Oo][Nn]\\[Rr][Uu][Nn].*/ OR data_win_eventdata_targetObject:/.*[Cc][Uu][Rr][Rr][Ee][Nn][Tt][Cc][Oo][Nn][Tt][Rr][Oo][Ll][Ss][Ee][Tt]\\[Ss][Ee][Rr][Vv][Ii][Cc][Ee][Ss]\\.*/ OR data_win_eventdata_targetObject:/.*[Ii][Mm][Aa][Gg][Ee] [Ff][Ii][Ll][Ee] [Ee][Xx][Ee][Cc][Uu][Tt][Ii][Oo][Nn] [Oo][Pp][Tt][Ii][Oo][Nn][Ss]\\.*/)
+    pivot_on:
+    - host
+    window: 4h

@@ -156,19 +156,58 @@ graylog:
   query: data_win_system_eventID:"7" AND data_win_eventdata_image:/.*\\[Ww][Mm][Ii][Cc]\.[Ee][Xx][Ee]/ AND (data_win_eventdata_imageLoaded:/.*\\[Jj][Ss][Cc][Rr][Ii][Pp][Tt]\.[Dd][Ll][Ll]/ OR data_win_eventdata_imageLoaded:/.*\\[Vv][Bb][Ss][Cc][Rr][Ii][Pp][Tt]\.[Dd][Ll][Ll]/)
 
 correlation:
-  # Authored by the correlation engine for review.
+  # Authored per-rule (behaviour-researched) for the correlation engine. Related CoPilot
+  # Searches + telemetry pivots to run around an alert, scoped to its host/user/ip/domain.
+  related_rules:
+  - id: 8d63dadf-b91b-4187-87b6-34a1114577ea
+    name: Potential Remote SquiblyTwo Technique Execution
+    reason: 'The process-creation view of the same SquiblyTwo trick: wmic /format pointing at a remote XSL is what makes wmic.exe load jscript.dll/vbscript.dll, so it supplies the URL and command line this image-load lacks.'
+  - id: 526be59f-a573-4eea-b5f7-f0973207634d
+    name: Process Creation Attempt via Wmic.EXE
+    reason: wmic 'process call create' is the usual way a wmic-hosted script payload goes on to launch a child, and it co-occurs with the script engine load.
+  - id: 3c89a1e8-0fba-449e-8f1b-8409d6267ec8
+    name: Suspicious Process Created Via Wmic.EXE
+    reason: If the XSL script payload spawns a suspicious child through wmic, this fires right after the script library load and confirms execution.
+  - id: 75d0a94e-6252-448d-a7be-d953dff527bb
+    name: Remote XSL Execution Via Msxsl.EXE
+    reason: Sibling XSL script-proxy technique using the same jscript/vbscript-in-XSL payload; attackers swap between wmic /format and msxsl on the same host.
+  - id: e1693bc8-7168-4eab-8718-cdcaa68a1738
+    name: Suspicious WMIC Execution Via Office Process
+    reason: 'Common precursor: a macro document spawns wmic /format to run the XSL payload, explaining why wmic loaded script engines.'
+  - id: ebef4391-1a81-4761-a40a-1db446c0e625
+    name: NewActiveScriptEventConsumer Creation Attempt via Wmic.EXE
+    reason: Also makes wmic load VBScript/JScript engines, and is the persistence follow-on when the operator turns scripted WMI execution into a durable event consumer.
+  - id: b6676963-0353-4f88-90f5-36c20d443c6a
+    name: Cscript/Wscript Potentially Suspicious Child Process
+    reason: 'Co-occurring script-host abuse: the same actor often chains wscript/cscript staging with wmic script execution.'
+  - id: 8a582fe2-0882-4b89-a82a-da6b2dc32937
+    name: Suspicious WmiPrvSE Child Process
+    reason: 'WMI-hosted execution follow-on: script payloads delivered via WMI frequently surface as unusual children of WmiPrvSE.'
+  window: 1h
   enrichment_searches:
-  # Rule-specific telemetry pivots the engine runs around an alert from this rule,
-  # scoped to the alert's host/user/IP within the window (behaviour-targeted, not a sweep).
-    - name: "Other executions of this tool-set on this host (any arguments)"
-      query: 'data_win_system_eventID:"1" AND data_win_eventdata_image:/.*(\\[Ww][Mm][Ii][Cc]\.[Ee][Xx][Ee])/'
-      pivot_on: [host]
-      window: 2h
-    - name: "DLL sideloading / execution from user-writable paths on this host"
-      query: '((data_win_system_eventID:"7" AND (data_win_eventdata_imageLoaded:/.*\\[Uu][Ss][Ee][Rr][Ss]\\.*/ OR data_win_eventdata_imageLoaded:/.*\\[Pp][Rr][Oo][Gg][Rr][Aa][Mm][Dd][Aa][Tt][Aa]\\.*/ OR data_win_eventdata_imageLoaded:/.*\\[Ww][Ii][Nn][Dd][Oo][Ww][Ss]\\[Tt][Ee][Mm][Pp]\\.*/ OR data_win_eventdata_imageLoaded:/.*\\[Aa][Pp][Pp][Dd][Aa][Tt][Aa]\\.*/ OR data_win_eventdata_imageLoaded:/.*\\[Pp][Uu][Bb][Ll][Ii][Cc]\\.*/ OR data_win_eventdata_imageLoaded:/.*\\\$[Rr][Ee][Cc][Yy][Cc][Ll][Ee].*/)) OR (data_win_system_eventID:"1" AND (data_win_eventdata_image:/.*\\[Uu][Ss][Ee][Rr][Ss]\\.*/ OR data_win_eventdata_image:/.*\\[Pp][Rr][Oo][Gg][Rr][Aa][Mm][Dd][Aa][Tt][Aa]\\.*/ OR data_win_eventdata_image:/.*\\[Ww][Ii][Nn][Dd][Oo][Ww][Ss]\\[Tt][Ee][Mm][Pp]\\.*/ OR data_win_eventdata_image:/.*\\[Aa][Pp][Pp][Dd][Aa][Tt][Aa]\\.*/ OR data_win_eventdata_image:/.*\\[Pp][Uu][Bb][Ll][Ii][Cc]\\.*/ OR data_win_eventdata_image:/.*\\\$[Rr][Ee][Cc][Yy][Cc][Ll][Ee].*/)))'
-      pivot_on: [host]
-      window: 2h
-    - name: "Follow-on LOLBin / signed-binary-proxy execution on this host"
-      query: 'data_win_system_eventID:"1" AND data_win_eventdata_image:/.*(\\[Rr][Uu][Nn][Dd][Ll][Ll]32\.[Ee][Xx][Ee]|\\[Rr][Ee][Gg][Ss][Vv][Rr]32\.[Ee][Xx][Ee]|\\[Mm][Ss][Hh][Tt][Aa]\.[Ee][Xx][Ee]|\\[Ii][Nn][Ss][Tt][Aa][Ll][Ll][Uu][Tt][Ii][Ll]\.[Ee][Xx][Ee]|\\[Rr][Ee][Gg][Aa][Ss][Mm]\.[Ee][Xx][Ee]|\\[Rr][Ee][Gg][Ss][Vv][Cc][Ss]\.[Ee][Xx][Ee]|\\[Mm][Ss][Bb][Uu][Ii][Ll][Dd]\.[Ee][Xx][Ee]|\\[Cc][Ee][Rr][Tt][Uu][Tt][Ii][Ll]\.[Ee][Xx][Ee]|\\[Bb][Ii][Tt][Ss][Aa][Dd][Mm][Ii][Nn]\.[Ee][Xx][Ee]|\\[Ww][Mm][Ii][Cc]\.[Ee][Xx][Ee]|\\[Cc][Mm][Ss][Tt][Pp]\.[Ee][Xx][Ee]|\\[Oo][Dd][Bb][Cc][Cc][Oo][Nn][Ff]\.[Ee][Xx][Ee]|\\[Ff][Oo][Rr][Ff][Ii][Ll][Ee][Ss]\.[Ee][Xx][Ee]|\\[Pp][Cc][Aa][Ll][Uu][Aa]\.[Ee][Xx][Ee]|\\[Mm][Aa][Vv][Ii][Nn][Jj][Ee][Cc][Tt]\.[Ee][Xx][Ee]|\\[Ss][Cc][Rr][Ii][Pp][Tt][Rr][Uu][Nn][Nn][Ee][Rr]\.[Ee][Xx][Ee])/'
-      pivot_on: [host]
-      window: 1h
+  # Behaviour-targeted hunts the engine runs around the alert (not a sweep).
+  - name: wmic.exe command line using /format with XSL or remote URL (SquiblyTwo)
+    query: data_win_system_eventID:"1" AND data_win_eventdata_image:/.*[Ww][Mm][Ii][Cc]\.[Ee][Xx][Ee]/ AND (data_win_eventdata_commandLine:*\/format* OR data_win_eventdata_commandLine:*\-format* OR data_win_eventdata_commandLine:*.xsl* OR data_win_eventdata_commandLine:*http\:* OR data_win_eventdata_commandLine:*https\:*)
+    pivot_on:
+    - host
+    window: 1h
+  - name: 'Parent of wmic.exe: Office, script host, or shell launching it'
+    query: data_win_system_eventID:"1" AND data_win_eventdata_image:/.*[Ww][Mm][Ii][Cc]\.[Ee][Xx][Ee]/ AND data_win_eventdata_parentImage:/.*(\\[Ww][Ii][Nn][Ww][Oo][Rr][Dd]\.[Ee][Xx][Ee]|\\[Ee][Xx][Cc][Ee][Ll]\.[Ee][Xx][Ee]|\\[Pp][Oo][Ww][Ee][Rr][Pp][Nn][Tt]\.[Ee][Xx][Ee]|\\[Ww][Ss][Cc][Rr][Ii][Pp][Tt]\.[Ee][Xx][Ee]|\\[Cc][Ss][Cc][Rr][Ii][Pp][Tt]\.[Ee][Xx][Ee]|\\[Mm][Ss][Hh][Tt][Aa]\.[Ee][Xx][Ee]|\\[Pp][Oo][Ww][Ee][Rr][Ss][Hh][Ee][Ll][Ll]\.[Ee][Xx][Ee]|\\[Cc][Mm][Dd]\.[Ee][Xx][Ee])/
+    pivot_on:
+    - host
+    window: 1h
+  - name: Network connections or DNS lookups made by wmic.exe (XSL fetch)
+    query: (data_win_system_eventID:"3" OR data_win_system_eventID:"22") AND data_win_eventdata_image:/.*[Ww][Mm][Ii][Cc]\.[Ee][Xx][Ee]/
+    pivot_on:
+    - host
+    window: 2h
+  - name: Child processes spawned by wmic.exe after script load
+    query: data_win_system_eventID:"1" AND data_win_eventdata_parentImage:/.*[Ww][Mm][Ii][Cc]\.[Ee][Xx][Ee]/ AND NOT data_win_eventdata_image:/.*[Ww][Mm][Ii][Cc]\.[Ee][Xx][Ee]/
+    pivot_on:
+    - host
+    window: 2h
+  - name: XSL or script payload files written to disk
+    query: data_win_system_eventID:"11" AND (data_win_eventdata_targetFilename:/.*\.[Xx][Ss][Ll]/ OR data_win_eventdata_targetFilename:/.*\.[Xx][Ss][Ll][Tt]/ OR data_win_eventdata_targetFilename:/.*\.[Jj][Ss]/ OR data_win_eventdata_targetFilename:/.*\.[Vv][Bb][Ss]/ OR data_win_eventdata_targetFilename:/.*\.[Ww][Ss][Ff]/)
+    pivot_on:
+    - host
+    window: 4h

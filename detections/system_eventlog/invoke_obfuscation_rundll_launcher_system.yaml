@@ -151,41 +151,58 @@ graylog:
   query: data_win_system_providerName:/[Ss][Ee][Rr][Vv][Ii][Cc][Ee] [Cc][Oo][Nn][Tt][Rr][Oo][Ll] [Mm][Aa][Nn][Aa][Gg][Ee][Rr]/ AND data_win_system_eventID:"7045" AND data_win_eventdata_imagePath:/.*[Rr][Uu][Nn][Dd][Ll][Ll]32\.[Ee][Xx][Ee].*/ AND data_win_eventdata_imagePath:/.*[Ss][Hh][Ee][Ll][Ll]32\.[Dd][Ll][Ll].*/ AND data_win_eventdata_imagePath:/.*[Ss][Hh][Ee][Ll][Ll][Ee][Xx][Ee][Cc]_[Rr][Uu][Nn][Dd][Ll][Ll].*/ AND data_win_eventdata_imagePath:/.*[Pp][Oo][Ww][Ee][Rr][Ss][Hh][Ee][Ll][Ll].*/
 
 correlation:
-  # Authored by the correlation engine for review. Related CoPilot Searches to run
-  # around an alert from this rule, scoped to the same host/user/IP within the window.
+  # Authored per-rule (behaviour-researched) for the correlation engine. Related CoPilot
+  # Searches + telemetry pivots to run around an alert, scoped to its host/user/ip/domain.
   related_rules:
-    - id: 0255a820-e564-4e40-af2b-6ac61160335c
-      name: "A New Trust Was Created To A Domain"
-      reason: "next kill-chain tactic: Persistence"
-    - id: 35ba1d85-724d-42a3-889f-2e2362bcaf23
-      name: "AD Privileged Users or Groups Reconnaissance"
-      reason: "next kill-chain tactic: Discovery"
-    - id: 9eb99343-d336-4020-a3cd-67f3819e68ee
-      name: "Account Tampering - Suspicious Failed Logon Reasons"
-      reason: "next kill-chain tactic: Persistence"
-    - id: 17d619c1-e020-4347-957e-1d1207455c93
-      name: "Active Directory Replication from Non Machine Account"
-      reason: "next kill-chain tactic: Credential Access"
-    - id: 300bac00-e041-4ee2-9c36-e262656a6ecc
-      name: "Active Directory User Backdoors"
-      reason: "next kill-chain tactic: Persistence"
+  - id: 641a4bfb-c017-44f7-800c-2aee0184ce9b
+    name: Invoke-Obfuscation Via Use Rundll32 - System
+    reason: Sibling Invoke-Obfuscation Rundll32 launcher variant also registered as a 7045 service; same tooling run with a different obfuscation flavour confirms an obfuscation framework in use.
+  - id: 1d61f71d-59d2-479e-9562-4ff5f4ead16b
+    name: Suspicious Service Installation
+    reason: The alert is itself a 7045 service install whose ImagePath launches PowerShell; a generic suspicious service-install hit on the same host corroborates service-based execution.
+  - id: 70f00d10-60b2-4f34-b9a0-dc3df3fe762a
+    name: Suspicious Service Installation Script
+    reason: Service whose image path is a script/interpreter command line, the same service-as-launcher technique used here.
+  - id: a2e5019d-a658-4c6a-92bf-7197b54e2cae
+    name: PowerShell Scripts Installed as Services
+    reason: 'Direct overlap: a service created to run PowerShell, as in the rundll32 shell32 ShellExec_RunDLL powershell launcher.'
+  - id: 843544a7-56e0-4dcc-a44f-5cc266dd97d6
+    name: Meterpreter or Cobalt Strike Getsystem Service Installation - System
+    reason: Service-installed PowerShell/rundll32 launchers are a common getsystem/SYSTEM-privilege step; indicates the service was used for privilege escalation by a C2 framework.
+  - id: 5a105d34-05fc-401e-8553-272b45c1522d
+    name: CobaltStrike Service Installations - System
+    reason: Cobalt Strike psexec/jump-psexec payloads install services with PowerShell command lines; follow-on or look-alike service install on the host.
+  - id: e6cb92b4-b470-4eb8-8a9d-d63e8583aae0
+    name: Invoke-Obfuscation RUNDLL LAUNCHER - PowerShell
+    reason: Same launcher seen at execution time in script block logging (4104), showing the obfuscated payload that the service ran.
+  - id: 42c575ea-e41e-41f1-b248-8093c3e82a28
+    name: PsExec Service Installation
+    reason: Remote service creation via PsExec is the typical delivery path for an obfuscated launcher service, so lateral movement origin may be shown here.
   window: 1h
   enrichment_searches:
-  # Rule-specific telemetry pivots the engine runs around an alert from this rule,
-  # scoped to the alert's host/user/IP within the window (behaviour-targeted, not a sweep).
-    - name: "Outbound connections by script interpreters on this host"
-      query: 'data_win_system_eventID:"3" AND data_win_eventdata_image:/.*(\\[Pp][Oo][Ww][Ee][Rr][Ss][Hh][Ee][Ll][Ll]\.[Ee][Xx][Ee]|\\[Pp][Ww][Ss][Hh]\.[Ee][Xx][Ee]|\\[Pp][Oo][Ww][Ee][Rr][Ss][Hh][Ee][Ll][Ll]_[Ii][Ss][Ee]\.[Ee][Xx][Ee]|\\[Cc][Mm][Dd]\.[Ee][Xx][Ee]|\\[Ww][Ss][Cc][Rr][Ii][Pp][Tt]\.[Ee][Xx][Ee]|\\[Cc][Ss][Cc][Rr][Ii][Pp][Tt]\.[Ee][Xx][Ee]|\\[Mm][Ss][Hh][Tt][Aa]\.[Ee][Xx][Ee]|\\[Rr][Uu][Nn][Dd][Ll][Ll]32\.[Ee][Xx][Ee]|\\[Rr][Ee][Gg][Ss][Vv][Rr]32\.[Ee][Xx][Ee])/'
-      pivot_on: [host]
-      window: 1h
-    - name: "Encoded / obfuscated script execution on this host"
-      query: 'data_win_system_eventID:"4104" AND (data_win_eventdata_scriptBlockText:/.*[Dd][Oo][Ww][Nn][Ll][Oo][Aa][Dd][Ss][Tt][Rr][Ii][Nn][Gg].*/ OR data_win_eventdata_scriptBlockText:/.*[Dd][Oo][Ww][Nn][Ll][Oo][Aa][Dd][Ff][Ii][Ll][Ee].*/ OR data_win_eventdata_scriptBlockText:/.*[Ii][Nn][Vv][Oo][Kk][Ee]-[Ww][Ee][Bb][Rr][Ee][Qq][Uu][Ee][Ss][Tt].*/ OR data_win_eventdata_scriptBlockText:/.*[Nn][Ee][Tt]\.[Ww][Ee][Bb][Cc][Ll][Ii][Ee][Nn][Tt].*/ OR data_win_eventdata_scriptBlockText:/.*[Ff][Rr][Oo][Mm][Bb][Aa][Ss][Ee]64[Ss][Tt][Rr][Ii][Nn][Gg].*/ OR data_win_eventdata_scriptBlockText:/.*[Ii][Ee][Xx].*/ OR data_win_eventdata_scriptBlockText:/.*[Ii][Nn][Vv][Oo][Kk][Ee]-[Ee][Xx][Pp][Rr][Ee][Ss][Ss][Ii][Oo][Nn].*/ OR data_win_eventdata_scriptBlockText:/.*[Ss][Tt][Aa][Rr][Tt]-[Bb][Ii][Tt][Ss][Tt][Rr][Aa][Nn][Ss][Ff][Ee][Rr].*/ OR data_win_eventdata_scriptBlockText:/.*[Aa][Mm][Ss][Ii][Uu][Tt][Ii][Ll][Ss].*/ OR data_win_eventdata_scriptBlockText:/.*-[Ee][Nn][Cc].*/ OR data_win_eventdata_scriptBlockText:/.*-[Ee][Nn][Cc][Oo][Dd][Ee][Dd][Cc][Oo][Mm][Mm][Aa][Nn][Dd].*/ OR data_win_eventdata_scriptBlockText:/.*[Rr][Ee][Ff][Ll][Ee][Cc][Tt][Ii][Oo][Nn]\.[Aa][Ss][Ss][Ee][Mm][Bb][Ll][Yy].*/)'
-      pivot_on: [host]
-      window: 1h
-    - name: "Autostart persistence written on this host (Run keys, services, IFEO)"
-      query: '(data_win_system_eventID:"12" OR data_win_system_eventID:"13") AND (data_win_eventdata_targetObject:/.*[Cc][Uu][Rr][Rr][Ee][Nn][Tt][Vv][Ee][Rr][Ss][Ii][Oo][Nn]\\[Rr][Uu][Nn].*/ OR data_win_eventdata_targetObject:/.*[Cc][Uu][Rr][Rr][Ee][Nn][Tt][Vv][Ee][Rr][Ss][Ii][Oo][Nn]\\[Rr][Uu][Nn][Oo][Nn][Cc][Ee].*/ OR data_win_eventdata_targetObject:/.*[Cc][Uu][Rr][Rr][Ee][Nn][Tt][Cc][Oo][Nn][Tt][Rr][Oo][Ll][Ss][Ee][Tt]\\[Ss][Ee][Rr][Vv][Ii][Cc][Ee][Ss]\\.*/ OR data_win_eventdata_targetObject:/.*[Ii][Mm][Aa][Gg][Ee] [Ff][Ii][Ll][Ee] [Ee][Xx][Ee][Cc][Uu][Tt][Ii][Oo][Nn] [Oo][Pp][Tt][Ii][Oo][Nn][Ss]\\.*/ OR data_win_eventdata_targetObject:/.*[Ww][Ii][Nn][Ll][Oo][Gg][Oo][Nn]\\[Ss][Hh][Ee][Ll][Ll].*/ OR data_win_eventdata_targetObject:/.*[Ww][Ii][Nn][Ll][Oo][Gg][Oo][Nn]\\[Uu][Ss][Ee][Rr][Ii][Nn][Ii][Tt].*/ OR data_win_eventdata_targetObject:/.*[Cc][Uu][Rr][Rr][Ee][Nn][Tt][Vv][Ee][Rr][Ss][Ii][Oo][Nn]\\[Ee][Xx][Pp][Ll][Oo][Rr][Ee][Rr]\\[Rr][Uu][Nn].*/ OR data_win_eventdata_targetObject:/.*[Pp][Oo][Ll][Ii][Cc][Ii][Ee][Ss]\\[Ee][Xx][Pp][Ll][Oo][Rr][Ee][Rr]\\[Rr][Uu][Nn].*/ OR data_win_eventdata_targetObject:/.*[Cc][Uu][Rr][Rr][Ee][Nn][Tt][Vv][Ee][Rr][Ss][Ii][Oo][Nn]\\[Ww][Ii][Nn][Dd][Oo][Ww][Ss]\\[Ll][Oo][Aa][Dd].*/)'
-      pivot_on: [host]
-      window: 4h
-    - name: "Service installations on this host"
-      query: 'data_win_system_eventID:"7045"'
-      pivot_on: [host]
-      window: 6h
+  # Behaviour-targeted hunts the engine runs around the alert (not a sweep).
+  - name: PowerShell/rundll32 children of services.exe or services-run processes
+    query: data_win_system_eventID:"1" AND data_win_eventdata_parentImage:/.*[Ss][Ee][Rr][Vv][Ii][Cc][Ee][Ss]\.[Ee][Xx][Ee]/ AND (data_win_eventdata_image:/.*[Pp][Oo][Ww][Ee][Rr][Ss][Hh][Ee][Ll][Ll]\.[Ee][Xx][Ee]/ OR data_win_eventdata_image:/.*[Rr][Uu][Nn][Dd][Ll][Ll]32\.[Ee][Xx][Ee]/ OR data_win_eventdata_image:/.*[Cc][Mm][Dd]\.[Ee][Xx][Ee]/)
+    pivot_on:
+    - host
+    window: 1h
+  - name: Obfuscated or encoded PowerShell command lines
+    query: data_win_system_eventID:"1" AND data_win_eventdata_commandLine:(*ShellExec_RunDLL* OR *-enc* OR *-EncodedCommand* OR *FromBase64String* OR *-nop* OR *-w\ hidden* OR *IEX*)
+    pivot_on:
+    - host
+    window: 1h
+  - name: Outbound network from PowerShell or rundll32
+    query: data_win_system_eventID:"3" AND (data_win_eventdata_image:/.*[Pp][Oo][Ww][Ee][Rr][Ss][Hh][Ee][Ll][Ll]\.[Ee][Xx][Ee]/ OR data_win_eventdata_image:/.*[Rr][Uu][Nn][Dd][Ll][Ll]32\.[Ee][Xx][Ee]/)
+    pivot_on:
+    - host
+    window: 2h
+  - name: Executables or scripts dropped before service install
+    query: data_win_system_eventID:"11" AND (data_win_eventdata_targetFilename:/.*\.[Ee][Xx][Ee]/ OR data_win_eventdata_targetFilename:/.*\.[Dd][Ll][Ll]/ OR data_win_eventdata_targetFilename:/.*\.[Pp][Ss]1/ OR data_win_eventdata_targetFilename:/.*\.[Bb][Aa][Tt]/)
+    pivot_on:
+    - host
+    window: 1h
+  - name: Service creation via sc.exe or remote logon preceding service
+    query: (data_win_system_eventID:"1" AND data_win_eventdata_commandLine:/.*[Ss][Cc]\.[Ee][Xx][Ee].*[Cc][Rr][Ee][Aa][Tt][Ee].*/) OR (data_win_system_eventID:"4624" AND data_win_eventdata_logonType:"3")
+    pivot_on:
+    - host
+    window: 1h
