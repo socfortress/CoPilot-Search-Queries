@@ -128,62 +128,60 @@ graylog:
   query: data_win_system_eventID:"4104" AND data_win_eventdata_scriptBlockText:/.*Get-CimInstance.*/ AND data_win_eventdata_scriptBlockText:/.*ComputerName.*/
 
 correlation:
-  # Authored by the correlation engine for review. Related CoPilot Searches to run
-  # around an alert from this rule, scoped to the same host/user/IP within the window.
+  # Authored per-rule (behaviour-researched) for the correlation engine. Related CoPilot
+  # Searches + telemetry pivots to run around an alert, scoped to its host/user/ip/domain.
   related_rules:
-    - id: 27c3a83d-cada-47c6-9042-67baf19d2574
-      name: "Detect PsExec With accepteula Flag"
-      reason: "same analytic story: Active Directory Lateral Movement"
-    - id: 683e6196-b8e8-11eb-9a79-acde48001122
-      name: "Detect Renamed PSExec"
-      reason: "same analytic story: Active Directory Lateral Movement"
-    - id: 8ce07472-496f-11ec-ab3b-3e22fbd008af
-      name: "Impacket Lateral Movement Commandline Parameters"
-      reason: "same analytic story: Active Directory Lateral Movement"
-    - id: d6e464e4-5c6a-474e-82d2-aed616a3a492
-      name: "Impacket Lateral Movement WMIExec Commandline Parameters"
-      reason: "same analytic story: Active Directory Lateral Movement"
-    - id: bb3c1bac-6bdf-4aa0-8dc9-068b8b712a76
-      name: "Impacket Lateral Movement smbexec CommandLine Parameters"
-      reason: "same analytic story: Active Directory Lateral Movement"
-    - id: a4e8f3a4-48b2-11ec-bcfc-3e22fbd008af
-      name: "Interactive Session on Remote Endpoint with PowerShell"
-      reason: "same analytic story: Active Directory Lateral Movement"
-    - id: cb909b3e-512b-11ec-aa31-3e22fbd008af
-      name: "Possible Lateral Movement PowerShell Spawn"
-      reason: "same analytic story: Active Directory Lateral Movement"
-    - id: windows-powershell-invoke-cimmethod-cimsession-001
-      name: "PowerShell Invoke CIMMethod CIMSession"
-      reason: "same analytic story: Active Directory Lateral Movement"
-    - id: windows-powershell-start-or-stop-service-001
-      name: "PowerShell Start or Stop Service"
-      reason: "same analytic story: Active Directory Lateral Movement"
-    - id: 24869767-8579-485d-9a4f-d9ddfd8f0cac
-      name: "Process Execution via WMI"
-      reason: "same analytic story: Active Directory Lateral Movement"
-    - id: fa1c3040-4680-11ec-a618-3e22fbd008af
-      name: "Remote Process Instantiation via DCOM and PowerShell Script Block"
-      reason: "same analytic story: Active Directory Lateral Movement"
-    - id: 2a048c14-4634-11ec-a618-3e22fbd008af
-      name: "Remote Process Instantiation via WMI and PowerShell Script Block"
-      reason: "same analytic story: Active Directory Lateral Movement"
-  window: 1h
+  - id: windows-powershell-invoke-cimmethod-cimsession-001
+    name: PowerShell Invoke CIMMethod CIMSession
+    reason: 'Natural escalation: Get-CimInstance -ComputerName is remote WMI recon, Invoke-CimMethod over a CIMSession (e.g. Win32_Process Create) uses the same WMI channel to execute code on the target.'
+  - id: 2a048c14-4634-11ec-a618-3e22fbd008af
+    name: Remote Process Instantiation via WMI and PowerShell Script Block
+    reason: 'Follow-on: after querying a remote host over WMI/CIM the operator spawns a process there via Win32_Process.Create from PowerShell.'
+  - id: fa1c3040-4680-11ec-a618-3e22fbd008af
+    name: Remote Process Instantiation via DCOM and PowerShell Script Block
+    reason: Alternate remote-execution path if WMI is filtered; DCOM (MMC20/ShellWindows) from the same PowerShell session that already scouted the target.
+  - id: 7d4c618e-4716-11ec-951c-3e22fbd008af
+    name: Remote Process Instantiation via WinRM and PowerShell Script Block
+    reason: 'Follow-on: operator pivots from CIM queries to WinRM (Invoke-Command/New-PSSession) against the same remote computers.'
+  - id: 7b836d7f-179c-4ba4-90a7-a7e60afb48e6
+    name: Execute Invoke-command on Remote Host
+    reason: Remote execution via Invoke-Command -ComputerName is the typical next step after enumerating remote hosts with -ComputerName CIM queries.
+  - id: a4e8f3a4-48b2-11ec-bcfc-3e22fbd008af
+    name: Interactive Session on Remote Endpoint with PowerShell
+    reason: Enter-PSSession on the remote computer is the interactive escalation of the same remote-targeted PowerShell activity.
+  - id: dcd74b95-3f36-4ed9-9598-0490951643aa
+    name: PowerView PowerShell Cmdlets - ScriptBlock
+    reason: 'Precursor: PowerView host enumeration (Get-NetComputer) commonly produces the target list later iterated with Get-CimInstance -ComputerName.'
+  - id: Windows_Domain_Account_Discovery_Via_Get-NetComputer
+    name: Windows Domain Account Discovery Via Get-NetComputer
+    reason: 'Precursor: AD computer enumeration supplies the remote hostnames subsequently queried over CIM.'
+  window: 2h
   enrichment_searches:
-  # Rule-specific telemetry pivots the engine runs around an alert from this rule,
-  # scoped to the alert's host/user/IP within the window (behaviour-targeted, not a sweep).
-    - name: "Outbound connections by script interpreters on this host"
-      query: 'data_win_system_eventID:"3" AND data_win_eventdata_image:/.*(\\[Pp][Oo][Ww][Ee][Rr][Ss][Hh][Ee][Ll][Ll]\.[Ee][Xx][Ee]|\\[Pp][Ww][Ss][Hh]\.[Ee][Xx][Ee]|\\[Pp][Oo][Ww][Ee][Rr][Ss][Hh][Ee][Ll][Ll]_[Ii][Ss][Ee]\.[Ee][Xx][Ee]|\\[Cc][Mm][Dd]\.[Ee][Xx][Ee]|\\[Ww][Ss][Cc][Rr][Ii][Pp][Tt]\.[Ee][Xx][Ee]|\\[Cc][Ss][Cc][Rr][Ii][Pp][Tt]\.[Ee][Xx][Ee]|\\[Mm][Ss][Hh][Tt][Aa]\.[Ee][Xx][Ee]|\\[Rr][Uu][Nn][Dd][Ll][Ll]32\.[Ee][Xx][Ee]|\\[Rr][Ee][Gg][Ss][Vv][Rr]32\.[Ee][Xx][Ee])/'
-      pivot_on: [host]
-      window: 1h
-    - name: "Memory/credential-dump creation & LSASS access on this host"
-      query: '((data_win_system_eventID:"1" AND data_win_eventdata_image:/.*(\\[Pp][Rr][Oo][Cc][Dd][Uu][Mm][Pp]\.[Ee][Xx][Ee]|\\[Pp][Rr][Oo][Cc][Dd][Uu][Mm][Pp]64\.[Ee][Xx][Ee]|\\[Ss][Qq][Ll][Dd][Uu][Mm][Pp][Ee][Rr]\.[Ee][Xx][Ee]|\\[Cc][Rr][Ee][Aa][Tt][Ee][Dd][Uu][Mm][Pp]\.[Ee][Xx][Ee]|\\[Rr][Dd][Rr][Ll][Ee][Aa][Kk][Dd][Ii][Aa][Gg]\.[Ee][Xx][Ee]|\\[Dd][Uu][Mm][Pp][Ee][Rr][Tt]\.[Ee][Xx][Ee]|\\[Nn][Aa][Nn][Oo][Dd][Uu][Mm][Pp]\.[Ee][Xx][Ee]|\\[Aa][Vv][Dd][Uu][Mm][Pp]\.[Ee][Xx][Ee])/) OR (data_win_system_eventID:"1" AND (data_win_eventdata_commandLine:/.*[Cc][Oo][Mm][Ss][Vv][Cc][Ss]\.[Dd][Ll][Ll].*/ OR data_win_eventdata_commandLine:/.*[Mm][Ii][Nn][Ii][Dd][Uu][Mm][Pp].*/ OR data_win_eventdata_commandLine:/.*[Dd][Uu][Mm][Pp][Ee][Rr][Tt].*/ OR data_win_eventdata_commandLine:/.*[Nn][Aa][Nn][Oo][Dd][Uu][Mm][Pp].*/ OR data_win_eventdata_commandLine:/.*[Ll][Ss][Aa][Ss][Ss].*/ OR data_win_eventdata_commandLine:/.*[Ss][Ee][Kk][Uu][Rr][Ll][Ss][Aa].*/ OR data_win_eventdata_commandLine:/.*[Nn][Tt][Dd][Ss]\.[Dd][Ii][Tt].*/ OR data_win_eventdata_commandLine:/.*[Nn][Tt][Dd][Ss][Uu][Tt][Ii][Ll].*/)) OR (data_win_system_eventID:"10" AND data_win_eventdata_targetImage:/.*(\\[Ll][Ss][Aa][Ss][Ss]\.[Ee][Xx][Ee])/))'
-      pivot_on: [host]
-      window: 1h
-    - name: "Download / AMSI-bypass / encoded script blocks on this host"
-      query: 'data_win_system_eventID:"4104" AND (data_win_eventdata_scriptBlockText:/.*[Dd][Oo][Ww][Nn][Ll][Oo][Aa][Dd][Ss][Tt][Rr][Ii][Nn][Gg].*/ OR data_win_eventdata_scriptBlockText:/.*[Dd][Oo][Ww][Nn][Ll][Oo][Aa][Dd][Ff][Ii][Ll][Ee].*/ OR data_win_eventdata_scriptBlockText:/.*[Ii][Nn][Vv][Oo][Kk][Ee]-[Ww][Ee][Bb][Rr][Ee][Qq][Uu][Ee][Ss][Tt].*/ OR data_win_eventdata_scriptBlockText:/.*[Nn][Ee][Tt]\.[Ww][Ee][Bb][Cc][Ll][Ii][Ee][Nn][Tt].*/ OR data_win_eventdata_scriptBlockText:/.*[Ff][Rr][Oo][Mm][Bb][Aa][Ss][Ee]64[Ss][Tt][Rr][Ii][Nn][Gg].*/ OR data_win_eventdata_scriptBlockText:/.*[Ii][Ee][Xx].*/ OR data_win_eventdata_scriptBlockText:/.*[Ii][Nn][Vv][Oo][Kk][Ee]-[Ee][Xx][Pp][Rr][Ee][Ss][Ss][Ii][Oo][Nn].*/ OR data_win_eventdata_scriptBlockText:/.*[Ss][Tt][Aa][Rr][Tt]-[Bb][Ii][Tt][Ss][Tt][Rr][Aa][Nn][Ss][Ff][Ee][Rr].*/ OR data_win_eventdata_scriptBlockText:/.*[Aa][Mm][Ss][Ii][Uu][Tt][Ii][Ll][Ss].*/ OR data_win_eventdata_scriptBlockText:/.*-[Ee][Nn][Cc].*/ OR data_win_eventdata_scriptBlockText:/.*-[Ee][Nn][Cc][Oo][Dd][Ee][Dd][Cc][Oo][Mm][Mm][Aa][Nn][Dd].*/ OR data_win_eventdata_scriptBlockText:/.*[Rr][Ee][Ff][Ll][Ee][Cc][Tt][Ii][Oo][Nn]\.[Aa][Ss][Ss][Ee][Mm][Bb][Ll][Yy].*/)'
-      pivot_on: [host]
-      window: 1h
-    - name: "Follow-on LOLBin / signed-binary-proxy execution on this host"
-      query: 'data_win_system_eventID:"1" AND data_win_eventdata_image:/.*(\\[Rr][Uu][Nn][Dd][Ll][Ll]32\.[Ee][Xx][Ee]|\\[Rr][Ee][Gg][Ss][Vv][Rr]32\.[Ee][Xx][Ee]|\\[Mm][Ss][Hh][Tt][Aa]\.[Ee][Xx][Ee]|\\[Ii][Nn][Ss][Tt][Aa][Ll][Ll][Uu][Tt][Ii][Ll]\.[Ee][Xx][Ee]|\\[Rr][Ee][Gg][Aa][Ss][Mm]\.[Ee][Xx][Ee]|\\[Rr][Ee][Gg][Ss][Vv][Cc][Ss]\.[Ee][Xx][Ee]|\\[Mm][Ss][Bb][Uu][Ii][Ll][Dd]\.[Ee][Xx][Ee]|\\[Cc][Ee][Rr][Tt][Uu][Tt][Ii][Ll]\.[Ee][Xx][Ee]|\\[Bb][Ii][Tt][Ss][Aa][Dd][Mm][Ii][Nn]\.[Ee][Xx][Ee]|\\[Ww][Mm][Ii][Cc]\.[Ee][Xx][Ee]|\\[Cc][Mm][Ss][Tt][Pp]\.[Ee][Xx][Ee]|\\[Oo][Dd][Bb][Cc][Cc][Oo][Nn][Ff]\.[Ee][Xx][Ee]|\\[Ff][Oo][Rr][Ff][Ii][Ll][Ee][Ss]\.[Ee][Xx][Ee]|\\[Pp][Cc][Aa][Ll][Uu][Aa]\.[Ee][Xx][Ee]|\\[Mm][Aa][Vv][Ii][Nn][Jj][Ee][Cc][Tt]\.[Ee][Xx][Ee]|\\[Ss][Cc][Rr][Ii][Pp][Tt][Rr][Uu][Nn][Nn][Ee][Rr]\.[Ee][Xx][Ee])/'
-      pivot_on: [host]
-      window: 1h
+  # Behaviour-targeted hunts the engine runs around the alert (not a sweep).
+  - name: Remote execution script blocks (Win32_Process, Invoke-Command, PSSession, CimSession, MMC20)
+    query: data_win_system_eventID:"4104" AND (data_win_eventdata_scriptBlockText:/.*[Ii]nvoke-[Cc]im[Mm]ethod.*/ OR data_win_eventdata_scriptBlockText:/.*[Ii]nvoke-[Ww]mi[Mm]ethod.*/ OR data_win_eventdata_scriptBlockText:/.*[Ww]in32_[Pp]rocess.*/ OR data_win_eventdata_scriptBlockText:/.*[Ii]nvoke-[Cc]ommand.*/ OR data_win_eventdata_scriptBlockText:/.*[Nn]ew-[Pp][Ss][Ss]ession.*/ OR data_win_eventdata_scriptBlockText:/.*[Ee]nter-[Pp][Ss][Ss]ession.*/ OR data_win_eventdata_scriptBlockText:/.*[Nn]ew-[Cc]im[Ss]ession.*/ OR data_win_eventdata_scriptBlockText:/.*[Mm][Mm][Cc]20.*/)
+    pivot_on:
+    - host
+    - user
+    window: 2h
+  - name: Sibling remote WMI/CIM and AD host enumeration script blocks
+    query: data_win_system_eventID:"4104" AND (data_win_eventdata_scriptBlockText:/.*[Gg]et-[Ww]mi[Oo]bject.*[Cc]omputer[Nn]ame.*/ OR data_win_eventdata_scriptBlockText:/.*[Gg]et-[Cc]im[Ii]nstance.*[Cc]im[Ss]ession.*/ OR data_win_eventdata_scriptBlockText:/.*[Gg]et-[Nn]et[Cc]omputer.*/ OR data_win_eventdata_scriptBlockText:/.*[Gg]et-[Aa][Dd][Cc]omputer.*/ OR data_win_eventdata_scriptBlockText:/.*[Ww]in32_([Oo]perating[Ss]ystem|[Cc]omputer[Ss]ystem|[Ss]ervice|[Ll]ogical[Dd]isk|[Nn]etwork[Aa]dapter[Cc]onfiguration).*/)
+    pivot_on:
+    - host
+    - user
+    window: 2h
+  - name: PowerShell outbound RPC/WinRM/SMB connections (135, 5985, 5986, 445)
+    query: data_win_system_eventID:"3" AND data_win_eventdata_image:/.*[Pp]ower[Ss]hell.*/ AND (data_win_eventdata_destinationPort:"135" OR data_win_eventdata_destinationPort:"5985" OR data_win_eventdata_destinationPort:"5986" OR data_win_eventdata_destinationPort:"445")
+    pivot_on:
+    - host
+    window: 2h
+  - name: WmiPrvSE / wsmprovhost spawned children (inbound remote execution)
+    query: data_win_system_eventID:"1" AND (data_win_eventdata_parentImage:/.*[Ww]mi[Pp]rv[Ss][Ee]\.[Ee][Xx][Ee]/ OR data_win_eventdata_parentImage:/.*[Ww]sm[Pp]rov[Hh]ost\.[Ee][Xx][Ee]/)
+    pivot_on:
+    - host
+    window: 2h
+  - name: Network logons and failed/explicit-credential logons by the acting account
+    query: (data_win_system_eventID:"4624" AND data_win_eventdata_logonType:"3") OR data_win_system_eventID:"4625" OR data_win_system_eventID:"4648"
+    pivot_on:
+    - user
+    window: 4h

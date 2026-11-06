@@ -129,62 +129,58 @@ graylog:
   query: data_win_system_eventID:"4104" AND data_win_eventdata_scriptBlockText:/.*Invoke-ShareFinder.*/
 
 correlation:
-  # Authored by the correlation engine for review. Related CoPilot Searches to run
-  # around an alert from this rule, scoped to the same host/user/IP within the window.
+  # Authored per-rule (behaviour-researched) for the correlation engine. Related CoPilot
+  # Searches + telemetry pivots to run around an alert, scoped to its host/user/ip/domain.
   related_rules:
-    - id: de7fcadc-04f3-11ec-a241-acde48001122
-      name: "AdsiSearcher Account Discovery"
-      reason: "same analytic story: Active Directory Discovery"
-    - id: cc316032-924a-11eb-91a2-acde48001122
-      name: "DSQuery Domain Discovery"
-      reason: "same analytic story: Active Directory Discovery"
-    - id: b1a8ce04-04c2-11ec-bea7-acde48001122
-      name: "Domain Account Discovery with Dsquery"
-      reason: "same analytic story: Active Directory Discovery"
-    - id: 383572e0-04c5-11ec-bdcc-acde48001122
-      name: "Domain Account Discovery with Wmic"
-      reason: "same analytic story: Active Directory Discovery"
-    - id: 41243735-89a7-4c83-bcdd-570aa78f00a1
-      name: "Domain Controller Discovery with Nltest"
-      reason: "same analytic story: Active Directory Discovery"
-    - id: 64c7adaa-48ee-483c-b0d6-7175bc65e6cc
-      name: "Domain Controller Discovery with Wmic"
-      reason: "same analytic story: Active Directory Discovery"
-    - id: f0c9d62f-a232-4edd-b17e-bc409fb133d4
-      name: "Domain Group Discovery With Dsquery"
-      reason: "same analytic story: Active Directory Discovery"
-    - id: a87736a6-95cd-4728-8689-3c64d5026b3e
-      name: "Domain Group Discovery With Wmic"
-      reason: "same analytic story: Active Directory Discovery"
-    - id: 089c862f-5f83-49b5-b1c8-7e4ff66560c7
-      name: "Domain Group Discovery with Adsisearcher"
-      reason: "same analytic story: Active Directory Discovery"
-    - id: 3f6bbf22-093e-4cb4-9641-83f47b8444b6
-      name: "Elevated Group Discovery With Wmic"
-      reason: "same analytic story: Active Directory Discovery"
-    - id: 10d62950-0de5-4199-a710-cff9ea79b413
-      name: "Elevated Group Discovery with PowerView"
-      reason: "same analytic story: Active Directory Discovery"
-    - id: 36e46ebe-065a-11ec-b4c7-acde48001122
-      name: "Get ADDefaultDomainPasswordPolicy with Powershell"
-      reason: "same analytic story: Active Directory Discovery"
-  window: 1h
+  - id: dcd74b95-3f36-4ed9-9598-0490951643aa
+    name: PowerView PowerShell Cmdlets - ScriptBlock
+    reason: Invoke-ShareFinder ships inside PowerView; the same script block session usually loads and runs other PowerView cmdlets, confirming the toolkit was imported rather than a lone call.
+  - id: a7093c28-796c-4ebb-9997-e2c18b870837
+    name: Windows PowerView SPN Discovery
+    reason: Operators typically pair share hunting with SPN enumeration to pick Kerberoast and high-value server targets in the same PowerView session.
+  - id: 10d62950-0de5-4199-a710-cff9ea79b413
+    name: Elevated Group Discovery with PowerView
+    reason: Privileged group discovery with PowerView alongside ShareFinder shows a broader AD recon sweep deciding which accounts and servers to pivot to.
+  - id: 39405650-c364-4e1e-a740-32a63ef042a6
+    name: Windows PowerView AD Access Control List Enumeration
+    reason: ACL enumeration is a co-occurring PowerView recon step that maps abusable permissions on the same domain the shares were found in.
+  - id: 1c563233-030e-4a07-af8c-ee0490a66d3a
+    name: Suspicious New-PSDrive to Admin Share
+    reason: 'Direct follow-on: after ShareFinder lists reachable shares, attackers mount ADMIN$/C$ with New-PSDrive to access them.'
+  - id: 3abd6094-7027-475f-9630-8ab9be7b9725
+    name: Windows Admin Share Mount Via Net.EXE
+    reason: Net use against admin shares is the command-line equivalent of mounting a share found by ShareFinder, moving from discovery to access.
+  - id: 855bc8b5-2ae8-402e-a9ed-b889e6df1900
+    name: Copy From Or To Admin Share Or Sysvol Folder
+    reason: Copying files to or from admin shares after enumeration indicates data collection or staging of tools for lateral movement.
+  - id: f376c8a7-a2d0-4ddc-aa0c-16c17236d962
+    name: HackTool - Bloodhound/Sharphound Execution
+    reason: SharpHound collection is a commonly co-occurring AD mapping step used with PowerView share discovery before lateral movement.
+  window: 2h
   enrichment_searches:
-  # Rule-specific telemetry pivots the engine runs around an alert from this rule,
-  # scoped to the alert's host/user/IP within the window (behaviour-targeted, not a sweep).
-    - name: "Memory/credential-dump creation & LSASS access on this host"
-      query: '((data_win_system_eventID:"1" AND data_win_eventdata_image:/.*(\\[Pp][Rr][Oo][Cc][Dd][Uu][Mm][Pp]\.[Ee][Xx][Ee]|\\[Pp][Rr][Oo][Cc][Dd][Uu][Mm][Pp]64\.[Ee][Xx][Ee]|\\[Ss][Qq][Ll][Dd][Uu][Mm][Pp][Ee][Rr]\.[Ee][Xx][Ee]|\\[Cc][Rr][Ee][Aa][Tt][Ee][Dd][Uu][Mm][Pp]\.[Ee][Xx][Ee]|\\[Rr][Dd][Rr][Ll][Ee][Aa][Kk][Dd][Ii][Aa][Gg]\.[Ee][Xx][Ee]|\\[Dd][Uu][Mm][Pp][Ee][Rr][Tt]\.[Ee][Xx][Ee]|\\[Nn][Aa][Nn][Oo][Dd][Uu][Mm][Pp]\.[Ee][Xx][Ee]|\\[Aa][Vv][Dd][Uu][Mm][Pp]\.[Ee][Xx][Ee])/) OR (data_win_system_eventID:"1" AND (data_win_eventdata_commandLine:/.*[Cc][Oo][Mm][Ss][Vv][Cc][Ss]\.[Dd][Ll][Ll].*/ OR data_win_eventdata_commandLine:/.*[Mm][Ii][Nn][Ii][Dd][Uu][Mm][Pp].*/ OR data_win_eventdata_commandLine:/.*[Dd][Uu][Mm][Pp][Ee][Rr][Tt].*/ OR data_win_eventdata_commandLine:/.*[Nn][Aa][Nn][Oo][Dd][Uu][Mm][Pp].*/ OR data_win_eventdata_commandLine:/.*[Ll][Ss][Aa][Ss][Ss].*/ OR data_win_eventdata_commandLine:/.*[Ss][Ee][Kk][Uu][Rr][Ll][Ss][Aa].*/ OR data_win_eventdata_commandLine:/.*[Nn][Tt][Dd][Ss]\.[Dd][Ii][Tt].*/ OR data_win_eventdata_commandLine:/.*[Nn][Tt][Dd][Ss][Uu][Tt][Ii][Ll].*/)) OR (data_win_system_eventID:"10" AND data_win_eventdata_targetImage:/.*(\\[Ll][Ss][Aa][Ss][Ss]\.[Ee][Xx][Ee])/))'
-      pivot_on: [host]
-      window: 1h
-    - name: "Download / AMSI-bypass / encoded script blocks on this host"
-      query: 'data_win_system_eventID:"4104" AND (data_win_eventdata_scriptBlockText:/.*[Dd][Oo][Ww][Nn][Ll][Oo][Aa][Dd][Ss][Tt][Rr][Ii][Nn][Gg].*/ OR data_win_eventdata_scriptBlockText:/.*[Dd][Oo][Ww][Nn][Ll][Oo][Aa][Dd][Ff][Ii][Ll][Ee].*/ OR data_win_eventdata_scriptBlockText:/.*[Ii][Nn][Vv][Oo][Kk][Ee]-[Ww][Ee][Bb][Rr][Ee][Qq][Uu][Ee][Ss][Tt].*/ OR data_win_eventdata_scriptBlockText:/.*[Nn][Ee][Tt]\.[Ww][Ee][Bb][Cc][Ll][Ii][Ee][Nn][Tt].*/ OR data_win_eventdata_scriptBlockText:/.*[Ff][Rr][Oo][Mm][Bb][Aa][Ss][Ee]64[Ss][Tt][Rr][Ii][Nn][Gg].*/ OR data_win_eventdata_scriptBlockText:/.*[Ii][Ee][Xx].*/ OR data_win_eventdata_scriptBlockText:/.*[Ii][Nn][Vv][Oo][Kk][Ee]-[Ee][Xx][Pp][Rr][Ee][Ss][Ss][Ii][Oo][Nn].*/ OR data_win_eventdata_scriptBlockText:/.*[Ss][Tt][Aa][Rr][Tt]-[Bb][Ii][Tt][Ss][Tt][Rr][Aa][Nn][Ss][Ff][Ee][Rr].*/ OR data_win_eventdata_scriptBlockText:/.*[Aa][Mm][Ss][Ii][Uu][Tt][Ii][Ll][Ss].*/ OR data_win_eventdata_scriptBlockText:/.*-[Ee][Nn][Cc].*/ OR data_win_eventdata_scriptBlockText:/.*-[Ee][Nn][Cc][Oo][Dd][Ee][Dd][Cc][Oo][Mm][Mm][Aa][Nn][Dd].*/ OR data_win_eventdata_scriptBlockText:/.*[Rr][Ee][Ff][Ll][Ee][Cc][Tt][Ii][Oo][Nn]\.[Aa][Ss][Ss][Ee][Mm][Bb][Ll][Yy].*/)'
-      pivot_on: [host]
-      window: 1h
-    - name: "Follow-on LOLBin / signed-binary-proxy execution on this host"
-      query: 'data_win_system_eventID:"1" AND data_win_eventdata_image:/.*(\\[Rr][Uu][Nn][Dd][Ll][Ll]32\.[Ee][Xx][Ee]|\\[Rr][Ee][Gg][Ss][Vv][Rr]32\.[Ee][Xx][Ee]|\\[Mm][Ss][Hh][Tt][Aa]\.[Ee][Xx][Ee]|\\[Ii][Nn][Ss][Tt][Aa][Ll][Ll][Uu][Tt][Ii][Ll]\.[Ee][Xx][Ee]|\\[Rr][Ee][Gg][Aa][Ss][Mm]\.[Ee][Xx][Ee]|\\[Rr][Ee][Gg][Ss][Vv][Cc][Ss]\.[Ee][Xx][Ee]|\\[Mm][Ss][Bb][Uu][Ii][Ll][Dd]\.[Ee][Xx][Ee]|\\[Cc][Ee][Rr][Tt][Uu][Tt][Ii][Ll]\.[Ee][Xx][Ee]|\\[Bb][Ii][Tt][Ss][Aa][Dd][Mm][Ii][Nn]\.[Ee][Xx][Ee]|\\[Ww][Mm][Ii][Cc]\.[Ee][Xx][Ee]|\\[Cc][Mm][Ss][Tt][Pp]\.[Ee][Xx][Ee]|\\[Oo][Dd][Bb][Cc][Cc][Oo][Nn][Ff]\.[Ee][Xx][Ee]|\\[Ff][Oo][Rr][Ff][Ii][Ll][Ee][Ss]\.[Ee][Xx][Ee]|\\[Pp][Cc][Aa][Ll][Uu][Aa]\.[Ee][Xx][Ee]|\\[Mm][Aa][Vv][Ii][Nn][Jj][Ee][Cc][Tt]\.[Ee][Xx][Ee]|\\[Ss][Cc][Rr][Ii][Pp][Tt][Rr][Uu][Nn][Nn][Ee][Rr]\.[Ee][Xx][Ee])/'
-      pivot_on: [host]
-      window: 1h
-    - name: "Remote-execution / lateral-movement tooling on this host"
-      query: '(data_win_system_eventID:"1" AND data_win_eventdata_image:/.*(\\[Pp][Ss][Ee][Xx][Ee][Cc]\.[Ee][Xx][Ee]|\\[Pp][Ss][Ee][Xx][Ee][Ss][Vv][Cc]\.[Ee][Xx][Ee]|\\[Pp][Aa][Ee][Xx][Ee][Cc]\.[Ee][Xx][Ee]|\\[Ww][Ii][Nn][Rr][Ss]\.[Ee][Xx][Ee]|\\[Mm][Ss][Tt][Ss][Cc]\.[Ee][Xx][Ee]|\\[Ww][Mm][Ii][Cc]\.[Ee][Xx][Ee])/) OR (data_win_system_eventID:"1" AND data_win_eventdata_image:/.*(\\[Pp][Oo][Ww][Ee][Rr][Ss][Hh][Ee][Ll][Ll]\.[Ee][Xx][Ee]|\\[Pp][Ww][Ss][Hh]\.[Ee][Xx][Ee])/ AND (data_win_eventdata_commandLine:/.*[Ii][Nn][Vv][Oo][Kk][Ee]-[Cc][Oo][Mm][Mm][Aa][Nn][Dd].*/ OR data_win_eventdata_commandLine:/.*[Nn][Ee][Ww]-[Pp][Ss][Ss][Ee][Ss][Ss][Ii][Oo][Nn].*/ OR data_win_eventdata_commandLine:/.*[Ee][Nn][Tt][Ee][Rr]-[Pp][Ss][Ss][Ee][Ss][Ss][Ii][Oo][Nn].*/ OR data_win_eventdata_commandLine:/.*-[Cc][Oo][Mm][Pp][Uu][Tt][Ee][Rr][Nn][Aa][Mm][Ee].*/))'
-      pivot_on: [host]
-      window: 2h
+  # Behaviour-targeted hunts the engine runs around the alert (not a sweep).
+  - name: PowerShell script blocks reading or copying from remote UNC shares / PowerView file hunting
+    query: data_win_system_eventID:"4104" AND (data_win_eventdata_scriptBlockText:/.*[Nn]ew-[Pp][Ss][Dd]rive.*/ OR data_win_eventdata_scriptBlockText:/.*[Ff]ind-[Dd]omain[Ss]hare.*/ OR data_win_eventdata_scriptBlockText:/.*[Ff]ind-[Ii]nteresting[Ff]ile.*/ OR data_win_eventdata_scriptBlockText:/.*[Ii]nvoke-[Ff]ile[Ff]inder.*/ OR data_win_eventdata_scriptBlockText:/.*[Gg]et-[Nn]et[Ss]hare.*/ OR data_win_eventdata_scriptBlockText:/.*[Ii]nvoke-[Uu]ser[Hh]unter.*/ OR data_win_eventdata_scriptBlockText:/.*([Cc]opy-[Ii]tem|[Gg]et-[Cc]hild[Ii]tem|[Gg]et-[Cc]ontent).*\\\\.*/)
+    pivot_on:
+    - host
+    window: 2h
+  - name: net.exe share enumeration and admin share mounts
+    query: data_win_system_eventID:"1" AND data_win_eventdata_image:/.*\\[Nn]et1?\.[Ee][Xx][Ee]/ AND (data_win_eventdata_commandLine:/.*[Uu][Ss][Ee] .*\\\\.*/ OR data_win_eventdata_commandLine:/.*[Vv][Ii][Ee][Ww].*/ OR data_win_eventdata_commandLine:/.*[Ss][Hh][Aa][Rr][Ee].*/)
+    pivot_on:
+    - host
+    window: 2h
+  - name: PowerShell outbound SMB connections to many file servers
+    query: data_win_system_eventID:"3" AND data_win_eventdata_destinationPort:"445" AND data_win_eventdata_image:/.*([Pp]ower[Ss]hell|[Pp]wsh)\.[Ee][Xx][Ee]/
+    pivot_on:
+    - host
+    window: 1h
+  - name: Data staging and archiving after share access
+    query: (data_win_system_eventID:"1" AND (data_win_eventdata_image:/.*\\(7z|7za|[Rr]ar|[Ww]in[Rr]ar)\.[Ee][Xx][Ee]/ OR data_win_eventdata_commandLine:/.*[Cc]ompress-[Aa]rchive.*/ OR data_win_eventdata_commandLine:/.*[Tt]ar.* -[a-z]*c.*/)) OR (data_win_system_eventID:"11" AND data_win_eventdata_targetFilename:/.*\.(zip|7z|rar|cab)/)
+    pivot_on:
+    - host
+    window: 4h
+  - name: Exfiltration and ransomware precursors (rclone, mega, shadow copy deletion)
+    query: data_win_system_eventID:"1" AND (data_win_eventdata_image:/.*\\([Rr]clone|[Mm]ega[Cc]md|[Ww]inscp)\.[Ee][Xx][Ee]/ OR data_win_eventdata_commandLine:/.*[Vv]ssadmin.*[Dd]elete.*[Ss]hadows.*/ OR data_win_eventdata_commandLine:/.*[Bb]cdedit.*[Rr]ecoveryenabled.*/ OR data_win_eventdata_commandLine:/.*[Rr]clone.*(copy|sync).*/)
+    pivot_on:
+    - host
+    window: 6h

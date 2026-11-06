@@ -152,19 +152,58 @@ graylog:
   query: data_win_system_eventID:"4104" AND (data_win_eventdata_scriptBlockText:/.*[Ss][Tt][Aa][Rr][Tt]-[Pp][Rr][Oo][Cc][Ee][Ss][Ss] .*/ OR data_win_eventdata_scriptBlockText:/.*[Ss][Aa][Pp][Ss] .*/) AND data_win_eventdata_scriptBlockText:/.*-[Pp][Aa][Ss][Ss][Tt][Hh][Rr][Uu] .*/ AND data_win_eventdata_scriptBlockText:/.*-[Ff][Ii][Ll][Ee][Pp][Aa][Tt][Hh] .*/
 
 correlation:
-  # Authored by the correlation engine for review.
+  # Authored per-rule (behaviour-researched) for the correlation engine. Related CoPilot
+  # Searches + telemetry pivots to run around an alert, scoped to its host/user/ip/domain.
+  related_rules:
+  - id: 403c2cc0-7f6b-4925-9423-bfa573bed7eb
+    name: Suspicious PowerShell Download - Powershell Script
+    reason: Start-Process -PassThru -FilePath is typically the launch step for a payload the same script just downloaded; this is the staging precursor in the same 4104 stream.
+  - id: 3c7d1587-3b13-439f-9941-7d14313dbdfe
+    name: Potential COM Objects Download Cradles Usage - PS Script
+    reason: Alternative download cradle (COM objects) that fetches the binary subsequently launched and tracked via -PassThru.
+  - id: windows-powershell-start-bitstransfer-001
+    name: PowerShell Start-BitsTransfer
+    reason: BITS transfer is a common way a script pulls the executable that Start-Process -PassThru then runs in the background.
+  - id: 1b9dc62e-6e9e-42a3-8990-94d7a10007f7
+    name: Invoke-Obfuscation Obfuscated IEX Invocation - PowerShell
+    reason: Obfuscated loader scripts that wrap stage launching in IEX often precede or contain the PassThru launch, indicating a malicious rather than admin script.
+  - id: e0d6c087-2d1c-47fd-8799-3904103c5a98
+    name: AMSI Bypass Pattern Assembly GetType
+    reason: Attackers disable AMSI in the same script before launching the payload process, so a hit confirms evasion around the process start.
+  - id: c1344fa2-323b-4d2e-9176-84b4d4821c88
+    name: Windows Defender Exclusions Added - PowerShell
+    reason: Defender exclusions are commonly added just before launching the dropped binary so it survives AV scanning; a close follow-on or co-occurring step.
+  - id: ddcd88cb-7f62-4ce5-86f9-1704190feb0a
+    name: Potential In-Memory Execution Using Reflection.Assembly
+    reason: Reflection-loaded .NET payloads are the in-memory alternative to launching a disk binary; co-occurrence shows layered loader tradecraft.
+  - id: 363eccc0-279a-4ccf-a3ab-24c2e63b11fb
+    name: Powershell Create Scheduled Task
+    reason: After the backgrounded process is started, the script commonly establishes scheduled-task persistence for the same payload.
+  window: 1h
   enrichment_searches:
-  # Rule-specific telemetry pivots the engine runs around an alert from this rule,
-  # scoped to the alert's host/user/IP within the window (behaviour-targeted, not a sweep).
-    - name: "Execution from user-writable / masquerading paths on this host"
-      query: 'data_win_system_eventID:"1" AND (data_win_eventdata_image:/.*\\[Uu][Ss][Ee][Rr][Ss]\\.*/ OR data_win_eventdata_image:/.*\\[Pp][Rr][Oo][Gg][Rr][Aa][Mm][Dd][Aa][Tt][Aa]\\.*/ OR data_win_eventdata_image:/.*\\[Ww][Ii][Nn][Dd][Oo][Ww][Ss]\\[Tt][Ee][Mm][Pp]\\.*/ OR data_win_eventdata_image:/.*\\[Aa][Pp][Pp][Dd][Aa][Tt][Aa]\\.*/ OR data_win_eventdata_image:/.*\\[Pp][Uu][Bb][Ll][Ii][Cc]\\.*/ OR data_win_eventdata_image:/.*\\\$[Rr][Ee][Cc][Yy][Cc][Ll][Ee].*/)'
-      pivot_on: [host]
-      window: 1h
-    - name: "Download / AMSI-bypass / encoded script blocks on this host"
-      query: 'data_win_system_eventID:"4104" AND (data_win_eventdata_scriptBlockText:/.*[Dd][Oo][Ww][Nn][Ll][Oo][Aa][Dd][Ss][Tt][Rr][Ii][Nn][Gg].*/ OR data_win_eventdata_scriptBlockText:/.*[Dd][Oo][Ww][Nn][Ll][Oo][Aa][Dd][Ff][Ii][Ll][Ee].*/ OR data_win_eventdata_scriptBlockText:/.*[Ii][Nn][Vv][Oo][Kk][Ee]-[Ww][Ee][Bb][Rr][Ee][Qq][Uu][Ee][Ss][Tt].*/ OR data_win_eventdata_scriptBlockText:/.*[Nn][Ee][Tt]\.[Ww][Ee][Bb][Cc][Ll][Ii][Ee][Nn][Tt].*/ OR data_win_eventdata_scriptBlockText:/.*[Ff][Rr][Oo][Mm][Bb][Aa][Ss][Ee]64[Ss][Tt][Rr][Ii][Nn][Gg].*/ OR data_win_eventdata_scriptBlockText:/.*[Ii][Ee][Xx].*/ OR data_win_eventdata_scriptBlockText:/.*[Ii][Nn][Vv][Oo][Kk][Ee]-[Ee][Xx][Pp][Rr][Ee][Ss][Ss][Ii][Oo][Nn].*/ OR data_win_eventdata_scriptBlockText:/.*[Ss][Tt][Aa][Rr][Tt]-[Bb][Ii][Tt][Ss][Tt][Rr][Aa][Nn][Ss][Ff][Ee][Rr].*/ OR data_win_eventdata_scriptBlockText:/.*[Aa][Mm][Ss][Ii][Uu][Tt][Ii][Ll][Ss].*/ OR data_win_eventdata_scriptBlockText:/.*-[Ee][Nn][Cc].*/ OR data_win_eventdata_scriptBlockText:/.*-[Ee][Nn][Cc][Oo][Dd][Ee][Dd][Cc][Oo][Mm][Mm][Aa][Nn][Dd].*/ OR data_win_eventdata_scriptBlockText:/.*[Rr][Ee][Ff][Ll][Ee][Cc][Tt][Ii][Oo][Nn]\.[Aa][Ss][Ss][Ee][Mm][Bb][Ll][Yy].*/)'
-      pivot_on: [host]
-      window: 1h
-    - name: "Follow-on LOLBin / signed-binary-proxy execution on this host"
-      query: 'data_win_system_eventID:"1" AND data_win_eventdata_image:/.*(\\[Rr][Uu][Nn][Dd][Ll][Ll]32\.[Ee][Xx][Ee]|\\[Rr][Ee][Gg][Ss][Vv][Rr]32\.[Ee][Xx][Ee]|\\[Mm][Ss][Hh][Tt][Aa]\.[Ee][Xx][Ee]|\\[Ii][Nn][Ss][Tt][Aa][Ll][Ll][Uu][Tt][Ii][Ll]\.[Ee][Xx][Ee]|\\[Rr][Ee][Gg][Aa][Ss][Mm]\.[Ee][Xx][Ee]|\\[Rr][Ee][Gg][Ss][Vv][Cc][Ss]\.[Ee][Xx][Ee]|\\[Mm][Ss][Bb][Uu][Ii][Ll][Dd]\.[Ee][Xx][Ee]|\\[Cc][Ee][Rr][Tt][Uu][Tt][Ii][Ll]\.[Ee][Xx][Ee]|\\[Bb][Ii][Tt][Ss][Aa][Dd][Mm][Ii][Nn]\.[Ee][Xx][Ee]|\\[Ww][Mm][Ii][Cc]\.[Ee][Xx][Ee]|\\[Cc][Mm][Ss][Tt][Pp]\.[Ee][Xx][Ee]|\\[Oo][Dd][Bb][Cc][Cc][Oo][Nn][Ff]\.[Ee][Xx][Ee]|\\[Ff][Oo][Rr][Ff][Ii][Ll][Ee][Ss]\.[Ee][Xx][Ee]|\\[Pp][Cc][Aa][Ll][Uu][Aa]\.[Ee][Xx][Ee]|\\[Mm][Aa][Vv][Ii][Nn][Jj][Ee][Cc][Tt]\.[Ee][Xx][Ee]|\\[Ss][Cc][Rr][Ii][Pp][Tt][Rr][Uu][Nn][Nn][Ee][Rr]\.[Ee][Xx][Ee])/'
-      pivot_on: [host]
-      window: 1h
+  # Behaviour-targeted hunts the engine runs around the alert (not a sweep).
+  - name: Processes launched from user-writable paths (what PassThru started)
+    query: data_win_system_eventID:"1" AND (data_win_eventdata_image:/.*\[Uu][Ss][Ee][Rr][Ss]\.*/ OR data_win_eventdata_image:/.*\[Pp][Rr][Oo][Gg][Rr][Aa][Mm][Dd][Aa][Tt][Aa]\.*/ OR data_win_eventdata_image:/.*\[Tt][Ee][Mm][Pp]\.*/ OR data_win_eventdata_image:/.*\[Pp][Uu][Bb][Ll][Ii][Cc]\.*/) AND data_win_eventdata_parentImage:/.*[Pp][Oo][Ww][Ee][Rr][Ss][Hh][Ee][Ll][Ll].*/
+    pivot_on:
+    - host
+    window: 1h
+  - name: Files dropped by PowerShell before the launch
+    query: data_win_system_eventID:"11" AND data_win_eventdata_image:/.*[Pp][Oo][Ww][Ee][Rr][Ss][Hh][Ee][Ll][Ll].*/ AND (data_win_eventdata_targetFilename:*.exe OR data_win_eventdata_targetFilename:*.dll OR data_win_eventdata_targetFilename:*.bat OR data_win_eventdata_targetFilename:*.scr OR data_win_eventdata_targetFilename:*.ps1)
+    pivot_on:
+    - host
+    window: 1h
+  - name: Download cradles and AMSI/encoded loaders in script blocks
+    query: data_win_system_eventID:"4104" AND (data_win_eventdata_scriptBlockText:*DownloadString* OR data_win_eventdata_scriptBlockText:*DownloadFile* OR data_win_eventdata_scriptBlockText:*Invoke-WebRequest* OR data_win_eventdata_scriptBlockText:*Start-BitsTransfer* OR data_win_eventdata_scriptBlockText:*Net.WebClient* OR data_win_eventdata_scriptBlockText:*amsiInitFailed* OR data_win_eventdata_scriptBlockText:*FromBase64String*)
+    pivot_on:
+    - host
+    window: 1h
+  - name: Outbound connections and DNS from PowerShell or its children
+    query: (data_win_system_eventID:"3" OR data_win_system_eventID:"22") AND (data_win_eventdata_image:/.*[Pp][Oo][Ww][Ee][Rr][Ss][Hh][Ee][Ll][Ll].*/ OR data_win_eventdata_image:/.*\(AppData|Temp|ProgramData|Users\Public)\.*/)
+    pivot_on:
+    - host
+    window: 2h
+  - name: Persistence and Defender tampering after the launch
+    query: (data_win_system_eventID:"13" AND data_win_eventdata_targetObject:*CurrentVersion\Run*) OR (data_win_system_eventID:"1" AND (data_win_eventdata_commandLine:*schtasks* OR data_win_eventdata_commandLine:*Add-MpPreference* OR data_win_eventdata_commandLine:*Set-MpPreference* OR data_win_eventdata_commandLine:*DisableRealtimeMonitoring*))
+    pivot_on:
+    - host
+    window: 2h

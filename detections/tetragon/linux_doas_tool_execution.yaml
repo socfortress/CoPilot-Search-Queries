@@ -129,55 +129,52 @@ correlation:
   # Authored per-rule (behaviour-researched) for the correlation engine. Related CoPilot
   # Searches + telemetry pivots to run around an alert, scoped to its host/user/ip/domain.
   related_rules:
-  - id: 0cf7a157-8879-41a2-8f55-388dd23746b7
-    name: Linux Recon Indicators
-    reason: Attacker enumerates user, id and sudo/doas rights before invoking doas; recon on the same host precedes the escalation.
-  - id: f74107df-b6c6-4e80-bf00-4170b658162b
-    name: Sudo Privilege Escalation CVE-2019-14287
-    reason: Alternative privilege-delegation abuse (sudo vs doas); an attacker probing sudo then falling back to doas is the same escalation attempt.
+  - id: lnx-doas-001
+    name: Linux doas Execution Detection
+    reason: Syslog/auditd view of the same doas execution; confirms the escalation from a second telemetry source
   - id: 0f79c4d2-4e1f-4683-9c36-b5469a665e06
     name: Access of Sudoers File Content
-    reason: Reading sudoers/doas policy to learn which commands can be run as root is the usual precursor to invoking doas.
-  - id: 86157017-c2b1-4d4a-8c33-93b8e67e4af4
-    name: Potential Suspicious Change To Sensitive/Critical Files
-    reason: After gaining root via doas, attackers modify sensitive files such as doas.conf, passwd or sshd_config for persistence.
+    reason: 'Precursor recon: attacker reads privilege config (sudoers/doas.conf) to learn which escalation path is allowed before invoking doas'
+  - id: linux-sudo-or-su-execution-001
+    name: Linux Sudo Or Su Execution
+    reason: Sibling escalation primitive; attacker falling back from sudo to doas (or vice versa) on the same host
+  - id: f74107df-b6c6-4e80-bf00-4170b658162b
+    name: Sudo Privilege Escalation CVE-2019-14287
+    reason: Alternative privilege-escalation attempt on the same host when doas is not permitted
+  - id: linux-setuid-using-chmod-utility-001
+    name: Linux Setuid Using Chmod Utility
+    reason: 'Follow-on: after gaining root via doas, attackers plant SUID binaries for persistent root'
+  - id: 6b14bac8-3e3a-4324-8109-42f0546a347f
+    name: Scheduled Cron Task/Job - Linux
+    reason: 'Follow-on persistence: root cron job created after elevated execution'
   - id: 6a50f16c-3b7b-42d1-b081-0fdd3ba70a73
     name: User Added To Root/Sudoers Group Using Usermod
-    reason: Root commands run through doas are commonly used to grant a backdoor user root group membership.
-  - id: 6419afd1-3742-47a5-a7e6-b50386cd15f8
-    name: Chmod Targeting Sensitive Directories
-    reason: Privileged chmod of sensitive paths is a follow-on action once doas yields root.
-  - id: a2d9e2f3-0f43-4c7a-bcd9-9acfc0d723aa
-    name: Suspicious Download and Execute Pattern via Curl/Wget
-    reason: Root-level payload staging via curl/wget typically follows a successful doas escalation.
-  - id: ea3ecad2-db86-4a89-ad0b-132a10d2db55
-    name: Interactive Bash Suspicious Children
-    reason: doas spawning an interactive shell or its child commands is the interactive hands-on-keyboard phase around escalation.
-  window: 1h
+    reason: 'Follow-on: root-level account/group change to keep privileged access after doas escalation'
+  window: 2h
   enrichment_searches:
   # Behaviour-targeted hunts the engine runs around the alert (not a sweep).
-  - name: Doas/sudo invocation spawning a root shell
-    query: data_process_exec_parent_binary:("/usr/bin/doas" OR "/usr/bin/sudo" OR "/bin/su") AND data_process_exec_process_binary:("/bin/bash" OR "/bin/sh" OR "/usr/bin/bash" OR "/usr/bin/sh" OR "/usr/bin/zsh" OR "/bin/dash")
-    pivot_on:
-    - host
-    window: 1h
-  - name: Account, sudoers or doas policy changes
-    query: data_process_exec_process_binary:("/usr/sbin/useradd" OR "/usr/sbin/usermod" OR "/usr/sbin/adduser" OR "/usr/bin/passwd" OR "/usr/sbin/visudo" OR "/usr/bin/chpasswd" OR "/usr/sbin/chpasswd") OR data_process_exec_process_arguments:(*sudoers* OR *doas.conf* OR */etc/passwd* OR */etc/shadow*)
+  - name: Commands run with doas (what was elevated)
+    query: data_process_exec_parent_binary:"/usr/bin/doas"
     pivot_on:
     - host
     window: 2h
-  - name: Payload download and staging by wget/curl
-    query: data_process_exec_process_binary:("/usr/bin/wget" OR "/usr/bin/curl") AND (data_process_exec_process_arguments:*http* OR data_process_exec_process_arguments:*\/tmp\/* OR data_process_exec_process_arguments:*\/dev\/shm*)
+  - name: Reads/edits of doas.conf or sudoers config
+    query: data_process_exec_process_arguments:(*doas.conf* OR */etc/sudoers*)
+    pivot_on:
+    - host
+    window: 6h
+  - name: Account, SSH key and shadow tampering after elevation
+    query: data_process_exec_process_binary:("/usr/sbin/useradd" OR "/usr/sbin/usermod" OR "/usr/bin/passwd" OR "/usr/sbin/adduser") OR data_process_exec_process_arguments:(*authorized_keys* OR */etc/shadow* OR */etc/passwd*)
     pivot_on:
     - host
     window: 2h
-  - name: Persistence via cron, SSH keys or systemd after escalation
-    query: data_process_exec_process_binary:("/usr/bin/crontab" OR "/bin/systemctl" OR "/usr/bin/systemctl") OR data_process_exec_process_arguments:(*authorized_keys* OR */etc/cron* OR *\/etc\/systemd\/system* OR *.bashrc* OR *ld.so.preload*)
+  - name: SUID/capability changes and root persistence
+    query: (data_process_exec_process_binary:"/usr/bin/chmod" AND data_process_exec_process_arguments:(*u+s* OR *4755* OR *+s*)) OR data_process_exec_process_binary:("/usr/sbin/setcap" OR "/usr/bin/crontab") OR data_process_exec_process_arguments:(*/etc/cron* OR */etc/systemd/system* OR *rc.local*)
     pivot_on:
     - host
     window: 4h
-  - name: 'Defense evasion: log clearing and history wiping'
-    query: data_process_exec_process_arguments:(*\/var\/log\/* OR *HISTFILE* OR *.bash_history* OR *history\ -c*) AND data_process_exec_process_binary:("/bin/rm" OR "/usr/bin/rm" OR "/usr/bin/shred" OR "/usr/bin/truncate" OR "/bin/ln" OR "/usr/bin/unset")
+  - name: Download-and-execute tooling around elevation
+    query: data_process_exec_process_binary:("/usr/bin/wget" OR "/usr/bin/curl") AND data_process_exec_process_arguments:(*/tmp/* OR */dev/shm/* OR *|*sh* OR *http*)
     pivot_on:
     - host
     window: 2h

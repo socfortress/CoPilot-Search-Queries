@@ -131,62 +131,58 @@ graylog:
   query: data_win_system_eventID:"4104" AND data_win_eventdata_scriptBlockText:/.*Compress-Archive.*/ AND data_win_eventdata_scriptBlockText:/.*Temp.*/
 
 correlation:
-  # Authored by the correlation engine for review. Related CoPilot Searches to run
-  # around an alert from this rule, scoped to the same host/user/IP within the window.
+  # Authored per-rule (behaviour-researched) for the correlation engine. Related CoPilot
+  # Searches + telemetry pivots to run around an alert, scoped to its host/user/ip/domain.
   related_rules:
-    - id: de7fcadc-04f3-11ec-a241-acde48001122
-      name: "AdsiSearcher Account Discovery"
-      reason: "same analytic story: CISA AA23-347A"
-    - id: 2452e632-9e0d-11eb-bacd-acde48001122
-      name: "DNS Exfiltration Using Nslookup App"
-      reason: "same analytic story: Data Exfiltration"
-    - id: 8148c29c-c952-11eb-9255-acde48001122
-      name: "Detect Mimikatz With PowerShell Script Block Logging"
-      reason: "same analytic story: CISA AA23-347A"
-    - id: 32e0baea-b3f1-11eb-a2ce-acde48001122
-      name: "Detect RClone Command-Line Usage"
-      reason: "same analytic story: Data Exfiltration"
-    - id: 4057291a-b8cf-11eb-95fe-acde48001122
-      name: "Detect Renamed 7-Zip"
-      reason: "same analytic story: Data Exfiltration"
-    - id: 6dca1124-b3ec-11eb-9328-acde48001122
-      name: "Detect Renamed RClone"
-      reason: "same analytic story: Data Exfiltration"
-    - id: 1b7bfb2c-b8e6-11eb-99ac-acde48001122
-      name: "Detect Renamed WinRAR"
-      reason: "same analytic story: Data Exfiltration"
-    - id: 91c79f14-5b41-11eb-ae93-0242ac130002
-      name: "Detect Rundll32 Inline HTA Execution"
-      reason: "same analytic story: APT37 Rustonotto and FadeStealer"
-    - id: 236e7c8e-c9d9-11eb-a824-acde48001122
-      name: "Disable Logs Using WevtUtil"
-      reason: "same analytic story: CISA AA23-347A"
-    - id: 114c6bfe-9406-11ec-bcce-acde48001122
-      name: "Disabled Kerberos Pre-Authentication Discovery With Get-ADUser"
-      reason: "same analytic story: CISA AA23-347A"
-    - id: 41243735-89a7-4c83-bcdd-570aa78f00a1
-      name: "Domain Controller Discovery with Nltest"
-      reason: "same analytic story: CISA AA23-347A"
-    - id: 0b6ee3f4-04e3-11ec-a87d-acde48001122
-      name: "Get ADUser with PowerShell"
-      reason: "same analytic story: CISA AA23-347A"
-  window: 1h
+  - id: c1dda054-d638-4c16-afc8-53e007f3fbc5
+    name: Automated Collection Command PowerShell
+    reason: 'Precursor: scripted file-harvesting (Get-ChildItem/Copy-Item over documents) is what produces the data that Compress-Archive then packs into Temp.'
+  - id: 7d416556-6502-45b2-9bad-9d2f05f38997
+    name: Powershell Sensitive File Discovery
+    reason: 'Precursor: hunting for sensitive files selects what gets staged; same script-block telemetry on the same host/user shortly before archiving.'
+  - id: 2837e152-93c8-43d2-85ba-c3cd3c2ae614
+    name: Powershell Local Email Collection
+    reason: 'Precursor/co-occurring: PST/OST harvesting is a common payload that is then zipped into Temp for exfiltration.'
+  - id: fc028194-969d-4122-8abe-0470d5b8f12f
+    name: Access to Browser Login Data
+    reason: 'Co-occurring collection: stolen browser credential stores are frequently copied and archived in the same staging step (FadeStealer-style collectors).'
+  - id: 85a8e5ba-bd03-4bfb-bbfa-a4409a8f8b98
+    name: Folder Compress To Potentially Suspicious Output Via Compress-Archive Cmdlet
+    reason: Same Compress-Archive action seen from process-creation telemetry; confirms the command line, parent process and output path of the archive.
+  - id: windows-archive-collected-data-via-rar-001
+    name: Windows Archive Collected Data via Rar
+    reason: Alternate archiver for the same staging objective; an attacker falling back from Compress-Archive to rar on the same host shows a persistent collection effort.
+  - id: 32e0baea-b3f1-11eb-a2ce-acde48001122
+    name: Detect RClone Command-Line Usage
+    reason: 'Follow-on: staged archives are typically pushed to cloud storage with rclone as the exfiltration step.'
+  - id: e328cc73-f92a-42fb-b3fa-7c2cffda981a
+    name: Curl File Upload To File Sharing Websites
+    reason: 'Follow-on: uploading the Temp archive to a file-sharing site via curl is the natural exfiltration step after staging.'
+  window: 2h
   enrichment_searches:
-  # Rule-specific telemetry pivots the engine runs around an alert from this rule,
-  # scoped to the alert's host/user/IP within the window (behaviour-targeted, not a sweep).
-    - name: "Memory/credential-dump creation on this host (source of staged data)"
-      query: '((data_win_system_eventID:"1" AND data_win_eventdata_image:/.*(\\[Pp][Rr][Oo][Cc][Dd][Uu][Mm][Pp]\.[Ee][Xx][Ee]|\\[Pp][Rr][Oo][Cc][Dd][Uu][Mm][Pp]64\.[Ee][Xx][Ee]|\\[Ss][Qq][Ll][Dd][Uu][Mm][Pp][Ee][Rr]\.[Ee][Xx][Ee]|\\[Cc][Rr][Ee][Aa][Tt][Ee][Dd][Uu][Mm][Pp]\.[Ee][Xx][Ee]|\\[Rr][Dd][Rr][Ll][Ee][Aa][Kk][Dd][Ii][Aa][Gg]\.[Ee][Xx][Ee]|\\[Dd][Uu][Mm][Pp][Ee][Rr][Tt]\.[Ee][Xx][Ee]|\\[Nn][Aa][Nn][Oo][Dd][Uu][Mm][Pp]\.[Ee][Xx][Ee]|\\[Aa][Vv][Dd][Uu][Mm][Pp]\.[Ee][Xx][Ee])/) OR (data_win_system_eventID:"1" AND (data_win_eventdata_commandLine:/.*[Cc][Oo][Mm][Ss][Vv][Cc][Ss]\.[Dd][Ll][Ll].*/ OR data_win_eventdata_commandLine:/.*[Mm][Ii][Nn][Ii][Dd][Uu][Mm][Pp].*/ OR data_win_eventdata_commandLine:/.*[Dd][Uu][Mm][Pp][Ee][Rr][Tt].*/ OR data_win_eventdata_commandLine:/.*[Nn][Aa][Nn][Oo][Dd][Uu][Mm][Pp].*/ OR data_win_eventdata_commandLine:/.*[Ll][Ss][Aa][Ss][Ss].*/ OR data_win_eventdata_commandLine:/.*[Ss][Ee][Kk][Uu][Rr][Ll][Ss][Aa].*/ OR data_win_eventdata_commandLine:/.*[Nn][Tt][Dd][Ss]\.[Dd][Ii][Tt].*/ OR data_win_eventdata_commandLine:/.*[Nn][Tt][Dd][Ss][Uu][Tt][Ii][Ll].*/)) OR (data_win_system_eventID:"10" AND data_win_eventdata_targetImage:/.*(\\[Ll][Ss][Aa][Ss][Ss]\.[Ee][Xx][Ee])/))'
-      pivot_on: [host]
-      window: 2h
-    - name: "Outbound transfer / cloud-storage egress on this host"
-      query: '((data_win_system_eventID:"1" AND data_win_eventdata_image:/.*(\\[Rr][Cc][Ll][Oo][Nn][Ee]\.[Ee][Xx][Ee]|\\[Cc][Uu][Rr][Ll]\.[Ee][Xx][Ee]|\\[Ww][Gg][Ee][Tt]\.[Ee][Xx][Ee]|\\[Ww][Ii][Nn][Ss][Cc][Pp]\.[Ee][Xx][Ee]|\\[Pp][Ss][Cc][Pp]\.[Ee][Xx][Ee]|\\[Mm][Ee][Gg][Aa][Cc][Mm][Dd]\.[Ee][Xx][Ee]|\\[Mm][Ee][Gg][Aa][Ss][Yy][Nn][Cc]\.[Ee][Xx][Ee])/) OR ((data_win_eventdata_commandLine:/.*[Ii][Nn][Vv][Oo][Kk][Ee]-[Rr][Ee][Ss][Tt][Mm][Ee][Tt][Hh][Oo][Dd].*/ OR data_win_eventdata_commandLine:/.*[Ss][Tt][Aa][Rr][Tt]-[Bb][Ii][Tt][Ss][Tt][Rr][Aa][Nn][Ss][Ff][Ee][Rr].*/ OR data_win_eventdata_commandLine:/.*[Rr][Cc][Ll][Oo][Nn][Ee].*/ OR data_win_eventdata_commandLine:/.*[Tt][Rr][Aa][Nn][Ss][Ff][Ee][Rr]\.[Ss][Hh].*/ OR data_win_eventdata_commandLine:/.*[Aa][Nn][Oo][Nn][Ff][Ii][Ll][Ee][Ss].*/ OR data_win_eventdata_commandLine:/.*[Pp][Aa][Ss][Tt][Ee][Bb][Ii][Nn].*/ OR data_win_eventdata_commandLine:/.*[Mm][Ee][Gg][Aa]\.[Nn][Zz].*/ OR data_win_eventdata_commandLine:/.*-[Oo][Uu][Tt][Ff][Ii][Ll][Ee].*/ OR data_win_eventdata_commandLine:/.*[Uu][Pp][Ll][Oo][Aa][Dd][Ff][Ii][Ll][Ee].*/)))'
-      pivot_on: [host]
-      window: 2h
-    - name: "Download / AMSI-bypass / encoded script blocks on this host"
-      query: 'data_win_system_eventID:"4104" AND (data_win_eventdata_scriptBlockText:/.*[Dd][Oo][Ww][Nn][Ll][Oo][Aa][Dd][Ss][Tt][Rr][Ii][Nn][Gg].*/ OR data_win_eventdata_scriptBlockText:/.*[Dd][Oo][Ww][Nn][Ll][Oo][Aa][Dd][Ff][Ii][Ll][Ee].*/ OR data_win_eventdata_scriptBlockText:/.*[Ii][Nn][Vv][Oo][Kk][Ee]-[Ww][Ee][Bb][Rr][Ee][Qq][Uu][Ee][Ss][Tt].*/ OR data_win_eventdata_scriptBlockText:/.*[Nn][Ee][Tt]\.[Ww][Ee][Bb][Cc][Ll][Ii][Ee][Nn][Tt].*/ OR data_win_eventdata_scriptBlockText:/.*[Ff][Rr][Oo][Mm][Bb][Aa][Ss][Ee]64[Ss][Tt][Rr][Ii][Nn][Gg].*/ OR data_win_eventdata_scriptBlockText:/.*[Ii][Ee][Xx].*/ OR data_win_eventdata_scriptBlockText:/.*[Ii][Nn][Vv][Oo][Kk][Ee]-[Ee][Xx][Pp][Rr][Ee][Ss][Ss][Ii][Oo][Nn].*/ OR data_win_eventdata_scriptBlockText:/.*[Ss][Tt][Aa][Rr][Tt]-[Bb][Ii][Tt][Ss][Tt][Rr][Aa][Nn][Ss][Ff][Ee][Rr].*/ OR data_win_eventdata_scriptBlockText:/.*[Aa][Mm][Ss][Ii][Uu][Tt][Ii][Ll][Ss].*/ OR data_win_eventdata_scriptBlockText:/.*-[Ee][Nn][Cc].*/ OR data_win_eventdata_scriptBlockText:/.*-[Ee][Nn][Cc][Oo][Dd][Ee][Dd][Cc][Oo][Mm][Mm][Aa][Nn][Dd].*/ OR data_win_eventdata_scriptBlockText:/.*[Rr][Ee][Ff][Ll][Ee][Cc][Tt][Ii][Oo][Nn]\.[Aa][Ss][Ss][Ee][Mm][Bb][Ll][Yy].*/)'
-      pivot_on: [host]
-      window: 1h
-    - name: "Follow-on LOLBin / signed-binary-proxy execution on this host"
-      query: 'data_win_system_eventID:"1" AND data_win_eventdata_image:/.*(\\[Rr][Uu][Nn][Dd][Ll][Ll]32\.[Ee][Xx][Ee]|\\[Rr][Ee][Gg][Ss][Vv][Rr]32\.[Ee][Xx][Ee]|\\[Mm][Ss][Hh][Tt][Aa]\.[Ee][Xx][Ee]|\\[Ii][Nn][Ss][Tt][Aa][Ll][Ll][Uu][Tt][Ii][Ll]\.[Ee][Xx][Ee]|\\[Rr][Ee][Gg][Aa][Ss][Mm]\.[Ee][Xx][Ee]|\\[Rr][Ee][Gg][Ss][Vv][Cc][Ss]\.[Ee][Xx][Ee]|\\[Mm][Ss][Bb][Uu][Ii][Ll][Dd]\.[Ee][Xx][Ee]|\\[Cc][Ee][Rr][Tt][Uu][Tt][Ii][Ll]\.[Ee][Xx][Ee]|\\[Bb][Ii][Tt][Ss][Aa][Dd][Mm][Ii][Nn]\.[Ee][Xx][Ee]|\\[Ww][Mm][Ii][Cc]\.[Ee][Xx][Ee]|\\[Cc][Mm][Ss][Tt][Pp]\.[Ee][Xx][Ee]|\\[Oo][Dd][Bb][Cc][Cc][Oo][Nn][Ff]\.[Ee][Xx][Ee]|\\[Ff][Oo][Rr][Ff][Ii][Ll][Ee][Ss]\.[Ee][Xx][Ee]|\\[Pp][Cc][Aa][Ll][Uu][Aa]\.[Ee][Xx][Ee]|\\[Mm][Aa][Vv][Ii][Nn][Jj][Ee][Cc][Tt]\.[Ee][Xx][Ee]|\\[Ss][Cc][Rr][Ii][Pp][Tt][Rr][Uu][Nn][Nn][Ee][Rr]\.[Ee][Xx][Ee])/'
-      pivot_on: [host]
-      window: 1h
+  # Behaviour-targeted hunts the engine runs around the alert (not a sweep).
+  - name: File collection and staging commands in script blocks
+    query: data_win_system_eventID:"4104" AND (data_win_eventdata_scriptBlockText:/.*[Gg]et-[Cc]hild[Ii]tem.*/ OR data_win_eventdata_scriptBlockText:/.*[Cc]opy-[Ii]tem.*/ OR data_win_eventdata_scriptBlockText:/.*[Gg]et-[Cc]ontent.*/) AND (data_win_eventdata_scriptBlockText:/.*\.(docx|xlsx|pdf|pst|ost|kdbx|txt).*/ OR data_win_eventdata_scriptBlockText:/.*[Dd]ocuments.*/ OR data_win_eventdata_scriptBlockText:/.*[Dd]esktop.*/ OR data_win_eventdata_scriptBlockText:/.*[Dd]ownloads.*/)
+    pivot_on:
+    - host
+    window: 2h
+  - name: Archive file written to Temp (zip/rar/7z)
+    query: data_win_system_eventID:"11" AND data_win_eventdata_targetFilename:/.*[Tt]emp.*\.(zip|rar|7z|cab)/
+    pivot_on:
+    - host
+    window: 2h
+  - name: Other archiver tools executed (rar, 7z, tar, makecab)
+    query: data_win_system_eventID:"1" AND (data_win_eventdata_image:/.*\\(rar|7z|7za|winrar|makecab|tar)\.exe/ OR data_win_eventdata_commandLine:/.*[Cc]ompress-[Aa]rchive.*/ OR data_win_eventdata_commandLine:/.*[Mm]ake[Cc]ab.*/)
+    pivot_on:
+    - host
+    window: 2h
+  - name: Exfiltration tooling or web upload from PowerShell
+    query: (data_win_system_eventID:"4104" AND (data_win_eventdata_scriptBlockText:/.*[Ii]nvoke-[Ww]eb[Rr]equest.*/ OR data_win_eventdata_scriptBlockText:/.*[Ii]nvoke-[Rr]est[Mm]ethod.*/ OR data_win_eventdata_scriptBlockText:/.*[Ss]tart-[Bb]its[Tt]ransfer.*/ OR data_win_eventdata_scriptBlockText:/.*UploadFile.*/ OR data_win_eventdata_scriptBlockText:/.*UploadData.*/) AND (data_win_eventdata_scriptBlockText:/.*-([Mm]ethod|[Ii]n[Ff]ile).*/ OR data_win_eventdata_scriptBlockText:/.*[Pp][Oo][Ss][Tt].*/ OR data_win_eventdata_scriptBlockText:/.*[Uu]pload.*/)) OR (data_win_system_eventID:"1" AND data_win_eventdata_image:/.*\\(rclone|curl|winscp|pscp|megacmd)\.exe/)
+    pivot_on:
+    - host
+    window: 4h
+  - name: Network connections to cloud storage / file-sharing domains
+    query: data_win_system_eventID:"22" AND (data_win_eventdata_queryName:*mega.nz* OR data_win_eventdata_queryName:*mega.io* OR data_win_eventdata_queryName:*dropbox* OR data_win_eventdata_queryName:*anonfiles* OR data_win_eventdata_queryName:*transfer.sh* OR data_win_eventdata_queryName:*pastebin* OR data_win_eventdata_queryName:*file.io* OR data_win_eventdata_queryName:*gofile* OR data_win_eventdata_queryName:*drive.google* OR data_win_eventdata_queryName:*onedrive*)
+    pivot_on:
+    - host
+    window: 4h

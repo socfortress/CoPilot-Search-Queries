@@ -140,44 +140,58 @@ graylog:
   query: data_win_system_eventID:"4104" AND data_win_eventdata_scriptBlockText:/.*::[Gg][Ee][Tt][Tt][Yy][Pp][Ee][Ff][Rr][Oo][Mm][Cc][Ll][Ss][Ii][Dd]\(.*/ AND data_win_eventdata_scriptBlockText:/.*\.[Ss][Hh][Ee][Ll][Ll][Ee][Xx][Ee][Cc][Uu][Tt][Ee]\(.*/
 
 correlation:
-  # Authored by the correlation engine for review. Related CoPilot Searches to run
-  # around an alert from this rule, scoped to the same host/user/IP within the window.
+  # Authored per-rule (behaviour-researched) for the correlation engine. Related CoPilot
+  # Searches + telemetry pivots to run around an alert, scoped to its host/user/ip/domain.
   related_rules:
-    - id: ec570e53-4c76-45a9-804d-dc3f355ff7a7
-      name: "7Zip Compressing Dump Files"
-      reason: "next kill-chain tactic: Collection"
-    - id: 0a1255c5-d732-4b62-ac02-b5152d34fb83
-      name: "ADExplorer Writing Complete AD Snapshot Into .dat File"
-      reason: "next kill-chain tactic: Discovery"
-    - id: 1ea13e8c-03ea-409b-877d-ce5c3d2c1cb3
-      name: "ADFS Database Named Pipe Connection By Uncommon Tool"
-      reason: "next kill-chain tactic: Collection"
-    - id: 75bf09fa-1dd7-4d18-9af9-dd9e492562eb
-      name: "ADSI-Cache File Creation By Uncommon Tool"
-      reason: "next kill-chain tactic: Command and Control"
-    - id: 33a2d1dd-f3b0-40bd-8baf-7974468927cc
-      name: "APT PRIVATELOG Image Load Pattern"
-      reason: "next kill-chain tactic: Privilege Escalation"
-    - id: 03e2746e-2b31-42f1-ab7a-eb39365b2422
-      name: "APT31 Judgement Panda Activity"
-      reason: "next kill-chain tactic: Credential Access"
+  - id: windows-powershell-com-clsid-execution-001
+    name: PowerShell Execute COM Object
+    reason: Sibling 4104 detection of the same GetTypeFromCLSID/CreateInstance COM-instantiation technique; co-firing on the same script block confirms deliberate COM-based execution rather than a benign ShellExecute call.
+  - id: fa1c3040-4680-11ec-a618-3e22fbd008af
+    name: Remote Process Instantiation via DCOM and PowerShell Script Block
+    reason: GetTypeFromCLSID with a remote computer argument is the PowerShell DCOM lateral-movement pattern (MMC20/ShellWindows/ShellBrowserWindow); this tells whether the ShellExecute was local or aimed at another host.
+  - id: f1f3bf22-deb2-418d-8cce-e1a45e46a5bd
+    name: MMC20 Lateral Movement
+    reason: MMC20.Application is a classic CLSID used with Document.ActiveView.ExecuteShellCommand; mmc.exe spawning a shell is the process-level result of the same DCOM abuse.
+  - id: 551d9c1f-816c-445b-a7a6-7a3864720d60
+    name: Potential Excel.EXE DCOM Lateral Movement Via ActivateMicrosoftApp
+    reason: Another DCOM-activated execution path via Excel.Application; an attacker who has used one COM object for execution often tries alternatives when one is blocked.
+  - id: windows-explorer-spawning-powershell-cmd-001
+    name: Windows Explorer Spawning PowerShell or Cmd
+    reason: ShellWindows/ShellBrowserWindow ShellExecute runs the child under explorer.exe, laundering the true PowerShell parent; this is the visible child-process result.
+  - id: 3c7d1587-3b13-439f-9941-7d14313dbdfe
+    name: Potential COM Objects Download Cradles Usage - PS Script
+    reason: COM objects (MSXML2/WinHttp) in PowerShell are used to fetch the payload that ShellExecute then launches; a precursor staging step in the same script session.
+  - id: ea61e291-af05-4716-932a-67faddb6ae6f
+    name: PowerShell COM Hijacking InProcServer32 Modification
+    reason: 'The rule''s T1546.015 lineage: the same operator may persist via COM hijacking after using COM objects for execution.'
+  - id: 403c2cc0-7f6b-4925-9423-bfa573bed7eb
+    name: Suspicious PowerShell Download - Powershell Script
+    reason: Download cradle in a script block shortly before/after COM ShellExecute indicates the launched file was fetched remotely, not a local admin task.
   window: 1h
   enrichment_searches:
-  # Rule-specific telemetry pivots the engine runs around an alert from this rule,
-  # scoped to the alert's host/user/IP within the window (behaviour-targeted, not a sweep).
-    - name: "Autostart persistence written on this host (Run keys, services, IFEO)"
-      query: '(data_win_system_eventID:"12" OR data_win_system_eventID:"13") AND (data_win_eventdata_targetObject:/.*[Cc][Uu][Rr][Rr][Ee][Nn][Tt][Vv][Ee][Rr][Ss][Ii][Oo][Nn]\\[Rr][Uu][Nn].*/ OR data_win_eventdata_targetObject:/.*[Cc][Uu][Rr][Rr][Ee][Nn][Tt][Vv][Ee][Rr][Ss][Ii][Oo][Nn]\\[Rr][Uu][Nn][Oo][Nn][Cc][Ee].*/ OR data_win_eventdata_targetObject:/.*[Cc][Uu][Rr][Rr][Ee][Nn][Tt][Cc][Oo][Nn][Tt][Rr][Oo][Ll][Ss][Ee][Tt]\\[Ss][Ee][Rr][Vv][Ii][Cc][Ee][Ss]\\.*/ OR data_win_eventdata_targetObject:/.*[Ii][Mm][Aa][Gg][Ee] [Ff][Ii][Ll][Ee] [Ee][Xx][Ee][Cc][Uu][Tt][Ii][Oo][Nn] [Oo][Pp][Tt][Ii][Oo][Nn][Ss]\\.*/ OR data_win_eventdata_targetObject:/.*[Ww][Ii][Nn][Ll][Oo][Gg][Oo][Nn]\\[Ss][Hh][Ee][Ll][Ll].*/ OR data_win_eventdata_targetObject:/.*[Ww][Ii][Nn][Ll][Oo][Gg][Oo][Nn]\\[Uu][Ss][Ee][Rr][Ii][Nn][Ii][Tt].*/ OR data_win_eventdata_targetObject:/.*[Cc][Uu][Rr][Rr][Ee][Nn][Tt][Vv][Ee][Rr][Ss][Ii][Oo][Nn]\\[Ee][Xx][Pp][Ll][Oo][Rr][Ee][Rr]\\[Rr][Uu][Nn].*/ OR data_win_eventdata_targetObject:/.*[Pp][Oo][Ll][Ii][Cc][Ii][Ee][Ss]\\[Ee][Xx][Pp][Ll][Oo][Rr][Ee][Rr]\\[Rr][Uu][Nn].*/ OR data_win_eventdata_targetObject:/.*[Cc][Uu][Rr][Rr][Ee][Nn][Tt][Vv][Ee][Rr][Ss][Ii][Oo][Nn]\\[Ww][Ii][Nn][Dd][Oo][Ww][Ss]\\[Ll][Oo][Aa][Dd].*/)'
-      pivot_on: [host]
-      window: 2h
-    - name: "Memory/credential-dump creation & LSASS access on this host"
-      query: '((data_win_system_eventID:"1" AND data_win_eventdata_image:/.*(\\[Pp][Rr][Oo][Cc][Dd][Uu][Mm][Pp]\.[Ee][Xx][Ee]|\\[Pp][Rr][Oo][Cc][Dd][Uu][Mm][Pp]64\.[Ee][Xx][Ee]|\\[Ss][Qq][Ll][Dd][Uu][Mm][Pp][Ee][Rr]\.[Ee][Xx][Ee]|\\[Cc][Rr][Ee][Aa][Tt][Ee][Dd][Uu][Mm][Pp]\.[Ee][Xx][Ee]|\\[Rr][Dd][Rr][Ll][Ee][Aa][Kk][Dd][Ii][Aa][Gg]\.[Ee][Xx][Ee]|\\[Dd][Uu][Mm][Pp][Ee][Rr][Tt]\.[Ee][Xx][Ee]|\\[Nn][Aa][Nn][Oo][Dd][Uu][Mm][Pp]\.[Ee][Xx][Ee]|\\[Aa][Vv][Dd][Uu][Mm][Pp]\.[Ee][Xx][Ee])/) OR (data_win_system_eventID:"1" AND (data_win_eventdata_commandLine:/.*[Cc][Oo][Mm][Ss][Vv][Cc][Ss]\.[Dd][Ll][Ll].*/ OR data_win_eventdata_commandLine:/.*[Mm][Ii][Nn][Ii][Dd][Uu][Mm][Pp].*/ OR data_win_eventdata_commandLine:/.*[Dd][Uu][Mm][Pp][Ee][Rr][Tt].*/ OR data_win_eventdata_commandLine:/.*[Nn][Aa][Nn][Oo][Dd][Uu][Mm][Pp].*/ OR data_win_eventdata_commandLine:/.*[Ll][Ss][Aa][Ss][Ss].*/ OR data_win_eventdata_commandLine:/.*[Ss][Ee][Kk][Uu][Rr][Ll][Ss][Aa].*/ OR data_win_eventdata_commandLine:/.*[Nn][Tt][Dd][Ss]\.[Dd][Ii][Tt].*/ OR data_win_eventdata_commandLine:/.*[Nn][Tt][Dd][Ss][Uu][Tt][Ii][Ll].*/)) OR (data_win_system_eventID:"10" AND data_win_eventdata_targetImage:/.*(\\[Ll][Ss][Aa][Ss][Ss]\.[Ee][Xx][Ee])/))'
-      pivot_on: [host]
-      window: 1h
-    - name: "Download / AMSI-bypass / encoded script blocks on this host"
-      query: 'data_win_system_eventID:"4104" AND (data_win_eventdata_scriptBlockText:/.*[Dd][Oo][Ww][Nn][Ll][Oo][Aa][Dd][Ss][Tt][Rr][Ii][Nn][Gg].*/ OR data_win_eventdata_scriptBlockText:/.*[Dd][Oo][Ww][Nn][Ll][Oo][Aa][Dd][Ff][Ii][Ll][Ee].*/ OR data_win_eventdata_scriptBlockText:/.*[Ii][Nn][Vv][Oo][Kk][Ee]-[Ww][Ee][Bb][Rr][Ee][Qq][Uu][Ee][Ss][Tt].*/ OR data_win_eventdata_scriptBlockText:/.*[Nn][Ee][Tt]\.[Ww][Ee][Bb][Cc][Ll][Ii][Ee][Nn][Tt].*/ OR data_win_eventdata_scriptBlockText:/.*[Ff][Rr][Oo][Mm][Bb][Aa][Ss][Ee]64[Ss][Tt][Rr][Ii][Nn][Gg].*/ OR data_win_eventdata_scriptBlockText:/.*[Ii][Ee][Xx].*/ OR data_win_eventdata_scriptBlockText:/.*[Ii][Nn][Vv][Oo][Kk][Ee]-[Ee][Xx][Pp][Rr][Ee][Ss][Ss][Ii][Oo][Nn].*/ OR data_win_eventdata_scriptBlockText:/.*[Ss][Tt][Aa][Rr][Tt]-[Bb][Ii][Tt][Ss][Tt][Rr][Aa][Nn][Ss][Ff][Ee][Rr].*/ OR data_win_eventdata_scriptBlockText:/.*[Aa][Mm][Ss][Ii][Uu][Tt][Ii][Ll][Ss].*/ OR data_win_eventdata_scriptBlockText:/.*-[Ee][Nn][Cc].*/ OR data_win_eventdata_scriptBlockText:/.*-[Ee][Nn][Cc][Oo][Dd][Ee][Dd][Cc][Oo][Mm][Mm][Aa][Nn][Dd].*/ OR data_win_eventdata_scriptBlockText:/.*[Rr][Ee][Ff][Ll][Ee][Cc][Tt][Ii][Oo][Nn]\.[Aa][Ss][Ss][Ee][Mm][Bb][Ll][Yy].*/)'
-      pivot_on: [host]
-      window: 1h
-    - name: "Follow-on LOLBin / signed-binary-proxy execution on this host"
-      query: 'data_win_system_eventID:"1" AND data_win_eventdata_image:/.*(\\[Rr][Uu][Nn][Dd][Ll][Ll]32\.[Ee][Xx][Ee]|\\[Rr][Ee][Gg][Ss][Vv][Rr]32\.[Ee][Xx][Ee]|\\[Mm][Ss][Hh][Tt][Aa]\.[Ee][Xx][Ee]|\\[Ii][Nn][Ss][Tt][Aa][Ll][Ll][Uu][Tt][Ii][Ll]\.[Ee][Xx][Ee]|\\[Rr][Ee][Gg][Aa][Ss][Mm]\.[Ee][Xx][Ee]|\\[Rr][Ee][Gg][Ss][Vv][Cc][Ss]\.[Ee][Xx][Ee]|\\[Mm][Ss][Bb][Uu][Ii][Ll][Dd]\.[Ee][Xx][Ee]|\\[Cc][Ee][Rr][Tt][Uu][Tt][Ii][Ll]\.[Ee][Xx][Ee]|\\[Bb][Ii][Tt][Ss][Aa][Dd][Mm][Ii][Nn]\.[Ee][Xx][Ee]|\\[Ww][Mm][Ii][Cc]\.[Ee][Xx][Ee]|\\[Cc][Mm][Ss][Tt][Pp]\.[Ee][Xx][Ee]|\\[Oo][Dd][Bb][Cc][Cc][Oo][Nn][Ff]\.[Ee][Xx][Ee]|\\[Ff][Oo][Rr][Ff][Ii][Ll][Ee][Ss]\.[Ee][Xx][Ee]|\\[Pp][Cc][Aa][Ll][Uu][Aa]\.[Ee][Xx][Ee]|\\[Mm][Aa][Vv][Ii][Nn][Jj][Ee][Cc][Tt]\.[Ee][Xx][Ee]|\\[Ss][Cc][Rr][Ii][Pp][Tt][Rr][Uu][Nn][Nn][Ee][Rr]\.[Ee][Xx][Ee])/'
-      pivot_on: [host]
-      window: 1h
+  # Behaviour-targeted hunts the engine runs around the alert (not a sweep).
+  - name: Shell/Office/MMC parent spawning script or LOLBin children (ShellExecute result)
+    query: data_win_system_eventID:"1" AND (data_win_eventdata_parentImage:/.*[Ee][Xx][Pp][Ll][Oo][Rr][Ee][Rr].[Ee][Xx][Ee]/ OR data_win_eventdata_parentImage:/.*[Mm][Mm][Cc].[Ee][Xx][Ee]/ OR data_win_eventdata_parentImage:/.*[Ee][Xx][Cc][Ee][Ll].[Ee][Xx][Ee]/ OR data_win_eventdata_parentImage:/.*[Oo][Uu][Tt][Ll][Oo][Oo][Kk].[Ee][Xx][Ee]/) AND (data_win_eventdata_image:/.*[Cc][Mm][Dd].[Ee][Xx][Ee]/ OR data_win_eventdata_image:/.*[Pp][Oo][Ww][Ee][Rr][Ss][Hh][Ee][Ll][Ll].[Ee][Xx][Ee]/ OR data_win_eventdata_image:/.*[Pp][Ww][Ss][Hh].[Ee][Xx][Ee]/ OR data_win_eventdata_image:/.*[Ww][Ss][Cc][Rr][Ii][Pp][Tt].[Ee][Xx][Ee]/ OR data_win_eventdata_image:/.*[Cc][Ss][Cc][Rr][Ii][Pp][Tt].[Ee][Xx][Ee]/ OR data_win_eventdata_image:/.*[Mm][Ss][Hh][Tt][Aa].[Ee][Xx][Ee]/ OR data_win_eventdata_image:/.*[Rr][Uu][Nn][Dd][Ll][Ll]32.[Ee][Xx][Ee]/ OR data_win_eventdata_image:/.*[Rr][Ee][Gg][Ss][Vv][Rr]32.[Ee][Xx][Ee]/ OR data_win_eventdata_image:/.*[Cc][Ee][Rr][Tt][Uu][Tt][Ii][Ll].[Ee][Xx][Ee]/ OR data_win_eventdata_image:/.*[Bb][Ii][Tt][Ss][Aa][Dd][Mm][Ii][Nn].[Ee][Xx][Ee]/)
+    pivot_on:
+    - host
+    window: 1h
+  - name: 'Remote DCOM activation: PowerShell to port 135 or mmc/excel spawning a shell'
+    query: (data_win_system_eventID:"3" AND (data_win_eventdata_image:/.*[Pp][Oo][Ww][Ee][Rr][Ss][Hh][Ee][Ll][Ll].[Ee][Xx][Ee]/ OR data_win_eventdata_image:/.*[Pp][Ww][Ss][Hh].[Ee][Xx][Ee]/) AND data_win_eventdata_destinationPort:"135") OR (data_win_system_eventID:"1" AND (data_win_eventdata_parentImage:/.*[Mm][Mm][Cc].[Ee][Xx][Ee]/ OR data_win_eventdata_parentImage:/.*[Ee][Xx][Cc][Ee][Ll].[Ee][Xx][Ee]/) AND (data_win_eventdata_image:/.*[Cc][Mm][Dd].[Ee][Xx][Ee]/ OR data_win_eventdata_image:/.*[Pp][Oo][Ww][Ee][Rr][Ss][Hh][Ee][Ll][Ll].[Ee][Xx][Ee]/ OR data_win_eventdata_image:/.*[Mm][Ss][Hh][Tt][Aa].[Ee][Xx][Ee]/ OR data_win_eventdata_image:/.*[Rr][Uu][Nn][Dd][Ll][Ll]32.[Ee][Xx][Ee]/ OR data_win_eventdata_image:/.*[Rr][Ee][Gg][Ss][Vv][Rr]32.[Ee][Xx][Ee]/))
+    pivot_on:
+    - host
+    window: 2h
+  - name: COM registration hijack (InprocServer32/LocalServer32/TreatAs) around the COM abuse
+    query: (data_win_system_eventID:"12" OR data_win_system_eventID:"13") AND (data_win_eventdata_targetObject:/.*[Cc][Ll][Ss][Ii][Dd].*/) AND ((data_win_eventdata_targetObject:/.*[Ii][Nn][Pp][Rr][Oo][Cc][Ss][Ee][Rr][Vv][Ee][Rr]32.*/ OR data_win_eventdata_targetObject:/.*[Ll][Oo][Cc][Aa][Ll][Ss][Ee][Rr][Vv][Ee][Rr]32.*/ OR data_win_eventdata_targetObject:/.*[Tt][Rr][Ee][Aa][Tt][Aa][Ss].*/ OR data_win_eventdata_targetObject:/.*[Ss][Cc][Rr][Ii][Pp][Tt][Ll][Ee][Tt][Uu][Rr][Ll].*/))
+    pivot_on:
+    - host
+    window: 4h
+  - name: Download / COM-HTTP / encoded staging in script blocks on this host
+    query: data_win_system_eventID:"4104" AND (data_win_eventdata_scriptBlockText:/.*[Nn][Ee][Ww]-[Oo][Bb][Jj][Ee][Cc][Tt] -[Cc][Oo][Mm][Oo][Bb][Jj][Ee][Cc][Tt].*/ OR data_win_eventdata_scriptBlockText:/.*[Mm][Ss][Xx][Mm][Ll]2.[Xx][Mm][Ll][Hh][Tt][Tt][Pp].*/ OR data_win_eventdata_scriptBlockText:/.*[Ww][Ii][Nn][Hh][Tt][Tt][Pp].[Ww][Ii][Nn][Hh][Tt][Tt][Pp][Rr][Ee][Qq][Uu][Ee][Ss][Tt].*/ OR data_win_eventdata_scriptBlockText:/.*[Nn][Ee][Tt].[Ww][Ee][Bb][Cc][Ll][Ii][Ee][Nn][Tt].*/ OR data_win_eventdata_scriptBlockText:/.*[Dd][Oo][Ww][Nn][Ll][Oo][Aa][Dd][Ss][Tt][Rr][Ii][Nn][Gg].*/ OR data_win_eventdata_scriptBlockText:/.*[Dd][Oo][Ww][Nn][Ll][Oo][Aa][Dd][Ff][Ii][Ll][Ee].*/ OR data_win_eventdata_scriptBlockText:/.*[Ii][Nn][Vv][Oo][Kk][Ee]-[Ww][Ee][Bb][Rr][Ee][Qq][Uu][Ee][Ss][Tt].*/ OR data_win_eventdata_scriptBlockText:/.*[Ff][Rr][Oo][Mm][Bb][Aa][Ss][Ee]64[Ss][Tt][Rr][Ii][Nn][Gg].*/ OR data_win_eventdata_scriptBlockText:/.*[Ii][Nn][Vv][Oo][Kk][Ee]-[Ee][Xx][Pp][Rr][Ee][Ss][Ss][Ii][Oo][Nn].*/ OR data_win_eventdata_scriptBlockText:/.*[Ii][Ee][Xx] .*/)
+    pivot_on:
+    - host
+    window: 1h
+  - name: Executable or script payload dropped to user-writable paths by PowerShell/Explorer
+    query: data_win_system_eventID:"11" AND (data_win_eventdata_image:/.*[Pp][Oo][Ww][Ee][Rr][Ss][Hh][Ee][Ll][Ll].[Ee][Xx][Ee]/ OR data_win_eventdata_image:/.*[Pp][Ww][Ss][Hh].[Ee][Xx][Ee]/ OR data_win_eventdata_image:/.*[Ee][Xx][Pp][Ll][Oo][Rr][Ee][Rr].[Ee][Xx][Ee]/) AND ((data_win_eventdata_targetFilename:/.*.[Ee][Xx][Ee].*/ OR data_win_eventdata_targetFilename:/.*.[Dd][Ll][Ll].*/ OR data_win_eventdata_targetFilename:/.*.[Pp][Ss]1.*/ OR data_win_eventdata_targetFilename:/.*.[Hh][Tt][Aa].*/ OR data_win_eventdata_targetFilename:/.*.[Jj][Ss].*/ OR data_win_eventdata_targetFilename:/.*.[Vv][Bb][Ss].*/ OR data_win_eventdata_targetFilename:/.*.[Bb][Aa][Tt].*/ OR data_win_eventdata_targetFilename:/.*.[Ss][Cc][Rr].*/ OR data_win_eventdata_targetFilename:/.*.[Ll][Nn][Kk].*/)) AND ((data_win_eventdata_targetFilename:/.*[Tt][Ee][Mm][Pp].*/ OR data_win_eventdata_targetFilename:/.*[Pp][Rr][Oo][Gg][Rr][Aa][Mm][Dd][Aa][Tt][Aa].*/ OR data_win_eventdata_targetFilename:/.*[Uu][Ss][Ee][Rr][Ss]/[Pp][Uu][Bb][Ll][Ii][Cc].*/ OR data_win_eventdata_targetFilename:/.*[Aa][Pp][Pp][Dd][Aa][Tt][Aa].*/))
+    pivot_on:
+    - host
+    window: 2h

@@ -138,58 +138,58 @@ graylog:
   query: data_win_system_eventID:"4104" AND data_win_eventdata_scriptBlockText:/.*System\.Security\.Cryptography.*/ AND NOT (data_win_eventdata_scriptBlockText:/.*SHA.*/ OR data_win_eventdata_scriptBlockText:/.*MD5.*/ OR data_win_eventdata_scriptBlockText:/.*DeriveBytes.*/)
 
 correlation:
-  # Authored by the correlation engine for review. Related CoPilot Searches to run
-  # around an alert from this rule, scoped to the same host/user/IP within the window.
+  # Authored per-rule (behaviour-researched) for the correlation engine. Related CoPilot
+  # Searches + telemetry pivots to run around an alert, scoped to its host/user/ip/domain.
   related_rules:
-    - id: b06a555e-dce0-417d-a2eb-28a5d8d66ef7
-      name: "Execution of File with Multiple Extensions"
-      reason: "same analytic story: AsyncRAT"
-    - id: 9be56c82-b1cc-4318-87eb-d138afaaca39
-      name: "Malicious PowerShell Process - Execution Policy Bypass"
-      reason: "same analytic story: AsyncRAT"
-    - id: windows-powershell-loading-dotnet-into-memory-via-reflection-001
-      name: "PowerShell Loading DotNET into Memory via Reflection"
-      reason: "same analytic story: AsyncRAT"
-    - id: windows-powershell-fileless-script-contains-base64-encoded-content-001
-      name: "Powershell Fileless Script Contains Base64 Encoded Content"
-      reason: "same analytic story: AsyncRAT"
-    - id: windows-powershell-processing-stream-of-data-001
-      name: "Powershell Processing Stream Of Data"
-      reason: "same analytic story: AsyncRAT"
-    - id: 28077620-c9f6-11eb-8785-acde48001122
-      name: "Recon AVProduct Through PowerShell or WMI"
-      reason: "same analytic story: XWorm"
-    - id: 018c1972-ca07-11eb-9473-acde48001122
-      name: "Recon Using WMI Class"
-      reason: "same analytic story: AsyncRAT"
-    - id: f421c250-24e7-11ec-bc43-acde48001122
-      name: "Regsvr32 Silent and Install Param Dll Loading"
-      reason: "same analytic story: AsyncRAT"
-    - id: c9ef7dc4-eeaf-11eb-b2b6-acde48001122
-      name: "Regsvr32 with Known Silent Switch Cmdline"
-      reason: "same analytic story: AsyncRAT"
-    - id: windows-access-token-manipulation-sedebugprivilege-001
-      name: "Windows Access Token Manipulation SeDebugPrivilege"
-      reason: "same analytic story: AsyncRAT"
-    - id: windows-malicious-powershell-process-execution-policy-bypass-001
-      name: "Windows Malicious PowerShell Process - Execution Policy Bypass"
-      reason: "same analytic story: AsyncRAT"
-    - id: windows-powershell-4104-hunting-001
-      name: "Windows PowerShell 4104 Hunting"
-      reason: "same analytic story: XWorm"
+  - id: windows-powershell-processing-stream-of-data-001
+    name: Powershell Processing Stream Of Data
+    reason: Crypto streams (CryptoStream/MemoryStream/GZipStream) decrypt-and-unpack an embedded payload; this fires on the same stream-processing in the same script block chain
+  - id: windows-powershell-loading-dotnet-into-memory-via-reflection-001
+    name: PowerShell Loading DotNET into Memory via Reflection
+    reason: Decrypted payload is typically a .NET assembly loaded with Assembly.Load straight after AES/RSA decryption (AsyncRAT/XWorm loader pattern)
+  - id: windows-powershell-fileless-script-contains-base64-encoded-content-001
+    name: Powershell Fileless Script Contains Base64 Encoded Content
+    reason: Base64 blob is the usual encrypted payload carrier decoded and decrypted by the cryptography call in the same script
+  - id: 434c08ba-8406-4d15-8b24-782cb071a691
+    name: PowerShell Execution With Potential Decryption Capabilities
+    reason: Process-creation view of the same decrypt-in-PowerShell command line (the launcher that produced this script block)
+  - id: 403c2cc0-7f6b-4925-9423-bfa573bed7eb
+    name: Suspicious PowerShell Download - Powershell Script
+    reason: Staged loaders download the encrypted blob first, then decrypt it with System.Security.Cryptography; download is the direct precursor
+  - id: e0d6c087-2d1c-47fd-8799-3904103c5a98
+    name: AMSI Bypass Pattern Assembly GetType
+    reason: Loaders patch AMSI before running the decrypted in-memory assembly so it is not scanned
+  - id: windows-powershell-fileless-process-injection-via-getprocaddress-001
+    name: Powershell Fileless Process Injection via GetProcAddress
+    reason: Decrypted shellcode/payload is then injected into memory via P/Invoke GetProcAddress/VirtualAlloc, the follow-on stage
+  - id: c4db14d9-7909-48b4-a054-aa14d89dbb19
+    name: Malicious PowerShell Process - Encoded Command
+    reason: Encoded-command launch commonly delivers the crypto-decrypting script block that triggered this alert
   window: 1h
   enrichment_searches:
-  # Rule-specific telemetry pivots the engine runs around an alert from this rule,
-  # scoped to the alert's host/user/IP within the window (behaviour-targeted, not a sweep).
-    - name: "Outbound connections by script interpreters on this host"
-      query: 'data_win_system_eventID:"3" AND data_win_eventdata_image:/.*(\\[Pp][Oo][Ww][Ee][Rr][Ss][Hh][Ee][Ll][Ll]\.[Ee][Xx][Ee]|\\[Pp][Ww][Ss][Hh]\.[Ee][Xx][Ee]|\\[Pp][Oo][Ww][Ee][Rr][Ss][Hh][Ee][Ll][Ll]_[Ii][Ss][Ee]\.[Ee][Xx][Ee]|\\[Cc][Mm][Dd]\.[Ee][Xx][Ee]|\\[Ww][Ss][Cc][Rr][Ii][Pp][Tt]\.[Ee][Xx][Ee]|\\[Cc][Ss][Cc][Rr][Ii][Pp][Tt]\.[Ee][Xx][Ee]|\\[Mm][Ss][Hh][Tt][Aa]\.[Ee][Xx][Ee]|\\[Rr][Uu][Nn][Dd][Ll][Ll]32\.[Ee][Xx][Ee]|\\[Rr][Ee][Gg][Ss][Vv][Rr]32\.[Ee][Xx][Ee])/'
-      pivot_on: [host]
-      window: 1h
-    - name: "Download / AMSI-bypass / encoded script blocks on this host"
-      query: 'data_win_system_eventID:"4104" AND (data_win_eventdata_scriptBlockText:/.*[Dd][Oo][Ww][Nn][Ll][Oo][Aa][Dd][Ss][Tt][Rr][Ii][Nn][Gg].*/ OR data_win_eventdata_scriptBlockText:/.*[Dd][Oo][Ww][Nn][Ll][Oo][Aa][Dd][Ff][Ii][Ll][Ee].*/ OR data_win_eventdata_scriptBlockText:/.*[Ii][Nn][Vv][Oo][Kk][Ee]-[Ww][Ee][Bb][Rr][Ee][Qq][Uu][Ee][Ss][Tt].*/ OR data_win_eventdata_scriptBlockText:/.*[Nn][Ee][Tt]\.[Ww][Ee][Bb][Cc][Ll][Ii][Ee][Nn][Tt].*/ OR data_win_eventdata_scriptBlockText:/.*[Ff][Rr][Oo][Mm][Bb][Aa][Ss][Ee]64[Ss][Tt][Rr][Ii][Nn][Gg].*/ OR data_win_eventdata_scriptBlockText:/.*[Ii][Ee][Xx].*/ OR data_win_eventdata_scriptBlockText:/.*[Ii][Nn][Vv][Oo][Kk][Ee]-[Ee][Xx][Pp][Rr][Ee][Ss][Ss][Ii][Oo][Nn].*/ OR data_win_eventdata_scriptBlockText:/.*[Ss][Tt][Aa][Rr][Tt]-[Bb][Ii][Tt][Ss][Tt][Rr][Aa][Nn][Ss][Ff][Ee][Rr].*/ OR data_win_eventdata_scriptBlockText:/.*[Aa][Mm][Ss][Ii][Uu][Tt][Ii][Ll][Ss].*/ OR data_win_eventdata_scriptBlockText:/.*-[Ee][Nn][Cc].*/ OR data_win_eventdata_scriptBlockText:/.*-[Ee][Nn][Cc][Oo][Dd][Ee][Dd][Cc][Oo][Mm][Mm][Aa][Nn][Dd].*/ OR data_win_eventdata_scriptBlockText:/.*[Rr][Ee][Ff][Ll][Ee][Cc][Tt][Ii][Oo][Nn]\.[Aa][Ss][Ss][Ee][Mm][Bb][Ll][Yy].*/)'
-      pivot_on: [host]
-      window: 1h
-    - name: "Follow-on LOLBin / signed-binary-proxy execution on this host"
-      query: 'data_win_system_eventID:"1" AND data_win_eventdata_image:/.*(\\[Rr][Uu][Nn][Dd][Ll][Ll]32\.[Ee][Xx][Ee]|\\[Rr][Ee][Gg][Ss][Vv][Rr]32\.[Ee][Xx][Ee]|\\[Mm][Ss][Hh][Tt][Aa]\.[Ee][Xx][Ee]|\\[Ii][Nn][Ss][Tt][Aa][Ll][Ll][Uu][Tt][Ii][Ll]\.[Ee][Xx][Ee]|\\[Rr][Ee][Gg][Aa][Ss][Mm]\.[Ee][Xx][Ee]|\\[Rr][Ee][Gg][Ss][Vv][Cc][Ss]\.[Ee][Xx][Ee]|\\[Mm][Ss][Bb][Uu][Ii][Ll][Dd]\.[Ee][Xx][Ee]|\\[Cc][Ee][Rr][Tt][Uu][Tt][Ii][Ll]\.[Ee][Xx][Ee]|\\[Bb][Ii][Tt][Ss][Aa][Dd][Mm][Ii][Nn]\.[Ee][Xx][Ee]|\\[Ww][Mm][Ii][Cc]\.[Ee][Xx][Ee]|\\[Cc][Mm][Ss][Tt][Pp]\.[Ee][Xx][Ee]|\\[Oo][Dd][Bb][Cc][Cc][Oo][Nn][Ff]\.[Ee][Xx][Ee]|\\[Ff][Oo][Rr][Ff][Ii][Ll][Ee][Ss]\.[Ee][Xx][Ee]|\\[Pp][Cc][Aa][Ll][Uu][Aa]\.[Ee][Xx][Ee]|\\[Mm][Aa][Vv][Ii][Nn][Jj][Ee][Cc][Tt]\.[Ee][Xx][Ee]|\\[Ss][Cc][Rr][Ii][Pp][Tt][Rr][Uu][Nn][Nn][Ee][Rr]\.[Ee][Xx][Ee])/'
-      pivot_on: [host]
-      window: 1h
+  # Behaviour-targeted hunts the engine runs around the alert (not a sweep).
+  - name: Reflective assembly load / in-memory execution of decrypted payload
+    query: data_win_system_eventID:"4104" AND (data_win_eventdata_scriptBlockText:/.*[Rr]eflection\.[Aa]ssembly.*/ OR data_win_eventdata_scriptBlockText:/.*[Aa]ssembly\]::[Ll]oad.*/ OR data_win_eventdata_scriptBlockText:/.*[Ee]ntry[Pp]oint.*[Ii]nvoke.*/ OR data_win_eventdata_scriptBlockText:/.*[Vv]irtual[Aa]lloc.*/ OR data_win_eventdata_scriptBlockText:/.*[Mm]arshal.*[Gg]et[Dd]elegate[Ff]or[Ff]unction[Pp]ointer.*/)
+    pivot_on:
+    - host
+    window: 1h
+  - name: Base64 and stream decode/decompress chains in script blocks
+    query: data_win_system_eventID:"4104" AND (data_win_eventdata_scriptBlockText:/.*[Ff]rom[Bb]ase64[Ss]tring.*/ OR data_win_eventdata_scriptBlockText:/.*[Gg][Zz]ip[Ss]tream.*/ OR data_win_eventdata_scriptBlockText:/.*[Dd]eflate[Ss]tream.*/ OR data_win_eventdata_scriptBlockText:/.*[Cc]rypto[Ss]tream.*/ OR data_win_eventdata_scriptBlockText:/.*[Cc]reate[Dd]ecryptor.*/)
+    pivot_on:
+    - host
+    window: 1h
+  - name: PowerShell spawned from script hosts or Office (loader launch)
+    query: data_win_system_eventID:"1" AND data_win_eventdata_image:/.*[Pp]ower[Ss]hell.*/ AND data_win_eventdata_parentImage:/.*(wscript|cscript|mshta|winword|excel|outlook|cmd|wmiprvse)\.exe/
+    pivot_on:
+    - host
+    window: 1h
+  - name: Persistence set by script interpreters (Run key or scheduled task)
+    query: (data_win_system_eventID:"13" AND data_win_eventdata_targetObject:/.*(CurrentVersion\\Run|CurrentVersion\\RunOnce).*/ AND data_win_eventdata_image:/.*(powershell|pwsh|wscript|cscript|mshta|cmd)\.exe/) OR (data_win_system_eventID:"1" AND data_win_eventdata_image:/.*schtasks\.exe/ AND data_win_eventdata_commandLine:/.*\/[Cc]reate.*/)
+    pivot_on:
+    - host
+    window: 4h
+  - name: Executable or script dropped to user-writable paths by PowerShell
+    query: data_win_system_eventID:"11" AND data_win_eventdata_image:/.*[Pp]ower[Ss]hell.*/ AND data_win_eventdata_targetFilename:/.*(AppData|Temp|ProgramData|Public).*\.(exe|dll|ps1|vbs|js|bat)/
+    pivot_on:
+    - host
+    window: 2h

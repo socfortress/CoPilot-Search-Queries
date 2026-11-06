@@ -135,62 +135,58 @@ graylog:
   query: data_win_system_eventID:"4104" AND data_win_eventdata_scriptBlockText:/.*Import-Module Applocker.*/ AND data_win_eventdata_scriptBlockText:/.*Set-AppLockerPolicy.*/ AND data_win_eventdata_scriptBlockText:/.*-XMLPolicy.*/
 
 correlation:
-  # Authored by the correlation engine for review. Related CoPilot Searches to run
-  # around an alert from this rule, scoped to the same host/user/IP within the window.
+  # Authored per-rule (behaviour-researched) for the correlation engine. Related CoPilot
+  # Searches + telemetry pivots to run around an alert, scoped to its host/user/ip/domain.
   related_rules:
-    - id: b89919ed-fe5f-492c-b139-95dbb162039e
-      name: "Detect Use of cmd exe to Launch Script Interpreters"
-      reason: "same analytic story: Azorult"
-    - id: detection-of-tools-built-by-nirsoft-001
-      name: "Detection of Tools Built by NirSoft"
-      reason: "same analytic story: Azorult"
-    - id: 9a8f63a8-43ac-11ec-904c-acde48001122
-      name: "Firewall Allowed Program Enable"
-      reason: "same analytic story: Azorult"
-    - id: 6e5a3ae4-90a3-462d-9aa6-0119f638c0f1
-      name: "Hiding Files And Directories With Attrib exe"
-      reason: "same analytic story: Azorult"
-    - id: cf8d753e-a8fe-11eb-8f58-acde48001122
-      name: "Icacls Deny Command"
-      reason: "same analytic story: Azorult"
-    - id: windows-attempt-stop-security-service-001
-      name: "Windows Attempt To Stop Security Service"
-      reason: "same analytic story: Azorult"
-    - id: Windows_DisableAntiSpyware_Registry
-      name: "Windows DisableAntiSpyware Registry"
-      reason: "same analytic story: Azorult"
-    - id: 467ed9d9-8035-470e-ad5e-ae5189283033
-      name: "Windows Impair Defense Add Xml Applocker Rules"
-      reason: "same analytic story: Azorult"
-    - id: windows-modify-registry-disable-toast-notifications-001
-      name: "Windows Modify Registry Disable Toast Notifications"
-      reason: "same analytic story: Azorult"
-    - id: windows-modify-registry-disable-defender-raw-write-001
-      name: "Windows Modify Registry Disable Win Defender Raw Write Notif"
-      reason: "same analytic story: Azorult"
-    - id: windows-modify-registry-disable-security-center-notif-001
-      name: "Windows Modify Registry Disable Windows Security Center Notif"
-      reason: "same analytic story: Azorult"
-    - id: windows-modify-registry-disabling-wer-settings-001
-      name: "Windows Modify Registry Disabling WER Settings"
-      reason: "same analytic story: Azorult"
+  - id: 467ed9d9-8035-470e-ad5e-ae5189283033
+    name: Windows Impair Defense Add Xml Applocker Rules
+    reason: Same AppLocker XML-policy push seen from process-creation telemetry; confirms the Set-AppLockerPolicy command line that the script block shows.
+  - id: b4c8da4a-1c12-46b0-8a2b-0a8521d03442
+    name: Restricted Software Access By SRP
+    reason: A malicious AppLocker/SRP policy that denies AV and security tools surfaces as software-restriction blocks of those binaries right after the import.
+  - id: 1d2de8a6-4803-4fde-b85b-f58f3aa7a705
+    name: Potentially Suspicious WDAC Policy File Creation
+    reason: 'Sibling application-control tampering: attacker-staged policy files (WDAC) used to block EDR drivers and tools alongside the AppLocker XML.'
+  - id: 17769c90-230e-488b-a463-e05c08e9d48f
+    name: Powershell Defender Exclusion
+    reason: Attacker blinding Defender with AppLocker deny rules typically also adds Defender exclusions via Add-MpPreference in the same session.
+  - id: c148a894-dd93-11eb-bf2a-acde48001122
+    name: Powershell Disable Security Monitoring
+    reason: Set-MpPreference real-time/behaviour monitoring disablement is the usual companion defense-evasion step to the policy import.
+  - id: 1321dc4e-a1fe-481d-a016-52c45f0c8b4f
+    name: Windows Defender Exclusions Added
+    reason: Defender-side confirmation of exclusions added around the time AppLocker was used to cripple security tooling.
+  - id: 9be56c82-b1cc-4318-87eb-d138afaaca39
+    name: Malicious PowerShell Process - Execution Policy Bypass
+    reason: 'Launcher precursor: the PowerShell session running Import-Module Applocker is often started with -ExecutionPolicy Bypass by the dropper.'
+  - id: windows-powershell-script-block-with-url-chain-001
+    name: PowerShell Script Block With URL Chain
+    reason: Azorult-style loaders download the stager in PowerShell before or after neutralising defenses; same script-block telemetry source.
   window: 1h
   enrichment_searches:
-  # Rule-specific telemetry pivots the engine runs around an alert from this rule,
-  # scoped to the alert's host/user/IP within the window (behaviour-targeted, not a sweep).
-    - name: "Outbound connections by script interpreters on this host"
-      query: 'data_win_system_eventID:"3" AND data_win_eventdata_image:/.*(\\[Pp][Oo][Ww][Ee][Rr][Ss][Hh][Ee][Ll][Ll]\.[Ee][Xx][Ee]|\\[Pp][Ww][Ss][Hh]\.[Ee][Xx][Ee]|\\[Pp][Oo][Ww][Ee][Rr][Ss][Hh][Ee][Ll][Ll]_[Ii][Ss][Ee]\.[Ee][Xx][Ee]|\\[Cc][Mm][Dd]\.[Ee][Xx][Ee]|\\[Ww][Ss][Cc][Rr][Ii][Pp][Tt]\.[Ee][Xx][Ee]|\\[Cc][Ss][Cc][Rr][Ii][Pp][Tt]\.[Ee][Xx][Ee]|\\[Mm][Ss][Hh][Tt][Aa]\.[Ee][Xx][Ee]|\\[Rr][Uu][Nn][Dd][Ll][Ll]32\.[Ee][Xx][Ee]|\\[Rr][Ee][Gg][Ss][Vv][Rr]32\.[Ee][Xx][Ee])/'
-      pivot_on: [host]
-      window: 1h
-    - name: "Security-tool / Defender tampering on this host"
-      query: 'data_win_system_eventID:"1" AND (data_win_eventdata_commandLine:/.*[Ss][Ee][Tt]-[Mm][Pp][Pp][Rr][Ee][Ff][Ee][Rr][Ee][Nn][Cc][Ee].*/ OR data_win_eventdata_commandLine:/.*[Dd][Ii][Ss][Aa][Bb][Ll][Ee][Rr][Ee][Aa][Ll][Tt][Ii][Mm][Ee][Mm][Oo][Nn][Ii][Tt][Oo][Rr][Ii][Nn][Gg].*/ OR data_win_eventdata_commandLine:/.*[Dd][Ii][Ss][Aa][Bb][Ll][Ee][Aa][Nn][Tt][Ii][Ss][Pp][Yy][Ww][Aa][Rr][Ee].*/ OR data_win_eventdata_commandLine:/.*[Aa][Dd][Dd]-[Mm][Pp][Pp][Rr][Ee][Ff][Ee][Rr][Ee][Nn][Cc][Ee] -[Ee][Xx][Cc][Ll][Uu][Ss][Ii][Oo][Nn][Pp][Aa][Tt][Hh].*/ OR data_win_eventdata_commandLine:/.*[Ww][Ee][Vv][Tt][Uu][Tt][Ii][Ll].*/ OR data_win_eventdata_commandLine:/.*[Cc][Ll][Ee][Aa][Rr]-[Ee][Vv][Ee][Nn][Tt][Ll][Oo][Gg].*/ OR data_win_eventdata_commandLine:/.*[Ff][Ss][Uu][Tt][Ii][Ll] [Uu][Ss][Nn] [Dd][Ee][Ll][Ee][Tt][Ee][Jj][Oo][Uu][Rr][Nn][Aa][Ll].*/ OR data_win_eventdata_commandLine:/.*[Vv][Ss][Ss][Aa][Dd][Mm][Ii][Nn].*/ OR data_win_eventdata_commandLine:/.*[Ss][Tt][Oo][Pp]-[Ss][Ee][Rr][Vv][Ii][Cc][Ee].*/ OR data_win_eventdata_commandLine:/.*[Ss][Cc] [Ss][Tt][Oo][Pp].*/ OR data_win_eventdata_commandLine:/.*[Ss][Cc] [Cc][Oo][Nn][Ff][Ii][Gg].*/)'
-      pivot_on: [host]
-      window: 2h
-    - name: "Downloader / C2 tooling executed on this host"
-      query: '(data_win_system_eventID:"1" AND data_win_eventdata_image:/.*(\\[Cc][Ee][Rr][Tt][Uu][Tt][Ii][Ll]\.[Ee][Xx][Ee]|\\[Bb][Ii][Tt][Ss][Aa][Dd][Mm][Ii][Nn]\.[Ee][Xx][Ee]|\\[Cc][Uu][Rr][Ll]\.[Ee][Xx][Ee]|\\[Ww][Gg][Ee][Tt]\.[Ee][Xx][Ee])/) OR (data_win_eventdata_commandLine:/.*[Dd][Oo][Ww][Nn][Ll][Oo][Aa][Dd][Ss][Tt][Rr][Ii][Nn][Gg].*/ OR data_win_eventdata_commandLine:/.*[Dd][Oo][Ww][Nn][Ll][Oo][Aa][Dd][Ff][Ii][Ll][Ee].*/ OR data_win_eventdata_commandLine:/.*[Ii][Nn][Vv][Oo][Kk][Ee]-[Ww][Ee][Bb][Rr][Ee][Qq][Uu][Ee][Ss][Tt].*/ OR data_win_eventdata_commandLine:/.*[Nn][Ee][Tt]\.[Ww][Ee][Bb][Cc][Ll][Ii][Ee][Nn][Tt].*/ OR data_win_eventdata_commandLine:/.*[Ss][Tt][Aa][Rr][Tt]-[Bb][Ii][Tt][Ss][Tt][Rr][Aa][Nn][Ss][Ff][Ee][Rr].*/ OR data_win_eventdata_commandLine:/.*[Ii][Ww][Rr] .*/ OR data_win_eventdata_commandLine:/.*[Cc][Uu][Rr][Ll] .*/ OR data_win_eventdata_commandLine:/.*[Ww][Gg][Ee][Tt] .*/)'
-      pivot_on: [host]
-      window: 1h
-    - name: "Download / AMSI-bypass / encoded script blocks on this host"
-      query: 'data_win_system_eventID:"4104" AND (data_win_eventdata_scriptBlockText:/.*[Dd][Oo][Ww][Nn][Ll][Oo][Aa][Dd][Ss][Tt][Rr][Ii][Nn][Gg].*/ OR data_win_eventdata_scriptBlockText:/.*[Dd][Oo][Ww][Nn][Ll][Oo][Aa][Dd][Ff][Ii][Ll][Ee].*/ OR data_win_eventdata_scriptBlockText:/.*[Ii][Nn][Vv][Oo][Kk][Ee]-[Ww][Ee][Bb][Rr][Ee][Qq][Uu][Ee][Ss][Tt].*/ OR data_win_eventdata_scriptBlockText:/.*[Nn][Ee][Tt]\.[Ww][Ee][Bb][Cc][Ll][Ii][Ee][Nn][Tt].*/ OR data_win_eventdata_scriptBlockText:/.*[Ff][Rr][Oo][Mm][Bb][Aa][Ss][Ee]64[Ss][Tt][Rr][Ii][Nn][Gg].*/ OR data_win_eventdata_scriptBlockText:/.*[Ii][Ee][Xx].*/ OR data_win_eventdata_scriptBlockText:/.*[Ii][Nn][Vv][Oo][Kk][Ee]-[Ee][Xx][Pp][Rr][Ee][Ss][Ss][Ii][Oo][Nn].*/ OR data_win_eventdata_scriptBlockText:/.*[Ss][Tt][Aa][Rr][Tt]-[Bb][Ii][Tt][Ss][Tt][Rr][Aa][Nn][Ss][Ff][Ee][Rr].*/ OR data_win_eventdata_scriptBlockText:/.*[Aa][Mm][Ss][Ii][Uu][Tt][Ii][Ll][Ss].*/ OR data_win_eventdata_scriptBlockText:/.*-[Ee][Nn][Cc].*/ OR data_win_eventdata_scriptBlockText:/.*-[Ee][Nn][Cc][Oo][Dd][Ee][Dd][Cc][Oo][Mm][Mm][Aa][Nn][Dd].*/ OR data_win_eventdata_scriptBlockText:/.*[Rr][Ee][Ff][Ll][Ee][Cc][Tt][Ii][Oo][Nn]\.[Aa][Ss][Ss][Ee][Mm][Bb][Ll][Yy].*/)'
-      pivot_on: [host]
-      window: 1h
+  # Behaviour-targeted hunts the engine runs around the alert (not a sweep).
+  - name: Defender tampering script blocks (MpPreference, exclusions, realtime off)
+    query: data_win_system_eventID:"4104" AND (data_win_eventdata_scriptBlockText:/.*[Ss]et-[Mm]p[Pp]reference.*/ OR data_win_eventdata_scriptBlockText:/.*[Aa]dd-[Mm]p[Pp]reference.*/ OR data_win_eventdata_scriptBlockText:/.*[Dd]isable[Rr]ealtime[Mm]onitoring.*/ OR data_win_eventdata_scriptBlockText:/.*[Ee]xclusion[Pp]ath.*/)
+    pivot_on:
+    - host
+    window: 2h
+  - name: Other AppLocker/SRP/WDAC policy manipulation on the host
+    query: (data_win_system_eventID:"4104" AND (data_win_eventdata_scriptBlockText:/.*[Aa]pp[Ll]ocker.*/ OR data_win_eventdata_scriptBlockText:/.*[Nn]ew-[Cc][Ii][Pp]olicy.*/)) OR (data_win_system_eventID:"1" AND (data_win_eventdata_commandLine:/.*[Aa]pp[Ll]ocker.*/ OR data_win_eventdata_commandLine:/.*[Ss]afer[Cc]odeidentifiers.*/ OR data_win_eventdata_commandLine:/.*[Ss]ip[Oo]licy.*/))
+    pivot_on:
+    - host
+    window: 2h
+  - name: Registry changes to AppLocker/SRP/Defender policy keys
+    query: (data_win_system_eventID:"12" OR data_win_system_eventID:"13") AND (data_win_eventdata_targetObject:/.*[Ss]rp[Vv]2.*/ OR data_win_eventdata_targetObject:/.*[Ss]afer.*[Cc]ode[Ii]dentifiers.*/ OR data_win_eventdata_targetObject:/.*[Pp]olicies.*[Mm]icrosoft.*[Ww]indows [Dd]efender.*/ OR data_win_eventdata_targetObject:/.*[Dd]isable[Aa]nti[Ss]pyware.*/)
+    pivot_on:
+    - host
+    window: 2h
+  - name: Security-tool stop or kill attempts via sc/net/taskkill
+    query: data_win_system_eventID:"1" AND (data_win_eventdata_commandLine:/.*[Ss]c(\.exe)? +(stop|config|delete).*/ OR data_win_eventdata_commandLine:/.*[Nn]et1? +stop.*/ OR data_win_eventdata_commandLine:/.*[Tt]askkill.*/ OR data_win_eventdata_commandLine:/.*[Ss]top-[Ss]ervice.*/)
+    pivot_on:
+    - host
+    window: 1h
+  - name: Stager download and execution by PowerShell on host (post-defense-evasion)
+    query: (data_win_system_eventID:"4104" AND (data_win_eventdata_scriptBlockText:/.*[Dd]ownload(String|File).*/ OR data_win_eventdata_scriptBlockText:/.*[Ii]nvoke-[Ww]eb[Rr]equest.*/ OR data_win_eventdata_scriptBlockText:/.*[Ss]tart-[Bb]its[Tt]ransfer.*/)) OR (data_win_system_eventID:"3" AND data_win_eventdata_image:/.*[Pp]ower[Ss]hell.*/)
+    pivot_on:
+    - host
+    window: 1h

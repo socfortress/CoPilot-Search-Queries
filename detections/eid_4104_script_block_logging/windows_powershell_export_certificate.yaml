@@ -127,50 +127,58 @@ graylog:
   query: data_win_system_eventID:"4104" AND data_win_eventdata_scriptBlockText:/.*export-certificate.*/
 
 correlation:
-  # Authored by the correlation engine for review. Related CoPilot Searches to run
-  # around an alert from this rule, scoped to the same host/user/IP within the window.
+  # Authored per-rule (behaviour-researched) for the correlation engine. Related CoPilot
+  # Searches + telemetry pivots to run around an alert, scoped to its host/user/ip/domain.
   related_rules:
-    - id: f533ca6c-9440-4686-80cb-7f294c07812a
-      name: "Detect Certify With PowerShell Script Block Logging"
-      reason: "same analytic story: Windows Certificate Services"
-    - id: ed06725f-6da6-439f-9dcc-ab30e891297c
-      name: "Windows PowerShell Export PfxCertificate"
-      reason: "same analytic story: Windows Certificate Services"
-    - id: ec570e53-4c76-45a9-804d-dc3f355ff7a7
-      name: "7Zip Compressing Dump Files"
-      reason: "next kill-chain tactic: Collection"
-    - id: 0a1255c5-d732-4b62-ac02-b5152d34fb83
-      name: "ADExplorer Writing Complete AD Snapshot Into .dat File"
-      reason: "next kill-chain tactic: Discovery"
-    - id: 1ea13e8c-03ea-409b-877d-ce5c3d2c1cb3
-      name: "ADFS Database Named Pipe Connection By Uncommon Tool"
-      reason: "next kill-chain tactic: Collection"
-    - id: 75bf09fa-1dd7-4d18-9af9-dd9e492562eb
-      name: "ADSI-Cache File Creation By Uncommon Tool"
-      reason: "next kill-chain tactic: Command and Control"
-    - id: 03e2746e-2b31-42f1-ab7a-eb39365b2422
-      name: "APT31 Judgement Panda Activity"
-      reason: "next kill-chain tactic: Credential Access"
-    - id: fc028194-969d-4122-8abe-0470d5b8f12f
-      name: "Access to Browser Login Data"
-      reason: "next kill-chain tactic: Credential Access"
-  window: 1h
+  - id: ed06725f-6da6-439f-9dcc-ab30e891297c
+    name: Windows PowerShell Export PfxCertificate
+    reason: Sibling cmdlet that exports the private key as PFX; the same actor often chains Export-Certificate (public cert) with Export-PfxCertificate (key theft).
+  - id: aa7a3fce-bef5-4311-9cc1-5f04bb8c308c
+    name: Certificate Exported Via PowerShell - ScriptBlock
+    reason: Broader script-block variant of certificate export; confirms the same export behavior in other cmdlet forms on the host.
+  - id: 9e716b33-63b2-46da-86a4-bd3c3b9b5dfb
+    name: Certificate Exported Via PowerShell
+    reason: Process-creation view of the same export (powershell command line), corroborating the script block with the launching parent and arguments.
+  - id: 3ffd6f51-e6c1-47b7-94b4-c1e61d4117c5
+    name: Certificate Exported Via Certutil.EXE
+    reason: Alternate LOLBin route to export certificates/keys; attackers switch tools if one is blocked or monitored.
+  - id: 213d6a77-3d55-4ce8-ba74-fcfef741974e
+    name: Private Keys Reconnaissance Via CommandLine Tools
+    reason: 'Typical precursor: hunting for .pfx/.p12/.key files before or after exporting certs from the store.'
+  - id: 7892ec59-c5bb-496d-8968-e5d210ca3ac4
+    name: DPAPI Backup Keys And Certificate Export Activity IOC
+    reason: Exported cert/key files landing on disk (.pfx/.pvk/.cer) and DPAPI key material are the file-level artifact of the export.
+  - id: c7d33b50-f690-4b51-8cfb-0fb912a31e57
+    name: HackTool - SharpDPAPI Execution
+    reason: SharpDPAPI extracts DPAPI-protected certificates and private keys; common companion to cert theft for non-exportable keys.
+  - id: 762f2482-ff21-4970-8939-0aa317a886bb
+    name: HackTool - Certify Execution
+    reason: Stolen certs are used for AD CS abuse; Certify enumerates and requests certificates for impersonation, the likely follow-on.
+  window: 2h
   enrichment_searches:
-  # Rule-specific telemetry pivots the engine runs around an alert from this rule,
-  # scoped to the alert's host/user/IP within the window (behaviour-targeted, not a sweep).
-    - name: "Credential / secret-store access on this host"
-      query: '((((data_win_system_eventID:"1" AND data_win_eventdata_image:/.*(\\[Pp][Rr][Oo][Cc][Dd][Uu][Mm][Pp]\.[Ee][Xx][Ee]|\\[Pp][Rr][Oo][Cc][Dd][Uu][Mm][Pp]64\.[Ee][Xx][Ee]|\\[Ss][Qq][Ll][Dd][Uu][Mm][Pp][Ee][Rr]\.[Ee][Xx][Ee]|\\[Cc][Rr][Ee][Aa][Tt][Ee][Dd][Uu][Mm][Pp]\.[Ee][Xx][Ee]|\\[Rr][Dd][Rr][Ll][Ee][Aa][Kk][Dd][Ii][Aa][Gg]\.[Ee][Xx][Ee]|\\[Dd][Uu][Mm][Pp][Ee][Rr][Tt]\.[Ee][Xx][Ee]|\\[Nn][Aa][Nn][Oo][Dd][Uu][Mm][Pp]\.[Ee][Xx][Ee]|\\[Aa][Vv][Dd][Uu][Mm][Pp]\.[Ee][Xx][Ee])/) OR (data_win_system_eventID:"1" AND (data_win_eventdata_commandLine:/.*[Cc][Oo][Mm][Ss][Vv][Cc][Ss]\.[Dd][Ll][Ll].*/ OR data_win_eventdata_commandLine:/.*[Mm][Ii][Nn][Ii][Dd][Uu][Mm][Pp].*/ OR data_win_eventdata_commandLine:/.*[Dd][Uu][Mm][Pp][Ee][Rr][Tt].*/ OR data_win_eventdata_commandLine:/.*[Nn][Aa][Nn][Oo][Dd][Uu][Mm][Pp].*/ OR data_win_eventdata_commandLine:/.*[Ll][Ss][Aa][Ss][Ss].*/ OR data_win_eventdata_commandLine:/.*[Ss][Ee][Kk][Uu][Rr][Ll][Ss][Aa].*/ OR data_win_eventdata_commandLine:/.*[Nn][Tt][Dd][Ss]\.[Dd][Ii][Tt].*/ OR data_win_eventdata_commandLine:/.*[Nn][Tt][Dd][Ss][Uu][Tt][Ii][Ll].*/)) OR (data_win_system_eventID:"10" AND data_win_eventdata_targetImage:/.*(\\[Ll][Ss][Aa][Ss][Ss]\.[Ee][Xx][Ee])/))) OR ((data_win_eventdata_commandLine:/.*[Uu][Nn][Aa][Tt][Tt][Ee][Nn][Dd]\.[Xx][Mm][Ll].*/ OR data_win_eventdata_commandLine:/.*[Cc][Mm][Dd][Kk][Ee][Yy].*/ OR data_win_eventdata_commandLine:/.*[Gg][Ee][Tt]-[Cc][Rr][Ee][Dd][Ee][Nn][Tt][Ii][Aa][Ll].*/ OR data_win_eventdata_commandLine:/.*[Vv][Aa][Uu][Ll][Tt][Cc][Mm][Dd].*/ OR data_win_eventdata_commandLine:/.*\/[Pp][Aa][Ss][Ss][Ww][Oo][Rr][Dd].*/ OR data_win_eventdata_commandLine:/.*[Nn][Ee][Tt] [Uu][Ss][Ee].*/ OR data_win_eventdata_commandLine:/.*[Cc][Pp][Aa][Ss][Ss][Ww][Oo][Rr][Dd].*/ OR data_win_eventdata_commandLine:/.*[Ww][Ee][Bb]\.[Cc][Oo][Nn][Ff][Ii][Gg].*/)))'
-      pivot_on: [host]
-      window: 2h
-    - name: "Remote-execution / lateral-movement tooling on this host"
-      query: '(data_win_system_eventID:"1" AND data_win_eventdata_image:/.*(\\[Pp][Ss][Ee][Xx][Ee][Cc]\.[Ee][Xx][Ee]|\\[Pp][Ss][Ee][Xx][Ee][Ss][Vv][Cc]\.[Ee][Xx][Ee]|\\[Pp][Aa][Ee][Xx][Ee][Cc]\.[Ee][Xx][Ee]|\\[Ww][Ii][Nn][Rr][Ss]\.[Ee][Xx][Ee]|\\[Mm][Ss][Tt][Ss][Cc]\.[Ee][Xx][Ee]|\\[Ww][Mm][Ii][Cc]\.[Ee][Xx][Ee])/) OR (data_win_system_eventID:"1" AND data_win_eventdata_image:/.*(\\[Pp][Oo][Ww][Ee][Rr][Ss][Hh][Ee][Ll][Ll]\.[Ee][Xx][Ee]|\\[Pp][Ww][Ss][Hh]\.[Ee][Xx][Ee])/ AND (data_win_eventdata_commandLine:/.*[Ii][Nn][Vv][Oo][Kk][Ee]-[Cc][Oo][Mm][Mm][Aa][Nn][Dd].*/ OR data_win_eventdata_commandLine:/.*[Nn][Ee][Ww]-[Pp][Ss][Ss][Ee][Ss][Ss][Ii][Oo][Nn].*/ OR data_win_eventdata_commandLine:/.*[Ee][Nn][Tt][Ee][Rr]-[Pp][Ss][Ss][Ee][Ss][Ss][Ii][Oo][Nn].*/ OR data_win_eventdata_commandLine:/.*-[Cc][Oo][Mm][Pp][Uu][Tt][Ee][Rr][Nn][Aa][Mm][Ee].*/))'
-      pivot_on: [host]
-      window: 2h
-    - name: "Download / AMSI-bypass / encoded script blocks on this host"
-      query: 'data_win_system_eventID:"4104" AND (data_win_eventdata_scriptBlockText:/.*[Dd][Oo][Ww][Nn][Ll][Oo][Aa][Dd][Ss][Tt][Rr][Ii][Nn][Gg].*/ OR data_win_eventdata_scriptBlockText:/.*[Dd][Oo][Ww][Nn][Ll][Oo][Aa][Dd][Ff][Ii][Ll][Ee].*/ OR data_win_eventdata_scriptBlockText:/.*[Ii][Nn][Vv][Oo][Kk][Ee]-[Ww][Ee][Bb][Rr][Ee][Qq][Uu][Ee][Ss][Tt].*/ OR data_win_eventdata_scriptBlockText:/.*[Nn][Ee][Tt]\.[Ww][Ee][Bb][Cc][Ll][Ii][Ee][Nn][Tt].*/ OR data_win_eventdata_scriptBlockText:/.*[Ff][Rr][Oo][Mm][Bb][Aa][Ss][Ee]64[Ss][Tt][Rr][Ii][Nn][Gg].*/ OR data_win_eventdata_scriptBlockText:/.*[Ii][Ee][Xx].*/ OR data_win_eventdata_scriptBlockText:/.*[Ii][Nn][Vv][Oo][Kk][Ee]-[Ee][Xx][Pp][Rr][Ee][Ss][Ss][Ii][Oo][Nn].*/ OR data_win_eventdata_scriptBlockText:/.*[Ss][Tt][Aa][Rr][Tt]-[Bb][Ii][Tt][Ss][Tt][Rr][Aa][Nn][Ss][Ff][Ee][Rr].*/ OR data_win_eventdata_scriptBlockText:/.*[Aa][Mm][Ss][Ii][Uu][Tt][Ii][Ll][Ss].*/ OR data_win_eventdata_scriptBlockText:/.*-[Ee][Nn][Cc].*/ OR data_win_eventdata_scriptBlockText:/.*-[Ee][Nn][Cc][Oo][Dd][Ee][Dd][Cc][Oo][Mm][Mm][Aa][Nn][Dd].*/ OR data_win_eventdata_scriptBlockText:/.*[Rr][Ee][Ff][Ll][Ee][Cc][Tt][Ii][Oo][Nn]\.[Aa][Ss][Ss][Ee][Mm][Bb][Ll][Yy].*/)'
-      pivot_on: [host]
-      window: 1h
-    - name: "Follow-on LOLBin / signed-binary-proxy execution on this host"
-      query: 'data_win_system_eventID:"1" AND data_win_eventdata_image:/.*(\\[Rr][Uu][Nn][Dd][Ll][Ll]32\.[Ee][Xx][Ee]|\\[Rr][Ee][Gg][Ss][Vv][Rr]32\.[Ee][Xx][Ee]|\\[Mm][Ss][Hh][Tt][Aa]\.[Ee][Xx][Ee]|\\[Ii][Nn][Ss][Tt][Aa][Ll][Ll][Uu][Tt][Ii][Ll]\.[Ee][Xx][Ee]|\\[Rr][Ee][Gg][Aa][Ss][Mm]\.[Ee][Xx][Ee]|\\[Rr][Ee][Gg][Ss][Vv][Cc][Ss]\.[Ee][Xx][Ee]|\\[Mm][Ss][Bb][Uu][Ii][Ll][Dd]\.[Ee][Xx][Ee]|\\[Cc][Ee][Rr][Tt][Uu][Tt][Ii][Ll]\.[Ee][Xx][Ee]|\\[Bb][Ii][Tt][Ss][Aa][Dd][Mm][Ii][Nn]\.[Ee][Xx][Ee]|\\[Ww][Mm][Ii][Cc]\.[Ee][Xx][Ee]|\\[Cc][Mm][Ss][Tt][Pp]\.[Ee][Xx][Ee]|\\[Oo][Dd][Bb][Cc][Cc][Oo][Nn][Ff]\.[Ee][Xx][Ee]|\\[Ff][Oo][Rr][Ff][Ii][Ll][Ee][Ss]\.[Ee][Xx][Ee]|\\[Pp][Cc][Aa][Ll][Uu][Aa]\.[Ee][Xx][Ee]|\\[Mm][Aa][Vv][Ii][Nn][Jj][Ee][Cc][Tt]\.[Ee][Xx][Ee]|\\[Ss][Cc][Rr][Ii][Pp][Tt][Rr][Uu][Nn][Nn][Ee][Rr]\.[Ee][Xx][Ee])/'
-      pivot_on: [host]
-      window: 1h
+  # Behaviour-targeted hunts the engine runs around the alert (not a sweep).
+  - name: Certificate/key files created on disk
+    query: data_win_system_eventID:"11" AND (data_win_eventdata_targetFilename:/.*\.([Pp][Ff][Xx]|[Pp]12|[Cc][Ee][Rr]|[Pp][Vv][Kk]|[Kk][Ee][Yy]|[Pp][Ee][Mm])/)
+    pivot_on:
+    - host
+    window: 2h
+  - name: Other certificate export or private-key handling script blocks
+    query: data_win_system_eventID:"4104" AND (data_win_eventdata_scriptBlockText:*Export-PfxCertificate* OR data_win_eventdata_scriptBlockText:*Cert\:* OR data_win_eventdata_scriptBlockText:*X509Certificate2* OR data_win_eventdata_scriptBlockText:*ExportPkcs12* OR data_win_eventdata_scriptBlockText:*Get-ChildItem*Cert*)
+    pivot_on:
+    - host
+    window: 2h
+  - name: 'Cert tooling: certutil, certreq, certmgr, mimikatz crypto, SharpDPAPI'
+    query: data_win_system_eventID:"1" AND (data_win_eventdata_commandLine:*certutil*-exportPFX* OR data_win_eventdata_commandLine:*certutil*-p* OR data_win_eventdata_commandLine:*crypto\:\:* OR data_win_eventdata_commandLine:*SharpDPAPI* OR data_win_eventdata_commandLine:*certificates* OR data_win_eventdata_commandLine:*Certify* OR data_win_eventdata_commandLine:*certreq*)
+    pivot_on:
+    - host
+    window: 2h
+  - name: Staging and compression of exported cert files
+    query: data_win_system_eventID:"1" AND (data_win_eventdata_commandLine:*Compress-Archive* OR data_win_eventdata_commandLine:/.*([Rr]ar|7z|[Zz]ip)(\.exe)?.*/) AND (data_win_eventdata_commandLine:*.pfx* OR data_win_eventdata_commandLine:*.cer* OR data_win_eventdata_commandLine:*.p12* OR data_win_eventdata_commandLine:*cert*)
+    pivot_on:
+    - host
+    window: 4h
+  - name: Outbound transfer after export (web upload, SMB copy, net use)
+    query: data_win_system_eventID:"1" AND (data_win_eventdata_commandLine:*Invoke-WebRequest* OR data_win_eventdata_commandLine:*Invoke-RestMethod* OR data_win_eventdata_commandLine:*curl* OR data_win_eventdata_commandLine:*Start-BitsTransfer* OR data_win_eventdata_commandLine:*net*use* OR data_win_eventdata_commandLine:*scp*) AND (data_win_eventdata_commandLine:*.pfx* OR data_win_eventdata_commandLine:*.cer* OR data_win_eventdata_commandLine:*.p12* OR data_win_eventdata_commandLine:*cert*)
+    pivot_on:
+    - host
+    window: 4h

@@ -147,19 +147,58 @@ graylog:
   query: data_win_system_eventID:"4104" AND (data_win_eventdata_scriptBlockText:/.*[Aa][Dd][Dd]-[Aa][Pp][Pp][Pp][Aa][Cc][Kk][Aa][Gg][Ee] .*/ OR data_win_eventdata_scriptBlockText:/.*[Aa][Dd][Dd]-[Aa][Pp][Pp][Xx][Pp][Aa][Cc][Kk][Aa][Gg][Ee] .*/) AND data_win_eventdata_scriptBlockText:/.* -[Aa][Ll][Ll][Oo][Ww][Uu][Nn][Ss][Ii][Gg][Nn][Ee][Dd].*/
 
 correlation:
-  # Authored by the correlation engine for review.
+  # Authored per-rule (behaviour-researched) for the correlation engine. Related CoPilot
+  # Searches + telemetry pivots to run around an alert, scoped to its host/user/ip/domain.
+  related_rules:
+  - id: 37651c2a-42cd-4a69-ae0d-22a4349aa04a
+    name: Unsigned AppX Installation Attempt Using Add-AppxPackage
+    reason: Same Add-AppxPackage -AllowUnsigned behaviour seen from the process-creation side (powershell.exe command line); confirms the script-block hit with the launching process and parent.
+  - id: d2f77901-dbfa-42d9-8af7-dcd0f1a50a2f
+    name: Windows PowerShell MSIX Package Installation
+    reason: Companion 4104 detection for PowerShell-driven MSIX/AppX deployment; co-fires when the unsigned package is a sideloaded MSIX.
+  - id: 180c7c5c-d64b-4a63-86e9-68910451bc8b
+    name: Potential File Download Via MS-AppInstaller Protocol Handler
+    reason: Alternative delivery path for the same malicious-package technique (ms-appinstaller:// fetch of an AppX/MSIX); precursor or sibling of a PowerShell sideload.
+  - id: 403c2cc0-7f6b-4925-9423-bfa573bed7eb
+    name: Suspicious PowerShell Download - Powershell Script
+    reason: The unsigned package usually has to be downloaded first; a download cradle in an earlier script block is the staging step before Add-AppxPackage.
+  - id: 3c7d1587-3b13-439f-9941-7d14313dbdfe
+    name: Potential COM Objects Download Cradles Usage - PS Script
+    reason: COM-object based download cradle is another way the .appx/.msix payload is staged before the sideload.
+  - id: d4488827-73af-4f8d-9244-7b7662ef046e
+    name: Change User Agents with WebRequest
+    reason: Custom user agent on a web request in the same script indicates scripted payload retrieval ahead of package install.
+  - id: 61d0475c-173f-4844-86f7-f3eebae1c66b
+    name: Change PowerShell Policies to an Insecure Level - PowerShell
+    reason: Attackers relax execution policy before running staged install scripts, a common precursor in the same session.
+  - id: c1344fa2-323b-4d2e-9176-84b4d4821c88
+    name: Windows Defender Exclusions Added - PowerShell
+    reason: Defense evasion commonly accompanies installing an unsigned, unvetted package so the app is not scanned or removed.
+  window: 2h
   enrichment_searches:
-  # Rule-specific telemetry pivots the engine runs around an alert from this rule,
-  # scoped to the alert's host/user/IP within the window (behaviour-targeted, not a sweep).
-    - name: "Follow-on LOLBin / signed-binary-proxy execution on this host"
-      query: 'data_win_system_eventID:"1" AND data_win_eventdata_image:/.*(\\[Rr][Uu][Nn][Dd][Ll][Ll]32\.[Ee][Xx][Ee]|\\[Rr][Ee][Gg][Ss][Vv][Rr]32\.[Ee][Xx][Ee]|\\[Mm][Ss][Hh][Tt][Aa]\.[Ee][Xx][Ee]|\\[Ii][Nn][Ss][Tt][Aa][Ll][Ll][Uu][Tt][Ii][Ll]\.[Ee][Xx][Ee]|\\[Rr][Ee][Gg][Aa][Ss][Mm]\.[Ee][Xx][Ee]|\\[Rr][Ee][Gg][Ss][Vv][Cc][Ss]\.[Ee][Xx][Ee]|\\[Mm][Ss][Bb][Uu][Ii][Ll][Dd]\.[Ee][Xx][Ee]|\\[Cc][Ee][Rr][Tt][Uu][Tt][Ii][Ll]\.[Ee][Xx][Ee]|\\[Bb][Ii][Tt][Ss][Aa][Dd][Mm][Ii][Nn]\.[Ee][Xx][Ee]|\\[Ww][Mm][Ii][Cc]\.[Ee][Xx][Ee]|\\[Cc][Mm][Ss][Tt][Pp]\.[Ee][Xx][Ee]|\\[Oo][Dd][Bb][Cc][Cc][Oo][Nn][Ff]\.[Ee][Xx][Ee]|\\[Ff][Oo][Rr][Ff][Ii][Ll][Ee][Ss]\.[Ee][Xx][Ee]|\\[Pp][Cc][Aa][Ll][Uu][Aa]\.[Ee][Xx][Ee]|\\[Mm][Aa][Vv][Ii][Nn][Jj][Ee][Cc][Tt]\.[Ee][Xx][Ee]|\\[Ss][Cc][Rr][Ii][Pp][Tt][Rr][Uu][Nn][Nn][Ee][Rr]\.[Ee][Xx][Ee])/'
-      pivot_on: [host]
-      window: 1h
-    - name: "Download / AMSI-bypass / encoded script blocks on this host"
-      query: 'data_win_system_eventID:"4104" AND (data_win_eventdata_scriptBlockText:/.*[Dd][Oo][Ww][Nn][Ll][Oo][Aa][Dd][Ss][Tt][Rr][Ii][Nn][Gg].*/ OR data_win_eventdata_scriptBlockText:/.*[Dd][Oo][Ww][Nn][Ll][Oo][Aa][Dd][Ff][Ii][Ll][Ee].*/ OR data_win_eventdata_scriptBlockText:/.*[Ii][Nn][Vv][Oo][Kk][Ee]-[Ww][Ee][Bb][Rr][Ee][Qq][Uu][Ee][Ss][Tt].*/ OR data_win_eventdata_scriptBlockText:/.*[Nn][Ee][Tt]\.[Ww][Ee][Bb][Cc][Ll][Ii][Ee][Nn][Tt].*/ OR data_win_eventdata_scriptBlockText:/.*[Ff][Rr][Oo][Mm][Bb][Aa][Ss][Ee]64[Ss][Tt][Rr][Ii][Nn][Gg].*/ OR data_win_eventdata_scriptBlockText:/.*[Ii][Ee][Xx].*/ OR data_win_eventdata_scriptBlockText:/.*[Ii][Nn][Vv][Oo][Kk][Ee]-[Ee][Xx][Pp][Rr][Ee][Ss][Ss][Ii][Oo][Nn].*/ OR data_win_eventdata_scriptBlockText:/.*[Ss][Tt][Aa][Rr][Tt]-[Bb][Ii][Tt][Ss][Tt][Rr][Aa][Nn][Ss][Ff][Ee][Rr].*/ OR data_win_eventdata_scriptBlockText:/.*[Aa][Mm][Ss][Ii][Uu][Tt][Ii][Ll][Ss].*/ OR data_win_eventdata_scriptBlockText:/.*-[Ee][Nn][Cc].*/ OR data_win_eventdata_scriptBlockText:/.*-[Ee][Nn][Cc][Oo][Dd][Ee][Dd][Cc][Oo][Mm][Mm][Aa][Nn][Dd].*/ OR data_win_eventdata_scriptBlockText:/.*[Rr][Ee][Ff][Ll][Ee][Cc][Tt][Ii][Oo][Nn]\.[Aa][Ss][Ss][Ee][Mm][Bb][Ll][Yy].*/)'
-      pivot_on: [host]
-      window: 1h
-    - name: "Autostart persistence written on this host (Run keys, services, IFEO)"
-      query: '(data_win_system_eventID:"12" OR data_win_system_eventID:"13") AND (data_win_eventdata_targetObject:/.*[Cc][Uu][Rr][Rr][Ee][Nn][Tt][Vv][Ee][Rr][Ss][Ii][Oo][Nn]\\[Rr][Uu][Nn].*/ OR data_win_eventdata_targetObject:/.*[Cc][Uu][Rr][Rr][Ee][Nn][Tt][Vv][Ee][Rr][Ss][Ii][Oo][Nn]\\[Rr][Uu][Nn][Oo][Nn][Cc][Ee].*/ OR data_win_eventdata_targetObject:/.*[Cc][Uu][Rr][Rr][Ee][Nn][Tt][Cc][Oo][Nn][Tt][Rr][Oo][Ll][Ss][Ee][Tt]\\[Ss][Ee][Rr][Vv][Ii][Cc][Ee][Ss]\\.*/ OR data_win_eventdata_targetObject:/.*[Ii][Mm][Aa][Gg][Ee] [Ff][Ii][Ll][Ee] [Ee][Xx][Ee][Cc][Uu][Tt][Ii][Oo][Nn] [Oo][Pp][Tt][Ii][Oo][Nn][Ss]\\.*/ OR data_win_eventdata_targetObject:/.*[Ww][Ii][Nn][Ll][Oo][Gg][Oo][Nn]\\[Ss][Hh][Ee][Ll][Ll].*/ OR data_win_eventdata_targetObject:/.*[Ww][Ii][Nn][Ll][Oo][Gg][Oo][Nn]\\[Uu][Ss][Ee][Rr][Ii][Nn][Ii][Tt].*/ OR data_win_eventdata_targetObject:/.*[Cc][Uu][Rr][Rr][Ee][Nn][Tt][Vv][Ee][Rr][Ss][Ii][Oo][Nn]\\[Ee][Xx][Pp][Ll][Oo][Rr][Ee][Rr]\\[Rr][Uu][Nn].*/ OR data_win_eventdata_targetObject:/.*[Pp][Oo][Ll][Ii][Cc][Ii][Ee][Ss]\\[Ee][Xx][Pp][Ll][Oo][Rr][Ee][Rr]\\[Rr][Uu][Nn].*/ OR data_win_eventdata_targetObject:/.*[Cc][Uu][Rr][Rr][Ee][Nn][Tt][Vv][Ee][Rr][Ss][Ii][Oo][Nn]\\[Ww][Ii][Nn][Dd][Oo][Ww][Ss]\\[Ll][Oo][Aa][Dd].*/)'
-      pivot_on: [host]
-      window: 4h
+  # Behaviour-targeted hunts the engine runs around the alert (not a sweep).
+  - name: Package download or staging of AppX/MSIX payload
+    query: (data_win_system_eventID:"4104" AND data_win_eventdata_scriptBlockText:(*Invoke-WebRequest* OR *DownloadFile* OR *DownloadString* OR *Start-BitsTransfer* OR *Net.WebClient* OR *iwr*) AND data_win_eventdata_scriptBlockText:(*.appx* OR *.msix* OR *.appxbundle* OR *.msixbundle*)) OR (data_win_system_eventID:"11" AND data_win_eventdata_targetFilename:/.*[.]([Aa][Pp][Pp][Xx]|[Mm][Ss][Ii][Xx])([Bb][Uu][Nn][Dd][Ll][Ee])?/)
+    pivot_on:
+    - host
+    window: 2h
+  - name: Package manager and sideloading policy changes
+    query: (data_win_system_eventID:"1" AND data_win_eventdata_commandLine:(*AllowAllTrustedApps* OR *AllowDevelopmentWithoutDevLicense* OR *Add-AppxProvisionedPackage* OR *DevelopmentMode* OR *Add-AppxPackage* OR *ms-appinstaller*)) OR ((data_win_system_eventID:"12" OR data_win_system_eventID:"13") AND data_win_eventdata_targetObject:/.*[Aa][Pp][Pp][Xx]\[Aa][Ll][Ll][Oo][Ww].*/)
+    pivot_on:
+    - host
+    window: 2h
+  - name: Execution policy bypass and encoded PowerShell around install
+    query: data_win_system_eventID:"1" AND data_win_eventdata_image:/.*[Pp]ower[Ss]hell.*/ AND (data_win_eventdata_commandLine:(*-ExecutionPolicy* OR *-Exec* OR *-enc* OR *-EncodedCommand* OR *-NoProfile* OR *-WindowStyle*) )
+    pivot_on:
+    - host
+    window: 1h
+  - name: Network connections and DNS from PowerShell to package host
+    query: (data_win_system_eventID:"3" OR data_win_system_eventID:"22") AND (data_win_eventdata_image:/.*[Pp]ower[Ss]hell.*/ OR data_win_eventdata_image:/.*[Ss]vc[Hh]ost.*/ OR data_win_eventdata_image:/.*[Aa]pp[Xx].*/)
+    pivot_on:
+    - host
+    window: 2h
+  - name: Persistence set by newly installed app (Run keys, scheduled tasks)
+    query: ((data_win_system_eventID:"12" OR data_win_system_eventID:"13") AND data_win_eventdata_targetObject:/.*[Cc]urrent[Vv]ersion\[Rr]un.*/) OR (data_win_system_eventID:"1" AND data_win_eventdata_image:/.*[Ss][Cc][Hh][Tt][Aa][Ss][Kk][Ss][.][Ee][Xx][Ee]/)
+    pivot_on:
+    - host
+    window: 4h

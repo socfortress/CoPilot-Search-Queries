@@ -134,62 +134,58 @@ graylog:
   query: data_win_system_eventID:"4104" AND (data_win_eventdata_scriptBlockText:/.*Install-WindowsFeature.*WindowsPowerShellWebAccess.*/ OR data_win_eventdata_scriptBlockText:/.*Install-PswaWebApplication.*/ OR data_win_eventdata_scriptBlockText:/.*Add-PswaAuthorizationRule.*/)
 
 correlation:
-  # Authored by the correlation engine for review. Related CoPilot Searches to run
-  # around an alert from this rule, scoped to the same host/user/IP within the window.
+  # Authored per-rule (behaviour-researched) for the correlation engine. Related CoPilot
+  # Searches + telemetry pivots to run around an alert, scoped to its host/user/ip/domain.
   related_rules:
-    - id: f533ca6c-9440-4686-80cb-7f294c07812a
-      name: "Detect Certify With PowerShell Script Block Logging"
-      reason: "same analytic story: Malicious PowerShell"
-    - id: bc1dc6b8-c954-11eb-bade-acde48001122
-      name: "Detect Empire with PowerShell Script Block Logging"
-      reason: "same analytic story: Malicious PowerShell"
-    - id: 8148c29c-c952-11eb-9255-acde48001122
-      name: "Detect Mimikatz With PowerShell Script Block Logging"
-      reason: "same analytic story: Malicious PowerShell"
-    - id: 2e891cbe-0426-11ec-9c9c-acde48001122
-      name: "Get-LocalUser with PowerShell Script Block"
-      reason: "same analytic story: Malicious PowerShell"
-    - id: 640b0eda-0429-11ec-accd-acde48001122
-      name: "Get-WmiObject Win32_UserAccount with PowerShell Script Block"
-      reason: "same analytic story: Malicious PowerShell"
-    - id: c4db14d9-7909-48b4-a054-aa14d89dbb19
-      name: "Malicious PowerShell Process - Encoded Command"
-      reason: "same analytic story: Malicious PowerShell"
-    - id: 9be56c82-b1cc-4318-87eb-d138afaaca39
-      name: "Malicious PowerShell Process - Execution Policy Bypass"
-      reason: "same analytic story: Malicious PowerShell"
-    - id: 1a382c6c-7c2e-11eb-ac69-acde48001122
-      name: "Nishang PowershellTCPOneLine"
-      reason: "same analytic story: Malicious PowerShell"
-    - id: cb909b3e-512b-11ec-aa31-3e22fbd008af
-      name: "Possible Lateral Movement PowerShell Spawn"
-      reason: "same analytic story: CISA AA24-241A"
-    - id: ee18ed37-0802-4268-9435-b3b91aaa18db
-      name: "PowerShell - Connect To Internet With Hidden Window"
-      reason: "same analytic story: Malicious PowerShell"
-    - id: ea61e291-af05-4716-932a-67faddb6ae6f
-      name: "PowerShell COM Hijacking InProcServer32 Modification"
-      reason: "same analytic story: Malicious PowerShell"
-    - id: windows-powershell-com-clsid-execution-001
-      name: "PowerShell Execute COM Object"
-      reason: "same analytic story: Malicious PowerShell"
-  window: 1h
+  - id: 5f9c7f1a-7c21-4c39-b2f3-8d8006e0e51f
+    name: PowerShell Web Access Installation - PsScript
+    reason: Sibling script-block detection of the same PSWA install; confirms the install and may catch variants this rule's patterns miss
+  - id: 7e8f2d3b-9c1a-4f67-b9e8-8d9006e0e51f
+    name: PowerShell Web Access Feature Enabled Via DISM
+    reason: Alternate way to install the same PSWA feature (dism.exe); the attacker may have used DISM before or after the PowerShell cmdlets
+  - id: windows-dism-install-pswa-001
+    name: Windows DISM Install PowerShell Web Access
+    reason: Process-creation view of the DISM-based PSWA install, corroborating the feature was enabled on this host
+  - id: 991a9744-f2f0-44f2-bd33-9092eba17dc3
+    name: Enable Windows Remote Management
+    reason: PSWA needs a working WinRM/remoting endpoint; enabling WinRM just before or after is a causal precursor of web-based remote shell
+  - id: a5d85486-b89c-11eb-8267-acde48001122
+    name: Allow Inbound Traffic In Firewall Rule
+    reason: PSWA is served over IIS on 443; the attacker must open inbound access, so a new allow-inbound rule is the follow-on that makes the web console reachable
+  - id: cd5cfd80-aa5f-44c0-9c20-108c4ae12e3c
+    name: New Firewall Rule Added Via Netsh.EXE
+    reason: Netsh variant of opening the inbound port needed to expose the PSWA gateway externally
+  - id: 488b44e7-3781-4a71-888d-c95abfacf44d
+    name: Windows Firewall Profile Disabled
+    reason: Disabling the firewall profile is a blunt way to make the new PSWA web endpoint reachable and hide the exposure
+  - id: 42821614-9264-4761-acfc-5772c3286f76
+    name: Root Certificate Installed - PowerShell
+    reason: Install-PswaWebApplication -UseTestCertificate creates and trusts a self-signed cert; a rogue root/cert install alongside PSWA setup indicates scripted gateway deployment
+  window: 2h
   enrichment_searches:
-  # Rule-specific telemetry pivots the engine runs around an alert from this rule,
-  # scoped to the alert's host/user/IP within the window (behaviour-targeted, not a sweep).
-    - name: "Outbound connections by script interpreters on this host"
-      query: 'data_win_system_eventID:"3" AND data_win_eventdata_image:/.*(\\[Pp][Oo][Ww][Ee][Rr][Ss][Hh][Ee][Ll][Ll]\.[Ee][Xx][Ee]|\\[Pp][Ww][Ss][Hh]\.[Ee][Xx][Ee]|\\[Pp][Oo][Ww][Ee][Rr][Ss][Hh][Ee][Ll][Ll]_[Ii][Ss][Ee]\.[Ee][Xx][Ee]|\\[Cc][Mm][Dd]\.[Ee][Xx][Ee]|\\[Ww][Ss][Cc][Rr][Ii][Pp][Tt]\.[Ee][Xx][Ee]|\\[Cc][Ss][Cc][Rr][Ii][Pp][Tt]\.[Ee][Xx][Ee]|\\[Mm][Ss][Hh][Tt][Aa]\.[Ee][Xx][Ee]|\\[Rr][Uu][Nn][Dd][Ll][Ll]32\.[Ee][Xx][Ee]|\\[Rr][Ee][Gg][Ss][Vv][Rr]32\.[Ee][Xx][Ee])/'
-      pivot_on: [host]
-      window: 1h
-    - name: "Follow-on LOLBin / signed-binary-proxy execution on this host"
-      query: 'data_win_system_eventID:"1" AND data_win_eventdata_image:/.*(\\[Rr][Uu][Nn][Dd][Ll][Ll]32\.[Ee][Xx][Ee]|\\[Rr][Ee][Gg][Ss][Vv][Rr]32\.[Ee][Xx][Ee]|\\[Mm][Ss][Hh][Tt][Aa]\.[Ee][Xx][Ee]|\\[Ii][Nn][Ss][Tt][Aa][Ll][Ll][Uu][Tt][Ii][Ll]\.[Ee][Xx][Ee]|\\[Rr][Ee][Gg][Aa][Ss][Mm]\.[Ee][Xx][Ee]|\\[Rr][Ee][Gg][Ss][Vv][Cc][Ss]\.[Ee][Xx][Ee]|\\[Mm][Ss][Bb][Uu][Ii][Ll][Dd]\.[Ee][Xx][Ee]|\\[Cc][Ee][Rr][Tt][Uu][Tt][Ii][Ll]\.[Ee][Xx][Ee]|\\[Bb][Ii][Tt][Ss][Aa][Dd][Mm][Ii][Nn]\.[Ee][Xx][Ee]|\\[Ww][Mm][Ii][Cc]\.[Ee][Xx][Ee]|\\[Cc][Mm][Ss][Tt][Pp]\.[Ee][Xx][Ee]|\\[Oo][Dd][Bb][Cc][Cc][Oo][Nn][Ff]\.[Ee][Xx][Ee]|\\[Ff][Oo][Rr][Ff][Ii][Ll][Ee][Ss]\.[Ee][Xx][Ee]|\\[Pp][Cc][Aa][Ll][Uu][Aa]\.[Ee][Xx][Ee]|\\[Mm][Aa][Vv][Ii][Nn][Jj][Ee][Cc][Tt]\.[Ee][Xx][Ee]|\\[Ss][Cc][Rr][Ii][Pp][Tt][Rr][Uu][Nn][Nn][Ee][Rr]\.[Ee][Xx][Ee])/'
-      pivot_on: [host]
-      window: 1h
-    - name: "Download / AMSI-bypass / encoded script blocks on this host"
-      query: 'data_win_system_eventID:"4104" AND (data_win_eventdata_scriptBlockText:/.*[Dd][Oo][Ww][Nn][Ll][Oo][Aa][Dd][Ss][Tt][Rr][Ii][Nn][Gg].*/ OR data_win_eventdata_scriptBlockText:/.*[Dd][Oo][Ww][Nn][Ll][Oo][Aa][Dd][Ff][Ii][Ll][Ee].*/ OR data_win_eventdata_scriptBlockText:/.*[Ii][Nn][Vv][Oo][Kk][Ee]-[Ww][Ee][Bb][Rr][Ee][Qq][Uu][Ee][Ss][Tt].*/ OR data_win_eventdata_scriptBlockText:/.*[Nn][Ee][Tt]\.[Ww][Ee][Bb][Cc][Ll][Ii][Ee][Nn][Tt].*/ OR data_win_eventdata_scriptBlockText:/.*[Ff][Rr][Oo][Mm][Bb][Aa][Ss][Ee]64[Ss][Tt][Rr][Ii][Nn][Gg].*/ OR data_win_eventdata_scriptBlockText:/.*[Ii][Ee][Xx].*/ OR data_win_eventdata_scriptBlockText:/.*[Ii][Nn][Vv][Oo][Kk][Ee]-[Ee][Xx][Pp][Rr][Ee][Ss][Ss][Ii][Oo][Nn].*/ OR data_win_eventdata_scriptBlockText:/.*[Ss][Tt][Aa][Rr][Tt]-[Bb][Ii][Tt][Ss][Tt][Rr][Aa][Nn][Ss][Ff][Ee][Rr].*/ OR data_win_eventdata_scriptBlockText:/.*[Aa][Mm][Ss][Ii][Uu][Tt][Ii][Ll][Ss].*/ OR data_win_eventdata_scriptBlockText:/.*-[Ee][Nn][Cc].*/ OR data_win_eventdata_scriptBlockText:/.*-[Ee][Nn][Cc][Oo][Dd][Ee][Dd][Cc][Oo][Mm][Mm][Aa][Nn][Dd].*/ OR data_win_eventdata_scriptBlockText:/.*[Rr][Ee][Ff][Ll][Ee][Cc][Tt][Ii][Oo][Nn]\.[Aa][Ss][Ss][Ee][Mm][Bb][Ll][Yy].*/)'
-      pivot_on: [host]
-      window: 1h
-    - name: "Autostart persistence written on this host (Run keys, services, IFEO)"
-      query: '(data_win_system_eventID:"12" OR data_win_system_eventID:"13") AND (data_win_eventdata_targetObject:/.*[Cc][Uu][Rr][Rr][Ee][Nn][Tt][Vv][Ee][Rr][Ss][Ii][Oo][Nn]\\[Rr][Uu][Nn].*/ OR data_win_eventdata_targetObject:/.*[Cc][Uu][Rr][Rr][Ee][Nn][Tt][Vv][Ee][Rr][Ss][Ii][Oo][Nn]\\[Rr][Uu][Nn][Oo][Nn][Cc][Ee].*/ OR data_win_eventdata_targetObject:/.*[Cc][Uu][Rr][Rr][Ee][Nn][Tt][Cc][Oo][Nn][Tt][Rr][Oo][Ll][Ss][Ee][Tt]\\[Ss][Ee][Rr][Vv][Ii][Cc][Ee][Ss]\\.*/ OR data_win_eventdata_targetObject:/.*[Ii][Mm][Aa][Gg][Ee] [Ff][Ii][Ll][Ee] [Ee][Xx][Ee][Cc][Uu][Tt][Ii][Oo][Nn] [Oo][Pp][Tt][Ii][Oo][Nn][Ss]\\.*/ OR data_win_eventdata_targetObject:/.*[Ww][Ii][Nn][Ll][Oo][Gg][Oo][Nn]\\[Ss][Hh][Ee][Ll][Ll].*/ OR data_win_eventdata_targetObject:/.*[Ww][Ii][Nn][Ll][Oo][Gg][Oo][Nn]\\[Uu][Ss][Ee][Rr][Ii][Nn][Ii][Tt].*/ OR data_win_eventdata_targetObject:/.*[Cc][Uu][Rr][Rr][Ee][Nn][Tt][Vv][Ee][Rr][Ss][Ii][Oo][Nn]\\[Ee][Xx][Pp][Ll][Oo][Rr][Ee][Rr]\\[Rr][Uu][Nn].*/ OR data_win_eventdata_targetObject:/.*[Pp][Oo][Ll][Ii][Cc][Ii][Ee][Ss]\\[Ee][Xx][Pp][Ll][Oo][Rr][Ee][Rr]\\[Rr][Uu][Nn].*/ OR data_win_eventdata_targetObject:/.*[Cc][Uu][Rr][Rr][Ee][Nn][Tt][Vv][Ee][Rr][Ss][Ii][Oo][Nn]\\[Ww][Ii][Nn][Dd][Oo][Ww][Ss]\\[Ll][Oo][Aa][Dd].*/)'
-      pivot_on: [host]
-      window: 4h
+  # Behaviour-targeted hunts the engine runs around the alert (not a sweep).
+  - name: PSWA gateway setup cmdlets and test certificate in script blocks
+    query: data_win_system_eventID:"4104" AND (data_win_eventdata_scriptBlockText:/.*[Uu][Ss][Ee][Tt][Ee][Ss][Tt][Cc][Ee][Rr][Tt][Ii][Ff][Ii][Cc][Aa][Tt][Ee].*/ OR data_win_eventdata_scriptBlockText:/.*[Aa][Dd][Dd]-[Pp][Ss][Ww][Aa][Aa][Uu][Tt][Hh][Oo][Rr][Ii][Zz][Aa][Tt][Ii][Oo][Nn][Rr][Uu][Ll][Ee].*/ OR data_win_eventdata_scriptBlockText:/.*[Ee][Nn][Aa][Bb][Ll][Ee]-[Pp][Ss][Rr][Ee][Mm][Oo][Tt][Ii][Nn][Gg].*/ OR data_win_eventdata_scriptBlockText:/.*[Nn][Ee][Ww]-[Ss][Ee][Ll][Ff][Ss][Ii][Gg][Nn][Ee][Dd][Cc][Ee][Rr][Tt][Ii][Ff][Ii][Cc][Aa][Tt][Ee].*/ OR data_win_eventdata_scriptBlockText:/.*[Ww][Ii][Nn][Dd][Oo][Ww][Ss][Pp][Oo][Ww][Ee][Rr][Ss][Hh][Ee][Ll][Ll][Ww][Ee][Bb][Aa][Cc][Cc][Ee][Ss][Ss].*/)
+    pivot_on:
+    - host
+    window: 2h
+  - name: Firewall rules or profile changes opening inbound access (netsh / process)
+    query: data_win_system_eventID:"1" AND data_win_eventdata_image:/.*\\[Nn][Ee][Tt][Ss][Hh]\.[Ee][Xx][Ee]/ AND (data_win_eventdata_commandLine:/.*[Aa][Dd][Vv][Ff][Ii][Rr][Ee][Ww][Aa][Ll][Ll].*[Aa][Dd][Dd].*[Rr][Uu][Ll][Ee].*/ OR data_win_eventdata_commandLine:/.*[Aa][Dd][Vv][Ff][Ii][Rr][Ee][Ww][Aa][Ll][Ll].*[Ss][Ee][Tt].*[Oo][Ff][Ff].*/ OR data_win_eventdata_commandLine:/.*[Pp][Oo][Rr][Tt][Oo][Pp][Ee][Nn][Ii][Nn][Gg].*/)
+    pivot_on:
+    - host
+    window: 2h
+  - name: DISM / IIS tooling used to install or configure web components
+    query: data_win_system_eventID:"1" AND ((data_win_eventdata_image:/.*\\[Dd][Ii][Ss][Mm]\.[Ee][Xx][Ee]/ AND data_win_eventdata_commandLine:/.*[Ee][Nn][Aa][Bb][Ll][Ee]-[Ff][Ee][Aa][Tt][Uu][Rr][Ee].*/) OR (data_win_eventdata_image:/.*\\[Aa][Pp][Pp][Cc][Mm][Dd]\.[Ee][Xx][Ee]/) OR (data_win_eventdata_image:/.*\\[Ii][Ii][Ss][Rr][Ee][Ss][Ee][Tt]\.[Ee][Xx][Ee]/) OR (data_win_eventdata_image:/.*\\[Pp][Aa][Ss][Ss][Ii][Nn][Gg].*/ AND data_win_eventdata_commandLine:/.*[Ii][Ii][Ss].*/))
+    pivot_on:
+    - host
+    window: 2h
+  - name: Inbound HTTPS connections to the new PSWA gateway (w3wp / IIS)
+    query: data_win_system_eventID:"3" AND data_win_eventdata_initiated:"false" AND data_win_eventdata_destinationPort:"443" AND (data_win_eventdata_image:/.*\\[Ww]3[Ww][Pp]\.[Ee][Xx][Ee]/ OR data_win_eventdata_image:/.*\\[Ss][Vv][Cc][Hh][Oo][Ss][Tt]\.[Ee][Xx][Ee]/ OR data_win_eventdata_image:/.*\\[Ii][Ii][Ss][Ee][Xx][Pp][Rr][Ee][Ss][Ss].*/)
+    pivot_on:
+    - host
+    window: 24h
+  - name: Processes spawned by IIS worker or wsmprovhost (PSWA remote shell activity)
+    query: data_win_system_eventID:"1" AND (data_win_eventdata_parentImage:/.*\\[Ww]3[Ww][Pp]\.[Ee][Xx][Ee]/ OR data_win_eventdata_parentImage:/.*\\[Ww][Ss][Mm][Pp][Rr][Oo][Vv][Hh][Oo][Ss][Tt]\.[Ee][Xx][Ee]/) AND (data_win_eventdata_image:/.*\\[Pp][Oo][Ww][Ee][Rr][Ss][Hh][Ee][Ll][Ll]\.[Ee][Xx][Ee]/ OR data_win_eventdata_image:/.*\\[Cc][Mm][Dd]\.[Ee][Xx][Ee]/ OR data_win_eventdata_image:/.*\\[Ww][Hh][Oo][Aa][Mm][Ii]\.[Ee][Xx][Ee]/ OR data_win_eventdata_image:/.*\\[Nn][Ee][Tt]1?\.[Ee][Xx][Ee]/ OR data_win_eventdata_image:/.*\\[Nn][Ll][Tt][Ee][Ss][Tt]\.[Ee][Xx][Ee]/)
+    pivot_on:
+    - host
+    window: 24h

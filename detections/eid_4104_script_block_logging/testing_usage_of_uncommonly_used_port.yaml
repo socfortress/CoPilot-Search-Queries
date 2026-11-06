@@ -158,44 +158,58 @@ graylog:
   query: data_win_system_eventID:"4104" AND data_win_eventdata_scriptBlockText:/.*[Tt][Ee][Ss][Tt]-[Nn][Ee][Tt][Cc][Oo][Nn][Nn][Ee][Cc][Tt][Ii][Oo][Nn].*/ AND data_win_eventdata_scriptBlockText:/.*-[Cc][Oo][Mm][Pp][Uu][Tt][Ee][Rr][Nn][Aa][Mm][Ee] .*/ AND data_win_eventdata_scriptBlockText:/.*-[Pp][Oo][Rr][Tt] .*/ AND _exists_:data_win_eventdata_scriptBlockText AND NOT (data_win_eventdata_scriptBlockText:/.* 443 .*/ OR data_win_eventdata_scriptBlockText:/.* 80 .*/)
 
 correlation:
-  # Authored by the correlation engine for review. Related CoPilot Searches to run
-  # around an alert from this rule, scoped to the same host/user/IP within the window.
+  # Authored per-rule (behaviour-researched) for the correlation engine. Related CoPilot
+  # Searches + telemetry pivots to run around an alert, scoped to its host/user/ip/domain.
   related_rules:
-    - id: 75bf09fa-1dd7-4d18-9af9-dd9e492562eb
-      name: "ADSI-Cache File Creation By Uncommon Tool"
-      reason: "next kill-chain tactic: Command and Control"
-    - id: 639c9081-f482-47d3-a0bd-ddee3d4ecd76
-      name: "All Backups Deleted Via Wbadmin.EXE"
-      reason: "next kill-chain tactic: Impact"
-    - id: 0b9ad457-2554-44c1-82c2-d56a99c42377
-      name: "Anydesk Temporary Artefact"
-      reason: "next kill-chain tactic: Command and Control"
-    - id: 7cff77e1-9663-46a3-8260-17f2e1aa9d0a
-      name: "AppX Package Installation Attempts Via AppInstaller.EXE"
-      reason: "next kill-chain tactic: Command and Control"
-    - id: 1f0f6176-6482-4027-b151-00071af39d7e
-      name: "Arbitrary File Download Via ConfigSecurityPolicy.EXE"
-      reason: "next kill-chain tactic: Exfiltration"
-    - id: eee00933-a761-4cd0-be70-c42fe91731e7
-      name: "Arbitrary File Download Via GfxDownloadWrapper.EXE"
-      reason: "next kill-chain tactic: Command and Control"
+  - id: 091712ff-b02a-4d43-82ed-34765515d95d
+    name: Get-NetTcpconnection with PowerShell Script Block
+    reason: 'Same PowerShell network-recon family: operator enumerating local TCP connections while probing which outbound ports are open for C2.'
+  - id: edc2f8ae-2412-4dfd-b9d5-0c57727e70be
+    name: Potential Powershell ReverseShell Connection
+    reason: 'Likely follow-on: once Test-NetConnection shows an unusual port is open egress, the actor opens a TCP reverse shell over it.'
+  - id: afd3df04-948d-46f6-ae44-25966c44b97f
+    name: PSAsyncShell - Asynchronous TCP Reverse Shell
+    reason: 'Script-block-level follow-on: a PowerShell TCP reverse shell uses the very non-standard port that was just validated.'
+  - id: f772cee9-b7c2-4cb2-8f07-49870adc02e0
+    name: Malicious Nishang PowerShell Commandlets
+    reason: Nishang TCP/one-liner shells are a typical payload deployed after confirming egress on an unusual port.
+  - id: 403c2cc0-7f6b-4925-9423-bfa573bed7eb
+    name: Suspicious PowerShell Download - Powershell Script
+    reason: 'Precursor or follow-on: the stager/tooling download (cradle) that accompanies port-reachability testing for C2 setup.'
+  - id: 06ade821-f6fa-40d0-80af-15bc1d45b3ba
+    name: Windows Exfiltration Over C2 Via Invoke RestMethod
+    reason: Egress validated on a nonstandard port is often followed by data exfiltration over the same channel via PowerShell web cmdlets.
+  - id: 322ed9ec-fcab-4f67-9a34-e7c6aef43614
+    name: New Port Forwarding Rule Added Via Netsh.EXE
+    reason: 'Co-occurring tunnelling/pivoting: attacker building port proxies on the host after testing which ports can leave or enter.'
+  - id: 54773c5f-f1cc-4703-9126-2f797d96a69d
+    name: PUA - Advanced Port Scanner Execution
+    reason: Same host scanning ports internally or externally; Test-NetConnection on odd ports is the scripted equivalent of port scanning.
   window: 1h
   enrichment_searches:
-  # Rule-specific telemetry pivots the engine runs around an alert from this rule,
-  # scoped to the alert's host/user/IP within the window (behaviour-targeted, not a sweep).
-    - name: "Archive / staging & outbound-transfer tooling on this host"
-      query: '(((data_win_system_eventID:"1" AND data_win_eventdata_image:/.*(\\7[Zz]\.[Ee][Xx][Ee]|\\7[Zz][Aa]\.[Ee][Xx][Ee]|\\7[Zz][Rr]\.[Ee][Xx][Ee]|\\[Rr][Aa][Rr]\.[Ee][Xx][Ee]|\\[Ww][Ii][Nn][Rr][Aa][Rr]\.[Ee][Xx][Ee]|\\[Ww][Zz][Zz][Ii][Pp]\.[Ee][Xx][Ee]|\\[Mm][Aa][Kk][Ee][Cc][Aa][Bb]\.[Ee][Xx][Ee])/) OR (data_win_eventdata_commandLine:/.*[Cc][Oo][Mm][Pp][Rr][Ee][Ss][Ss]-[Aa][Rr][Cc][Hh][Ii][Vv][Ee].*/ OR data_win_eventdata_commandLine:/.*\.7[Zz].*/ OR data_win_eventdata_commandLine:/.*\.[Rr][Aa][Rr].*/ OR data_win_eventdata_commandLine:/.* -[Hh][Pp].*/)) OR (((data_win_system_eventID:"1" AND data_win_eventdata_image:/.*(\\[Rr][Cc][Ll][Oo][Nn][Ee]\.[Ee][Xx][Ee]|\\[Cc][Uu][Rr][Ll]\.[Ee][Xx][Ee]|\\[Ww][Gg][Ee][Tt]\.[Ee][Xx][Ee]|\\[Ww][Ii][Nn][Ss][Cc][Pp]\.[Ee][Xx][Ee]|\\[Pp][Ss][Cc][Pp]\.[Ee][Xx][Ee]|\\[Mm][Ee][Gg][Aa][Cc][Mm][Dd]\.[Ee][Xx][Ee]|\\[Mm][Ee][Gg][Aa][Ss][Yy][Nn][Cc]\.[Ee][Xx][Ee])/) OR ((data_win_eventdata_commandLine:/.*[Ii][Nn][Vv][Oo][Kk][Ee]-[Rr][Ee][Ss][Tt][Mm][Ee][Tt][Hh][Oo][Dd].*/ OR data_win_eventdata_commandLine:/.*[Ss][Tt][Aa][Rr][Tt]-[Bb][Ii][Tt][Ss][Tt][Rr][Aa][Nn][Ss][Ff][Ee][Rr].*/ OR data_win_eventdata_commandLine:/.*[Rr][Cc][Ll][Oo][Nn][Ee].*/ OR data_win_eventdata_commandLine:/.*[Tt][Rr][Aa][Nn][Ss][Ff][Ee][Rr]\.[Ss][Hh].*/ OR data_win_eventdata_commandLine:/.*[Aa][Nn][Oo][Nn][Ff][Ii][Ll][Ee][Ss].*/ OR data_win_eventdata_commandLine:/.*[Pp][Aa][Ss][Tt][Ee][Bb][Ii][Nn].*/ OR data_win_eventdata_commandLine:/.*[Mm][Ee][Gg][Aa]\.[Nn][Zz].*/ OR data_win_eventdata_commandLine:/.*-[Oo][Uu][Tt][Ff][Ii][Ll][Ee].*/ OR data_win_eventdata_commandLine:/.*[Uu][Pp][Ll][Oo][Aa][Dd][Ff][Ii][Ll][Ee].*/)))))'
-      pivot_on: [host]
-      window: 2h
-    - name: "Download / AMSI-bypass / encoded script blocks on this host"
-      query: 'data_win_system_eventID:"4104" AND (data_win_eventdata_scriptBlockText:/.*[Dd][Oo][Ww][Nn][Ll][Oo][Aa][Dd][Ss][Tt][Rr][Ii][Nn][Gg].*/ OR data_win_eventdata_scriptBlockText:/.*[Dd][Oo][Ww][Nn][Ll][Oo][Aa][Dd][Ff][Ii][Ll][Ee].*/ OR data_win_eventdata_scriptBlockText:/.*[Ii][Nn][Vv][Oo][Kk][Ee]-[Ww][Ee][Bb][Rr][Ee][Qq][Uu][Ee][Ss][Tt].*/ OR data_win_eventdata_scriptBlockText:/.*[Nn][Ee][Tt]\.[Ww][Ee][Bb][Cc][Ll][Ii][Ee][Nn][Tt].*/ OR data_win_eventdata_scriptBlockText:/.*[Ff][Rr][Oo][Mm][Bb][Aa][Ss][Ee]64[Ss][Tt][Rr][Ii][Nn][Gg].*/ OR data_win_eventdata_scriptBlockText:/.*[Ii][Ee][Xx].*/ OR data_win_eventdata_scriptBlockText:/.*[Ii][Nn][Vv][Oo][Kk][Ee]-[Ee][Xx][Pp][Rr][Ee][Ss][Ss][Ii][Oo][Nn].*/ OR data_win_eventdata_scriptBlockText:/.*[Ss][Tt][Aa][Rr][Tt]-[Bb][Ii][Tt][Ss][Tt][Rr][Aa][Nn][Ss][Ff][Ee][Rr].*/ OR data_win_eventdata_scriptBlockText:/.*[Aa][Mm][Ss][Ii][Uu][Tt][Ii][Ll][Ss].*/ OR data_win_eventdata_scriptBlockText:/.*-[Ee][Nn][Cc].*/ OR data_win_eventdata_scriptBlockText:/.*-[Ee][Nn][Cc][Oo][Dd][Ee][Dd][Cc][Oo][Mm][Mm][Aa][Nn][Dd].*/ OR data_win_eventdata_scriptBlockText:/.*[Rr][Ee][Ff][Ll][Ee][Cc][Tt][Ii][Oo][Nn]\.[Aa][Ss][Ss][Ee][Mm][Bb][Ll][Yy].*/)'
-      pivot_on: [host]
-      window: 1h
-    - name: "Follow-on LOLBin / signed-binary-proxy execution on this host"
-      query: 'data_win_system_eventID:"1" AND data_win_eventdata_image:/.*(\\[Rr][Uu][Nn][Dd][Ll][Ll]32\.[Ee][Xx][Ee]|\\[Rr][Ee][Gg][Ss][Vv][Rr]32\.[Ee][Xx][Ee]|\\[Mm][Ss][Hh][Tt][Aa]\.[Ee][Xx][Ee]|\\[Ii][Nn][Ss][Tt][Aa][Ll][Ll][Uu][Tt][Ii][Ll]\.[Ee][Xx][Ee]|\\[Rr][Ee][Gg][Aa][Ss][Mm]\.[Ee][Xx][Ee]|\\[Rr][Ee][Gg][Ss][Vv][Cc][Ss]\.[Ee][Xx][Ee]|\\[Mm][Ss][Bb][Uu][Ii][Ll][Dd]\.[Ee][Xx][Ee]|\\[Cc][Ee][Rr][Tt][Uu][Tt][Ii][Ll]\.[Ee][Xx][Ee]|\\[Bb][Ii][Tt][Ss][Aa][Dd][Mm][Ii][Nn]\.[Ee][Xx][Ee]|\\[Ww][Mm][Ii][Cc]\.[Ee][Xx][Ee]|\\[Cc][Mm][Ss][Tt][Pp]\.[Ee][Xx][Ee]|\\[Oo][Dd][Bb][Cc][Cc][Oo][Nn][Ff]\.[Ee][Xx][Ee]|\\[Ff][Oo][Rr][Ff][Ii][Ll][Ee][Ss]\.[Ee][Xx][Ee]|\\[Pp][Cc][Aa][Ll][Uu][Aa]\.[Ee][Xx][Ee]|\\[Mm][Aa][Vv][Ii][Nn][Jj][Ee][Cc][Tt]\.[Ee][Xx][Ee]|\\[Ss][Cc][Rr][Ii][Pp][Tt][Rr][Uu][Nn][Nn][Ee][Rr]\.[Ee][Xx][Ee])/'
-      pivot_on: [host]
-      window: 1h
-    - name: "Downloader / C2 tooling executed on this host"
-      query: '(data_win_system_eventID:"1" AND data_win_eventdata_image:/.*(\\[Cc][Ee][Rr][Tt][Uu][Tt][Ii][Ll]\.[Ee][Xx][Ee]|\\[Bb][Ii][Tt][Ss][Aa][Dd][Mm][Ii][Nn]\.[Ee][Xx][Ee]|\\[Cc][Uu][Rr][Ll]\.[Ee][Xx][Ee]|\\[Ww][Gg][Ee][Tt]\.[Ee][Xx][Ee])/) OR (data_win_eventdata_commandLine:/.*[Dd][Oo][Ww][Nn][Ll][Oo][Aa][Dd][Ss][Tt][Rr][Ii][Nn][Gg].*/ OR data_win_eventdata_commandLine:/.*[Dd][Oo][Ww][Nn][Ll][Oo][Aa][Dd][Ff][Ii][Ll][Ee].*/ OR data_win_eventdata_commandLine:/.*[Ii][Nn][Vv][Oo][Kk][Ee]-[Ww][Ee][Bb][Rr][Ee][Qq][Uu][Ee][Ss][Tt].*/ OR data_win_eventdata_commandLine:/.*[Nn][Ee][Tt]\.[Ww][Ee][Bb][Cc][Ll][Ii][Ee][Nn][Tt].*/ OR data_win_eventdata_commandLine:/.*[Ss][Tt][Aa][Rr][Tt]-[Bb][Ii][Tt][Ss][Tt][Rr][Aa][Nn][Ss][Ff][Ee][Rr].*/ OR data_win_eventdata_commandLine:/.*[Ii][Ww][Rr] .*/ OR data_win_eventdata_commandLine:/.*[Cc][Uu][Rr][Ll] .*/ OR data_win_eventdata_commandLine:/.*[Ww][Gg][Ee][Tt] .*/)'
-      pivot_on: [host]
-      window: 1h
+  # Behaviour-targeted hunts the engine runs around the alert (not a sweep).
+  - name: Network connections to non-standard ports from PowerShell or script hosts
+    query: data_win_system_eventID:"3" AND data_win_eventdata_image:/.*(\\[Pp]ower[Ss]hell\.[Ee][Xx][Ee]|\\[Pp][Ww][Ss][Hh]\.[Ee][Xx][Ee]|\\[Ww][Ss][Cc][Rr][Ii][Pp][Tt]\.[Ee][Xx][Ee]|\\[Cc][Ss][Cc][Rr][Ii][Pp][Tt]\.[Ee][Xx][Ee])/ AND NOT (data_win_eventdata_destinationPort:"443" OR data_win_eventdata_destinationPort:"80" OR data_win_eventdata_destinationPort:"53")
+    pivot_on:
+    - host
+    window: 1h
+  - name: PowerShell TCP socket / reverse-shell constructs in script blocks
+    query: data_win_system_eventID:"4104" AND (data_win_eventdata_scriptBlockText:/.*[Ss]ystem\.[Nn]et\.[Ss]ockets\.[Tt][Cc][Pp][Cc]lient.*/ OR data_win_eventdata_scriptBlockText:/.*[Tt][Cc][Pp][Ll]istener.*/ OR data_win_eventdata_scriptBlockText:/.*[Ss]ockets\.[Ss]ocket.*/ OR data_win_eventdata_scriptBlockText:/.*[Gg]et[Ss]tream\(\).*/ OR data_win_eventdata_scriptBlockText:/.*[Pp][Oo][Ww][Ee][Rr][Cc][Aa][Tt].*/)
+    pivot_on:
+    - host
+    window: 2h
+  - name: Other PowerShell port-probing or reachability sweeps
+    query: data_win_system_eventID:"4104" AND (data_win_eventdata_scriptBlockText:/.*[Tt]est-[Nn]et[Cc]onnection.*/ OR data_win_eventdata_scriptBlockText:/.*[Tt]est-[Cc]onnection.*/ OR data_win_eventdata_scriptBlockText:/.*[Ii]nvoke-[Pp]ort[Ss]can.*/ OR data_win_eventdata_scriptBlockText:/.*[Ii]nvoke-[Pp]ort[Ss]weep.*/ OR data_win_eventdata_scriptBlockText:/.*[Cc]onnect[Aa]sync.*/ OR data_win_eventdata_scriptBlockText:/.*1\.\.1024.*/)
+    pivot_on:
+    - host
+    window: 4h
+  - name: Tunnelling and port-forward tooling executed on the host
+    query: data_win_system_eventID:"1" AND (data_win_eventdata_image:/.*(\\[Pp][Ll][Ii][Nn][Kk]\.[Ee][Xx][Ee]|\\[Nn][Cc]\.[Ee][Xx][Ee]|\\[Nn][Cc][Aa][Tt]\.[Ee][Xx][Ee]|\\[Cc][Hh][Ii][Ss][Ee][Ll]\.[Ee][Xx][Ee]|\\[Ff][Rr][Pp][Cc]?\.[Ee][Xx][Ee]|\\[Nn][Gg][Rr][Oo][Kk]\.[Ee][Xx][Ee]|\\[Ss][Oo][Cc][Aa][Tt]\.[Ee][Xx][Ee])/ OR (data_win_eventdata_image:/.*\\[Nn][Ee][Tt][Ss][Hh]\.[Ee][Xx][Ee]/ AND data_win_eventdata_commandLine:/.*[Pp][Oo][Rr][Tt][Pp][Rr][Oo][Xx][Yy].*/))
+    pivot_on:
+    - host
+    window: 2h
+  - name: DNS lookups for dynamic-DNS, tunnel and paste domains
+    query: data_win_system_eventID:"22" AND (data_win_eventdata_queryName:*ngrok* OR data_win_eventdata_queryName:*duckdns* OR data_win_eventdata_queryName:*no-ip* OR data_win_eventdata_queryName:*serveo* OR data_win_eventdata_queryName:*trycloudflare* OR data_win_eventdata_queryName:*pastebin*)
+    pivot_on:
+    - host
+    window: 2h
