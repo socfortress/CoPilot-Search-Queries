@@ -129,55 +129,55 @@ correlation:
   # Authored per-rule (behaviour-researched) for the correlation engine. Related CoPilot
   # Searches + telemetry pivots to run around an alert, scoped to its host/user/ip/domain.
   related_rules:
-  - id: 86157017-c2b1-4d4a-8c33-93b8e67e4af4
-    name: Potential Suspicious Change To Sensitive/Critical Files
-    reason: 'Precursor/setup: edits to authentication and policy files (/etc/sudoers, /etc/passwd and the /etc/doas.conf analog this detection is named for) are how an operator grants their own user a permit rule before invoking doas; seeing it just before this alert marks the escalation as self-provisioned, not an admin''s sanctioned doas use.'
   - id: 0f79c4d2-4e1f-4683-9c36-b5469a665e06
     name: Access of Sudoers File Content
-    reason: 'Precursor/recon: reading /etc/sudoers (the direct sibling of /etc/doas.conf) is the privilege-policy reconnaissance an operator performs to find an exploitable escalation path, and typically fires moments before a deliberate doas call.'
+    reason: Attacker reads sudoers/privilege config to learn which escalation path (sudo vs doas) is permitted just before invoking doas
   - id: f74107df-b6c6-4e80-bf00-4170b658162b
     name: Sudo Privilege Escalation CVE-2019-14287
-    reason: 'Co-occurring/parallel vector: doas is sudo''s drop-in alternative, so an operator hunting any root path commonly probes both; a sudo exploit on the same host in-window shows one coordinated escalation effort rather than an isolated doas invocation.'
-  - id: db1ac3be-f606-4e3a-89e0-9607cbe6b98a
-    name: Capsh Shell Invocation - Linux
-    reason: 'Co-occurring/alternate privesc: capsh (a GTFOBins technique) dropping a capability-privileged shell alongside doas means the operator is cycling through several local escalation primitives on the host, corroborating intent behind the doas call.'
-  - id: fa4aaed5-4fe0-498d-bbc0-08e3346387ba
-    name: Copy Passwd Or Shadow From TMP Path
-    reason: 'Follow-on credential access: /etc/shadow is root-only readable, so staging passwd/shadow via cp right after a doas call confirms doas delivered uid 0 and is being used to harvest password hashes.'
+    reason: Alternative privilege-escalation attempt on the same host; failed or blocked doas often leads to sudo-based escalation
   - id: 6a50f16c-3b7b-42d1-b081-0fdd3ba70a73
     name: User Added To Root/Sudoers Group Using Usermod
-    reason: 'Follow-on persistence: having reached root via doas, ''usermod -aG sudo/root'' (the group-level analog of adding a doas.conf permit) cements the elevated access so the operator never has to re-escalate.'
-  - id: e3a8a052-111f-4606-9aee-f28ebeb76776
-    name: Disabling Security Tools
-    reason: 'Follow-on defense evasion: the root that doas granted is immediately used to stop or disable Wazuh, auditd or EDR; firing after doas means the escalation is being spent to blind the very telemetry that caught it.'
-  - id: 80915f59-9b56-4616-9de0-fd0dea6c12fe
-    name: Linux Logs Clearing Attempts
-    reason: 'Follow-on anti-forensics: wiping /var/log requires root, so log clearing in the same window after a doas privilege-escalation event is a cover-tracks step that sharply raises incident confidence and severity.'
-  window: 2h
+    reason: Once escalated via doas, attacker commonly grants a persistent account root/sudo membership
+  - id: fa4aaed5-4fe0-498d-bbc0-08e3346387ba
+    name: Copy Passwd Or Shadow From TMP Path
+    reason: 'Root-level follow-on: credential files copied out after doas gives access to /etc/shadow'
+  - id: 1182f3b3-e716-4efa-99ab-d2685d04360f
+    name: History File Deletion
+    reason: 'Post-escalation defense evasion: shell history wiped to hide the doas commands'
+  - id: 6b14bac8-3e3a-4324-8109-42f0546a347f
+    name: Scheduled Cron Task/Job - Linux
+    reason: Root persistence via cron following elevated execution through doas
+  - id: 880973f3-9708-491c-a77b-2a35a1921158
+    name: Linux Shell Pipe to Shell
+    reason: 'Precursor/follow-on: payload fetched and piped to a shell, then run elevated with doas'
+  - id: 312b42b1-bded-4441-8b58-163a3af58775
+    name: Potentially Suspicious Execution From Tmp Folder
+    reason: Dropped binary in /tmp executed under doas to run attacker tooling as root
+  window: 1h
   enrichment_searches:
   # Behaviour-targeted hunts the engine runs around the alert (not a sweep).
-  - name: Doas/sudoers privilege-policy file modified on this host (self-provisioned permit)
-    query: (data_process_exec_process_arguments:/.*\/etc\/([Dd][Oo][Aa][Ss]\.[Cc][Oo][Nn][Ff]|[Ss][Uu][Dd][Oo][Ee][Rr][Ss]).*/ OR full_log:/.*\/etc\/[Dd][Oo][Aa][Ss]\.[Cc][Oo][Nn][Ff].*/)
-    pivot_on:
-    - host
-    window: 6h
-  - name: Doas spawned an interactive root shell or interpreter on this host
-    query: (data_process_exec_parent_binary:/.*\/[Dd][Oo][Aa][Ss]$/ AND data_process_exec_process_binary:/.*\/([Bb][Aa][Ss][Hh]|[Ss][Hh]|[Dd][Aa][Ss][Hh]|[Zz][Ss][Hh]|[Kk][Ss][Hh]|[Pp][Yy][Tt][Hh][Oo][Nn]3?|[Pp][Ee][Rr][Ll])$/)
+  - name: Commands executed via doas (child of doas)
+    query: data_process_exec_parent_binary:"/usr/bin/doas"
     pivot_on:
     - host
     window: 1h
-  - name: Other privilege-escalation binaries probed on this host (parallel root paths)
-    query: data_process_exec_process_binary:/.*\/([Ss][Uu]|[Ss][Uu][Dd][Oo]|[Pp][Kk][Ee][Xx][Ee][Cc]|[Ss][Ee][Tt][Cc][Aa][Pp]|[Nn][Ee][Ww][Gg][Rr][Pp]|[Cc][Hh][Ss][Hh]|[Cc][Aa][Pp][Ss][Hh])$/
+  - name: Sudoers/doas config and shadow file access
+    query: (data_process_exec_process_arguments:*\/etc\/doas.conf* OR data_process_exec_process_arguments:*\/etc\/sudoers* OR data_process_exec_process_arguments:*\/etc\/shadow* OR data_process_exec_process_arguments:*\/etc\/passwd*)
+    pivot_on:
+    - host
+    window: 4h
+  - name: Account creation and group privilege changes
+    query: (data_process_exec_process_binary:("/usr/sbin/useradd" OR "/usr/sbin/usermod" OR "/usr/sbin/adduser" OR "/usr/bin/passwd" OR "/usr/sbin/visudo" OR "/usr/bin/gpasswd"))
     pivot_on:
     - host
     window: 2h
-  - name: Credential / secret-file access following escalation on this host
-    query: (data_process_exec_process_arguments:/.*\/etc\/([Ss][Hh][Aa][Dd][Oo][Ww]|[Gg][Ss][Hh][Aa][Dd][Oo][Ww]).*/ OR data_process_exec_process_arguments:/.*\/\.[Ss][Ss][Hh]\/.*/ OR data_process_exec_process_arguments:/.*[Ii][Dd]_([Rr][Ss][Aa]|[Ee][Cc][Dd][Ss][Aa]|[Ee][Dd]25519).*/ OR data_process_exec_process_arguments:/.*[Aa][Uu][Tt][Hh][Oo][Rr][Ii][Zz][Ee][Dd]_[Kk][Ee][Yy][Ss].*/)
+  - name: Persistence and defense evasion after elevation
+    query: (data_process_exec_process_binary:("/usr/bin/crontab" OR "/usr/bin/systemctl" OR "/usr/bin/chattr") OR data_process_exec_process_arguments:*.bash_history* OR data_process_exec_process_arguments:*authorized_keys*)
     pivot_on:
     - host
     window: 2h
-  - name: Post-escalation persistence or audit/service tampering on this host
-    query: (data_process_exec_process_binary:/.*\/([Uu][Ss][Ee][Rr][Aa][Dd][Dd]|[Aa][Dd][Dd][Uu][Ss][Ee][Rr]|[Uu][Ss][Ee][Rr][Mm][Oo][Dd]|[Cc][Rr][Oo][Nn][Tt][Aa][Bb]|[Aa][Uu][Dd][Ii][Tt][Cc][Tt][Ll]|[Vv][Ii][Ss][Uu][Dd][Oo])$/ OR data_process_exec_process_arguments:/.*\/etc\/(cron|systemd).*/ OR (data_process_exec_process_binary:/.*\/[Ss][Yy][Ss][Tt][Ee][Mm][Cc][Tt][Ll]$/ AND data_process_exec_process_arguments:/.*(disable|stop|mask).*/))
+  - name: Download and execute from temp paths
+    query: (data_process_exec_process_binary:("/usr/bin/wget" OR "/usr/bin/curl") OR data_process_exec_process_binary:\/tmp\/* OR data_process_exec_process_binary:\/dev\/shm\/*)
     pivot_on:
     - host
     window: 4h
