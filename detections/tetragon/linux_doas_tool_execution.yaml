@@ -129,50 +129,55 @@ correlation:
   # Authored per-rule (behaviour-researched) for the correlation engine. Related CoPilot
   # Searches + telemetry pivots to run around an alert, scoped to its host/user/ip/domain.
   related_rules:
-  - id: 86157017-c2b1-4d4a-8c33-93b8e67e4af4
-    name: Potential Suspicious Change To Sensitive/Critical Files
-    reason: 'Precursor/co-occurring: doas only elevates what /etc/doas.conf permits, so edits or redirects into sensitive config files around the same time suggest the permit rule was just planted.'
   - id: 0f79c4d2-4e1f-4683-9c36-b5469a665e06
     name: Access of Sudoers File Content
-    reason: Recon of the privilege-delegation config (sudoers) shares the intent of reading doas.conf to find a permitted escalation path before using doas.
+    reason: 'Sibling privilege-config recon: reading sudoers content is how an attacker maps who can elevate before or after leaning on doas'
   - id: 6a50f16c-3b7b-42d1-b081-0fdd3ba70a73
     name: User Added To Root/Sudoers Group Using Usermod
-    reason: 'Parallel privilege grant: adding the account to root/sudoers via usermod makes the escalation durable alongside doas.'
-  - id: 0cf7a157-8879-41a2-8f55-388dd23746b7
-    name: Linux Recon Indicators
-    reason: Linux recon (id/whoami/uname/enumeration) typically precedes an attacker trying doas to become root.
-  - id: ea3ecad2-db86-4a89-ad0b-132a10d2db55
-    name: Interactive Bash Suspicious Children
-    reason: Interactive bash spawning nc/whoami/iptables/pty children is the foothold shell from which doas gets invoked.
+    reason: 'Follow-on: once elevated via doas, adding an account to root/sudoers groups makes the privilege durable'
   - id: fa4aaed5-4fe0-498d-bbc0-08e3346387ba
     name: Copy Passwd Or Shadow From TMP Path
-    reason: 'Post-root follow-on: copying passwd/shadow to a tmp path is a common first action once root is obtained.'
+    reason: 'Follow-on: root obtained via doas is typically used to copy passwd/shadow out to tmp for offline cracking'
+  - id: 86157017-c2b1-4d4a-8c33-93b8e67e4af4
+    name: Potential Suspicious Change To Sensitive/Critical Files
+    reason: 'Follow-on: root-level edits to sensitive/critical files (doas.conf, sudoers, passwd) after the elevation'
+  - id: 6b14bac8-3e3a-4324-8109-42f0546a347f
+    name: Scheduled Cron Task/Job - Linux
+    reason: 'Follow-on: persistence via cron planted with the elevated rights'
+  - id: ea3ecad2-db86-4a89-ad0b-132a10d2db55
+    name: Interactive Bash Suspicious Children
+    reason: 'Co-occurring: doas launched from an interactive bash that spawns suspicious children shows a hands-on-keyboard escalation'
   - id: 1182f3b3-e716-4efa-99ab-d2685d04360f
     name: History File Deletion
-    reason: 'Post-root defense evasion: shell history deletion commonly follows a privileged session to hide the doas commands.'
+    reason: 'Follow-on: history deletion is anti-forensics commonly run right after a root shell is gained'
   - id: 80915f59-9b56-4616-9de0-fd0dea6c12fe
     name: Linux Logs Clearing Attempts
-    reason: 'Post-root defense evasion: log clearing after a root-level doas session removes the audit trail of the escalation.'
-  window: 4h
+    reason: 'Follow-on: clearing logs after escalation to hide the doas use and later actions'
+  window: 2h
   enrichment_searches:
   # Behaviour-targeted hunts the engine runs around the alert (not a sweep).
-  - name: Root shells and interpreters spawned by doas
-    query: data_process_exec_parent_binary:"/usr/bin/doas" AND (data_process_exec_process_binary:/.*\/[Bb][Aa][Ss][Hh]/ OR data_process_exec_process_binary:/.*\/[Ss][Hh]/ OR data_process_exec_process_binary:/.*\/[Zz][Ss][Hh]/ OR data_process_exec_process_binary:/.*\/[Dd][Aa][Ss][Hh]/ OR data_process_exec_process_binary:/.*\/[Pp][Yy][Tt][Hh][Oo][Nn]3/ OR data_process_exec_process_binary:/.*\/[Pp][Yy][Tt][Hh][Oo][Nn]/ OR data_process_exec_process_binary:/.*\/[Pp][Ee][Rr][Ll]/)
-    pivot_on: host
+  - name: Shells and interpreters launched through doas (escalated command execution)
+    query: data_process_exec_parent_binary:"/usr/bin/doas" AND (data_process_exec_process_binary:/.*(\/[Ss][Hh]|\/[Bb][Aa][Ss][Hh]|\/[Dd][Aa][Ss][Hh]|\/[Zz][Ss][Hh]|\/[Kk][Ss][Hh]|\/[Aa][Ss][Hh]|\/[Pp][Yy][Tt][Hh][Oo][Nn]|\/[Pp][Yy][Tt][Hh][Oo][Nn]3|\/[Pp][Ee][Rr][Ll]|\/[Rr][Uu][Bb][Yy]|\/[Pp][Hh][Pp]|\/[Nn][Cc]|\/[Nn][Cc][Aa][Tt])/)
+    pivot_on:
+    - host
+    window: 1h
+  - name: Edits to auth and privilege config files (doas.conf, sudoers, passwd, shadow, authorized_keys)
+    query: data_process_exec_process_arguments:/.*(\/etc\/[Dd][Oo][Aa][Ss].[Cc][Oo][Nn][Ff]|\/etc\/[Ss][Uu][Dd][Oo][Ee][Rr][Ss]|\/etc\/[Pp][Aa][Ss][Ss][Ww][Dd]|\/etc\/[Ss][Hh][Aa][Dd][Oo][Ww]|[Aa][Uu][Tt][Hh][Oo][Rr][Ii][Zz][Ee][Dd]_[Kk][Ee][Yy][Ss]).*/ AND (data_process_exec_process_binary:/.*(\/[Vv][Ii]|\/[Vv][Ii][Mm]|\/[Nn][Aa][Nn][Oo]|\/[Tt][Ee][Ee]|\/[Ss][Ee][Dd]|\/[Cc][Pp]|\/[Mm][Vv]|\/[Ee][Cc][Hh][Oo]|\/[Cc][Aa][Tt]|\/[Cc][Hh][Mm][Oo][Dd]|\/[Cc][Hh][Oo][Ww][Nn]|\/[Vv][Ii][Ss][Uu][Dd][Oo]|\/[Uu][Ss][Ee][Rr][Aa][Dd][Dd]|\/[Uu][Ss][Ee][Rr][Mm][Oo][Dd]|\/[Aa][Dd][Dd][Uu][Ss][Ee][Rr]|\/[Pp][Aa][Ss][Ss][Ww][Dd]|\/[Cc][Hh][Pp][Aa][Ss][Ss][Ww][Dd])/)
+    pivot_on:
+    - host
     window: 2h
-  - name: Edits to doas.conf and privilege-delegation config
-    query: data_process_exec_process_arguments:/.*[Dd][Oo][Aa][Ss]\.[Cc][Oo][Nn][Ff].*/ OR (data_process_exec_process_arguments:/.*\/etc\/sudoers.*/ AND (data_process_exec_process_binary:/.*\/[Nn][Aa][Nn][Oo]/ OR data_process_exec_process_binary:/.*\/[Vv][Ii]/ OR data_process_exec_process_binary:/.*\/[Vv][Ii][Mm]/ OR data_process_exec_process_binary:/.*\/[Ss][Ee][Dd]/ OR data_process_exec_process_binary:/.*\/[Tt][Ee][Ee]/))
-    pivot_on: host
-    window: 6h
-  - name: Credential file access (shadow/passwd/SSH keys)
-    query: (data_process_exec_process_binary:/.*\/[Cc][Aa][Tt]/ OR data_process_exec_process_binary:/.*\/[Hh][Ee][Aa][Dd]/ OR data_process_exec_process_binary:/.*\/[Tt][Aa][Ii][Ll]/ OR data_process_exec_process_binary:/.*\/[Ll][Ee][Ss][Ss]/ OR data_process_exec_process_binary:/.*\/[Mm][Oo][Rr][Ee]/ OR data_process_exec_process_binary:/.*\/[Gg][Rr][Ee][Pp]/ OR data_process_exec_process_binary:/.*\/[Cc][Pp]/ OR data_process_exec_process_binary:/.*\/[Ss][Cc][Pp]/) AND (data_process_exec_process_arguments:/.*\/etc\/shadow.*/ OR data_process_exec_process_arguments:/.*\/etc\/passwd.*/ OR data_process_exec_process_arguments:/.*\.ssh\/.*/)
-    pivot_on: host
+  - name: Persistence planted after escalation (cron, systemd units, rc.local, init scripts)
+    query: data_process_exec_process_arguments:/.*([Cc][Rr][Oo][Nn][Tt][Aa][Bb]|\/etc\/[Cc][Rr][Oo][Nn]|\/[Ss][Yy][Ss][Tt][Ee][Mm][Dd]\/[Ss][Yy][Ss][Tt][Ee][Mm]\/.*\.[Ss][Ee][Rr][Vv][Ii][Cc][Ee]|[Ss][Yy][Ss][Tt][Ee][Mm][Cc][Tt][Ll] +[Ee][Nn][Aa][Bb][Ll][Ee]|[Rr][Cc].[Ll][Oo][Cc][Aa][Ll]|\/etc\/[Ii][Nn][Ii][Tt].[Dd]).*/
+    pivot_on:
+    - host
     window: 4h
-  - name: Account creation and privilege persistence
-    query: (data_process_exec_process_binary:/.*\/[Uu][Ss][Ee][Rr][Aa][Dd][Dd]/ OR data_process_exec_process_binary:/.*\/[Aa][Dd][Dd][Uu][Ss][Ee][Rr]/ OR data_process_exec_process_binary:/.*\/[Uu][Ss][Ee][Rr][Mm][Oo][Dd]/ OR data_process_exec_process_binary:/.*\/[Cc][Hh][Pp][Aa][Ss][Ss][Ww][Dd]/ OR data_process_exec_process_binary:/.*\/[Pp][Aa][Ss][Ss][Ww][Dd]/ OR data_process_exec_process_binary:/.*\/[Cc][Rr][Oo][Nn][Tt][Aa][Bb]/) AND NOT _exists_:data_win_system_eventID
-    pivot_on: host
-    window: 6h
-  - name: Tool staging via curl/wget to writable directories
-    query: (data_process_exec_process_binary:/.*\/[Cc][Uu][Rr][Ll]/ OR data_process_exec_process_binary:/.*\/[Ww][Gg][Ee][Tt]/) AND (data_process_exec_process_arguments:/.*\/tmp\/.*/ OR data_process_exec_process_arguments:/.*\/dev\/shm\/.*/ OR data_process_exec_process_arguments:/.*\/var\/tmp\/.*/)
-    pivot_on: host
-    window: 6h
+  - name: Download-and-execute or tool staging as root
+    query: (data_process_exec_process_binary:/.*(\/[Cc][Uu][Rr][Ll]|\/[Ww][Gg][Ee][Tt]|\/[Ff][Ee][Tt][Cc][Hh])/) AND data_process_exec_process_arguments:/.*([Hh][Tt][Tt][Pp]://|[Hh][Tt][Tt][Pp][Ss]://|-[Oo] +\/[Tt][Mm][Pp]|\/[Dd][Ee][Vv]\/[Ss][Hh][Mm]).*/
+    pivot_on:
+    - host
+    window: 2h
+  - name: 'Anti-forensics: history and log tampering'
+    query: data_process_exec_process_arguments:/.*([Hh][Ii][Ss][Tt][Oo][Rr][Yy] -[Cc]|.[Bb][Aa][Ss][Hh]_[Hh][Ii][Ss][Tt][Oo][Rr][Yy]|\/[Vv][Aa][Rr]\/[Ll][Oo][Gg]\/|[Uu][Nn][Ss][Ee][Tt] [Hh][Ii][Ss][Tt][Ff][Ii][Ll][Ee]|[Hh][Ii][Ss][Tt][Ss][Ii][Zz][Ee]=0).*/ AND (data_process_exec_process_binary:/.*(\/[Rr][Mm]|\/[Ss][Hh][Rr][Ee][Dd]|\/[Tt][Rr][Uu][Nn][Cc][Aa][Tt][Ee]|\/[Uu][Nn][Ll][Ii][Nn][Kk]|\/[Cc][Aa][Tt]|\/[Ee][Cc][Hh][Oo]|\/[Ll][Nn]|\/[Ss][Hh]|\/[Bb][Aa][Ss][Hh])/)
+    pivot_on:
+    - host
+    window: 4h
