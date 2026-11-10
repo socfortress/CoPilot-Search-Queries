@@ -131,50 +131,48 @@ correlation:
   related_rules:
   - id: lnx-doas-001
     name: Linux doas Execution Detection
-    reason: Same doas behaviour seen via syslog/auditd; corroborates the Tetragon exec and shows the invoking user and command.
-  - id: 6a50f16c-3b7b-42d1-b081-0fdd3ba70a73
-    name: User Added To Root/Sudoers Group Using Usermod
-    reason: Attacker who wins doas root commonly adds a user to root/sudo groups to keep privileged access.
-  - id: 0f79c4d2-4e1f-4683-9c36-b5469a665e06
-    name: Access of Sudoers File Content
-    reason: Reading sudoers/doas policy is the recon step before or after trying doas.
+    reason: Same doas invocation seen via syslog/auditd; confirms the escalation from a second sensor.
+  - id: linux-sudo-or-su-execution-001
+    name: Linux Sudo Or Su Execution
+    reason: Attacker probing alternative escalation paths (sudo/su) before or after doas on the same host.
+  - id: a1b2c3d4-5e6f-7a8b-9c0d-e1f2a3b4c5d6
+    name: Linux Sudoers File Access
+    reason: Recon of privilege configuration precedes choosing doas or sudo; same intent as reading doas.conf.
   - id: linux-setuid-using-chmod-utility-001
     name: Linux Setuid Using Chmod Utility
-    reason: Root via doas is often used to plant a SUID backdoor shell.
-  - id: 1182f3b3-e716-4efa-99ab-d2685d04360f
-    name: History File Deletion
-    reason: 'Post-escalation anti-forensics: wiping shell history of the escalating account.'
-  - id: 80915f59-9b56-4616-9de0-fd0dea6c12fe
-    name: Linux Logs Clearing Attempts
-    reason: Root obtained through doas is used to truncate logs covering the activity.
-  - id: 6b14bac8-3e3a-4324-8109-42f0546a347f
-    name: Scheduled Cron Task/Job - Linux
-    reason: Elevated cron job creation is the common persistence step after doas root.
+    reason: 'Follow-on persistence: planting a setuid binary once root is obtained via doas.'
+  - id: b3c8e2d1-4f1a-4b7c-9a22-91a6f2c4e8de
+    name: Linux Init Script Persistence Detection
+    reason: Root gained through doas is commonly used to install init-script persistence.
+  - id: linux-append-cronjob-entry-001
+    name: Linux Append Cronjob Entry On Existing Cronjob File
+    reason: Root-level cron persistence frequently follows privileged execution.
+  - id: 3b4c5d6e-7f80-1234-5678-90abcdef1234
+    name: Linux SSH Key Discovery
+    reason: Post-escalation credential hunting for SSH keys under root.
+  - id: a94cdd87-6c54-4678-a6cc-2814ffe5a13d
+    name: Unix Shell Configuration Modification
+    reason: Shell profile tampering to persist after privilege gain.
   window: 4h
   enrichment_searches:
   # Behaviour-targeted hunts the engine runs around the alert (not a sweep).
-  - name: Shells and sensitive commands run through doas
-    query: data_process_exec_parent_binary:"/usr/bin/doas" AND (data_process_exec_process_binary:/.*\/(sh|bash|dash|zsh|cat|cp|chmod|chown|useradd|usermod|passwd|visudo)/)
-    pivot_on:
-    - host
-    window: 2h
-  - name: Account and persistence tampering on this host
-    query: data_process_exec_process_binary:/.*\/(useradd|usermod|adduser|chpasswd|crontab|visudo)/
-    pivot_on:
-    - host
+  - name: Doas process execution
+    query: data_process_exec_process_binary:"/usr/bin/doas" OR data_process_exec_parent_binary:"/usr/bin/doas"
+    pivot_on: host
+    window: 1h
+  - name: doas.conf read or edited
+    query: data_process_exec_process_arguments:*doas.conf* OR full_log:*doas.conf*
+    pivot_on: host
     window: 4h
-  - name: Credential and sudoers file reads
-    query: data_process_exec_process_binary:/.*\/(cat|less|more|head|tail|cp|scp)/ AND data_process_exec_process_arguments:/.*(\/etc\/shadow|\/etc\/sudoers|\/etc\/doas\.conf|id_rsa|authorized_keys).*/
-    pivot_on:
-    - host
+  - name: Shell spawned under doas
+    query: data_process_exec_parent_binary:"/usr/bin/doas" AND data_process_exec_process_binary:(*\/sh OR *\/bash OR *\/dash OR *\/zsh)
+    pivot_on: host
+    window: 1h
+  - name: Sensitive file access after escalation
+    query: data_process_exec_process_arguments:(*\/etc\/shadow* OR *\/etc\/sudoers* OR *authorized_keys* OR *id_rsa*)
+    pivot_on: host
     window: 4h
-  - name: Setuid and capability changes on binaries
-    query: data_process_exec_process_binary:/.*\/(chmod|setcap)/ AND data_process_exec_process_arguments:/.*(\+s|4755|6755|cap_setuid).*/
-    pivot_on:
-    - host
-    window: 4h
-  - name: Tool downloads and reverse shell primitives
-    query: data_process_exec_process_binary:/.*\/(curl|wget|nc|ncat|socat)/ AND data_process_exec_process_arguments:/.*(http|\/dev\/tcp|exec).*/
-    pivot_on:
-    - host
+  - name: Download or persistence tooling
+    query: data_process_exec_process_binary:(*\/curl OR *\/wget OR *\/crontab OR *\/chmod OR *\/systemctl)
+    pivot_on: host
     window: 4h

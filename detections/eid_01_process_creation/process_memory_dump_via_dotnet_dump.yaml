@@ -151,19 +151,37 @@ graylog:
   query: data_win_system_eventID:"1" AND (data_win_eventdata_image:/.*\\[Dd][Oo][Tt][Nn][Ee][Tt]-[Dd][Uu][Mm][Pp]\.[Ee][Xx][Ee]/ OR data_win_eventdata_originalFileName:/[Dd][Oo][Tt][Nn][Ee][Tt]-[Dd][Uu][Mm][Pp]\.[Dd][Ll][Ll]/) AND data_win_eventdata_commandLine:/.*[Cc][Oo][Ll][Ll][Ee][Cc][Tt].*/
 
 correlation:
-  # Authored by the correlation engine for review.
+  # Authored per-rule (behaviour-researched) for the correlation engine. Related CoPilot
+  # Searches + telemetry pivots to run around an alert, scoped to its host/user/ip/domain.
+  related_rules:
+  - id: 5afee48e-67dd-4e03-a783-f74259dcf998
+    name: Potential LSASS Process Dump Via Procdump
+    reason: Alternative signed dumper tool used for the same LSASS goal.
+  - id: 515c8be5-e5df-4c5e-8f6d-a4a2f05e4b48
+    name: CreateDump Process Dump
+    reason: Another .NET-runtime dumper abused for the same purpose.
+  - id: 9257c05b-4a4a-48e5-a670-b7b073cf401b
+    name: Binary Proxy Execution Via Dotnet-Trace.EXE
+    reason: Sibling dotnet diagnostic tool abused by the same operators.
+  - id: a5a2d357-1ab8-4675-a967-ef9990a59391
+    name: LSASS Process Memory Dump Files
+    reason: Dump output expected after collect.
+  window: 4h
   enrichment_searches:
-  # Rule-specific telemetry pivots the engine runs around an alert from this rule,
-  # scoped to the alert's host/user/IP within the window (behaviour-targeted, not a sweep).
-    - name: "Follow-on LOLBin / signed-binary-proxy execution on this host"
-      query: 'data_win_system_eventID:"1" AND data_win_eventdata_image:/.*(\\[Rr][Uu][Nn][Dd][Ll][Ll]32\.[Ee][Xx][Ee]|\\[Rr][Ee][Gg][Ss][Vv][Rr]32\.[Ee][Xx][Ee]|\\[Mm][Ss][Hh][Tt][Aa]\.[Ee][Xx][Ee]|\\[Ii][Nn][Ss][Tt][Aa][Ll][Ll][Uu][Tt][Ii][Ll]\.[Ee][Xx][Ee]|\\[Rr][Ee][Gg][Aa][Ss][Mm]\.[Ee][Xx][Ee]|\\[Rr][Ee][Gg][Ss][Vv][Cc][Ss]\.[Ee][Xx][Ee]|\\[Mm][Ss][Bb][Uu][Ii][Ll][Dd]\.[Ee][Xx][Ee]|\\[Cc][Ee][Rr][Tt][Uu][Tt][Ii][Ll]\.[Ee][Xx][Ee]|\\[Bb][Ii][Tt][Ss][Aa][Dd][Mm][Ii][Nn]\.[Ee][Xx][Ee]|\\[Ww][Mm][Ii][Cc]\.[Ee][Xx][Ee]|\\[Cc][Mm][Ss][Tt][Pp]\.[Ee][Xx][Ee]|\\[Oo][Dd][Bb][Cc][Cc][Oo][Nn][Ff]\.[Ee][Xx][Ee]|\\[Ff][Oo][Rr][Ff][Ii][Ll][Ee][Ss]\.[Ee][Xx][Ee]|\\[Pp][Cc][Aa][Ll][Uu][Aa]\.[Ee][Xx][Ee]|\\[Mm][Aa][Vv][Ii][Nn][Jj][Ee][Cc][Tt]\.[Ee][Xx][Ee]|\\[Ss][Cc][Rr][Ii][Pp][Tt][Rr][Uu][Nn][Nn][Ee][Rr]\.[Ee][Xx][Ee])/'
-      pivot_on: [host]
-      window: 1h
-    - name: "Other executions of this tool-set on this host (any arguments)"
-      query: 'data_win_system_eventID:"1" AND data_win_eventdata_image:/.*(\\[Dd][Oo][Tt][Nn][Ee][Tt]-[Dd][Uu][Mm][Pp]\.[Ee][Xx][Ee])/'
-      pivot_on: [host]
-      window: 2h
-    - name: "Outbound connections by script interpreters on this host"
-      query: 'data_win_system_eventID:"3" AND data_win_eventdata_image:/.*(\\[Pp][Oo][Ww][Ee][Rr][Ss][Hh][Ee][Ll][Ll]\.[Ee][Xx][Ee]|\\[Pp][Ww][Ss][Hh]\.[Ee][Xx][Ee]|\\[Pp][Oo][Ww][Ee][Rr][Ss][Hh][Ee][Ll][Ll]_[Ii][Ss][Ee]\.[Ee][Xx][Ee]|\\[Cc][Mm][Dd]\.[Ee][Xx][Ee]|\\[Ww][Ss][Cc][Rr][Ii][Pp][Tt]\.[Ee][Xx][Ee]|\\[Cc][Ss][Cc][Rr][Ii][Pp][Tt]\.[Ee][Xx][Ee]|\\[Mm][Ss][Hh][Tt][Aa]\.[Ee][Xx][Ee]|\\[Rr][Uu][Nn][Dd][Ll][Ll]32\.[Ee][Xx][Ee]|\\[Rr][Ee][Gg][Ss][Vv][Rr]32\.[Ee][Xx][Ee])/'
-      pivot_on: [host]
-      window: 1h
+  # Behaviour-targeted hunts the engine runs around the alert (not a sweep).
+  - name: Dump files written
+    query: data_win_system_eventID:11 AND (data_win_eventdata_targetFilename:*.dmp OR data_win_eventdata_targetFilename:*.dump OR data_win_eventdata_targetFilename:*.bin)
+    pivot_on: host
+    window: 2h
+  - name: Process access to LSASS
+    query: data_win_system_eventID:10 AND data_win_eventdata_targetImage:/.*\\[Ll][Ss][Aa][Ss][Ss]\.[Ee][Xx][Ee]/
+    pivot_on: host
+    window: 4h
+  - name: Dotnet diagnostic tool install or use
+    query: data_win_system_eventID:1 AND (data_win_eventdata_commandLine:/.*[Dd]otnet.*tool.*install.*/ OR data_win_eventdata_commandLine:/.*dotnet-(dump|trace|gcdump).*/)
+    pivot_on: host
+    window: 6h
+  - name: Dump archived or exfiltrated
+    query: data_win_system_eventID:1 AND (data_win_eventdata_commandLine:/.*[Rr]ar.*\.dmp.*/ OR data_win_eventdata_commandLine:/.*7z.*\.dmp.*/ OR data_win_eventdata_commandLine:/.*[Cc]ompress-[Aa]rchive.*/ OR data_win_eventdata_commandLine:/.*[Cc]url.* -[Tt] .*/)
+    pivot_on: host
+    window: 4h
