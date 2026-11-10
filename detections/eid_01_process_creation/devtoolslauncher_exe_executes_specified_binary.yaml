@@ -141,19 +141,41 @@ graylog:
   query: data_win_system_eventID:"1" AND data_win_eventdata_image:/.*\\[Dd][Ee][Vv][Tt][Oo][Oo][Ll][Ss][Ll][Aa][Uu][Nn][Cc][Hh][Ee][Rr]\.[Ee][Xx][Ee]/ AND data_win_eventdata_commandLine:/.*[Ll][Aa][Uu][Nn][Cc][Hh][Ff][Oo][Rr][Dd][Ee][Pp][Ll][Oo][Yy].*/
 
 correlation:
-  # Authored by the correlation engine for review.
+  # Authored per-rule (behaviour-researched) for the correlation engine. Related CoPilot
+  # Searches + telemetry pivots to run around an alert, scoped to its host/user/ip/domain.
+  related_rules:
+  - id: a20391f8-76fb-437b-abc0-dba2df1952c6
+    name: Visual Studio NodejsTools PressAnyKey Arbitrary Binary Execution
+    reason: Another Visual Studio component abused to proxy-execute arbitrary binaries.
+  - id: 15c7904e-6ad1-4a45-9b46-5fb25df37fd2
+    name: Malicious PE Execution by Microsoft Visual Studio Debugger
+    reason: Same Visual Studio developer-tool abuse family for launching attacker PEs.
+  - id: b8b1b304-a60f-4999-9a6e-c547bde03ffd
+    name: DeviceCredentialDeployment Execution
+    reason: Sibling LOLBin proxy-execution technique often tried alongside devtoolslauncher.
+  - id: 33be4333-2c6b-44f4-ae28-102cdbde0a31
+    name: Suspicious Msbuild Execution By Uncommon Parent Process
+    reason: Msbuild is a common companion when abusing Visual Studio tooling for execution.
+  window: 4h
   enrichment_searches:
-  # Rule-specific telemetry pivots the engine runs around an alert from this rule,
-  # scoped to the alert's host/user/IP within the window (behaviour-targeted, not a sweep).
-    - name: "Follow-on LOLBin / signed-binary-proxy execution on this host"
-      query: 'data_win_system_eventID:"1" AND data_win_eventdata_image:/.*(\\[Rr][Uu][Nn][Dd][Ll][Ll]32\.[Ee][Xx][Ee]|\\[Rr][Ee][Gg][Ss][Vv][Rr]32\.[Ee][Xx][Ee]|\\[Mm][Ss][Hh][Tt][Aa]\.[Ee][Xx][Ee]|\\[Ii][Nn][Ss][Tt][Aa][Ll][Ll][Uu][Tt][Ii][Ll]\.[Ee][Xx][Ee]|\\[Rr][Ee][Gg][Aa][Ss][Mm]\.[Ee][Xx][Ee]|\\[Rr][Ee][Gg][Ss][Vv][Cc][Ss]\.[Ee][Xx][Ee]|\\[Mm][Ss][Bb][Uu][Ii][Ll][Dd]\.[Ee][Xx][Ee]|\\[Cc][Ee][Rr][Tt][Uu][Tt][Ii][Ll]\.[Ee][Xx][Ee]|\\[Bb][Ii][Tt][Ss][Aa][Dd][Mm][Ii][Nn]\.[Ee][Xx][Ee]|\\[Ww][Mm][Ii][Cc]\.[Ee][Xx][Ee]|\\[Cc][Mm][Ss][Tt][Pp]\.[Ee][Xx][Ee]|\\[Oo][Dd][Bb][Cc][Cc][Oo][Nn][Ff]\.[Ee][Xx][Ee]|\\[Ff][Oo][Rr][Ff][Ii][Ll][Ee][Ss]\.[Ee][Xx][Ee]|\\[Pp][Cc][Aa][Ll][Uu][Aa]\.[Ee][Xx][Ee]|\\[Mm][Aa][Vv][Ii][Nn][Jj][Ee][Cc][Tt]\.[Ee][Xx][Ee]|\\[Ss][Cc][Rr][Ii][Pp][Tt][Rr][Uu][Nn][Nn][Ee][Rr]\.[Ee][Xx][Ee])/'
-      pivot_on: [host]
-      window: 1h
-    - name: "Other executions of this tool-set on this host (any arguments)"
-      query: 'data_win_system_eventID:"1" AND data_win_eventdata_image:/.*(\\[Dd][Ee][Vv][Tt][Oo][Oo][Ll][Ss][Ll][Aa][Uu][Nn][Cc][Hh][Ee][Rr]\.[Ee][Xx][Ee])/'
-      pivot_on: [host]
-      window: 2h
-    - name: "Outbound connections by script interpreters on this host"
-      query: 'data_win_system_eventID:"3" AND data_win_eventdata_image:/.*(\\[Pp][Oo][Ww][Ee][Rr][Ss][Hh][Ee][Ll][Ll]\.[Ee][Xx][Ee]|\\[Pp][Ww][Ss][Hh]\.[Ee][Xx][Ee]|\\[Pp][Oo][Ww][Ee][Rr][Ss][Hh][Ee][Ll][Ll]_[Ii][Ss][Ee]\.[Ee][Xx][Ee]|\\[Cc][Mm][Dd]\.[Ee][Xx][Ee]|\\[Ww][Ss][Cc][Rr][Ii][Pp][Tt]\.[Ee][Xx][Ee]|\\[Cc][Ss][Cc][Rr][Ii][Pp][Tt]\.[Ee][Xx][Ee]|\\[Mm][Ss][Hh][Tt][Aa]\.[Ee][Xx][Ee]|\\[Rr][Uu][Nn][Dd][Ll][Ll]32\.[Ee][Xx][Ee]|\\[Rr][Ee][Gg][Ss][Vv][Rr]32\.[Ee][Xx][Ee])/'
-      pivot_on: [host]
-      window: 1h
+  # Behaviour-targeted hunts the engine runs around the alert (not a sweep).
+  - name: devtoolslauncher invocations
+    query: data_win_system_eventID:1 AND data_win_eventdata_image:/.*[Dd]ev[Tt]ools[Ll]auncher\.exe/
+    pivot_on: host
+    window: 4h
+  - name: Binaries spawned by devtoolslauncher
+    query: data_win_system_eventID:1 AND data_win_eventdata_parentImage:/.*[Dd]ev[Tt]ools[Ll]auncher\.exe/
+    pivot_on: host
+    window: 4h
+  - name: devtoolslauncher copied or dropped
+    query: data_win_system_eventID:11 AND data_win_eventdata_targetFilename:/.*[Dd]ev[Tt]ools[Ll]auncher.*/
+    pivot_on: host
+    window: 6h
+  - name: Payloads staged in user-writable paths
+    query: data_win_system_eventID:11 AND data_win_eventdata_targetFilename:/.*\.(exe|dll|bat|ps1)/ AND data_win_eventdata_targetFilename:/.*(Temp|ProgramData|Users.Public|AppData).*/
+    pivot_on: host
+    window: 2h
+  - name: Visual Studio tool abuse by commandline
+    query: data_win_system_eventID:1 AND data_win_eventdata_commandLine:/.*(LaunchForDeploy|PressAnyKey|vsjitdebugger|MSBuild).*/
+    pivot_on: host
+    window: 4h

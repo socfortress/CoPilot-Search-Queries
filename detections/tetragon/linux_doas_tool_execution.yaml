@@ -129,50 +129,47 @@ correlation:
   # Authored per-rule (behaviour-researched) for the correlation engine. Related CoPilot
   # Searches + telemetry pivots to run around an alert, scoped to its host/user/ip/domain.
   related_rules:
-  - id: 0cf7a157-8879-41a2-8f55-388dd23746b7
-    name: Linux Recon Indicators
-    reason: Enumeration of users, SUID binaries and privilege config typically precedes an attacker reaching for doas.
   - id: 0f79c4d2-4e1f-4683-9c36-b5469a665e06
     name: Access of Sudoers File Content
-    reason: Reading sudoers/privilege config on the same host is the sibling check for what a user may escalate to.
+    reason: Reading sudoers/doas config to learn which accounts may elevate typically precedes using doas.
   - id: 86157017-c2b1-4d4a-8c33-93b8e67e4af4
     name: Potential Suspicious Change To Sensitive/Critical Files
-    reason: Once root via doas, edits to critical files (passwd, sudoers, ld.so.preload) follow.
+    reason: Once elevated via doas, attackers edit passwd, sudoers or doas.conf to keep root access.
   - id: fa4aaed5-4fe0-498d-bbc0-08e3346387ba
     name: Copy Passwd Or Shadow From TMP Path
-    reason: Root obtained through doas is commonly used to copy credential files for offline cracking.
-  - id: 6b14bac8-3e3a-4324-8109-42f0546a347f
-    name: Scheduled Cron Task/Job - Linux
-    reason: Elevated access is commonly converted into cron persistence.
-  - id: 1182f3b3-e716-4efa-99ab-d2685d04360f
-    name: History File Deletion
-    reason: Anti-forensics after privileged activity.
+    reason: Root obtained through doas is commonly used next to stage and crack credential files.
+  - id: de25eeb8-3655-4643-ac3a-b662d3f26b6b
+    name: Disable Or Stop Services
+    reason: Root commands run through doas often stop security or logging services.
   - id: 80915f59-9b56-4616-9de0-fd0dea6c12fe
     name: Linux Logs Clearing Attempts
-    reason: Root-level log wiping is the usual cleanup once doas escalation succeeded.
-  - id: e3a8a052-111f-4606-9aee-f28ebeb76776
-    name: Disabling Security Tools
-    reason: Root access enables stopping auditd/EDR agents before further actions.
-  window: 2h
+    reason: Log wiping needs root; doas execution followed by clearing logs indicates cleanup after escalation.
+  - id: 1182f3b3-e716-4efa-99ab-d2685d04360f
+    name: History File Deletion
+    reason: Shell history removal right after an elevated session is anti-forensic follow-on.
+  - id: 6b14bac8-3e3a-4324-8109-42f0546a347f
+    name: Scheduled Cron Task/Job - Linux
+    reason: A root cron entry added via doas is a typical persistence step after escalation.
+  window: 4h
   enrichment_searches:
   # Behaviour-targeted hunts the engine runs around the alert (not a sweep).
-  - name: Commands run through doas
+  - name: Commands launched by or via doas
     query: data_process_exec_parent_binary:"/usr/bin/doas" OR data_process_exec_process_binary:"/usr/bin/doas"
     pivot_on: host
-    window: 2h
-  - name: Privileged shell spawns
-    query: data_process_exec_process_binary:/.*\/(ba|da|z|k)?sh/ AND data_process_exec_process_arguments:/.* -[ic].*/
+    window: 4h
+  - name: Shells and interpreters with command or pty args
+    query: data_process_exec_process_binary:("/bin/sh" OR "/bin/bash" OR "/usr/bin/bash" OR "/usr/bin/python3" OR "/usr/bin/perl") AND data_process_exec_process_arguments:/.*(-c|-i|pty|socket).*/
     pivot_on: host
     window: 2h
-  - name: Credential and privilege config access
-    query: data_process_exec_process_arguments:/.*(\/etc\/shadow|\/etc\/passwd|\/etc\/sudoers|\/etc\/doas\.conf).*/
+  - name: Edits to doas, sudoers or passwd files
+    query: data_process_exec_process_arguments:/.*(doas\.conf|sudoers|\/etc\/passwd|\/etc\/shadow).*/
     pivot_on: host
     window: 4h
-  - name: Persistence via cron, systemd or authorized_keys
-    query: data_process_exec_process_arguments:/.*(\/etc\/cron|crontab|\/etc\/systemd\/system|authorized_keys|\.bashrc).*/
+  - name: Account and credential management commands
+    query: data_process_exec_process_binary:("/usr/sbin/useradd" OR "/usr/sbin/usermod" OR "/usr/bin/passwd" OR "/usr/sbin/adduser" OR "/usr/sbin/chpasswd")
     pivot_on: host
-    window: 4h
-  - name: User or permission changes
-    query: data_process_exec_process_binary:/.*\/(useradd|usermod|adduser|chmod|chown|setcap)/
+    window: 6h
+  - name: Persistence and defense evasion after elevation
+    query: data_process_exec_process_arguments:/.*(crontab|systemctl (stop|disable)|history -c|\.bash_history|chattr).*/
     pivot_on: host
     window: 4h

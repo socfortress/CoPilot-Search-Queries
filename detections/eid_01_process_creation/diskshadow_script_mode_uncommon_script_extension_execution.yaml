@@ -184,23 +184,58 @@ graylog:
   query: data_win_system_eventID:"1" AND (data_win_eventdata_originalFileName:/[Dd][Ii][Ss][Kk][Ss][Hh][Aa][Dd][Oo][Ww]\.[Ee][Xx][Ee]/ OR data_win_eventdata_image:/.*\\[Dd][Ii][Ss][Kk][Ss][Hh][Aa][Dd][Oo][Ww]\.[Ee][Xx][Ee]/) AND (data_win_eventdata_commandLine:/.*-[Ss] .*/ OR data_win_eventdata_commandLine:/.*\/[Ss] .*/ OR data_win_eventdata_commandLine:/.*–[Ss] .*/ OR data_win_eventdata_commandLine:/.*—[Ss] .*/ OR data_win_eventdata_commandLine:/.*―[Ss] .*/) AND _exists_:data_win_eventdata_commandLine AND NOT (data_win_eventdata_commandLine:/.*\.[Tt][Xx][Tt].*/)
 
 correlation:
-  # Authored by the correlation engine for review.
+  # Authored per-rule (behaviour-researched) for the correlation engine. Related CoPilot
+  # Searches + telemetry pivots to run around an alert, scoped to its host/user/ip/domain.
+  related_rules:
+  - id: 9f546b25-5f12-4c8d-8532-5893dcb1e4b8
+    name: Potentially Suspicious Child Process Of DiskShadow.EXE
+    reason: diskshadow script mode can run arbitrary commands via its exec directive; a suspicious child process confirms the script was used as a proxy to run code, not just to snapshot volumes.
+  - id: windows-diskshadow-proxy-execution-001
+    name: Windows DiskShadow Proxy Execution
+    reason: Sibling diskshadow proxy-execution detection on the same host; both firing on one invocation raises confidence that script mode is being abused as a LOLBin.
+  - id: f57f8d16-1f39-4dcb-a604-6c73d9b54b3d
+    name: Sensitive File Access Via Volume Shadow Copy Backup
+    reason: Diskshadow exposes a shadow copy so locked files such as NTDS.dit/SYSTEM can be read from it; this is the read-out step that follows.
+  - id: 8bc64091-6875-4881-aaf9-7bd25b5dda08
+    name: Suspicious Process Patterns NTDS.DIT Exfil
+    reason: Diskshadow in script mode is a documented route to extract ntds.dit; process patterns copying it out are the direct next step.
+  - id: 11b1ed55-154d-4e82-8ad7-83739298f720
+    name: NTDS.DIT Creation By Uncommon Process
+    reason: The shadow-copy-exposed ntds.dit is copied to disk by a non-AD process; confirms AD database theft after diskshadow.
+  - id: c947b146-0abc-4c87-9c64-b17e9d7274a2
+    name: Shadow Copies Deletion Using Operating Systems Utilities
+    reason: Ransomware crews (Grief, Crytox per references) pair diskshadow with shadow copy deletion to inhibit recovery before encryption.
+  - id: b17ea6f7-6e90-447e-a799-e6c0a493d6ce
+    name: Shadow Copies Creation Using Operating Systems Utilities
+    reason: Creating a shadow copy is the precursor to mounting and reading locked files; diskshadow add volume/expose has the same effect.
+  - id: 40b19fa6-d835-400c-b301-41f3a2baacaf
+    name: VolumeShadowCopy Symlink Creation Via Mklink
+    reason: Alternative way to expose a created shadow copy for file copy; co-occurs when the attacker mounts the snapshot to harvest files.
+  window: 2h
   enrichment_searches:
-  # Rule-specific telemetry pivots the engine runs around an alert from this rule,
-  # scoped to the alert's host/user/IP within the window (behaviour-targeted, not a sweep).
-    - name: "Follow-on LOLBin / signed-binary-proxy execution on this host"
-      query: 'data_win_system_eventID:"1" AND data_win_eventdata_image:/.*(\\[Rr][Uu][Nn][Dd][Ll][Ll]32\.[Ee][Xx][Ee]|\\[Rr][Ee][Gg][Ss][Vv][Rr]32\.[Ee][Xx][Ee]|\\[Mm][Ss][Hh][Tt][Aa]\.[Ee][Xx][Ee]|\\[Ii][Nn][Ss][Tt][Aa][Ll][Ll][Uu][Tt][Ii][Ll]\.[Ee][Xx][Ee]|\\[Rr][Ee][Gg][Aa][Ss][Mm]\.[Ee][Xx][Ee]|\\[Rr][Ee][Gg][Ss][Vv][Cc][Ss]\.[Ee][Xx][Ee]|\\[Mm][Ss][Bb][Uu][Ii][Ll][Dd]\.[Ee][Xx][Ee]|\\[Cc][Ee][Rr][Tt][Uu][Tt][Ii][Ll]\.[Ee][Xx][Ee]|\\[Bb][Ii][Tt][Ss][Aa][Dd][Mm][Ii][Nn]\.[Ee][Xx][Ee]|\\[Ww][Mm][Ii][Cc]\.[Ee][Xx][Ee]|\\[Cc][Mm][Ss][Tt][Pp]\.[Ee][Xx][Ee]|\\[Oo][Dd][Bb][Cc][Cc][Oo][Nn][Ff]\.[Ee][Xx][Ee]|\\[Ff][Oo][Rr][Ff][Ii][Ll][Ee][Ss]\.[Ee][Xx][Ee]|\\[Pp][Cc][Aa][Ll][Uu][Aa]\.[Ee][Xx][Ee]|\\[Mm][Aa][Vv][Ii][Nn][Jj][Ee][Cc][Tt]\.[Ee][Xx][Ee]|\\[Ss][Cc][Rr][Ii][Pp][Tt][Rr][Uu][Nn][Nn][Ee][Rr]\.[Ee][Xx][Ee])/'
-      pivot_on: [host]
-      window: 1h
-    - name: "Other executions of this tool-set on this host (any arguments)"
-      query: 'data_win_system_eventID:"1" AND data_win_eventdata_image:/.*(\\[Dd][Ii][Ss][Kk][Ss][Hh][Aa][Dd][Oo][Ww]\.[Ee][Xx][Ee])/'
-      pivot_on: [host]
-      window: 2h
-    - name: "Outbound connections by script interpreters on this host"
-      query: 'data_win_system_eventID:"3" AND data_win_eventdata_image:/.*(\\[Pp][Oo][Ww][Ee][Rr][Ss][Hh][Ee][Ll][Ll]\.[Ee][Xx][Ee]|\\[Pp][Ww][Ss][Hh]\.[Ee][Xx][Ee]|\\[Pp][Oo][Ww][Ee][Rr][Ss][Hh][Ee][Ll][Ll]_[Ii][Ss][Ee]\.[Ee][Xx][Ee]|\\[Cc][Mm][Dd]\.[Ee][Xx][Ee]|\\[Ww][Ss][Cc][Rr][Ii][Pp][Tt]\.[Ee][Xx][Ee]|\\[Cc][Ss][Cc][Rr][Ii][Pp][Tt]\.[Ee][Xx][Ee]|\\[Mm][Ss][Hh][Tt][Aa]\.[Ee][Xx][Ee]|\\[Rr][Uu][Nn][Dd][Ll][Ll]32\.[Ee][Xx][Ee]|\\[Rr][Ee][Gg][Ss][Vv][Rr]32\.[Ee][Xx][Ee])/'
-      pivot_on: [host]
-      window: 1h
-    - name: "Autostart persistence written on this host (Run keys, services, IFEO)"
-      query: '(data_win_system_eventID:"12" OR data_win_system_eventID:"13") AND (data_win_eventdata_targetObject:/.*[Cc][Uu][Rr][Rr][Ee][Nn][Tt][Vv][Ee][Rr][Ss][Ii][Oo][Nn]\\[Rr][Uu][Nn].*/ OR data_win_eventdata_targetObject:/.*[Cc][Uu][Rr][Rr][Ee][Nn][Tt][Vv][Ee][Rr][Ss][Ii][Oo][Nn]\\[Rr][Uu][Nn][Oo][Nn][Cc][Ee].*/ OR data_win_eventdata_targetObject:/.*[Cc][Uu][Rr][Rr][Ee][Nn][Tt][Cc][Oo][Nn][Tt][Rr][Oo][Ll][Ss][Ee][Tt]\\[Ss][Ee][Rr][Vv][Ii][Cc][Ee][Ss]\\.*/ OR data_win_eventdata_targetObject:/.*[Ii][Mm][Aa][Gg][Ee] [Ff][Ii][Ll][Ee] [Ee][Xx][Ee][Cc][Uu][Tt][Ii][Oo][Nn] [Oo][Pp][Tt][Ii][Oo][Nn][Ss]\\.*/ OR data_win_eventdata_targetObject:/.*[Ww][Ii][Nn][Ll][Oo][Gg][Oo][Nn]\\[Ss][Hh][Ee][Ll][Ll].*/ OR data_win_eventdata_targetObject:/.*[Ww][Ii][Nn][Ll][Oo][Gg][Oo][Nn]\\[Uu][Ss][Ee][Rr][Ii][Nn][Ii][Tt].*/ OR data_win_eventdata_targetObject:/.*[Cc][Uu][Rr][Rr][Ee][Nn][Tt][Vv][Ee][Rr][Ss][Ii][Oo][Nn]\\[Ee][Xx][Pp][Ll][Oo][Rr][Ee][Rr]\\[Rr][Uu][Nn].*/ OR data_win_eventdata_targetObject:/.*[Pp][Oo][Ll][Ii][Cc][Ii][Ee][Ss]\\[Ee][Xx][Pp][Ll][Oo][Rr][Ee][Rr]\\[Rr][Uu][Nn].*/ OR data_win_eventdata_targetObject:/.*[Cc][Uu][Rr][Rr][Ee][Nn][Tt][Vv][Ee][Rr][Ss][Ii][Oo][Nn]\\[Ww][Ii][Nn][Dd][Oo][Ww][Ss]\\[Ll][Oo][Aa][Dd].*/)'
-      pivot_on: [host]
-      window: 4h
+  # Behaviour-targeted hunts the engine runs around the alert (not a sweep).
+  - name: Child processes spawned by diskshadow (exec directive)
+    query: data_win_system_eventID:"1" AND data_win_eventdata_parentImage:/.*\\[Dd][Ii][Ss][Kk][Ss][Hh][Aa][Dd][Oo][Ww]\.[Ee][Xx][Ee]/
+    pivot_on:
+    - host
+    window: 1h
+  - name: NTDS.dit / SYSTEM hive files written or copied
+    query: (data_win_system_eventID:"11" AND data_win_eventdata_targetFilename:/.*([Nn][Tt][Dd][Ss]\.[Dd][Ii][Tt]|\\[Ss][Yy][Ss][Tt][Ee][Mm]\.[Hh][Ii][Vv]|\\[Ss][Yy][Ss][Tt][Ee][Mm]\.[Ss][Aa][Vv]).*/)
+    pivot_on:
+    - host
+    window: 4h
+  - name: Shadow-copy / AD database extraction tooling
+    query: data_win_system_eventID:"1" AND (data_win_eventdata_commandLine:/.*[Nn][Tt][Dd][Ss][Uu][Tt][Ii][Ll].*/ OR data_win_eventdata_commandLine:/.*[Ee][Ss][Ee][Nn][Tt][Uu][Tt][Ll].*/ OR data_win_eventdata_commandLine:/.*[Vv][Ss][Hh][Aa][Dd][Oo][Ww].*/ OR data_win_eventdata_commandLine:/.*[Vv][Ss][Ss][Aa][Dd][Mm][Ii][Nn].*/ OR data_win_eventdata_commandLine:/.*[Ww][Mm][Ii][Cc] [Ss][Hh][Aa][Dd][Oo][Ww][Cc][Oo][Pp][Yy].*/ OR data_win_eventdata_commandLine:/.*[Ww][Ii][Nn]32_[Ss][Hh][Aa][Dd][Oo][Ww][Cc][Oo][Pp][Yy].*/ OR data_win_eventdata_commandLine:/.*[Rr][Ee][Gg] [Ss][Aa][Vv][Ee].*/ OR data_win_eventdata_commandLine:/.*[Gg][Ll][Oo][Bb][Aa][Ll][Rr][Oo][Oo][Tt]\\[Dd][Ee][Vv][Ii][Cc][Ee]\\[Hh][Aa][Rr][Dd][Dd][Ii][Ss][Kk][Vv][Oo][Ll][Uu][Mm][Ee][Ss][Hh][Aa][Dd][Oo][Ww][Cc][Oo][Pp][Yy].*/)
+    pivot_on:
+    - host
+    window: 2h
+  - name: Archive or bulk-copy staging after snapshot
+    query: data_win_system_eventID:"1" AND (data_win_eventdata_commandLine:/.*7[Zz]\.[Ee][Xx][Ee] [Aa].*/ OR data_win_eventdata_commandLine:/.*[Rr][Aa][Rr]\.[Ee][Xx][Ee] [Aa].*/ OR data_win_eventdata_commandLine:/.*[Cc][Oo][Mm][Pp][Rr][Ee][Ss][Ss]\-[Aa][Rr][Cc][Hh][Ii][Vv][Ee].*/ OR data_win_eventdata_commandLine:/.*[Tt][Aa][Rr]\.[Ee][Xx][Ee] \-[Cc].*/ OR data_win_eventdata_commandLine:/.*[Mm][Aa][Kk][Ee][Cc][Aa][Bb].*/ OR data_win_eventdata_commandLine:/.*[Rr][Oo][Bb][Oo][Cc][Oo][Pp][Yy].*/ OR data_win_eventdata_commandLine:/.*[Xx][Cc][Oo][Pp][Yy].*/)
+    pivot_on:
+    - host
+    window: 4h
+  - name: All diskshadow invocations (script and interactive) on host
+    query: data_win_system_eventID:"1" AND data_win_eventdata_image:/.*\\[Dd][Ii][Ss][Kk][Ss][Hh][Aa][Dd][Oo][Ww]\.[Ee][Xx][Ee]/
+    pivot_on:
+    - host
+    window: 2h

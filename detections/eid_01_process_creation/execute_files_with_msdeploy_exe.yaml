@@ -148,19 +148,40 @@ graylog:
   query: data_win_system_eventID:"1" AND data_win_eventdata_commandLine:/.*[Vv][Ee][Rr][Bb]:[Ss][Yy][Nn][Cc].*/ AND data_win_eventdata_commandLine:/.*-[Ss][Oo][Uu][Rr][Cc][Ee]:[Rr][Uu][Nn][Cc][Oo][Mm][Mm][Aa][Nn][Dd].*/ AND data_win_eventdata_commandLine:/.*-[Dd][Ee][Ss][Tt]:[Rr][Uu][Nn][Cc][Oo][Mm][Mm][Aa][Nn][Dd].*/ AND data_win_eventdata_image:/.*\\[Mm][Ss][Dd][Ee][Pp][Ll][Oo][Yy]\.[Ee][Xx][Ee]/
 
 correlation:
-  # Authored by the correlation engine for review.
+  # Authored per-rule (behaviour-researched) for the correlation engine. Related CoPilot
+  # Searches + telemetry pivots to run around an alert, scoped to its host/user/ip/domain.
+  related_rules:
+  - id: 0649be4a-aeb0-45b0-b89e-7f1668f6d9c0
+    name: IIS WebServer Log Deletion via CommandLine Utilities
+    reason: Msdeploy lives on IIS hosts; log wiping follows to hide activity on such servers.
+  - id: 8202070f-edeb-4d31-a010-a26c72ac5600
+    name: Suspicious Process By Web Server Process
+    reason: A web server process spawning shells shows the host is already abused, context for msdeploy runCommand.
+  - id: d4ca7c59-e9e4-42d8-bf57-91a776efcb87
+    name: LOLBIN Execution From Abnormal Drive
+    reason: Other LOLBins used for proxy execution on the same box.
+  - id: 0955e4e1-c281-4fb9-9ee1-5ee7b4b754d2
+    name: Use of Pcalua For Execution
+    reason: Alternative signed-binary proxy execution an operator tries when one LOLBin is blocked.
+  - id: 64760eef-87f7-4ed3-93fd-655668ea9420
+    name: Use of Scriptrunner.exe
+    reason: Another LOLBAS proxy executor frequently tested together.
+  window: 4h
   enrichment_searches:
-  # Rule-specific telemetry pivots the engine runs around an alert from this rule,
-  # scoped to the alert's host/user/IP within the window (behaviour-targeted, not a sweep).
-    - name: "Follow-on LOLBin / signed-binary-proxy execution on this host"
-      query: 'data_win_system_eventID:"1" AND data_win_eventdata_image:/.*(\\[Rr][Uu][Nn][Dd][Ll][Ll]32\.[Ee][Xx][Ee]|\\[Rr][Ee][Gg][Ss][Vv][Rr]32\.[Ee][Xx][Ee]|\\[Mm][Ss][Hh][Tt][Aa]\.[Ee][Xx][Ee]|\\[Ii][Nn][Ss][Tt][Aa][Ll][Ll][Uu][Tt][Ii][Ll]\.[Ee][Xx][Ee]|\\[Rr][Ee][Gg][Aa][Ss][Mm]\.[Ee][Xx][Ee]|\\[Rr][Ee][Gg][Ss][Vv][Cc][Ss]\.[Ee][Xx][Ee]|\\[Mm][Ss][Bb][Uu][Ii][Ll][Dd]\.[Ee][Xx][Ee]|\\[Cc][Ee][Rr][Tt][Uu][Tt][Ii][Ll]\.[Ee][Xx][Ee]|\\[Bb][Ii][Tt][Ss][Aa][Dd][Mm][Ii][Nn]\.[Ee][Xx][Ee]|\\[Ww][Mm][Ii][Cc]\.[Ee][Xx][Ee]|\\[Cc][Mm][Ss][Tt][Pp]\.[Ee][Xx][Ee]|\\[Oo][Dd][Bb][Cc][Cc][Oo][Nn][Ff]\.[Ee][Xx][Ee]|\\[Ff][Oo][Rr][Ff][Ii][Ll][Ee][Ss]\.[Ee][Xx][Ee]|\\[Pp][Cc][Aa][Ll][Uu][Aa]\.[Ee][Xx][Ee]|\\[Mm][Aa][Vv][Ii][Nn][Jj][Ee][Cc][Tt]\.[Ee][Xx][Ee]|\\[Ss][Cc][Rr][Ii][Pp][Tt][Rr][Uu][Nn][Nn][Ee][Rr]\.[Ee][Xx][Ee])/'
-      pivot_on: [host]
-      window: 1h
-    - name: "Other executions of this tool-set on this host (any arguments)"
-      query: 'data_win_system_eventID:"1" AND data_win_eventdata_image:/.*(\\[Mm][Ss][Dd][Ee][Pp][Ll][Oo][Yy]\.[Ee][Xx][Ee])/'
-      pivot_on: [host]
-      window: 2h
-    - name: "Outbound connections by script interpreters on this host"
-      query: 'data_win_system_eventID:"3" AND data_win_eventdata_image:/.*(\\[Pp][Oo][Ww][Ee][Rr][Ss][Hh][Ee][Ll][Ll]\.[Ee][Xx][Ee]|\\[Pp][Ww][Ss][Hh]\.[Ee][Xx][Ee]|\\[Pp][Oo][Ww][Ee][Rr][Ss][Hh][Ee][Ll][Ll]_[Ii][Ss][Ee]\.[Ee][Xx][Ee]|\\[Cc][Mm][Dd]\.[Ee][Xx][Ee]|\\[Ww][Ss][Cc][Rr][Ii][Pp][Tt]\.[Ee][Xx][Ee]|\\[Cc][Ss][Cc][Rr][Ii][Pp][Tt]\.[Ee][Xx][Ee]|\\[Mm][Ss][Hh][Tt][Aa]\.[Ee][Xx][Ee]|\\[Rr][Uu][Nn][Dd][Ll][Ll]32\.[Ee][Xx][Ee]|\\[Rr][Ee][Gg][Ss][Vv][Rr]32\.[Ee][Xx][Ee])/'
-      pivot_on: [host]
-      window: 1h
+  # Behaviour-targeted hunts the engine runs around the alert (not a sweep).
+  - name: Children of msdeploy
+    query: data_win_system_eventID:1 AND data_win_eventdata_parentImage:/.*[Mm]sdeploy\.exe/
+    pivot_on: host
+    window: 4h
+  - name: Msdeploy runCommand/sync usage
+    query: data_win_system_eventID:1 AND data_win_eventdata_image:/.*[Mm]sdeploy\.exe/ AND data_win_eventdata_commandLine:/.*([Rr]un[Cc]ommand|verb:sync|[Ww]eb[Ss]erver).*/
+    pivot_on: host
+    window: 4h
+  - name: Recon commands after execution
+    query: data_win_system_eventID:1 AND data_win_eventdata_image:/.*(whoami|net1?|nltest|ipconfig|systeminfo)\.exe/
+    pivot_on: host
+    window: 2h
+  - name: New files dropped in web roots
+    query: data_win_system_eventID:11 AND data_win_eventdata_targetFilename:/.*[Ii]netpub.*\.(aspx|ashx|asp|dll|config)/
+    pivot_on: host
+    window: 6h
