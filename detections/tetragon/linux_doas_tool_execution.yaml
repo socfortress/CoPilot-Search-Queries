@@ -131,35 +131,48 @@ correlation:
   related_rules:
   - id: lnx-doas-001
     name: Linux doas Execution Detection
-    reason: Same doas execution seen through the syslog/auditd path; corroborates the Tetragon exec and shows the invoking user.
-  - id: linux-auditd-possible-access-sudoers-file-001
-    name: Linux Auditd Possible Access To Sudoers File
-    reason: Attacker touching doas often also reads or edits sudo privilege config to map or grant escalation paths.
-  - id: linux-sudoers-tmp-file-creation-001
-    name: Linux Sudoers Tmp File Creation
-    reason: Editing sudoers (visudo) is the sibling persistence step to writing a permissive doas.conf.
+    reason: Same doas execution seen via syslog/auditd telemetry; confirms the invocation and who ran it.
+  - id: linux-sudo-or-su-execution-001
+    name: Linux Sudo Or Su Execution
+    reason: Attacker pivoting between doas and sudo/su on the same host to obtain root.
+  - id: 0f79c4d2-4e1f-4683-9c36-b5469a665e06
+    name: Access of Sudoers File Content
+    reason: Reading privilege config usually precedes choosing doas or sudo as the escalation path.
   - id: linux-setuid-using-chmod-utility-001
     name: Linux Setuid Using Chmod Utility
-    reason: 'Alternative or follow-on escalation: planting a setuid binary after gaining or testing root via doas.'
+    reason: Root obtained via doas is commonly used to plant setuid binaries for persistent privilege.
   - id: 6a50f16c-3b7b-42d1-b081-0fdd3ba70a73
     name: User Added To Root/Sudoers Group Using Usermod
-    reason: 'Follow-on persistence: adding the account to privileged groups once doas confirms root.'
-  window: 4h
+    reason: 'Follow-on persistence: granting the account durable root rights after escalation.'
+  - id: fa4aaed5-4fe0-498d-bbc0-08e3346387ba
+    name: Copy Passwd Or Shadow From TMP Path
+    reason: Credential harvesting that typically follows once root is gained.
+  - id: 1182f3b3-e716-4efa-99ab-d2685d04360f
+    name: History File Deletion
+    reason: Post-escalation anti-forensics clearing shell history.
+  - id: bed26dea-4525-47f4-b24a-76e30e44ffb0
+    name: Audit Rules Deleted Via Auditctl
+    reason: Root-level defense evasion removing audit rules after escalation.
+  window: 1h
   enrichment_searches:
   # Behaviour-targeted hunts the engine runs around the alert (not a sweep).
-  - name: Commands run through doas
+  - name: Commands run as root via doas
     query: data_process_exec_parent_binary:"/usr/bin/doas"
     pivot_on: host
-    window: 4h
-  - name: doas.conf read or edited
-    query: data_process_exec_process_arguments:/.*doas\.conf.*/
+    window: 1h
+  - name: Shadow/passwd/sudoers access
+    query: data_process_exec_process_arguments:/.*(shadow|sudoers|doas\.conf|passwd).*/
+    pivot_on: host
+    window: 2h
+  - name: Account or privilege changes
+    query: data_process_exec_process_binary:("/usr/sbin/useradd" OR "/usr/sbin/usermod" OR "/usr/bin/passwd" OR "/usr/bin/chmod")
+    pivot_on: host
+    window: 2h
+  - name: Persistence via cron/systemd/ssh keys
+    query: data_process_exec_process_arguments:/.*(crontab|\/etc\/cron|systemctl|authorized_keys|\/etc\/systemd).*/
     pivot_on: host
     window: 4h
-  - name: Account and credential file access
-    query: data_process_exec_process_arguments:/.*\/etc\/(shadow|passwd|sudoers).*/
+  - name: Download or reverse shell tooling
+    query: data_process_exec_process_binary:("/usr/bin/curl" OR "/usr/bin/wget" OR "/usr/bin/nc" OR "/usr/bin/ncat")
     pivot_on: host
-    window: 4h
-  - name: Persistence via cron or authorized_keys
-    query: data_process_exec_process_arguments:(/.*authorized_keys.*/ OR /.*crontab.*/ OR /.*\/etc\/cron.*/)
-    pivot_on: host
-    window: 6h
+    window: 2h
