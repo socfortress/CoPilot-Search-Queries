@@ -161,44 +161,55 @@ graylog:
   query: data_win_system_eventID:"4624" AND data_win_eventdata_logonType:"3" AND data_win_eventdata_authenticationPackageName:/[Kk][Ee][Rr][Bb][Ee][Rr][Oo][Ss]/ AND data_win_eventdata_ipAddress:"127.0.0.1" AND data_win_eventdata_targetUserSid:/[Ss]-1-5-21-.*/ AND data_win_eventdata_targetUserSid:/.*-500/ AND _exists_:data_win_eventdata_ipPort AND NOT (data_win_eventdata_ipPort:"0")
 
 correlation:
-  # Authored by the correlation engine for review. Related CoPilot Searches to run
-  # around an alert from this rule, scoped to the same host/user/IP within the window.
+  # Authored per-rule (behaviour-researched) for the correlation engine. Related CoPilot
+  # Searches + telemetry pivots to run around an alert, scoped to its host/user/ip/domain.
   related_rules:
-    - id: 0255a820-e564-4e40-af2b-6ac61160335c
-      name: "A New Trust Was Created To A Domain"
-      reason: "next kill-chain tactic: Privilege Escalation"
-    - id: 35ba1d85-724d-42a3-889f-2e2362bcaf23
-      name: "AD Privileged Users or Groups Reconnaissance"
-      reason: "next kill-chain tactic: Discovery"
-    - id: 9eb99343-d336-4020-a3cd-67f3819e68ee
-      name: "Account Tampering - Suspicious Failed Logon Reasons"
-      reason: "next kill-chain tactic: Privilege Escalation"
-    - id: 17d619c1-e020-4347-957e-1d1207455c93
-      name: "Active Directory Replication from Non Machine Account"
-      reason: "next kill-chain tactic: Credential Access"
-    - id: 300bac00-e041-4ee2-9c36-e262656a6ecc
-      name: "Active Directory User Backdoors"
-      reason: "next kill-chain tactic: Privilege Escalation"
-    - id: 2632954e-db1c-49cb-9936-67d1ef1d17d2
-      name: "Addition of SID History to Active Directory Object"
-      reason: "next kill-chain tactic: Privilege Escalation"
+  - id: 12827a56-61a4-476a-a9cb-f3068f191073
+    name: HackTool - KrbRelayUp Execution
+    reason: KrbRelayUp is the tool that produces this exact loopback Kerberos logon as local Administrator; its process execution is the direct cause of the 4624.
+  - id: e96253b8-6b3b-4f90-9e59-3b24b99cf9b4
+    name: HackTool - KrbRelay Execution
+    reason: KrbRelay is the relay primitive KrbRelayUp wraps; a standalone run on the same host explains the localhost Kerberos logon.
+  - id: 0ed99dda-6a35-11ef-8c99-0242ac120002
+    name: Attempts of Kerberos Coercion Via DNS SPN Spoofing
+    reason: Marshalled-SPN DNS records coerce the local machine into Kerberos-authenticating to the attacker's listener, immediately before the relayed loopback logon.
+  - id: e7a21b5f-d8c4-4ae5-b8d9-93c5d3f28e1c
+    name: Suspicious DNS Query Indicating Kerberos Coercion via DNS Object SPN Spoofing
+    reason: Sysmon DNS lookup of a marshalled-SPN hostname is the precursor coercion step that triggers the relayed authentication seen in this 4624.
+  - id: 17a1be64-8d88-40bf-b5ff-a4f7a50ebcc8
+    name: Suspicious New Service Creation
+    reason: KrbRelayUp's final stage uses the relayed S4U ticket to create a SYSTEM service; a new service shortly after this logon is the escalation payoff.
+  - id: 45eb2ae2-9aa2-4c3a-99a5-6e5077655466
+    name: Suspicious Computer Account Name Change CVE-2021-42287
+    reason: Relay-to-LDAP chains depend on attacker-controlled computer accounts (RBCD/noPac style); co-occurrence indicates the same domain privilege-escalation toolkit.
+  - id: e3818659-5016-4811-a73c-dde4679169d2
+    name: Suspicious Computer Machine Password by PowerShell
+    reason: Machine-account credential manipulation is a common setup step for the RBCD/shadow-credential account used in the relay chain.
   window: 1h
   enrichment_searches:
-  # Rule-specific telemetry pivots the engine runs around an alert from this rule,
-  # scoped to the alert's host/user/IP within the window (behaviour-targeted, not a sweep).
-    - name: "UAC-bypass / privilege-escalation binaries on this host"
-      query: 'data_win_system_eventID:"1" AND (data_win_eventdata_image:/.*(\\[Ff][Oo][Dd][Hh][Ee][Ll][Pp][Ee][Rr]\.[Ee][Xx][Ee]|\\[Ee][Vv][Ee][Nn][Tt][Vv][Ww][Rr]\.[Ee][Xx][Ee]|\\[Ss][Dd][Cc][Ll][Tt]\.[Ee][Xx][Ee]|\\[Cc][Oo][Mm][Pp][Uu][Tt][Ee][Rr][Dd][Ee][Ff][Aa][Uu][Ll][Tt][Ss]\.[Ee][Xx][Ee]|\\[Ss][Ll][Uu][Ii]\.[Ee][Xx][Ee]|\\[Ww][Ss][Rr][Ee][Ss][Ee][Tt]\.[Ee][Xx][Ee])/ OR data_win_eventdata_parentImage:/.*(\\[Ff][Oo][Dd][Hh][Ee][Ll][Pp][Ee][Rr]\.[Ee][Xx][Ee]|\\[Ee][Vv][Ee][Nn][Tt][Vv][Ww][Rr]\.[Ee][Xx][Ee]|\\[Ss][Dd][Cc][Ll][Tt]\.[Ee][Xx][Ee]|\\[Cc][Oo][Mm][Pp][Uu][Tt][Ee][Rr][Dd][Ee][Ff][Aa][Uu][Ll][Tt][Ss]\.[Ee][Xx][Ee]|\\[Ss][Ll][Uu][Ii]\.[Ee][Xx][Ee]|\\[Ww][Ss][Rr][Ee][Ss][Ee][Tt]\.[Ee][Xx][Ee])/)'
-      pivot_on: [host]
-      window: 2h
-    - name: "Remote-execution / lateral-movement tooling on this host"
-      query: '(data_win_system_eventID:"1" AND data_win_eventdata_image:/.*(\\[Pp][Ss][Ee][Xx][Ee][Cc]\.[Ee][Xx][Ee]|\\[Pp][Ss][Ee][Xx][Ee][Ss][Vv][Cc]\.[Ee][Xx][Ee]|\\[Pp][Aa][Ee][Xx][Ee][Cc]\.[Ee][Xx][Ee]|\\[Ww][Ii][Nn][Rr][Ss]\.[Ee][Xx][Ee]|\\[Mm][Ss][Tt][Ss][Cc]\.[Ee][Xx][Ee]|\\[Ww][Mm][Ii][Cc]\.[Ee][Xx][Ee])/) OR (data_win_system_eventID:"1" AND data_win_eventdata_image:/.*(\\[Pp][Oo][Ww][Ee][Rr][Ss][Hh][Ee][Ll][Ll]\.[Ee][Xx][Ee]|\\[Pp][Ww][Ss][Hh]\.[Ee][Xx][Ee])/ AND (data_win_eventdata_commandLine:/.*[Ii][Nn][Vv][Oo][Kk][Ee]-[Cc][Oo][Mm][Mm][Aa][Nn][Dd].*/ OR data_win_eventdata_commandLine:/.*[Nn][Ee][Ww]-[Pp][Ss][Ss][Ee][Ss][Ss][Ii][Oo][Nn].*/ OR data_win_eventdata_commandLine:/.*[Ee][Nn][Tt][Ee][Rr]-[Pp][Ss][Ss][Ee][Ss][Ss][Ii][Oo][Nn].*/ OR data_win_eventdata_commandLine:/.*-[Cc][Oo][Mm][Pp][Uu][Tt][Ee][Rr][Nn][Aa][Mm][Ee].*/))'
-      pivot_on: [host]
-      window: 2h
-    - name: "This account's logon activity across hosts"
-      query: '(data_win_system_eventID:"4624" OR data_win_system_eventID:"4625")'
-      pivot_on: [user]
-      window: 6h
-    - name: "Account / group / privilege changes involving this account"
-      query: '(data_win_system_eventID:"4720" OR data_win_system_eventID:"4722" OR data_win_system_eventID:"4724" OR data_win_system_eventID:"4728" OR data_win_system_eventID:"4732" OR data_win_system_eventID:"4756" OR data_win_system_eventID:"4672")'
-      pivot_on: [user]
-      window: 6h
+  # Behaviour-targeted hunts the engine runs around the alert (not a sweep).
+  - name: KrbRelayUp / KrbRelay / RBCD tooling execution
+    query: data_win_system_eventID:"1" AND (data_win_eventdata_image:/.*\\[Kk][Rr][Bb][Rr][Ee][Ll][Aa][Yy].*/ OR data_win_eventdata_originalFileName:/[Kk][Rr][Bb][Rr][Ee][Ll][Aa][Yy].*/ OR data_win_eventdata_commandLine:/.*[Kk][Rr][Bb][Rr][Ee][Ll][Aa][Yy].*/ OR data_win_eventdata_commandLine:/.*[Rr][Bb][Cc][Dd].*/ OR data_win_eventdata_commandLine:/.*[Ss][Hh][Aa][Dd][Oo][Ww][Cc][Rr][Ee][Dd].*/ OR data_win_eventdata_commandLine:/.*[Kk][Rr][Bb][Ss][Cc][Mm].*/)
+    pivot_on:
+    - host
+    window: 2h
+  - name: Service creation as SYSTEM after relay
+    query: (data_win_system_eventID:"1" AND data_win_eventdata_image:/.*\\[Ss][Cc]\.[Ee][Xx][Ee]/ AND data_win_eventdata_commandLine:/.*[Cc][Rr][Ee][Aa][Tt][Ee].*/ AND data_win_eventdata_commandLine:/.*[Bb][Ii][Nn][Pp][Aa][Tt][Hh].*/) OR data_win_system_eventID:"7045" OR data_win_system_eventID:"4697"
+    pivot_on:
+    - host
+    window: 1h
+  - name: Kerberos marshalled-SPN DNS coercion lookups
+    query: data_win_system_eventID:"22" AND (data_win_eventdata_queryName:*UWhRCAAAAAAAA* OR data_win_eventdata_queryName:*wbEAYBAAAA*)
+    pivot_on:
+    - host
+    window: 1h
+  - name: Kerberos ticket, explicit-credential and privileged logon events for this account
+    query: data_win_system_eventID:"4769" OR data_win_system_eventID:"4768" OR data_win_system_eventID:"4648" OR data_win_system_eventID:"4672"
+    pivot_on:
+    - user
+    window: 4h
+  - name: SYSTEM-level shells and LSASS access after escalation
+    query: (data_win_system_eventID:"1" AND data_win_eventdata_user:/.*[Ss][Yy][Ss][Tt][Ee][Mm]/ AND (data_win_eventdata_image:/.*\\([Cc][Mm][Dd]|[Pp][Oo][Ww][Ee][Rr][Ss][Hh][Ee][Ll][Ll]|[Pp][Ww][Ss][Hh]|[Rr][Uu][Nn][Dd][Ll][Ll]32|[Mm][Ss][Hh][Tt][Aa])\.[Ee][Xx][Ee]/ OR data_win_eventdata_commandLine:/.*([Ff][Rr][Oo][Mm][Bb][Aa][Ss][Ee]64[Ss][Tt][Rr][Ii][Nn][Gg]|-[Ee][Nn][Cc]|[Nn][Ee][Tt] +[Uu][Ss][Ee][Rr]|[Nn][Ee][Tt] +[Ll][Oo][Cc][Aa][Ll][Gg][Rr][Oo][Uu][Pp]).*/)) OR (data_win_system_eventID:"10" AND data_win_eventdata_targetImage:/.*\\[Ll][Ss][Aa][Ss][Ss]\.[Ee][Xx][Ee]/)
+    pivot_on:
+    - host
+    window: 2h

@@ -161,41 +161,58 @@ graylog:
   query: data_win_system_eventID:"129" AND (data_win_eventdata_path:/.*\\[Cc][Aa][Ll][Cc]\.[Ee][Xx][Ee]/ OR data_win_eventdata_path:/.*\\[Cc][Ss][Cc][Rr][Ii][Pp][Tt]\.[Ee][Xx][Ee]/ OR data_win_eventdata_path:/.*\\[Mm][Ss][Hh][Tt][Aa]\.[Ee][Xx][Ee]/ OR data_win_eventdata_path:/.*\\[Mm][Ss][Pp][Aa][Ii][Nn][Tt]\.[Ee][Xx][Ee]/ OR data_win_eventdata_path:/.*\\[Nn][Oo][Tt][Ee][Pp][Aa][Dd]\.[Ee][Xx][Ee]/ OR data_win_eventdata_path:/.*\\[Rr][Ee][Gg][Ss][Vv][Rr]32\.[Ee][Xx][Ee]/ OR data_win_eventdata_path:/.*\\[Ww][Ss][Cc][Rr][Ii][Pp][Tt]\.[Ee][Xx][Ee]/)
 
 correlation:
-  # Authored by the correlation engine for review. Related CoPilot Searches to run
-  # around an alert from this rule, scoped to the same host/user/IP within the window.
+  # Authored per-rule (behaviour-researched) for the correlation engine. Related CoPilot
+  # Searches + telemetry pivots to run around an alert, scoped to its host/user/ip/domain.
   related_rules:
-    - id: 0255a820-e564-4e40-af2b-6ac61160335c
-      name: "A New Trust Was Created To A Domain"
-      reason: "next kill-chain tactic: Persistence"
-    - id: 35ba1d85-724d-42a3-889f-2e2362bcaf23
-      name: "AD Privileged Users or Groups Reconnaissance"
-      reason: "next kill-chain tactic: Discovery"
-    - id: 9eb99343-d336-4020-a3cd-67f3819e68ee
-      name: "Account Tampering - Suspicious Failed Logon Reasons"
-      reason: "next kill-chain tactic: Persistence"
-    - id: 17d619c1-e020-4347-957e-1d1207455c93
-      name: "Active Directory Replication from Non Machine Account"
-      reason: "next kill-chain tactic: Credential Access"
-    - id: 300bac00-e041-4ee2-9c36-e262656a6ecc
-      name: "Active Directory User Backdoors"
-      reason: "next kill-chain tactic: Persistence"
+  - id: 3a734d25-df5c-4b99-8034-af1ddb5883a4
+    name: Suspicious Scheduled Task Creation
+    reason: 'Direct precursor: the task that now launches a script-host/LOLBin had to be registered (EID 4698) shortly before this execution.'
+  - id: 81325ce1-be01-4250-944f-b4789644556f
+    name: Schedule Task Creation From Env Variable Or Potentially Suspicious Path Via Schtasks.EXE
+    reason: 'Precursor: schtasks /create pointing at env-var or user-writable paths is how a task ends up running mshta/wscript/regsvr32.'
+  - id: f2c64357-b1d2-41b7-849f-34d2682c0fad
+    name: Suspicious Command Patterns In Scheduled Task Creation
+    reason: 'Precursor: task creation embedding script-host or download commands explains why the task later executes an uncommon LOLBin.'
+  - id: 80e1f67a-4596-4351-98f5-a9c3efabac95
+    name: Suspicious Scheduled Task Write to System32 Tasks
+    reason: 'Precursor: a task XML dropped directly into System32 Tasks (bypassing schtasks) that the Scheduler then executes.'
+  - id: 4720b7df-40c3-48fd-bbdf-fd4b3c464f0d
+    name: Scheduled TaskCache Change by Uncommon Program
+    reason: 'Precursor: TaskCache registry tampering by a non-standard program registers or hides the persistent task now firing.'
+  - id: 424273ea-7cf8-43a6-b712-375f925e481f
+    name: Scheduled Task Executed From A Suspicious Location
+    reason: 'Co-occurring EID 129 detection: the same malicious task often also runs a payload from Temp/AppData/Public, confirming the task is attacker-controlled.'
+  - id: b6676963-0353-4f88-90f5-36c20d443c6a
+    name: Cscript/Wscript Potentially Suspicious Child Process
+    reason: 'Follow-on: when the task launches wscript/cscript, the script commonly spawns powershell/cmd to stage the real payload.'
+  - id: 6f0947a4-1c5e-4e0d-8ac7-53159b8f23ca
+    name: Potentially Suspicious Child Process Of Regsvr32
+    reason: 'Follow-on: a task-launched regsvr32 (squiblydoo/scrobj) spawning shells or LOLBins is the execution stage of the persisted payload.'
   window: 1h
   enrichment_searches:
-  # Rule-specific telemetry pivots the engine runs around an alert from this rule,
-  # scoped to the alert's host/user/IP within the window (behaviour-targeted, not a sweep).
-    - name: "Scheduled-task creation on this host"
-      query: '((data_win_system_eventID:"1" AND data_win_eventdata_image:/.*(\\[Ss][Cc][Hh][Tt][Aa][Ss][Kk][Ss]\.[Ee][Xx][Ee]|\\[Aa][Tt]\.[Ee][Xx][Ee])/) OR ((data_win_system_eventID:"4698" OR data_win_system_eventID:"4702")))'
-      pivot_on: [host]
-      window: 4h
-    - name: "Memory/credential-dump creation & LSASS access on this host"
-      query: '((data_win_system_eventID:"1" AND data_win_eventdata_image:/.*(\\[Pp][Rr][Oo][Cc][Dd][Uu][Mm][Pp]\.[Ee][Xx][Ee]|\\[Pp][Rr][Oo][Cc][Dd][Uu][Mm][Pp]64\.[Ee][Xx][Ee]|\\[Ss][Qq][Ll][Dd][Uu][Mm][Pp][Ee][Rr]\.[Ee][Xx][Ee]|\\[Cc][Rr][Ee][Aa][Tt][Ee][Dd][Uu][Mm][Pp]\.[Ee][Xx][Ee]|\\[Rr][Dd][Rr][Ll][Ee][Aa][Kk][Dd][Ii][Aa][Gg]\.[Ee][Xx][Ee]|\\[Dd][Uu][Mm][Pp][Ee][Rr][Tt]\.[Ee][Xx][Ee]|\\[Nn][Aa][Nn][Oo][Dd][Uu][Mm][Pp]\.[Ee][Xx][Ee]|\\[Aa][Vv][Dd][Uu][Mm][Pp]\.[Ee][Xx][Ee])/) OR (data_win_system_eventID:"1" AND (data_win_eventdata_commandLine:/.*[Cc][Oo][Mm][Ss][Vv][Cc][Ss]\.[Dd][Ll][Ll].*/ OR data_win_eventdata_commandLine:/.*[Mm][Ii][Nn][Ii][Dd][Uu][Mm][Pp].*/ OR data_win_eventdata_commandLine:/.*[Dd][Uu][Mm][Pp][Ee][Rr][Tt].*/ OR data_win_eventdata_commandLine:/.*[Nn][Aa][Nn][Oo][Dd][Uu][Mm][Pp].*/ OR data_win_eventdata_commandLine:/.*[Ll][Ss][Aa][Ss][Ss].*/ OR data_win_eventdata_commandLine:/.*[Ss][Ee][Kk][Uu][Rr][Ll][Ss][Aa].*/ OR data_win_eventdata_commandLine:/.*[Nn][Tt][Dd][Ss]\.[Dd][Ii][Tt].*/ OR data_win_eventdata_commandLine:/.*[Nn][Tt][Dd][Ss][Uu][Tt][Ii][Ll].*/)) OR (data_win_system_eventID:"10" AND data_win_eventdata_targetImage:/.*(\\[Ll][Ss][Aa][Ss][Ss]\.[Ee][Xx][Ee])/))'
-      pivot_on: [host]
-      window: 1h
-    - name: "Process creation by the task engine on this host"
-      query: 'data_win_system_eventID:"1" AND data_win_eventdata_parentImage:/.*(\\[Tt][Aa][Ss][Kk][Ee][Nn][Gg]\.[Ee][Xx][Ee]|\\[Tt][Aa][Ss][Kk][Hh][Oo][Ss][Tt][Ww]\.[Ee][Xx][Ee])/'
-      pivot_on: [host]
-      window: 2h
-    - name: "Follow-on LOLBin / signed-binary-proxy execution on this host"
-      query: 'data_win_system_eventID:"1" AND data_win_eventdata_image:/.*(\\[Rr][Uu][Nn][Dd][Ll][Ll]32\.[Ee][Xx][Ee]|\\[Rr][Ee][Gg][Ss][Vv][Rr]32\.[Ee][Xx][Ee]|\\[Mm][Ss][Hh][Tt][Aa]\.[Ee][Xx][Ee]|\\[Ii][Nn][Ss][Tt][Aa][Ll][Ll][Uu][Tt][Ii][Ll]\.[Ee][Xx][Ee]|\\[Rr][Ee][Gg][Aa][Ss][Mm]\.[Ee][Xx][Ee]|\\[Rr][Ee][Gg][Ss][Vv][Cc][Ss]\.[Ee][Xx][Ee]|\\[Mm][Ss][Bb][Uu][Ii][Ll][Dd]\.[Ee][Xx][Ee]|\\[Cc][Ee][Rr][Tt][Uu][Tt][Ii][Ll]\.[Ee][Xx][Ee]|\\[Bb][Ii][Tt][Ss][Aa][Dd][Mm][Ii][Nn]\.[Ee][Xx][Ee]|\\[Ww][Mm][Ii][Cc]\.[Ee][Xx][Ee]|\\[Cc][Mm][Ss][Tt][Pp]\.[Ee][Xx][Ee]|\\[Oo][Dd][Bb][Cc][Cc][Oo][Nn][Ff]\.[Ee][Xx][Ee]|\\[Ff][Oo][Rr][Ff][Ii][Ll][Ee][Ss]\.[Ee][Xx][Ee]|\\[Pp][Cc][Aa][Ll][Uu][Aa]\.[Ee][Xx][Ee]|\\[Mm][Aa][Vv][Ii][Nn][Jj][Ee][Cc][Tt]\.[Ee][Xx][Ee]|\\[Ss][Cc][Rr][Ii][Pp][Tt][Rr][Uu][Nn][Nn][Ee][Rr]\.[Ee][Xx][Ee])/'
-      pivot_on: [host]
-      window: 2h
+  # Behaviour-targeted hunts the engine runs around the alert (not a sweep).
+  - name: Task-launched LOLBin with script/remote payload arguments
+    query: data_win_system_eventID:"1" AND data_win_eventdata_image:/.*\\([Mm][Ss][Hh][Tt][Aa]|[Ww][Ss][Cc][Rr][Ii][Pp][Tt]|[Cc][Ss][Cc][Rr][Ii][Pp][Tt]|[Rr][Ee][Gg][Ss][Vv][Rr]32)\.[Ee][Xx][Ee]/ AND (data_win_eventdata_commandLine:*http* OR data_win_eventdata_commandLine:*.hta* OR data_win_eventdata_commandLine:*.vbs* OR data_win_eventdata_commandLine:*.js* OR data_win_eventdata_commandLine:*.sct* OR data_win_eventdata_commandLine:*scrobj* OR data_win_eventdata_commandLine:*javascript*)
+    pivot_on:
+    - host
+    window: 1h
+  - name: Child processes spawned by script-host LOLBins
+    query: data_win_system_eventID:"1" AND data_win_eventdata_parentImage:/.*\\([Mm][Ss][Hh][Tt][Aa]|[Ww][Ss][Cc][Rr][Ii][Pp][Tt]|[Cc][Ss][Cc][Rr][Ii][Pp][Tt]|[Rr][Ee][Gg][Ss][Vv][Rr]32)\.[Ee][Xx][Ee]/ AND data_win_eventdata_image:/.*\\([Pp][Oo][Ww][Ee][Rr][Ss][Hh][Ee][Ll][Ll]|[Pp][Ww][Ss][Hh]|[Cc][Mm][Dd]|[Rr][Uu][Nn][Dd][Ll][Ll]32|[Cc][Uu][Rr][Ll]|[Cc][Ee][Rr][Tt][Uu][Tt][Ii][Ll]|[Bb][Ii][Tt][Ss][Aa][Dd][Mm][Ii][Nn])\.[Ee][Xx][Ee]/
+    pivot_on:
+    - host
+    window: 1h
+  - name: Network connections by task-launched LOLBins
+    query: data_win_system_eventID:"3" AND data_win_eventdata_image:/.*\\([Mm][Ss][Hh][Tt][Aa]|[Ww][Ss][Cc][Rr][Ii][Pp][Tt]|[Cc][Ss][Cc][Rr][Ii][Pp][Tt]|[Rr][Ee][Gg][Ss][Vv][Rr]32)\.[Ee][Xx][Ee]/
+    pivot_on:
+    - host
+    window: 2h
+  - name: Scheduled task registered, updated or created on host
+    query: (data_win_system_eventID:"4698" OR data_win_system_eventID:"4702" OR data_win_system_eventID:"106" OR data_win_system_eventID:"140" OR (data_win_system_eventID:"1" AND data_win_eventdata_image:/.*\\([Ss][Cc][Hh][Tt][Aa][Ss][Kk][Ss])\.[Ee][Xx][Ee]/ AND data_win_eventdata_commandLine:*[Cc][Rr][Ee][Aa][Tt][Ee]*))
+    pivot_on:
+    - host
+    window: 24h
+  - name: Script and payload files dropped to user-writable paths
+    query: data_win_system_eventID:"11" AND data_win_eventdata_targetFilename:/.*\\([Tt]emp|[Aa]pp[Dd]ata|[Pp]ublic|[Pp]rogram[Dd]ata)\\.*\.(hta|vbs|vbe|js|jse|wsf|sct|dll|ps1|bat)/
+    pivot_on:
+    - host
+    window: 4h

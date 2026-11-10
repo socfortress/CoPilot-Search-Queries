@@ -137,44 +137,58 @@ graylog:
   query: data_win_system_providerName:/[Ss][Ee][Rr][Vv][Ii][Cc][Ee] [Cc][Oo][Nn][Tt][Rr][Oo][Ll] [Mm][Aa][Nn][Aa][Gg][Ee][Rr]/ AND data_win_system_eventID:"7045" AND data_win_eventdata_serviceName:/[Zz][Zz][Nn][Ee][Tt][Ss][Vv][Cc]/
 
 correlation:
-  # Authored by the correlation engine for review. Related CoPilot Searches to run
-  # around an alert from this rule, scoped to the same host/user/IP within the window.
+  # Authored per-rule (behaviour-researched) for the correlation engine. Related CoPilot
+  # Searches + telemetry pivots to run around an alert, scoped to its host/user/ip/domain.
   related_rules:
-    - id: 0255a820-e564-4e40-af2b-6ac61160335c
-      name: "A New Trust Was Created To A Domain"
-      reason: "next kill-chain tactic: Persistence"
-    - id: 35ba1d85-724d-42a3-889f-2e2362bcaf23
-      name: "AD Privileged Users or Groups Reconnaissance"
-      reason: "next kill-chain tactic: Discovery"
-    - id: 9eb99343-d336-4020-a3cd-67f3819e68ee
-      name: "Account Tampering - Suspicious Failed Logon Reasons"
-      reason: "next kill-chain tactic: Persistence"
-    - id: 17d619c1-e020-4347-957e-1d1207455c93
-      name: "Active Directory Replication from Non Machine Account"
-      reason: "next kill-chain tactic: Credential Access"
-    - id: 300bac00-e041-4ee2-9c36-e262656a6ecc
-      name: "Active Directory User Backdoors"
-      reason: "next kill-chain tactic: Persistence"
-    - id: 2632954e-db1c-49cb-9936-67d1ef1d17d2
-      name: "Addition of SID History to Active Directory Object"
-      reason: "next kill-chain tactic: Privilege Escalation"
+  - id: 5e993621-67d4-488a-b9ae-b420d08b96cb
+    name: Service Installation in Suspicious Folder
+    reason: Moriya's ZzNetSvc is a 7045 service whose driver is dropped to a writable path; the same 7045 event with a suspicious ImagePath folder is the generic form of this install.
+  - id: 26481afe-db26-4228-b264-25a29fe6efc7
+    name: Uncommon Service Installation Image Path
+    reason: Rootkit services register a .sys/odd ImagePath at the same 7045 moment; a hit here on the same host confirms a non-standard driver service.
+  - id: 71c276aa-49cd-43d2-b920-2dcd3e6962d5
+    name: Service Installed By Unusual Client - System
+    reason: Operation TunnelSnake installed the rootkit on servers via remote execution; a remote client creating the service shows lateral deployment rather than local install.
+  - id: 431a1fdb-4799-4f3b-91c3-a683b003fc49
+    name: New Kernel Driver Via SC.EXE
+    reason: 'Precursor/co-occurring: attackers create the kernel driver service with sc.exe create type=kernel, which then surfaces as the 7045 ZzNetSvc event.'
+  - id: 39b64854-5497-4b57-a448-40977b8c9679
+    name: Malicious Driver Load By Name
+    reason: 'Follow-on: once the service starts, the driver load (Sysmon EID 6) of the rootkit or a known-bad driver on the same host proves the kernel component actually loaded.'
+  - id: 2c4523d5-d481-4ed0-8ec3-7fbf0cb41a75
+    name: Driver Load From A Temporary Directory
+    reason: Moriya's .sys is staged by an earlier implant in a user-writable path before service creation; a driver loaded from temp on this host is the staging-to-load link.
+  - id: 42c575ea-e41e-41f1-b248-8093c3e82a28
+    name: PsExec Service Installation
+    reason: Moriya operators pushed the rootkit and tooling between servers with remote service execution; PsExec 7045 events on the host or neighbours show the lateral path.
+  - id: d7654f02-e04b-4934-9838-65c46f187ebc
+    name: PUA- IOX Tunneling Tool Execution
+    reason: Moriya's purpose is stealth C2 traffic interception, and the same campaign used proxy/tunnel tools (Termite, EarthWorm class) for pivoting; IOX is the closest co-occurring tunnelling tool.
   window: 1h
   enrichment_searches:
-  # Rule-specific telemetry pivots the engine runs around an alert from this rule,
-  # scoped to the alert's host/user/IP within the window (behaviour-targeted, not a sweep).
-    - name: "Service installation / creation on this host"
-      query: '((data_win_system_eventID:"7045") OR (data_win_system_eventID:"1" AND data_win_eventdata_image:/.*(\\[Ss][Cc]\.[Ee][Xx][Ee])/ AND (data_win_eventdata_commandLine:/.*[Cc][Rr][Ee][Aa][Tt][Ee].*/ OR data_win_eventdata_commandLine:/.*[Cc][Oo][Nn][Ff][Ii][Gg].*/ OR data_win_eventdata_commandLine:/.*[Bb][Ii][Nn][Pp][Aa][Tt][Hh].*/ OR data_win_eventdata_commandLine:/.*[Bb][Ii][Nn][Pp][Aa][Tt][Hh].*/)))'
-      pivot_on: [host]
-      window: 4h
-    - name: "Memory/credential-dump creation & LSASS access on this host"
-      query: '((data_win_system_eventID:"1" AND data_win_eventdata_image:/.*(\\[Pp][Rr][Oo][Cc][Dd][Uu][Mm][Pp]\.[Ee][Xx][Ee]|\\[Pp][Rr][Oo][Cc][Dd][Uu][Mm][Pp]64\.[Ee][Xx][Ee]|\\[Ss][Qq][Ll][Dd][Uu][Mm][Pp][Ee][Rr]\.[Ee][Xx][Ee]|\\[Cc][Rr][Ee][Aa][Tt][Ee][Dd][Uu][Mm][Pp]\.[Ee][Xx][Ee]|\\[Rr][Dd][Rr][Ll][Ee][Aa][Kk][Dd][Ii][Aa][Gg]\.[Ee][Xx][Ee]|\\[Dd][Uu][Mm][Pp][Ee][Rr][Tt]\.[Ee][Xx][Ee]|\\[Nn][Aa][Nn][Oo][Dd][Uu][Mm][Pp]\.[Ee][Xx][Ee]|\\[Aa][Vv][Dd][Uu][Mm][Pp]\.[Ee][Xx][Ee])/) OR (data_win_system_eventID:"1" AND (data_win_eventdata_commandLine:/.*[Cc][Oo][Mm][Ss][Vv][Cc][Ss]\.[Dd][Ll][Ll].*/ OR data_win_eventdata_commandLine:/.*[Mm][Ii][Nn][Ii][Dd][Uu][Mm][Pp].*/ OR data_win_eventdata_commandLine:/.*[Dd][Uu][Mm][Pp][Ee][Rr][Tt].*/ OR data_win_eventdata_commandLine:/.*[Nn][Aa][Nn][Oo][Dd][Uu][Mm][Pp].*/ OR data_win_eventdata_commandLine:/.*[Ll][Ss][Aa][Ss][Ss].*/ OR data_win_eventdata_commandLine:/.*[Ss][Ee][Kk][Uu][Rr][Ll][Ss][Aa].*/ OR data_win_eventdata_commandLine:/.*[Nn][Tt][Dd][Ss]\.[Dd][Ii][Tt].*/ OR data_win_eventdata_commandLine:/.*[Nn][Tt][Dd][Ss][Uu][Tt][Ii][Ll].*/)) OR (data_win_system_eventID:"10" AND data_win_eventdata_targetImage:/.*(\\[Ll][Ss][Aa][Ss][Ss]\.[Ee][Xx][Ee])/))'
-      pivot_on: [host]
-      window: 1h
-    - name: "Service installations on this host"
-      query: 'data_win_system_eventID:"7045"'
-      pivot_on: [host]
-      window: 6h
-    - name: "Follow-on LOLBin / signed-binary-proxy execution on this host"
-      query: 'data_win_system_eventID:"1" AND data_win_eventdata_image:/.*(\\[Rr][Uu][Nn][Dd][Ll][Ll]32\.[Ee][Xx][Ee]|\\[Rr][Ee][Gg][Ss][Vv][Rr]32\.[Ee][Xx][Ee]|\\[Mm][Ss][Hh][Tt][Aa]\.[Ee][Xx][Ee]|\\[Ii][Nn][Ss][Tt][Aa][Ll][Ll][Uu][Tt][Ii][Ll]\.[Ee][Xx][Ee]|\\[Rr][Ee][Gg][Aa][Ss][Mm]\.[Ee][Xx][Ee]|\\[Rr][Ee][Gg][Ss][Vv][Cc][Ss]\.[Ee][Xx][Ee]|\\[Mm][Ss][Bb][Uu][Ii][Ll][Dd]\.[Ee][Xx][Ee]|\\[Cc][Ee][Rr][Tt][Uu][Tt][Ii][Ll]\.[Ee][Xx][Ee]|\\[Bb][Ii][Tt][Ss][Aa][Dd][Mm][Ii][Nn]\.[Ee][Xx][Ee]|\\[Ww][Mm][Ii][Cc]\.[Ee][Xx][Ee]|\\[Cc][Mm][Ss][Tt][Pp]\.[Ee][Xx][Ee]|\\[Oo][Dd][Bb][Cc][Cc][Oo][Nn][Ff]\.[Ee][Xx][Ee]|\\[Ff][Oo][Rr][Ff][Ii][Ll][Ee][Ss]\.[Ee][Xx][Ee]|\\[Pp][Cc][Aa][Ll][Uu][Aa]\.[Ee][Xx][Ee]|\\[Mm][Aa][Vv][Ii][Nn][Jj][Ee][Cc][Tt]\.[Ee][Xx][Ee]|\\[Ss][Cc][Rr][Ii][Pp][Tt][Rr][Uu][Nn][Nn][Ee][Rr]\.[Ee][Xx][Ee])/'
-      pivot_on: [host]
-      window: 2h
+  # Behaviour-targeted hunts the engine runs around the alert (not a sweep).
+  - name: Kernel driver services and driver loads outside System32
+    query: (data_win_system_eventID:"7045" AND data_win_eventdata_imagePath:/.*\.[Ss][Yy][Ss].*/) OR (data_win_system_eventID:"6" AND NOT data_win_eventdata_imageLoaded:/.*[Ww][Ii][Nn][Dd][Oo][Ww][Ss].[Ss][Yy][Ss][Tt][Ee][Mm]32.*/)
+    pivot_on:
+    - host
+    window: 6h
+  - name: Remote service deployment (PsExec/ADMIN$/COMSPEC service images)
+    query: data_win_system_eventID:"7045" AND (data_win_eventdata_imagePath:/.*[Pp][Ss][Ee][Xx][Ee][Ss][Vv][Cc].*/ OR data_win_eventdata_imagePath:/.*[Aa][Dd][Mm][Ii][Nn]\$.*/ OR data_win_eventdata_imagePath:/.*%[Cc][Oo][Mm][Ss][Pp][Ee][Cc]%.*/)
+    pivot_on:
+    - host
+    window: 6h
+  - name: Tunneling and proxy pivot tools (Termite, EarthWorm, iox, frp, chisel)
+    query: data_win_system_eventID:"1" AND (data_win_eventdata_image:/.*([Ee][Ww]_[Ff][Oo][Rr]_[Ww][Ii][Nn]|[Tt][Ee][Rr][Mm][Ii][Tt][Ee]|[Ee][Aa][Rr][Tt][Hh][Ww][Oo][Rr][Mm]|[Ii][Oo][Xx]|[Ff][Rr][Pp][Cc]|[Cc][Hh][Ii][Ss][Ee][Ll]).*/ OR data_win_eventdata_commandLine:/.*([Ee][Ww]_[Ff][Oo][Rr]_[Ww][Ii][Nn]|[Rr][Cc][Ss][Oo][Cc][Kk][Ss]|[Rr][Ss][Ss][Oo][Cc][Kk][Ss]|[Ss][Ss][Oo][Cc][Kk][Ss][Dd]).*/)
+    pivot_on:
+    - host
+    window: 6h
+  - name: Web-server spawned shells (China Chopper / webshell recon)
+    query: data_win_system_eventID:"1" AND data_win_eventdata_parentImage:/.*([Ww]3[Ww][Pp]|[Hh][Tt][Tt][Pp][Dd]|[Tt][Oo][Mm][Cc][Aa][Tt]|[Nn][Gg][Ii][Nn][Xx]|[Pp][Hh][Pp]-[Cc][Gg][Ii]).*/ AND data_win_eventdata_image:/.*([Cc][Mm][Dd]|[Pp][Oo][Ww][Ee][Rr][Ss][Hh][Ee][Ll][Ll]|[Ww][Hh][Oo][Aa][Mm][Ii]|[Nn][Ee][Tt]1?|[Nn][Ee][Tt][Ss][Tt][Aa][Tt]|[Ii][Pp][Cc][Oo][Nn][Ff][Ii][Gg]|[Ss][Yy][Ss][Tt][Ee][Mm][Ii][Nn][Ff][Oo]).*/
+    pivot_on:
+    - host
+    window: 24h
+  - name: Log clearing and security service tampering on this host
+    query: data_win_system_eventID:"1" AND ((data_win_eventdata_image:/.*[Ww][Ee][Vv][Tt][Uu][Tt][Ii][Ll]\.[Ee][Xx][Ee]/ AND data_win_eventdata_commandLine:/.* [Cc][Ll] .*/) OR (data_win_eventdata_image:/.*[Ss][Cc]\.[Ee][Xx][Ee]/ AND data_win_eventdata_commandLine:/.*([Ss][Tt][Oo][Pp]|[Cc][Oo][Nn][Ff][Ii][Gg]|[Dd][Ee][Ll][Ee][Tt][Ee]).*([Ss][Yy][Ss][Mm][Oo][Nn]|[Ww][Ii][Nn][Dd][Ee][Ff][Ee][Nn][Dd]|[Ss][Ee][Nn][Ss][Ee]|[Ww][Aa][Zz][Uu][Hh]|[Ee][Vv][Ee][Nn][Tt][Ll][Oo][Gg]).*/))
+    pivot_on:
+    - host
+    window: 4h

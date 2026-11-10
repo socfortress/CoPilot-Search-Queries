@@ -143,19 +143,58 @@ graylog:
   query: data_win_system_providerName:/.*[Mm][Ss][Ss][Qq][Ll].*/ AND data_win_system_eventID:"33205" AND (data_win_eventdata_data:/.*[Ss][Tt][Aa][Tt][Ee][Mm][Ee][Nn][Tt]:[Aa][Ll][Tt][Ee][Rr] [Ss][Ee][Rr][Vv][Ee][Rr] [Aa][Uu][Dd][Ii][Tt].*/ OR data_win_eventdata_data:/.*[Ss][Tt][Aa][Tt][Ee][Mm][Ee][Nn][Tt]:[Dd][Rr][Oo][Pp] [Ss][Ee][Rr][Vv][Ee][Rr] [Aa][Uu][Dd][Ii][Tt].*/)
 
 correlation:
-  # Authored by the correlation engine for review.
+  # Authored per-rule (behaviour-researched) for the correlation engine. Related CoPilot
+  # Searches + telemetry pivots to run around an alert, scoped to its host/user/ip/domain.
+  related_rules:
+  - id: 08200f85-2678-463e-9c32-88dce2f073d1
+    name: MSSQL Add Account To Sysadmin Role
+    reason: Attacker typically gains or grants sysadmin (required for ALTER/DROP SERVER AUDIT) before blinding auditing; both are same-instance privilege-then-cover-tracks steps.
+  - id: d08dd86f-681e-4a00-a92c-1db218754417
+    name: MSSQL XPCmdshell Option Change
+    reason: Enabling xp_cmdshell is the classic action that audit is disabled to hide; the two together indicate OS-command preparation on the SQL instance.
+  - id: 7f103213-a04e-4d59-8261-213dddf22314
+    name: MSSQL XPCmdshell Suspicious Execution
+    reason: Actual OS command execution through xp_cmdshell is the likely follow-on once auditing is turned off.
+  - id: b3d57a5c-c92e-4b48-9a79-5f124b7cf964
+    name: MSSQL SPProcoption Set
+    reason: sp_procoption startup stored procedures are the persistence mechanism referenced by this rule's NetSPI source; set alongside audit disabling to persist unseen.
+  - id: 711ab2fe-c9ba-4746-8840-5228a58c3cb8
+    name: MSSQL Extended Stored Procedure Backdoor Maggie
+    reason: Malicious extended stored procedure DLL (Maggie) installed on the same instance; audit tampering hides its registration.
+  - id: ebfe73c2-5bc9-4ed9-aaa8-8b54b2b4777d
+    name: MSSQL Server Failed Logon From External Network
+    reason: Brute force or probing of the SQL login that precedes initial access and later audit tampering.
+  - id: 00321fee-ca72-4cce-b011-5415af3b9960
+    name: MSSQL Destructive Query
+    reason: Destructive statements (DROP/TRUNCATE) are the objective audit logging is disabled to conceal.
+  - id: 869b9ca7-9ea2-4a5a-8325-e80e62f75445
+    name: Suspicious Child Process Of SQL Server
+    reason: sqlservr.exe spawning shells/LOLBins is the OS-level evidence of command execution from the compromised SQL instance.
+  window: 1h
   enrichment_searches:
-  # Rule-specific telemetry pivots the engine runs around an alert from this rule,
-  # scoped to the alert's host/user/IP within the window (behaviour-targeted, not a sweep).
-    - name: "Follow-on LOLBin / signed-binary-proxy execution on this host"
-      query: 'data_win_system_eventID:"1" AND data_win_eventdata_image:/.*(\\[Rr][Uu][Nn][Dd][Ll][Ll]32\.[Ee][Xx][Ee]|\\[Rr][Ee][Gg][Ss][Vv][Rr]32\.[Ee][Xx][Ee]|\\[Mm][Ss][Hh][Tt][Aa]\.[Ee][Xx][Ee]|\\[Ii][Nn][Ss][Tt][Aa][Ll][Ll][Uu][Tt][Ii][Ll]\.[Ee][Xx][Ee]|\\[Rr][Ee][Gg][Aa][Ss][Mm]\.[Ee][Xx][Ee]|\\[Rr][Ee][Gg][Ss][Vv][Cc][Ss]\.[Ee][Xx][Ee]|\\[Mm][Ss][Bb][Uu][Ii][Ll][Dd]\.[Ee][Xx][Ee]|\\[Cc][Ee][Rr][Tt][Uu][Tt][Ii][Ll]\.[Ee][Xx][Ee]|\\[Bb][Ii][Tt][Ss][Aa][Dd][Mm][Ii][Nn]\.[Ee][Xx][Ee]|\\[Ww][Mm][Ii][Cc]\.[Ee][Xx][Ee]|\\[Cc][Mm][Ss][Tt][Pp]\.[Ee][Xx][Ee]|\\[Oo][Dd][Bb][Cc][Cc][Oo][Nn][Ff]\.[Ee][Xx][Ee]|\\[Ff][Oo][Rr][Ff][Ii][Ll][Ee][Ss]\.[Ee][Xx][Ee]|\\[Pp][Cc][Aa][Ll][Uu][Aa]\.[Ee][Xx][Ee]|\\[Mm][Aa][Vv][Ii][Nn][Jj][Ee][Cc][Tt]\.[Ee][Xx][Ee]|\\[Ss][Cc][Rr][Ii][Pp][Tt][Rr][Uu][Nn][Nn][Ee][Rr]\.[Ee][Xx][Ee])/'
-      pivot_on: [host]
-      window: 1h
-    - name: "Outbound connections by script interpreters on this host"
-      query: 'data_win_system_eventID:"3" AND data_win_eventdata_image:/.*(\\[Pp][Oo][Ww][Ee][Rr][Ss][Hh][Ee][Ll][Ll]\.[Ee][Xx][Ee]|\\[Pp][Ww][Ss][Hh]\.[Ee][Xx][Ee]|\\[Pp][Oo][Ww][Ee][Rr][Ss][Hh][Ee][Ll][Ll]_[Ii][Ss][Ee]\.[Ee][Xx][Ee]|\\[Cc][Mm][Dd]\.[Ee][Xx][Ee]|\\[Ww][Ss][Cc][Rr][Ii][Pp][Tt]\.[Ee][Xx][Ee]|\\[Cc][Ss][Cc][Rr][Ii][Pp][Tt]\.[Ee][Xx][Ee]|\\[Mm][Ss][Hh][Tt][Aa]\.[Ee][Xx][Ee]|\\[Rr][Uu][Nn][Dd][Ll][Ll]32\.[Ee][Xx][Ee]|\\[Rr][Ee][Gg][Ss][Vv][Rr]32\.[Ee][Xx][Ee])/'
-      pivot_on: [host]
-      window: 1h
-    - name: "Autostart persistence written on this host (Run keys, services, IFEO)"
-      query: '(data_win_system_eventID:"12" OR data_win_system_eventID:"13") AND (data_win_eventdata_targetObject:/.*[Cc][Uu][Rr][Rr][Ee][Nn][Tt][Vv][Ee][Rr][Ss][Ii][Oo][Nn]\\[Rr][Uu][Nn].*/ OR data_win_eventdata_targetObject:/.*[Cc][Uu][Rr][Rr][Ee][Nn][Tt][Vv][Ee][Rr][Ss][Ii][Oo][Nn]\\[Rr][Uu][Nn][Oo][Nn][Cc][Ee].*/ OR data_win_eventdata_targetObject:/.*[Cc][Uu][Rr][Rr][Ee][Nn][Tt][Cc][Oo][Nn][Tt][Rr][Oo][Ll][Ss][Ee][Tt]\\[Ss][Ee][Rr][Vv][Ii][Cc][Ee][Ss]\\.*/ OR data_win_eventdata_targetObject:/.*[Ii][Mm][Aa][Gg][Ee] [Ff][Ii][Ll][Ee] [Ee][Xx][Ee][Cc][Uu][Tt][Ii][Oo][Nn] [Oo][Pp][Tt][Ii][Oo][Nn][Ss]\\.*/ OR data_win_eventdata_targetObject:/.*[Ww][Ii][Nn][Ll][Oo][Gg][Oo][Nn]\\[Ss][Hh][Ee][Ll][Ll].*/ OR data_win_eventdata_targetObject:/.*[Ww][Ii][Nn][Ll][Oo][Gg][Oo][Nn]\\[Uu][Ss][Ee][Rr][Ii][Nn][Ii][Tt].*/ OR data_win_eventdata_targetObject:/.*[Cc][Uu][Rr][Rr][Ee][Nn][Tt][Vv][Ee][Rr][Ss][Ii][Oo][Nn]\\[Ee][Xx][Pp][Ll][Oo][Rr][Ee][Rr]\\[Rr][Uu][Nn].*/ OR data_win_eventdata_targetObject:/.*[Pp][Oo][Ll][Ii][Cc][Ii][Ee][Ss]\\[Ee][Xx][Pp][Ll][Oo][Rr][Ee][Rr]\\[Rr][Uu][Nn].*/ OR data_win_eventdata_targetObject:/.*[Cc][Uu][Rr][Rr][Ee][Nn][Tt][Vv][Ee][Rr][Ss][Ii][Oo][Nn]\\[Ww][Ii][Nn][Dd][Oo][Ww][Ss]\\[Ll][Oo][Aa][Dd].*/)'
-      pivot_on: [host]
-      window: 4h
+  # Behaviour-targeted hunts the engine runs around the alert (not a sweep).
+  - name: MSSQL privilege, xp_cmdshell and login changes on this instance
+    query: data_win_system_providerName:/.*[Mm][Ss][Ss][Qq][Ll].*/ AND (data_win_system_eventID:"15457" OR data_win_system_eventID:"33205") AND (data_win_eventdata_data:/.*([Xx][Pp]_[Cc][Mm][Dd][Ss][Hh][Ee][Ll][Ll]|[Ss][Pp]_[Aa][Dd][Dd][Ss][Rr][Vv][Rr][Oo][Ll][Ee][Mm][Ee][Mm][Bb][Ee][Rr]|[Aa][Ll][Tt][Ee][Rr] [Ss][Ee][Rr][Vv][Ee][Rr] [Rr][Oo][Ll][Ee]|[Cc][Rr][Ee][Aa][Tt][Ee] [Ll][Oo][Gg][Ii][Nn]|[Aa][Ll][Tt][Ee][Rr] [Ll][Oo][Gg][Ii][Nn]|[Ss][Pp]_[Pp][Rr][Oo][Cc][Oo][Pp][Tt][Ii][Oo][Nn]|[Oo][Pp][Ee][Nn][Rr][Oo][Ww][Ss][Ee][Tt]).*/)
+    pivot_on:
+    - host
+    window: 4h
+  - name: Processes spawned by sqlservr.exe on this host
+    query: data_win_system_eventID:"1" AND data_win_eventdata_parentImage:/.*\\[Ss][Qq][Ll][Ss][Ee][Rr][Vv][Rr]\.[Ee][Xx][Ee]/ AND data_win_eventdata_image:/.*\\(cmd|powershell|pwsh|wscript|cscript|certutil|bitsadmin|whoami|net|net1|rundll32|regsvr32|mshta)\.exe/
+    pivot_on:
+    - host
+    window: 2h
+  - name: Log clearing or audit-policy tampering at OS level on this host
+    query: (data_win_system_eventID:"1" AND ((data_win_eventdata_image:/.*\\[Ww][Ee][Vv][Tt][Uu][Tt][Ii][Ll]\.[Ee][Xx][Ee]/ AND data_win_eventdata_commandLine:/.* (cl|clear-log|sl|set-log) .*/) OR (data_win_eventdata_image:/.*\\[Aa][Uu][Dd][Ii][Tt][Pp][Oo][Ll]\.[Ee][Xx][Ee]/ AND data_win_eventdata_commandLine:/.*(clear|remove|disable|\/success:disable|\/failure:disable).*/))) OR data_win_system_eventID:"1102" OR data_win_system_eventID:"104"
+    pivot_on:
+    - host
+    window: 2h
+  - name: MSSQL logon failures and successes (18456 / 18454) on this instance
+    query: data_win_system_providerName:/.*[Mm][Ss][Ss][Qq][Ll].*/ AND (data_win_system_eventID:"18456" OR data_win_system_eventID:"18454")
+    pivot_on:
+    - host
+    window: 24h
+  - name: DLL or executable files written by sqlservr.exe (extended procedure / payload drop)
+    query: data_win_system_eventID:"11" AND data_win_eventdata_image:/.*\\[Ss][Qq][Ll][Ss][Ee][Rr][Vv][Rr]\.[Ee][Xx][Ee]/ AND data_win_eventdata_targetFilename:/.*\.(dll|exe|ps1|bat|vbs)/
+    pivot_on:
+    - host
+    window: 4h

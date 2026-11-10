@@ -129,44 +129,47 @@ graylog:
   query: full_log:/.*curl.*/ AND (full_log:/.*-x .*/ OR full_log:/.*socks.*/ OR full_log:/.*--proxy.*/ OR full_log:/.*--preproxy.*/) AND NOT _exists_:data_win_system_eventID AND NOT rule_groups:/.*windows.*/
 
 correlation:
-  # Authored by the correlation engine for review. Related CoPilot Searches to run
-  # around an alert from this rule, scoped to the same host/user/IP within the window.
+  # Authored per-rule (behaviour-researched) for the correlation engine. Related CoPilot
+  # Searches + telemetry pivots to run around an alert, scoped to its host/user/ip/domain.
   related_rules:
-    - id: 26f86252-1549-45e1-a212-eb26840e86bc
-      name: "File Download or Read to Pipe Execution"
-      reason: "same analytic story: Linux Living Off The Land"
-    - id: windows-curl-upload-remote-destination-001
-      name: "Windows Curl Upload to Remote Destination"
-      reason: "same analytic story: Ingress Tool Transfer"
-    - id: Windows_DNS_Query_Request_To_TinyUrl
-      name: "Windows DNS Query Request To TinyUrl"
-      reason: "same analytic story: Ingress Tool Transfer"
-    - id: windows-file-download-certutil-001
-      name: "Windows File Download Via Certutil"
-      reason: "same analytic story: Ingress Tool Transfer"
-    - id: 76753bab-f116-4ea3-8fb9-89b638be58a9
-      name: "Windows Ingress Tool Transfer Using Explorer"
-      reason: "same analytic story: Ingress Tool Transfer"
-    - id: 0a23a62d-c5b3-468b-a072-25064a9a8c87
-      name: "Axios NPM Compromise Indicators - Linux"
-      reason: "next kill-chain tactic: Command and Control"
-  window: 1h
+  - id: 26f86252-1549-45e1-a212-eb26840e86bc
+    name: File Download or Read to Pipe Execution
+    reason: Proxied curl is often the fetch stage of a download-and-pipe-to-shell payload delivery.
+  - id: ba592c6d-6888-43c3-b8c6-689b8fe47337
+    name: Linux Base64 Encoded Pipe to Shell
+    reason: Staged payload fetched via proxy is commonly decoded and piped into a shell.
+  - id: f7158a64-6204-4d6d-868a-6e6378b467e0
+    name: Suspicious C2 Activities
+    reason: Proxy-routed curl may be C2 beaconing; this shows other C2 indicators on the host.
+  - id: c3d9e7f1-6a2b-4d8f-9c2b-5e6f7a8b9c0d
+    name: Linux Suspicious Curl Data Exfiltration
+    reason: Proxy use to obscure traffic is typical for curl-based exfiltration that follows.
+  - id: cb39d16b-b3b6-4a7a-8222-1cf24b686ffc
+    name: Data Exfiltration with Wget
+    reason: Same exfil intent through the sibling tool if curl is blocked or swapped.
+  - id: a39d7fa7-3fbd-4dc2-97e1-d87f546b1bbc
+    name: Program Executions in Suspicious Folders
+    reason: Downloaded tooling is then run from tmp/dev/shm style directories.
+  window: 2h
   enrichment_searches:
-  # Rule-specific telemetry pivots the engine runs around an alert from this rule,
-  # scoped to the alert's host/user/IP within the window (behaviour-targeted, not a sweep).
-    - name: "Proxy / tunnelling tooling on this host"
-      query: 'data_process_exec_process_binary:/.*(\/[Ss][Ss][Hh]|\/[Ss][Oo][Cc][Aa][Tt]|\/[Nn][Gg][Rr][Oo][Kk]|\/[Cc][Hh][Ii][Ss][Ee][Ll]|\/[Pp][Rr][Oo][Xx][Yy][Cc][Hh][Aa][Ii][Nn][Ss])/'
-      pivot_on: [host]
-      window: 1h
-    - name: "Non-application-layer C2 / raw-socket tooling on this host"
-      query: '((data_process_exec_process_binary:/.*(\/[Nn][Cc]|\/[Nn][Cc][Aa][Tt]|\/[Nn][Ee][Tt][Cc][Aa][Tt]|\/[Ss][Oo][Cc][Aa][Tt])/) OR (data_process_exec_process_arguments:/.*\/[Dd][Ee][Vv]\/[Tt][Cc][Pp]\/.*/) OR (data_process_exec_process_arguments:/.*[Bb][Aa][Ss][Hh] -[Ii].*/) OR (data_process_exec_process_arguments:/.*[Ss][Hh] -[Ii].*/) OR (data_process_exec_process_arguments:/.*[Mm][Kk][Ff][Ii][Ff][Oo].*/))'
-      pivot_on: [host]
-      window: 1h
-    - name: "Shell / interpreter execution on this host"
-      query: '((data_process_exec_process_binary:/.*(\/[Bb][Aa][Ss][Hh]|\/[Ss][Hh]|\/[Dd][Aa][Ss][Hh]|\/[Zz][Ss][Hh]|\/[Kk][Ss][Hh]|\/[Aa][Ss][Hh]|\/[Bb][Uu][Ss][Yy][Bb][Oo][Xx])/) OR (data_process_exec_process_binary:/.*(\/[Pp][Yy][Tt][Hh][Oo][Nn]|\/[Pp][Yy][Tt][Hh][Oo][Nn]3|\/[Pp][Ee][Rr][Ll]|\/[Rr][Uu][Bb][Yy]|\/[Pp][Hh][Pp]|\/[Nn][Oo][Dd][Ee]|\/[Ll][Uu][Aa]|\/[Aa][Ww][Kk])/))'
-      pivot_on: [host]
-      window: 1h
-    - name: "Reconnaissance commands on this host"
-      query: 'data_process_exec_process_binary:/.*(\/[Ww][Hh][Oo][Aa][Mm][Ii]|\/[Ii][Dd]|\/[Uu][Nn][Aa][Mm][Ee]|\/[Hh][Oo][Ss][Tt][Nn][Aa][Mm][Ee]|\/[Hh][Oo][Ss][Tt][Nn][Aa][Mm][Ee][Cc][Tt][Ll]|\/[Ss][Ss]|\/[Nn][Ee][Tt][Ss][Tt][Aa][Tt]|\/[Ii][Ff][Cc][Oo][Nn][Ff][Ii][Gg]|\/[Aa][Rr][Pp]|\/[Ww]|\/[Ww][Hh][Oo]|\/[Ll][Aa][Ss][Tt]|\/[Ll][Ss][Oo][Ff]|\/[Nn][Mm][Aa][Pp]|\/[Dd][Ii][Gg]|\/[Ff][Ii][Nn][Dd])/'
-      pivot_on: [host]
-      window: 1h
+  # Behaviour-targeted hunts the engine runs around the alert (not a sweep).
+  - name: Curl/wget downloads and uploads
+    query: full_log:/.*(curl|wget).*(-o |-O |--output|-T |--upload-file|--data|-F ).*/
+    pivot_on: host
+    window: 2h
+  - name: Tunnelling and proxy tools
+    query: full_log:/.*(proxychains|chisel|ssh -D|socat|ncat|frpc|gost).*/
+    pivot_on: host
+    window: 4h
+  - name: Execution from writable dirs
+    query: full_log:/.*(\/tmp\/|\/dev\/shm\/|\/var\/tmp\/).*(chmod|\.sh).*/
+    pivot_on: host
+    window: 2h
+  - name: Proxy environment or config set
+    query: full_log:/.*(http_proxy|https_proxy|all_proxy|socks5|socks4).*/
+    pivot_on: host
+    window: 4h
+  - name: Pipe to shell after fetch
+    query: full_log:/.*(curl|wget).*\|.*(sh|bash).*/
+    pivot_on: host
+    window: 1h

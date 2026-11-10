@@ -171,19 +171,58 @@ graylog:
   query: data_win_system_eventID:"4104" AND (data_win_eventdata_scriptBlockText:/.*[Rr][Ee][Mm][Oo][Vv][Ee]-[Ss][Mm][Bb][Ss][Hh][Aa][Rr][Ee].*/ OR data_win_eventdata_scriptBlockText:/.*[Rr][Ee][Mm][Oo][Vv][Ee]-[Ff][Ii][Ll][Ee][Ss][Hh][Aa][Rr][Ee].*/) AND _exists_:data_win_eventdata_scriptBlockText AND NOT (data_win_eventdata_scriptBlockText:/.*[Ff][Ii][Ll][Ee][Ss][Hh][Aa][Rr][Ee]\.[Cc][Dd][Xx][Mm][Ll].*/ AND data_win_eventdata_scriptBlockText:/.*[Mm][Ii][Cc][Rr][Oo][Ss][Oo][Ff][Tt]\.[Pp][Oo][Ww][Ee][Rr][Ss][Hh][Ee][Ll][Ll]\.[Cc][Oo][Rr][Ee]\\[Ee][Xx][Pp][Oo][Rr][Tt]-[Mm][Oo][Dd][Uu][Ll][Ee][Mm][Ee][Mm][Bb][Ee][Rr].*/ AND data_win_eventdata_scriptBlockText:/.*[Rr][Oo][Oo][Tt]\/[Mm][Ii][Cc][Rr][Oo][Ss][Oo][Ff][Tt]\/[Ww][Ii][Nn][Dd][Oo][Ww][Ss]\/[Ss][Tt][Oo][Rr][Aa][Gg][Ee]\/[Mm][Ss][Ff][Tt]_[Ff][Ii][Ll][Ee][Ss][Hh][Aa][Rr][Ee].*/ AND data_win_eventdata_scriptBlockText:/.*[Oo][Bb][Jj][Ee][Cc][Tt][Mm][Oo][Dd][Ee][Ll][Ww][Rr][Aa][Pp][Pp][Ee][Rr].*/ AND data_win_eventdata_scriptBlockText:/.*[Cc][Mm][Dd][Ll][Ee][Tt][Ii][Zz][Aa][Tt][Ii][Oo][Nn]\.[Mm][Ee][Tt][Hh][Oo][Dd][Pp][Aa][Rr][Aa][Mm][Ee][Tt][Ee][Rr].*/)
 
 correlation:
-  # Authored by the correlation engine for review.
+  # Authored per-rule (behaviour-researched) for the correlation engine. Related CoPilot
+  # Searches + telemetry pivots to run around an alert, scoped to its host/user/ip/domain.
+  related_rules:
+  - id: 1c563233-030e-4a07-af8c-ee0490a66d3a
+    name: Suspicious New-PSDrive to Admin Share
+    reason: Mapping an admin share via New-PSDrive is the mount whose removal this rule sees; precursor in the same PowerShell session
+  - id: 3abd6094-7027-475f-9630-8ab9be7b9725
+    name: Windows Admin Share Mount Via Net.EXE
+    reason: net use mount of C$/ADMIN$ is the cmd-based precursor to the share connection being cleaned up
+  - id: a44c0be1-d7ab-41e4-92fd-aa9af4fe232c
+    name: Windows File Share Discovery With Powerview
+    reason: Share enumeration precedes choosing and mounting a share for staging or lateral movement
+  - id: 855bc8b5-2ae8-402e-a9ed-b889e6df1900
+    name: Copy From Or To Admin Share Or Sysvol Folder
+    reason: Tool/payload copy over the mounted admin share, typically between mount and unmount
+  - id: 4aafb0fa-bff5-4b9d-b99e-8093e659c65f
+    name: Writing Local Admin Share
+    reason: 'File written to an admin share while mounted: payload staging or exfil before the connection is removed'
+  - id: b210394c-ba12-4f89-9117-44a2464b9511
+    name: SMB Create Remote File Admin Share
+    reason: Remote file creation over admin share confirms the mounted share was used to drop files
+  - id: 26b692dc-1722-49b2-b496-a8258aa6371d
+    name: Clear PowerShell History - PowerShell
+    reason: 'Same anti-forensic cleanup stage: attackers remove the share and wipe PS history together'
+  - id: fdb829a8-db84-4832-b64b-3e964cd44f01
+    name: Windows Eventlog Cleared Via Wevtutil
+    reason: Log clearing is the usual companion of T1070 indicator removal after share-based operations
+  window: 2h
   enrichment_searches:
-  # Rule-specific telemetry pivots the engine runs around an alert from this rule,
-  # scoped to the alert's host/user/IP within the window (behaviour-targeted, not a sweep).
-    - name: "Log-clearing / anti-forensic activity on this host"
-      query: '(((data_win_eventdata_commandLine:/.*[Ww][Ee][Vv][Tt][Uu][Tt][Ii][Ll] [Cc][Ll].*/ OR data_win_eventdata_commandLine:/.*[Cc][Ll][Ee][Aa][Rr]-[Ee][Vv][Ee][Nn][Tt][Ll][Oo][Gg].*/ OR data_win_eventdata_commandLine:/.*[Ff][Ss][Uu][Tt][Ii][Ll] [Uu][Ss][Nn] [Dd][Ee][Ll][Ee][Tt][Ee][Jj][Oo][Uu][Rr][Nn][Aa][Ll].*/ OR data_win_eventdata_commandLine:/.*[Vv][Ss][Ss][Aa][Dd][Mm][Ii][Nn] [Dd][Ee][Ll][Ee][Tt][Ee].*/ OR data_win_eventdata_commandLine:/.*[Ww][Ee][Vv][Tt][Uu][Tt][Ii][Ll] [Cc][Ll][Ee][Aa][Rr]-[Ll][Oo][Gg].*/)) OR ((data_win_system_eventID:"1102" OR data_win_system_eventID:"104")))'
-      pivot_on: [host]
-      window: 2h
-    - name: "Download / AMSI-bypass / encoded script blocks on this host"
-      query: 'data_win_system_eventID:"4104" AND (data_win_eventdata_scriptBlockText:/.*[Dd][Oo][Ww][Nn][Ll][Oo][Aa][Dd][Ss][Tt][Rr][Ii][Nn][Gg].*/ OR data_win_eventdata_scriptBlockText:/.*[Dd][Oo][Ww][Nn][Ll][Oo][Aa][Dd][Ff][Ii][Ll][Ee].*/ OR data_win_eventdata_scriptBlockText:/.*[Ii][Nn][Vv][Oo][Kk][Ee]-[Ww][Ee][Bb][Rr][Ee][Qq][Uu][Ee][Ss][Tt].*/ OR data_win_eventdata_scriptBlockText:/.*[Nn][Ee][Tt]\.[Ww][Ee][Bb][Cc][Ll][Ii][Ee][Nn][Tt].*/ OR data_win_eventdata_scriptBlockText:/.*[Ff][Rr][Oo][Mm][Bb][Aa][Ss][Ee]64[Ss][Tt][Rr][Ii][Nn][Gg].*/ OR data_win_eventdata_scriptBlockText:/.*[Ii][Ee][Xx].*/ OR data_win_eventdata_scriptBlockText:/.*[Ii][Nn][Vv][Oo][Kk][Ee]-[Ee][Xx][Pp][Rr][Ee][Ss][Ss][Ii][Oo][Nn].*/ OR data_win_eventdata_scriptBlockText:/.*[Ss][Tt][Aa][Rr][Tt]-[Bb][Ii][Tt][Ss][Tt][Rr][Aa][Nn][Ss][Ff][Ee][Rr].*/ OR data_win_eventdata_scriptBlockText:/.*[Aa][Mm][Ss][Ii][Uu][Tt][Ii][Ll][Ss].*/ OR data_win_eventdata_scriptBlockText:/.*-[Ee][Nn][Cc].*/ OR data_win_eventdata_scriptBlockText:/.*-[Ee][Nn][Cc][Oo][Dd][Ee][Dd][Cc][Oo][Mm][Mm][Aa][Nn][Dd].*/ OR data_win_eventdata_scriptBlockText:/.*[Rr][Ee][Ff][Ll][Ee][Cc][Tt][Ii][Oo][Nn]\.[Aa][Ss][Ss][Ee][Mm][Bb][Ll][Yy].*/)'
-      pivot_on: [host]
-      window: 1h
-    - name: "Follow-on LOLBin / signed-binary-proxy execution on this host"
-      query: 'data_win_system_eventID:"1" AND data_win_eventdata_image:/.*(\\[Rr][Uu][Nn][Dd][Ll][Ll]32\.[Ee][Xx][Ee]|\\[Rr][Ee][Gg][Ss][Vv][Rr]32\.[Ee][Xx][Ee]|\\[Mm][Ss][Hh][Tt][Aa]\.[Ee][Xx][Ee]|\\[Ii][Nn][Ss][Tt][Aa][Ll][Ll][Uu][Tt][Ii][Ll]\.[Ee][Xx][Ee]|\\[Rr][Ee][Gg][Aa][Ss][Mm]\.[Ee][Xx][Ee]|\\[Rr][Ee][Gg][Ss][Vv][Cc][Ss]\.[Ee][Xx][Ee]|\\[Mm][Ss][Bb][Uu][Ii][Ll][Dd]\.[Ee][Xx][Ee]|\\[Cc][Ee][Rr][Tt][Uu][Tt][Ii][Ll]\.[Ee][Xx][Ee]|\\[Bb][Ii][Tt][Ss][Aa][Dd][Mm][Ii][Nn]\.[Ee][Xx][Ee]|\\[Ww][Mm][Ii][Cc]\.[Ee][Xx][Ee]|\\[Cc][Mm][Ss][Tt][Pp]\.[Ee][Xx][Ee]|\\[Oo][Dd][Bb][Cc][Cc][Oo][Nn][Ff]\.[Ee][Xx][Ee]|\\[Ff][Oo][Rr][Ff][Ii][Ll][Ee][Ss]\.[Ee][Xx][Ee]|\\[Pp][Cc][Aa][Ll][Uu][Aa]\.[Ee][Xx][Ee]|\\[Mm][Aa][Vv][Ii][Nn][Jj][Ee][Cc][Tt]\.[Ee][Xx][Ee]|\\[Ss][Cc][Rr][Ii][Pp][Tt][Rr][Uu][Nn][Nn][Ee][Rr]\.[Ee][Xx][Ee])/'
-      pivot_on: [host]
-      window: 1h
+  # Behaviour-targeted hunts the engine runs around the alert (not a sweep).
+  - name: Admin share / drive mapping commands (net use, New-PSDrive) on host
+    query: (data_win_system_eventID:"1" AND data_win_eventdata_commandLine:/.*[Nn][Ee][Tt]1?[ ]+[Uu][Ss][Ee].*/) OR (data_win_system_eventID:"4104" AND (data_win_eventdata_scriptBlockText:/.*[Nn][Ee][Ww]-[Pp][Ss][Dd][Rr][Ii][Vv][Ee].*/ OR data_win_eventdata_scriptBlockText:/.*[Nn][Ee][Ww]-[Ss][Mm][Bb][Mm][Aa][Pp][Pp][Ii][Nn][Gg].*/ OR data_win_eventdata_scriptBlockText:/.*[Ww][Ii][Nn]32_[Ll][Oo][Gg][Ii][Cc][Aa][Ll][Dd][Ii][Ss][Kk].*/))
+    pivot_on:
+    - host
+    window: 2h
+  - name: Files copied or staged to network shares (Copy-Item, robocopy, xcopy, UNC paths)
+    query: (data_win_system_eventID:"4104" AND data_win_eventdata_scriptBlockText:/.*([Cc][Oo][Pp][Yy]-[Ii][Tt][Ee][Mm]|[Mm][Oo][Vv][Ee]-[Ii][Tt][Ee][Mm]|[Rr][Oo][Bb][Oo][Cc][Oo][Pp][Yy]|[Xx][Cc][Oo][Pp][Yy]).*/ AND data_win_eventdata_scriptBlockText:/.*\\\\.*/) OR (data_win_system_eventID:"1" AND (data_win_eventdata_image:/.*[Rr][Oo][Bb][Oo][Cc][Oo][Pp][Yy]\.[Ee][Xx][Ee]/ OR data_win_eventdata_image:/.*[Xx][Cc][Oo][Pp][Yy]\.[Ee][Xx][Ee]/) AND data_win_eventdata_commandLine:/.*\\\\.*/)
+    pivot_on:
+    - host
+    window: 2h
+  - name: Share disconnect and other cleanup (net use /delete, Remove-PSDrive, history clearing)
+    query: (data_win_system_eventID:"1" AND data_win_eventdata_commandLine:/.*[Nn][Ee][Tt]1?[ ]+[Uu][Ss][Ee].*[Dd][Ee][Ll][Ee][Tt][Ee].*/) OR (data_win_system_eventID:"4104" AND (data_win_eventdata_scriptBlockText:/.*[Rr][Ee][Mm][Oo][Vv][Ee]-[Pp][Ss][Dd][Rr][Ii][Vv][Ee].*/ OR data_win_eventdata_scriptBlockText:/.*[Rr][Ee][Mm][Oo][Vv][Ee]-[Ss][Mm][Bb][Mm][Aa][Pp][Pp][Ii][Nn][Gg].*/ OR data_win_eventdata_scriptBlockText:/.*[Cc][Ll][Ee][Aa][Rr]-[Ee][Vv][Ee][Nn][Tt][Ll][Oo][Gg].*/ OR data_win_eventdata_scriptBlockText:/.*[Cc][Ll][Ee][Aa][Rr]-[Hh][Ii][Ss][Tt][Oo][Rr][Yy].*/ OR data_win_eventdata_scriptBlockText:/.*[Cc][Oo][Nn][Ss][Oo][Ll][Ee][Hh][Oo][Ss][Tt]_[Hh][Ii][Ss][Tt][Oo][Rr][Yy].*/))
+    pivot_on:
+    - host
+    window: 2h
+  - name: Log clearing and file/artifact deletion by wevtutil, wmic or fsutil
+    query: data_win_system_eventID:"1" AND (data_win_eventdata_commandLine:/.*[Ww][Ee][Vv][Tt][Uu][Tt][Ii][Ll].*([Cc][Ll]|[Cc][Ll][Ee][Aa][Rr]-[Ll][Oo][Gg]).*/ OR data_win_eventdata_commandLine:/.*[Ff][Ss][Uu][Tt][Ii][Ll].*[Uu][Ss][Nn].*[Dd][Ee][Ll][Ee][Tt][Ee][Jj][Oo][Uu][Rr][Nn][Aa][Ll].*/ OR data_win_eventdata_commandLine:/.*[Vv][Ss][Ss][Aa][Dd][Mm][Ii][Nn].*[Dd][Ee][Ll][Ee][Tt][Ee].*/)
+    pivot_on:
+    - host
+    window: 2h
+  - name: Outbound SMB connections from the host (lateral movement / share use)
+    query: data_win_system_eventID:"3" AND data_win_eventdata_destinationPort:"445" AND data_win_eventdata_initiated:"true"
+    pivot_on:
+    - host
+    window: 2h

@@ -156,23 +156,58 @@ graylog:
   query: ((data_win_system_eventID:"4742" AND data_win_eventdata_servicePrincipalNames:/.*[Gg][Cc]\/.*/) OR (data_win_system_eventID:"5136" AND data_win_eventdata_attributeLDAPDisplayName:/[Ss][Ee][Rr][Vv][Ii][Cc][Ee][Pp][Rr][Ii][Nn][Cc][Ii][Pp][Aa][Ll][Nn][Aa][Mm][Ee]/ AND data_win_eventdata_attributeValue:/[Gg][Cc]\/.*/))
 
 correlation:
-  # Authored by the correlation engine for review.
+  # Authored per-rule (behaviour-researched) for the correlation engine. Related CoPilot
+  # Searches + telemetry pivots to run around an alert, scoped to its host/user/ip/domain.
+  related_rules:
+  - id: a642964e-bead-4bed-8910-1bb4d63e3b4d
+    name: HackTool - Mimikatz Execution
+    reason: DCShadow is run via mimikatz lsadump::dcshadow (/push) on the attacker host; Mimikatz execution on the same host just before the GC/ SPN registration is the direct tooling precursor.
+  - id: windows-mimikatz-binary-execution-001
+    name: Windows Mimikatz Binary Execution
+    reason: Same tooling precursor as above, catching renamed or binary-level mimikatz that is later used to stage and push the rogue DC objects.
+  - id: 189e3b02-82b2-4b90-9662-411eb64486d4
+    name: Potential Invoke-Mimikatz PowerShell Script
+    reason: In-memory Invoke-Mimikatz can also run lsadump::dcshadow; a fileless precursor to the rogue-DC SPN change.
+  - id: 962fe167-e48d-4fd6-9974-11e5b9a5d6d1
+    name: LSASS Access From Non System Account
+    reason: DCShadow needs Domain Admin or SYSTEM rights; LSASS access earlier on the host is how the attacker obtained those credentials.
+  - id: aa1697b7-d611-4f9a-9cb2-5125b4ccfd5c
+    name: Password Dumper Activity on LSASS
+    reason: Credential dumping on this host precedes the DA-level use needed to register a rogue domain controller.
+  - id: 611eab06-a145-4dfa-a295-3ccc5c20f59a
+    name: Mimikatz DC Sync
+    reason: 'DCSync and DCShadow are both directory-replication abuses by the same tool and often used together: DCSync to steal krbtgt, DCShadow to persist.'
+  - id: 17d619c1-e020-4347-957e-1d1207455c93
+    name: Active Directory Replication from Non Machine Account
+    reason: Replication rights abused from a non-DC identity on the same account or host confirms directory-replication abuse beyond the SPN change.
+  - id: f7644214-0eb0-4ace-9455-331ec4c09253
+    name: Kerberos Manipulation
+    reason: A typical DCShadow payload is persistence such as krbtgt or SIDHistory tampering, followed by forged ticket use.
+  window: 2h
   enrichment_searches:
-  # Rule-specific telemetry pivots the engine runs around an alert from this rule,
-  # scoped to the alert's host/user/IP within the window (behaviour-targeted, not a sweep).
-    - name: "Remote-execution / lateral-movement tooling on this host"
-      query: '(data_win_system_eventID:"1" AND data_win_eventdata_image:/.*(\\[Pp][Ss][Ee][Xx][Ee][Cc]\.[Ee][Xx][Ee]|\\[Pp][Ss][Ee][Xx][Ee][Ss][Vv][Cc]\.[Ee][Xx][Ee]|\\[Pp][Aa][Ee][Xx][Ee][Cc]\.[Ee][Xx][Ee]|\\[Ww][Ii][Nn][Rr][Ss]\.[Ee][Xx][Ee]|\\[Mm][Ss][Tt][Ss][Cc]\.[Ee][Xx][Ee]|\\[Ww][Mm][Ii][Cc]\.[Ee][Xx][Ee])/) OR (data_win_system_eventID:"1" AND data_win_eventdata_image:/.*(\\[Pp][Oo][Ww][Ee][Rr][Ss][Hh][Ee][Ll][Ll]\.[Ee][Xx][Ee]|\\[Pp][Ww][Ss][Hh]\.[Ee][Xx][Ee])/ AND (data_win_eventdata_commandLine:/.*[Ii][Nn][Vv][Oo][Kk][Ee]-[Cc][Oo][Mm][Mm][Aa][Nn][Dd].*/ OR data_win_eventdata_commandLine:/.*[Nn][Ee][Ww]-[Pp][Ss][Ss][Ee][Ss][Ss][Ii][Oo][Nn].*/ OR data_win_eventdata_commandLine:/.*[Ee][Nn][Tt][Ee][Rr]-[Pp][Ss][Ss][Ee][Ss][Ss][Ii][Oo][Nn].*/ OR data_win_eventdata_commandLine:/.*-[Cc][Oo][Mm][Pp][Uu][Tt][Ee][Rr][Nn][Aa][Mm][Ee].*/))'
-      pivot_on: [host]
-      window: 2h
-    - name: "This account's logon activity across hosts"
-      query: '(data_win_system_eventID:"4624" OR data_win_system_eventID:"4625")'
-      pivot_on: [user]
-      window: 6h
-    - name: "Account / group / privilege changes involving this account"
-      query: '(data_win_system_eventID:"4720" OR data_win_system_eventID:"4722" OR data_win_system_eventID:"4724" OR data_win_system_eventID:"4728" OR data_win_system_eventID:"4732" OR data_win_system_eventID:"4756" OR data_win_system_eventID:"4672")'
-      pivot_on: [user]
-      window: 6h
-    - name: "Memory/credential-dump creation & LSASS access on this host"
-      query: '((data_win_system_eventID:"1" AND data_win_eventdata_image:/.*(\\[Pp][Rr][Oo][Cc][Dd][Uu][Mm][Pp]\.[Ee][Xx][Ee]|\\[Pp][Rr][Oo][Cc][Dd][Uu][Mm][Pp]64\.[Ee][Xx][Ee]|\\[Ss][Qq][Ll][Dd][Uu][Mm][Pp][Ee][Rr]\.[Ee][Xx][Ee]|\\[Cc][Rr][Ee][Aa][Tt][Ee][Dd][Uu][Mm][Pp]\.[Ee][Xx][Ee]|\\[Rr][Dd][Rr][Ll][Ee][Aa][Kk][Dd][Ii][Aa][Gg]\.[Ee][Xx][Ee]|\\[Dd][Uu][Mm][Pp][Ee][Rr][Tt]\.[Ee][Xx][Ee]|\\[Nn][Aa][Nn][Oo][Dd][Uu][Mm][Pp]\.[Ee][Xx][Ee]|\\[Aa][Vv][Dd][Uu][Mm][Pp]\.[Ee][Xx][Ee])/) OR (data_win_system_eventID:"1" AND (data_win_eventdata_commandLine:/.*[Cc][Oo][Mm][Ss][Vv][Cc][Ss]\.[Dd][Ll][Ll].*/ OR data_win_eventdata_commandLine:/.*[Mm][Ii][Nn][Ii][Dd][Uu][Mm][Pp].*/ OR data_win_eventdata_commandLine:/.*[Dd][Uu][Mm][Pp][Ee][Rr][Tt].*/ OR data_win_eventdata_commandLine:/.*[Nn][Aa][Nn][Oo][Dd][Uu][Mm][Pp].*/ OR data_win_eventdata_commandLine:/.*[Ll][Ss][Aa][Ss][Ss].*/ OR data_win_eventdata_commandLine:/.*[Ss][Ee][Kk][Uu][Rr][Ll][Ss][Aa].*/ OR data_win_eventdata_commandLine:/.*[Nn][Tt][Dd][Ss]\.[Dd][Ii][Tt].*/ OR data_win_eventdata_commandLine:/.*[Nn][Tt][Dd][Ss][Uu][Tt][Ii][Ll].*/)) OR (data_win_system_eventID:"10" AND data_win_eventdata_targetImage:/.*(\\[Ll][Ss][Aa][Ss][Ss]\.[Ee][Xx][Ee])/))'
-      pivot_on: [host]
-      window: 1h
+  # Behaviour-targeted hunts the engine runs around the alert (not a sweep).
+  - name: Mimikatz lsadump dcshadow staging and push on this host
+    query: data_win_system_eventID:"1" AND (data_win_eventdata_commandLine:/.*[Ll][Ss][Aa][Dd][Uu][Mm][Pp].*/ OR data_win_eventdata_commandLine:/.*[Dd][Cc][Ss][Hh][Aa][Dd][Oo][Ww].*/ OR data_win_eventdata_commandLine:/.*[Mm][Ii][Mm][Ii][Kk][Aa][Tt][Zz].*/ OR data_win_eventdata_commandLine:/.*[Pp][Rr][Ii][Vv][Ii][Ll][Ee][Gg][Ee]::[Dd][Ee][Bb][Uu][Gg].*/)
+    pivot_on:
+    - host
+    window: 2h
+  - name: SYSTEM-context launch via PsExec or token theft on this host
+    query: data_win_system_eventID:"1" AND ((data_win_eventdata_image:/.*\\[Pp][Ss][Ee][Xx][Ee][Cc]6?4?\.[Ee][Xx][Ee]/ AND data_win_eventdata_commandLine:/.*-[Ss].*/) OR data_win_eventdata_commandLine:/.*[Tt][Oo][Kk][Ee][Nn]::[Ee][Ll][Ee][Vv][Aa][Tt][Ee].*/)
+    pivot_on:
+    - host
+    window: 2h
+  - name: Rogue DC object creation and sensitive AD attribute changes
+    query: (data_win_system_eventID:"5137" AND (data_win_eventdata_objectClass:"nTDSDSA" OR data_win_eventdata_objectClass:"server")) OR (data_win_system_eventID:"5136" AND (data_win_eventdata_attributeLDAPDisplayName:"sIDHistory" OR data_win_eventdata_attributeLDAPDisplayName:"primaryGroupID" OR data_win_eventdata_attributeLDAPDisplayName:"adminCount" OR data_win_eventdata_attributeLDAPDisplayName:"msDS-AllowedToDelegateTo" OR data_win_eventdata_attributeLDAPDisplayName:"servicePrincipalName")) OR data_win_system_eventID:"4928" OR data_win_system_eventID:"4929"
+    pivot_on:
+    - user
+    window: 4h
+  - name: Directory replication rights exercised by this account
+    query: data_win_system_eventID:"4662" AND (data_win_eventdata_properties:/.*1131f6a[ad]-9c07-11d1-f79f-00c04fc2dcd2.*/ OR data_win_eventdata_properties:/.*89e95b76-444d-4c62-991a-0facbeda640c.*/)
+    pivot_on:
+    - user
+    window: 4h
+  - name: Computer account modification and RC4 TGT requests by this account
+    query: (data_win_system_eventID:"4742") OR (data_win_system_eventID:"4768" AND data_win_eventdata_ticketEncryptionType:"0x17")
+    pivot_on:
+    - user
+    window: 6h

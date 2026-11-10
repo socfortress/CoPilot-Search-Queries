@@ -142,62 +142,58 @@ graylog:
   query: data_win_system_eventID:"4104" AND data_win_eventdata_scriptBlockText:/.*Get-DomainUser.*/ AND data_win_eventdata_scriptBlockText:/.*PreauthNotRequired.*/
 
 correlation:
-  # Authored by the correlation engine for review. Related CoPilot Searches to run
-  # around an alert from this rule, scoped to the same host/user/IP within the window.
+  # Authored per-rule (behaviour-researched) for the correlation engine. Related CoPilot
+  # Searches + telemetry pivots to run around an alert, scoped to its host/user/ip/domain.
   related_rules:
-    - id: ccad96d7-a48c-4f13-8b9c-9f6a31cba454
-      name: "Detect Remote Access Software Usage FileInfo"
-      reason: "same analytic story: Interlock Ransomware"
-    - id: 114c6bfe-9406-11ec-bcce-acde48001122
-      name: "Disabled Kerberos Pre-Authentication Discovery With Get-ADUser"
-      reason: "same analytic story: Active Directory Kerberos Attacks"
-    - id: 383572e0-04c5-11ec-bdcc-acde48001122
-      name: "Domain Account Discovery with Wmic"
-      reason: "same analytic story: Interlock Ransomware"
-    - id: 59b51620-94c9-11ec-b3d5-acde48001122
-      name: "Kerberos Pre-Authentication Flag Disabled with PowerShell"
-      reason: "same analytic story: Active Directory Kerberos Attacks"
-    - id: 13bbd574-83ac-11ec-99d4-acde48001122
-      name: "Mimikatz PassTheTicket CommandLine Parameters"
-      reason: "same analytic story: Active Directory Kerberos Attacks"
-    - id: 13243068-2d38-11ec-8908-acde48001122
-      name: "ServicePrincipalNames Discovery with PowerShell"
-      reason: "same analytic story: Active Directory Kerberos Attacks"
-    - id: c8640777-469f-4638-ab44-c34a3233ffac
-      name: "Windows Get-AdComputer Unconstrained Delegation Discovery"
-      reason: "same analytic story: Active Directory Kerberos Attacks"
-    - id: windows-mimikatz-passtheticket-commandline-parameters-001
-      name: "Windows Mimikatz PassTheTicket CommandLine Parameters"
-      reason: "same analytic story: Active Directory Kerberos Attacks"
-    - id: windows-network-connection-discovery-with-arp-001
-      name: "Windows Network Connection Discovery With Arp"
-      reason: "same analytic story: Interlock Ransomware"
-    - id: windows-powershell-4104-hunting-001
-      name: "Windows PowerShell 4104 Hunting"
-      reason: "same analytic story: Interlock Ransomware"
-    - id: windows-powershell-domain-enumeration-001
-      name: "Windows PowerShell Domain Enumeration"
-      reason: "same analytic story: Interlock Ransomware"
-    - id: d81d4d3d-76b5-4f21-ab51-b17d5164c106
-      name: "Windows PowerShell FakeCAPTCHA Clipboard Execution"
-      reason: "same analytic story: Interlock Ransomware"
+  - id: 114c6bfe-9406-11ec-bcce-acde48001122
+    name: Disabled Kerberos Pre-Authentication Discovery With Get-ADUser
+    reason: Same AS-REP-roastable account hunt done with the AD module instead of PowerView; attackers swap tooling, so either firing on the host confirms the recon.
+  - id: 59b51620-94c9-11ec-b3d5-acde48001122
+    name: Kerberos Pre-Authentication Flag Disabled with PowerShell
+    reason: 'Escalation of the same theme: after discovering accounts, an attacker with write rights can set DONT_REQ_PREAUTH on a chosen account to make it roastable.'
+  - id: 3e2f1b2c-4d5e-11ee-be56-0242ac120002
+    name: Potential AS-REP Roasting via Kerberos TGT Requests
+    reason: 'Direct follow-on: the discovered pre-auth-disabled accounts are exploited by requesting AS-REPs (4768) for offline cracking.'
+  - id: caa9a802-8bd8-4b9e-a5cd-4d6221670219
+    name: Suspicious Kerberos Ticket Request via CLI
+    reason: Rubeus-style asreproast/asktgt command lines are the usual tool that consumes the PowerView output.
+  - id: 496a0e47-0a33-4dca-b009-9e6ca3591f39
+    name: Suspicious Kerberos RC4 Ticket Encryption
+    reason: AS-REP roast and Kerberoast responses are requested as RC4 (0x17) for cracking, so RC4 tickets after this recon corroborate the roast.
+  - id: dcd74b95-3f36-4ed9-9598-0490951643aa
+    name: PowerView PowerShell Cmdlets - ScriptBlock
+    reason: 'Same PowerView session: the attacker normally runs other PowerView cmdlets around Get-DomainUser during AD recon.'
+  - id: a7093c28-796c-4ebb-9997-e2c18b870837
+    name: Windows PowerView SPN Discovery
+    reason: 'Companion roasting recon: SPN discovery finds Kerberoastable accounts alongside the AS-REP candidates in the same PowerView session.'
+  - id: windows-powershell-domain-enumeration-001
+    name: Windows PowerShell Domain Enumeration
+    reason: Broader AD enumeration from PowerShell on the same host that precedes or accompanies the targeted pre-auth query.
   window: 1h
   enrichment_searches:
-  # Rule-specific telemetry pivots the engine runs around an alert from this rule,
-  # scoped to the alert's host/user/IP within the window (behaviour-targeted, not a sweep).
-    - name: "Kerberos ticket requests for this account"
-      query: '(data_win_system_eventID:"4768" OR data_win_system_eventID:"4769" OR data_win_system_eventID:"4771")'
-      pivot_on: [user]
-      window: 6h
-    - name: "UAC-bypass / privilege-escalation binaries on this host"
-      query: 'data_win_system_eventID:"1" AND (data_win_eventdata_image:/.*(\\[Ff][Oo][Dd][Hh][Ee][Ll][Pp][Ee][Rr]\.[Ee][Xx][Ee]|\\[Ee][Vv][Ee][Nn][Tt][Vv][Ww][Rr]\.[Ee][Xx][Ee]|\\[Ss][Dd][Cc][Ll][Tt]\.[Ee][Xx][Ee]|\\[Cc][Oo][Mm][Pp][Uu][Tt][Ee][Rr][Dd][Ee][Ff][Aa][Uu][Ll][Tt][Ss]\.[Ee][Xx][Ee]|\\[Ss][Ll][Uu][Ii]\.[Ee][Xx][Ee]|\\[Ww][Ss][Rr][Ee][Ss][Ee][Tt]\.[Ee][Xx][Ee])/ OR data_win_eventdata_parentImage:/.*(\\[Ff][Oo][Dd][Hh][Ee][Ll][Pp][Ee][Rr]\.[Ee][Xx][Ee]|\\[Ee][Vv][Ee][Nn][Tt][Vv][Ww][Rr]\.[Ee][Xx][Ee]|\\[Ss][Dd][Cc][Ll][Tt]\.[Ee][Xx][Ee]|\\[Cc][Oo][Mm][Pp][Uu][Tt][Ee][Rr][Dd][Ee][Ff][Aa][Uu][Ll][Tt][Ss]\.[Ee][Xx][Ee]|\\[Ss][Ll][Uu][Ii]\.[Ee][Xx][Ee]|\\[Ww][Ss][Rr][Ee][Ss][Ee][Tt]\.[Ee][Xx][Ee])/)'
-      pivot_on: [host]
-      window: 2h
-    - name: "Download / AMSI-bypass / encoded script blocks on this host"
-      query: 'data_win_system_eventID:"4104" AND (data_win_eventdata_scriptBlockText:/.*[Dd][Oo][Ww][Nn][Ll][Oo][Aa][Dd][Ss][Tt][Rr][Ii][Nn][Gg].*/ OR data_win_eventdata_scriptBlockText:/.*[Dd][Oo][Ww][Nn][Ll][Oo][Aa][Dd][Ff][Ii][Ll][Ee].*/ OR data_win_eventdata_scriptBlockText:/.*[Ii][Nn][Vv][Oo][Kk][Ee]-[Ww][Ee][Bb][Rr][Ee][Qq][Uu][Ee][Ss][Tt].*/ OR data_win_eventdata_scriptBlockText:/.*[Nn][Ee][Tt]\.[Ww][Ee][Bb][Cc][Ll][Ii][Ee][Nn][Tt].*/ OR data_win_eventdata_scriptBlockText:/.*[Ff][Rr][Oo][Mm][Bb][Aa][Ss][Ee]64[Ss][Tt][Rr][Ii][Nn][Gg].*/ OR data_win_eventdata_scriptBlockText:/.*[Ii][Ee][Xx].*/ OR data_win_eventdata_scriptBlockText:/.*[Ii][Nn][Vv][Oo][Kk][Ee]-[Ee][Xx][Pp][Rr][Ee][Ss][Ss][Ii][Oo][Nn].*/ OR data_win_eventdata_scriptBlockText:/.*[Ss][Tt][Aa][Rr][Tt]-[Bb][Ii][Tt][Ss][Tt][Rr][Aa][Nn][Ss][Ff][Ee][Rr].*/ OR data_win_eventdata_scriptBlockText:/.*[Aa][Mm][Ss][Ii][Uu][Tt][Ii][Ll][Ss].*/ OR data_win_eventdata_scriptBlockText:/.*-[Ee][Nn][Cc].*/ OR data_win_eventdata_scriptBlockText:/.*-[Ee][Nn][Cc][Oo][Dd][Ee][Dd][Cc][Oo][Mm][Mm][Aa][Nn][Dd].*/ OR data_win_eventdata_scriptBlockText:/.*[Rr][Ee][Ff][Ll][Ee][Cc][Tt][Ii][Oo][Nn]\.[Aa][Ss][Ss][Ee][Mm][Bb][Ll][Yy].*/)'
-      pivot_on: [host]
-      window: 1h
-    - name: "Follow-on LOLBin / signed-binary-proxy execution on this host"
-      query: 'data_win_system_eventID:"1" AND data_win_eventdata_image:/.*(\\[Rr][Uu][Nn][Dd][Ll][Ll]32\.[Ee][Xx][Ee]|\\[Rr][Ee][Gg][Ss][Vv][Rr]32\.[Ee][Xx][Ee]|\\[Mm][Ss][Hh][Tt][Aa]\.[Ee][Xx][Ee]|\\[Ii][Nn][Ss][Tt][Aa][Ll][Ll][Uu][Tt][Ii][Ll]\.[Ee][Xx][Ee]|\\[Rr][Ee][Gg][Aa][Ss][Mm]\.[Ee][Xx][Ee]|\\[Rr][Ee][Gg][Ss][Vv][Cc][Ss]\.[Ee][Xx][Ee]|\\[Mm][Ss][Bb][Uu][Ii][Ll][Dd]\.[Ee][Xx][Ee]|\\[Cc][Ee][Rr][Tt][Uu][Tt][Ii][Ll]\.[Ee][Xx][Ee]|\\[Bb][Ii][Tt][Ss][Aa][Dd][Mm][Ii][Nn]\.[Ee][Xx][Ee]|\\[Ww][Mm][Ii][Cc]\.[Ee][Xx][Ee]|\\[Cc][Mm][Ss][Tt][Pp]\.[Ee][Xx][Ee]|\\[Oo][Dd][Bb][Cc][Cc][Oo][Nn][Ff]\.[Ee][Xx][Ee]|\\[Ff][Oo][Rr][Ff][Ii][Ll][Ee][Ss]\.[Ee][Xx][Ee]|\\[Pp][Cc][Aa][Ll][Uu][Aa]\.[Ee][Xx][Ee]|\\[Mm][Aa][Vv][Ii][Nn][Jj][Ee][Cc][Tt]\.[Ee][Xx][Ee]|\\[Ss][Cc][Rr][Ii][Pp][Tt][Rr][Uu][Nn][Nn][Ee][Rr]\.[Ee][Xx][Ee])/'
-      pivot_on: [host]
-      window: 1h
+  # Behaviour-targeted hunts the engine runs around the alert (not a sweep).
+  - name: Other PowerView / AD recon script blocks
+    query: data_win_system_eventID:"4104" AND (data_win_eventdata_scriptBlockText:/.*[Gg]et-[Dd]omain(User|Computer|Group|Controller|Trust|GPO|SPNTicket).*/ OR data_win_eventdata_scriptBlockText:/.*[Gg]et-[Nn]et(User|Computer|Group|Session).*/ OR data_win_eventdata_scriptBlockText:/.*[Ff]ind-[Ll]ocal[Aa]dmin[Aa]ccess.*/ OR data_win_eventdata_scriptBlockText:/.*[Ii]nvoke-[Kk]erberoast.*/ OR data_win_eventdata_scriptBlockText:/.*[Ii]nvoke-[Ss]hare[Ff]inder.*/)
+    pivot_on:
+    - host
+    window: 2h
+  - name: PowerView loaded or downloaded in memory
+    query: data_win_system_eventID:"4104" AND (data_win_eventdata_scriptBlockText:/.*[Pp]ower[Vv]iew.*/ OR data_win_eventdata_scriptBlockText:/.*[Pp]ower[Ss]ploit.*/) AND (data_win_eventdata_scriptBlockText:/.*[Dd]ownload[Ss]tring.*/ OR data_win_eventdata_scriptBlockText:/.*[Ii]nvoke-[Ww]eb[Rr]equest.*/ OR data_win_eventdata_scriptBlockText:/.*[Ii][Ee][Xx].*/ OR data_win_eventdata_scriptBlockText:/.*[Ii]mport-[Mm]odule.*/)
+    pivot_on:
+    - host
+    window: 1h
+  - name: Rubeus / AS-REP roast tooling execution
+    query: data_win_system_eventID:"1" AND (data_win_eventdata_image:/.*[Rr]ubeus.*/ OR data_win_eventdata_commandLine:/.*[Aa]sreproast.*/ OR data_win_eventdata_commandLine:/.*[Aa]sktgt.*/ OR data_win_eventdata_commandLine:/.*[Kk]erberoast.*/ OR data_win_eventdata_commandLine:/.*[Rr]ubeus.*/ OR data_win_eventdata_commandLine:/.*[Hh]ashcat.*/ OR data_win_eventdata_commandLine:/.*[Gg]et[Nn]pusers.*/)
+    pivot_on:
+    - host
+    window: 4h
+  - name: AS-REP requests without pre-authentication for this account
+    query: data_win_system_eventID:"4768" AND (data_win_eventdata_preAuthType:"0" OR data_win_eventdata_ticketEncryptionType:"0x17")
+    pivot_on:
+    - user
+    window: 6h
+  - name: PowerShell connections to Kerberos or LDAP
+    query: data_win_system_eventID:"3" AND data_win_eventdata_image:/.*[Pp]ower[Ss]hell.*/ AND (data_win_eventdata_destinationPort:"88" OR data_win_eventdata_destinationPort:"389" OR data_win_eventdata_destinationPort:"636" OR data_win_eventdata_destinationPort:"3268")
+    pivot_on:
+    - host
+    window: 2h

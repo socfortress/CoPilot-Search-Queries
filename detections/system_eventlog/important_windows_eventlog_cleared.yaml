@@ -163,19 +163,58 @@ graylog:
   query: data_win_system_eventID:"104" AND data_win_system_providerName:/[Mm][Ii][Cc][Rr][Oo][Ss][Oo][Ff][Tt]-[Ww][Ii][Nn][Dd][Oo][Ww][Ss]-[Ee][Vv][Ee][Nn][Tt][Ll][Oo][Gg]/ AND (data_win_system_channel:/[Mm][Ii][Cc][Rr][Oo][Ss][Oo][Ff][Tt]-[Ww][Ii][Nn][Dd][Oo][Ww][Ss]-[Pp][Oo][Ww][Ee][Rr][Ss][Hh][Ee][Ll][Ll]\/[Oo][Pp][Ee][Rr][Aa][Tt][Ii][Oo][Nn][Aa][Ll]/ OR data_win_system_channel:/[Mm][Ii][Cc][Rr][Oo][Ss][Oo][Ff][Tt]-[Ww][Ii][Nn][Dd][Oo][Ww][Ss]-[Ss][Yy][Ss][Mm][Oo][Nn]\/[Oo][Pp][Ee][Rr][Aa][Tt][Ii][Oo][Nn][Aa][Ll]/ OR data_win_system_channel:/[Pp][Oo][Ww][Ee][Rr][Ss][Hh][Ee][Ll][Ll][Cc][Oo][Rr][Ee]\/[Oo][Pp][Ee][Rr][Aa][Tt][Ii][Oo][Nn][Aa][Ll]/ OR data_win_system_channel:/[Ss][Ee][Cc][Uu][Rr][Ii][Tt][Yy]/ OR data_win_system_channel:/[Ss][Yy][Ss][Tt][Ee][Mm]/ OR data_win_system_channel:/[Ww][Ii][Nn][Dd][Oo][Ww][Ss] [Pp][Oo][Ww][Ee][Rr][Ss][Hh][Ee][Ll][Ll]/)
 
 correlation:
-  # Authored by the correlation engine for review.
+  # Authored per-rule (behaviour-researched) for the correlation engine. Related CoPilot
+  # Searches + telemetry pivots to run around an alert, scoped to its host/user/ip/domain.
+  related_rules:
+  - id: fdb829a8-db84-4832-b64b-3e964cd44f01
+    name: Windows Eventlog Cleared Via Wevtutil
+    reason: 'Process-creation view of the same clear: names the parent, user and command line that produced the Event 104, identifying who cleared the log.'
+  - id: d99b79d2-0a6f-4f46-ad8b-260b6e17f982
+    name: Security Eventlog Cleared
+    reason: Security-channel clear (1102) fires alongside 104 when an attacker wipes several logs, showing logon/audit history was destroyed too.
+  - id: 0f017df3-8f5a-414f-ad6b-24aff1128278
+    name: Suspicious Eventlog Clear
+    reason: PowerShell Clear-EventLog/Remove-EventLog script block is the scripted way to produce this 104; confirms an interactive or fileless operator.
+  - id: 236e7c8e-c9d9-11eb-a824-acde48001122
+    name: Disable Logs Using WevtUtil
+    reason: Attackers often disable channels with wevtutil sl /e:false before or after clearing, so logging stays dark after the wipe.
+  - id: 0a13e132-651d-11eb-ae93-0242ac130002
+    name: Audit Policy Tampering Via Auditpol
+    reason: Audit policy weakening is a common companion to log clearing, a precursor that suppresses new evidence before the clear.
+  - id: 4d7cda18-1b12-4e52-b45c-d28653210df8
+    name: Sysmon Driver Unloaded Via Fltmc.EXE
+    reason: Unloading Sysmon is paired with clearing the Sysmon/Operational channel to blind endpoint telemetry before follow-on activity.
+  - id: c947b146-0abc-4c87-9c64-b17e9d7274a2
+    name: Shadow Copies Deletion Using Operating Systems Utilities
+    reason: Ransomware playbooks clear event logs and delete shadow copies together to cripple forensics and recovery just before encryption.
+  - id: b28e58e4-2a72-4fae-bdee-0fbe904db642
+    name: Windows Defender Real-time Protection Disabled
+    reason: 'Defense impairment chain: attackers disable AV then wipe logs to remove traces of the tooling that ran in between.'
+  window: 2h
   enrichment_searches:
-  # Rule-specific telemetry pivots the engine runs around an alert from this rule,
-  # scoped to the alert's host/user/IP within the window (behaviour-targeted, not a sweep).
-    - name: "Service installations on this host"
-      query: 'data_win_system_eventID:"7045"'
-      pivot_on: [host]
-      window: 6h
-    - name: "Follow-on LOLBin / signed-binary-proxy execution on this host"
-      query: 'data_win_system_eventID:"1" AND data_win_eventdata_image:/.*(\\[Rr][Uu][Nn][Dd][Ll][Ll]32\.[Ee][Xx][Ee]|\\[Rr][Ee][Gg][Ss][Vv][Rr]32\.[Ee][Xx][Ee]|\\[Mm][Ss][Hh][Tt][Aa]\.[Ee][Xx][Ee]|\\[Ii][Nn][Ss][Tt][Aa][Ll][Ll][Uu][Tt][Ii][Ll]\.[Ee][Xx][Ee]|\\[Rr][Ee][Gg][Aa][Ss][Mm]\.[Ee][Xx][Ee]|\\[Rr][Ee][Gg][Ss][Vv][Cc][Ss]\.[Ee][Xx][Ee]|\\[Mm][Ss][Bb][Uu][Ii][Ll][Dd]\.[Ee][Xx][Ee]|\\[Cc][Ee][Rr][Tt][Uu][Tt][Ii][Ll]\.[Ee][Xx][Ee]|\\[Bb][Ii][Tt][Ss][Aa][Dd][Mm][Ii][Nn]\.[Ee][Xx][Ee]|\\[Ww][Mm][Ii][Cc]\.[Ee][Xx][Ee]|\\[Cc][Mm][Ss][Tt][Pp]\.[Ee][Xx][Ee]|\\[Oo][Dd][Bb][Cc][Cc][Oo][Nn][Ff]\.[Ee][Xx][Ee]|\\[Ff][Oo][Rr][Ff][Ii][Ll][Ee][Ss]\.[Ee][Xx][Ee]|\\[Pp][Cc][Aa][Ll][Uu][Aa]\.[Ee][Xx][Ee]|\\[Mm][Aa][Vv][Ii][Nn][Jj][Ee][Cc][Tt]\.[Ee][Xx][Ee]|\\[Ss][Cc][Rr][Ii][Pp][Tt][Rr][Uu][Nn][Nn][Ee][Rr]\.[Ee][Xx][Ee])/'
-      pivot_on: [host]
-      window: 2h
-    - name: "Memory/credential-dump creation & LSASS access on this host"
-      query: '((data_win_system_eventID:"1" AND data_win_eventdata_image:/.*(\\[Pp][Rr][Oo][Cc][Dd][Uu][Mm][Pp]\.[Ee][Xx][Ee]|\\[Pp][Rr][Oo][Cc][Dd][Uu][Mm][Pp]64\.[Ee][Xx][Ee]|\\[Ss][Qq][Ll][Dd][Uu][Mm][Pp][Ee][Rr]\.[Ee][Xx][Ee]|\\[Cc][Rr][Ee][Aa][Tt][Ee][Dd][Uu][Mm][Pp]\.[Ee][Xx][Ee]|\\[Rr][Dd][Rr][Ll][Ee][Aa][Kk][Dd][Ii][Aa][Gg]\.[Ee][Xx][Ee]|\\[Dd][Uu][Mm][Pp][Ee][Rr][Tt]\.[Ee][Xx][Ee]|\\[Nn][Aa][Nn][Oo][Dd][Uu][Mm][Pp]\.[Ee][Xx][Ee]|\\[Aa][Vv][Dd][Uu][Mm][Pp]\.[Ee][Xx][Ee])/) OR (data_win_system_eventID:"1" AND (data_win_eventdata_commandLine:/.*[Cc][Oo][Mm][Ss][Vv][Cc][Ss]\.[Dd][Ll][Ll].*/ OR data_win_eventdata_commandLine:/.*[Mm][Ii][Nn][Ii][Dd][Uu][Mm][Pp].*/ OR data_win_eventdata_commandLine:/.*[Dd][Uu][Mm][Pp][Ee][Rr][Tt].*/ OR data_win_eventdata_commandLine:/.*[Nn][Aa][Nn][Oo][Dd][Uu][Mm][Pp].*/ OR data_win_eventdata_commandLine:/.*[Ll][Ss][Aa][Ss][Ss].*/ OR data_win_eventdata_commandLine:/.*[Ss][Ee][Kk][Uu][Rr][Ll][Ss][Aa].*/ OR data_win_eventdata_commandLine:/.*[Nn][Tt][Dd][Ss]\.[Dd][Ii][Tt].*/ OR data_win_eventdata_commandLine:/.*[Nn][Tt][Dd][Ss][Uu][Tt][Ii][Ll].*/)) OR (data_win_system_eventID:"10" AND data_win_eventdata_targetImage:/.*(\\[Ll][Ss][Aa][Ss][Ss]\.[Ee][Xx][Ee])/))'
-      pivot_on: [host]
-      window: 1h
+  # Behaviour-targeted hunts the engine runs around the alert (not a sweep).
+  - name: Log-clearing or logging-disable commands run on this host
+    query: data_win_system_eventID:"1" AND (data_win_eventdata_commandLine:/.*[Ww][Ee][Vv][Tt][Uu][Tt][Ii][Ll].*[ ]+(cl|clear-log|sl|set-log).*/ OR data_win_eventdata_commandLine:/.*([Cc]lear-[Ee]vent[Ll]og|[Rr]emove-[Ee]vent[Ll]og|[Ll]imit-[Ee]vent[Ll]og).*/ OR data_win_eventdata_commandLine:/.*[Aa][Uu][Dd][Ii][Tt][Pp][Oo][Ll].*(\/clear|\/remove|\/set).*/)
+    pivot_on:
+    - host
+    window: 2h
+  - name: Shadow copy, backup and recovery destruction before the wipe
+    query: data_win_system_eventID:"1" AND (data_win_eventdata_commandLine:/.*[Vv][Ss][Ss][Aa][Dd][Mm][Ii][Nn].*[Dd][Ee][Ll][Ee][Tt][Ee].*[Ss][Hh][Aa][Dd][Oo][Ww].*/ OR data_win_eventdata_commandLine:/.*[Ww][Bb][Aa][Dd][Mm][Ii][Nn].*[Dd][Ee][Ll][Ee][Tt][Ee].*/ OR data_win_eventdata_commandLine:/.*[Bb][Cc][Dd][Ee][Dd][Ii][Tt].*([Rr][Ee][Cc][Oo][Vv][Ee][Rr][Yy][Ee][Nn][Aa][Bb][Ll][Ee]|[Bb][Oo][Oo][Tt][Ss][Tt][Aa][Tt][Uu][Ss][Pp][Oo][Ll][Ii][Cc][Yy]).*/ OR data_win_eventdata_commandLine:/.*[Ww][Mm][Ii][Cc].*[Ss][Hh][Aa][Dd][Oo][Ww][Cc][Oo][Pp][Yy].*[Dd][Ee][Ll][Ee][Tt][Ee].*/)
+    pivot_on:
+    - host
+    window: 2h
+  - name: Security tooling and telemetry tampering (Defender, Sysmon, firewall)
+    query: data_win_system_eventID:"1" AND (data_win_eventdata_commandLine:/.*([Ss]et-[Mm]p[Pp]reference|[Aa]dd-[Mm]p[Pp]reference).*([Dd]isable|[Ee]xclusion).*/ OR data_win_eventdata_commandLine:/.*[Ff][Ll][Tt][Mm][Cc].*[Uu][Nn][Ll][Oo][Aa][Dd].*/ OR data_win_eventdata_commandLine:/.*[Nn][Ee][Tt][Ss][Hh].*[Aa][Dd][Vv][Ff][Ii][Rr][Ee][Ww][Aa][Ll][Ll].*[Oo][Ff][Ff].*/ OR data_win_eventdata_commandLine:/.*[Ss][Cc].*([Ss][Tt][Oo][Pp]|[Cc][Oo][Nn][Ff][Ii][Gg]).*([Ss][Yy][Ss][Mm][Oo][Nn]|[Ww][Ii][Nn][Dd][Ee][Ff][Ee][Nn][Dd]|[Ss][Ee][Nn][Ss][Ee]).*/)
+    pivot_on:
+    - host
+    window: 2h
+  - name: 'Credential theft: LSASS access and dump tooling'
+    query: (data_win_system_eventID:"10" AND data_win_eventdata_targetImage:/.*[Ll][Ss][Aa][Ss][Ss]\.[Ee][Xx][Ee]/) OR (data_win_system_eventID:"1" AND (data_win_eventdata_commandLine:/.*[Cc][Oo][Mm][Ss][Vv][Cc][Ss].*[Mm][Ii][Nn][Ii][Dd][Uu][Mm][Pp].*/ OR data_win_eventdata_commandLine:/.*([Ss][Ee][Kk][Uu][Rr][Ll][Ss][Aa]|[Ll][Ss][Aa][Dd][Uu][Mm][Pp]|[Nn][Tt][Dd][Ss][Uu][Tt][Ii][Ll]).*/ OR data_win_eventdata_image:/.*\\([Pp][Rr][Oo][Cc][Dd][Uu][Mm][Pp]|[Mm][Ii][Mm][Ii][Kk][Aa][Tt][Zz])(64)?\.[Ee][Xx][Ee]/))
+    pivot_on:
+    - host
+    window: 4h
+  - name: Lateral movement and service-based execution on this host
+    query: (data_win_system_eventID:"4624" AND data_win_eventdata_logonType:"3" AND NOT data_win_eventdata_ipAddress:"127.0.0.1") OR data_win_system_eventID:"7045" OR (data_win_system_eventID:"1" AND data_win_eventdata_image:/.*\\([Pp][Ss][Ee][Xx][Ee][Ss][Vv][Cc]|[Pp][Ss][Ee][Xx][Ee][Cc])\.[Ee][Xx][Ee]/)
+    pivot_on:
+    - host
+    window: 6h

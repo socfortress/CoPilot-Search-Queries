@@ -141,19 +141,58 @@ graylog:
   query: data_win_system_eventID:"4104" AND (data_win_eventdata_scriptBlockText:/.*[Ii][Ff]\(0\)\{\{\{0\}\}\}' -[Ff] \$\(0 -[Aa][Ss] \[[Cc][Hh][Aa][Rr]\]\) \+.*/ OR data_win_eventdata_scriptBlockText:/.*\#\<[Nn][Uu][Ll][Ll]\>.*/)
 
 correlation:
-  # Authored by the correlation engine for review.
+  # Authored per-rule (behaviour-researched) for the correlation engine. Related CoPilot
+  # Searches + telemetry pivots to run around an alert, scoped to its host/user/ip/domain.
+  related_rules:
+  - id: e0d6c087-2d1c-47fd-8799-3904103c5a98
+    name: AMSI Bypass Pattern Assembly GetType
+    reason: Same 4104 channel; the common alternative/companion AMSI bypass (reflection to AmsiUtils) that attackers chain with or fall back to when the NULL-bit string trick is caught
+  - id: a21e3484-c94d-11eb-b55b-acde48001122
+    name: Unloading AMSI via Reflection
+    reason: Reflective amsiInitFailed/AmsiUtils tampering in the same script block stream; confirms deliberate AMSI neutralization rather than a stray string
+  - id: ea9bf0fa-edec-4fb8-8b78-b119f2528186
+    name: Windows Defender AMSI Trigger Detected
+    reason: Defender flagging the same script via AMSI shows the bypass failed or an earlier obfuscated stage was caught just before the bypass was applied
+  - id: 115fdba9-f017-42e6-84cf-d5573bf2ddf8
+    name: Disable of ETW Trace - Powershell
+    reason: 'Defense-impairment pair: attackers blind AMSI and ETW in the same prologue before running the real payload'
+  - id: 14c71865-6cd3-44ae-adaa-1db923fae5f2
+    name: Tamper Windows Defender - ScriptBlockLogging
+    reason: After AMSI is bypassed the script commonly disables Defender real-time protection to persist the payload
+  - id: c1344fa2-323b-4d2e-9176-84b4d4821c88
+    name: Windows Defender Exclusions Added - PowerShell
+    reason: 'Follow-on step: add path/process exclusions so dropped payloads survive scanning'
+  - id: 403c2cc0-7f6b-4925-9423-bfa573bed7eb
+    name: Suspicious PowerShell Download - Powershell Script
+    reason: The bypass exists to let the next stage download a flagged payload via DownloadString/DownloadFile without AMSI scanning
+  - id: ddcd88cb-7f62-4ce5-86f9-1704190feb0a
+    name: Potential In-Memory Execution Using Reflection.Assembly
+    reason: 'Typical post-bypass action: load a .NET assembly in memory (Rubeus, SharpHound, Cobalt Strike loaders)'
+  window: 1h
   enrichment_searches:
-  # Rule-specific telemetry pivots the engine runs around an alert from this rule,
-  # scoped to the alert's host/user/IP within the window (behaviour-targeted, not a sweep).
-    - name: "Download / AMSI-bypass / encoded script blocks on this host"
-      query: 'data_win_system_eventID:"4104" AND (data_win_eventdata_scriptBlockText:/.*[Dd][Oo][Ww][Nn][Ll][Oo][Aa][Dd][Ss][Tt][Rr][Ii][Nn][Gg].*/ OR data_win_eventdata_scriptBlockText:/.*[Dd][Oo][Ww][Nn][Ll][Oo][Aa][Dd][Ff][Ii][Ll][Ee].*/ OR data_win_eventdata_scriptBlockText:/.*[Ii][Nn][Vv][Oo][Kk][Ee]-[Ww][Ee][Bb][Rr][Ee][Qq][Uu][Ee][Ss][Tt].*/ OR data_win_eventdata_scriptBlockText:/.*[Nn][Ee][Tt]\.[Ww][Ee][Bb][Cc][Ll][Ii][Ee][Nn][Tt].*/ OR data_win_eventdata_scriptBlockText:/.*[Ff][Rr][Oo][Mm][Bb][Aa][Ss][Ee]64[Ss][Tt][Rr][Ii][Nn][Gg].*/ OR data_win_eventdata_scriptBlockText:/.*[Ii][Ee][Xx].*/ OR data_win_eventdata_scriptBlockText:/.*[Ii][Nn][Vv][Oo][Kk][Ee]-[Ee][Xx][Pp][Rr][Ee][Ss][Ss][Ii][Oo][Nn].*/ OR data_win_eventdata_scriptBlockText:/.*[Ss][Tt][Aa][Rr][Tt]-[Bb][Ii][Tt][Ss][Tt][Rr][Aa][Nn][Ss][Ff][Ee][Rr].*/ OR data_win_eventdata_scriptBlockText:/.*[Aa][Mm][Ss][Ii][Uu][Tt][Ii][Ll][Ss].*/ OR data_win_eventdata_scriptBlockText:/.*-[Ee][Nn][Cc].*/ OR data_win_eventdata_scriptBlockText:/.*-[Ee][Nn][Cc][Oo][Dd][Ee][Dd][Cc][Oo][Mm][Mm][Aa][Nn][Dd].*/ OR data_win_eventdata_scriptBlockText:/.*[Rr][Ee][Ff][Ll][Ee][Cc][Tt][Ii][Oo][Nn]\.[Aa][Ss][Ss][Ee][Mm][Bb][Ll][Yy].*/)'
-      pivot_on: [host]
-      window: 1h
-    - name: "Follow-on LOLBin / signed-binary-proxy execution on this host"
-      query: 'data_win_system_eventID:"1" AND data_win_eventdata_image:/.*(\\[Rr][Uu][Nn][Dd][Ll][Ll]32\.[Ee][Xx][Ee]|\\[Rr][Ee][Gg][Ss][Vv][Rr]32\.[Ee][Xx][Ee]|\\[Mm][Ss][Hh][Tt][Aa]\.[Ee][Xx][Ee]|\\[Ii][Nn][Ss][Tt][Aa][Ll][Ll][Uu][Tt][Ii][Ll]\.[Ee][Xx][Ee]|\\[Rr][Ee][Gg][Aa][Ss][Mm]\.[Ee][Xx][Ee]|\\[Rr][Ee][Gg][Ss][Vv][Cc][Ss]\.[Ee][Xx][Ee]|\\[Mm][Ss][Bb][Uu][Ii][Ll][Dd]\.[Ee][Xx][Ee]|\\[Cc][Ee][Rr][Tt][Uu][Tt][Ii][Ll]\.[Ee][Xx][Ee]|\\[Bb][Ii][Tt][Ss][Aa][Dd][Mm][Ii][Nn]\.[Ee][Xx][Ee]|\\[Ww][Mm][Ii][Cc]\.[Ee][Xx][Ee]|\\[Cc][Mm][Ss][Tt][Pp]\.[Ee][Xx][Ee]|\\[Oo][Dd][Bb][Cc][Cc][Oo][Nn][Ff]\.[Ee][Xx][Ee]|\\[Ff][Oo][Rr][Ff][Ii][Ll][Ee][Ss]\.[Ee][Xx][Ee]|\\[Pp][Cc][Aa][Ll][Uu][Aa]\.[Ee][Xx][Ee]|\\[Mm][Aa][Vv][Ii][Nn][Jj][Ee][Cc][Tt]\.[Ee][Xx][Ee]|\\[Ss][Cc][Rr][Ii][Pp][Tt][Rr][Uu][Nn][Nn][Ee][Rr]\.[Ee][Xx][Ee])/'
-      pivot_on: [host]
-      window: 1h
-    - name: "Memory/credential-dump creation & LSASS access on this host"
-      query: '((data_win_system_eventID:"1" AND data_win_eventdata_image:/.*(\\[Pp][Rr][Oo][Cc][Dd][Uu][Mm][Pp]\.[Ee][Xx][Ee]|\\[Pp][Rr][Oo][Cc][Dd][Uu][Mm][Pp]64\.[Ee][Xx][Ee]|\\[Ss][Qq][Ll][Dd][Uu][Mm][Pp][Ee][Rr]\.[Ee][Xx][Ee]|\\[Cc][Rr][Ee][Aa][Tt][Ee][Dd][Uu][Mm][Pp]\.[Ee][Xx][Ee]|\\[Rr][Dd][Rr][Ll][Ee][Aa][Kk][Dd][Ii][Aa][Gg]\.[Ee][Xx][Ee]|\\[Dd][Uu][Mm][Pp][Ee][Rr][Tt]\.[Ee][Xx][Ee]|\\[Nn][Aa][Nn][Oo][Dd][Uu][Mm][Pp]\.[Ee][Xx][Ee]|\\[Aa][Vv][Dd][Uu][Mm][Pp]\.[Ee][Xx][Ee])/) OR (data_win_system_eventID:"1" AND (data_win_eventdata_commandLine:/.*[Cc][Oo][Mm][Ss][Vv][Cc][Ss]\.[Dd][Ll][Ll].*/ OR data_win_eventdata_commandLine:/.*[Mm][Ii][Nn][Ii][Dd][Uu][Mm][Pp].*/ OR data_win_eventdata_commandLine:/.*[Dd][Uu][Mm][Pp][Ee][Rr][Tt].*/ OR data_win_eventdata_commandLine:/.*[Nn][Aa][Nn][Oo][Dd][Uu][Mm][Pp].*/ OR data_win_eventdata_commandLine:/.*[Ll][Ss][Aa][Ss][Ss].*/ OR data_win_eventdata_commandLine:/.*[Ss][Ee][Kk][Uu][Rr][Ll][Ss][Aa].*/ OR data_win_eventdata_commandLine:/.*[Nn][Tt][Dd][Ss]\.[Dd][Ii][Tt].*/ OR data_win_eventdata_commandLine:/.*[Nn][Tt][Dd][Ss][Uu][Tt][Ii][Ll].*/)) OR (data_win_system_eventID:"10" AND data_win_eventdata_targetImage:/.*(\\[Ll][Ss][Aa][Ss][Ss]\.[Ee][Xx][Ee])/))'
-      pivot_on: [host]
-      window: 1h
+  # Behaviour-targeted hunts the engine runs around the alert (not a sweep).
+  - name: Download cradle or remote script fetch in script blocks after AMSI bypass
+    query: data_win_system_eventID:"4104" AND (data_win_eventdata_scriptBlockText:/.*[Dd]ownload([Ss]tring|[Ff]ile|[Dd]ata).*/ OR data_win_eventdata_scriptBlockText:/.*[Ii]nvoke-[Ww]eb[Rr]equest.*/ OR data_win_eventdata_scriptBlockText:/.*[Nn]et\.[Ww]eb[Cc]lient.*/ OR data_win_eventdata_scriptBlockText:/.*[Ss]tart-[Bb]its[Tt]ransfer.*/ OR data_win_eventdata_scriptBlockText:/.*[Ii]nvoke-[Ee]xpression.*/)
+    pivot_on:
+    - host
+    window: 1h
+  - name: Other AMSI/ETW tampering and in-memory .NET loading in script blocks
+    query: data_win_system_eventID:"4104" AND (data_win_eventdata_scriptBlockText:/.*[Aa]msi[Uu]tils.*/ OR data_win_eventdata_scriptBlockText:/.*amsiInitFailed.*/ OR data_win_eventdata_scriptBlockText:/.*[Aa]msi[Cc]ontext.*/ OR data_win_eventdata_scriptBlockText:/.*[Aa]msi[Ss]can[Bb]uffer.*/ OR data_win_eventdata_scriptBlockText:/.*[Rr]eflection\.[Aa]ssembly.*/ OR data_win_eventdata_scriptBlockText:/.*[Vv]irtual[Pp]rotect.*/ OR data_win_eventdata_scriptBlockText:/.*[Ee]tw[Ee]vent[Ww]rite.*/)
+    pivot_on:
+    - host
+    window: 1h
+  - name: Defender tampering or exclusions via PowerShell script blocks
+    query: data_win_system_eventID:"4104" AND (data_win_eventdata_scriptBlockText:/.*[Ss]et-[Mm]p[Pp]reference.*/ OR data_win_eventdata_scriptBlockText:/.*[Aa]dd-[Mm]p[Pp]reference.*/ OR data_win_eventdata_scriptBlockText:/.*[Dd]isable[Rr]ealtime[Mm]onitoring.*/ OR data_win_eventdata_scriptBlockText:/.*[Ee]xclusion[Pp]ath.*/)
+    pivot_on:
+    - host
+    window: 2h
+  - name: PowerShell process launch with encoded or hidden arguments and its parent
+    query: data_win_system_eventID:"1" AND data_win_eventdata_image:/.*[Pp]ower[Ss]hell.*/ AND (data_win_eventdata_commandLine:/.*-[Ee]nc.*/ OR data_win_eventdata_commandLine:/.*-[Ww]indow[Ss]tyle +[Hh]idden.*/ OR data_win_eventdata_commandLine:/.*-[Nn]o[Pp].*/ OR data_win_eventdata_commandLine:/.*[Ff]rom[Bb]ase64[Ss]tring.*/)
+    pivot_on:
+    - host
+    window: 2h
+  - name: Outbound network connections from PowerShell after the bypass
+    query: data_win_system_eventID:"3" AND data_win_eventdata_image:/.*[Pp]ower[Ss]hell.*/
+    pivot_on:
+    - host
+    window: 1h

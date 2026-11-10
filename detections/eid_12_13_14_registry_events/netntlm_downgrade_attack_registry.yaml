@@ -208,44 +208,58 @@ graylog:
   query: (data_win_system_eventID:"12" OR data_win_system_eventID:"13" OR data_win_system_eventID:"14") AND data_win_eventdata_targetObject:/.*[Ss][Yy][Ss][Tt][Ee][Mm]\\.*/ AND data_win_eventdata_targetObject:/.*[Cc][Oo][Nn][Tt][Rr][Oo][Ll][Ss][Ee][Tt].*/ AND data_win_eventdata_targetObject:/.*\\[Cc][Oo][Nn][Tt][Rr][Oo][Ll]\\[Ll][Ss][Aa].*/ AND ((data_win_eventdata_targetObject:/.*\\[Ll][Mm][Cc][Oo][Mm][Pp][Aa][Tt][Ii][Bb][Ii][Ll][Ii][Tt][Yy][Ll][Ee][Vv][Ee][Ll]/ AND (data_win_eventdata_details:/[Dd][Ww][Oo][Rr][Dd] \(0[Xx]00000000\)/ OR data_win_eventdata_details:/[Dd][Ww][Oo][Rr][Dd] \(0[Xx]00000001\)/ OR data_win_eventdata_details:/[Dd][Ww][Oo][Rr][Dd] \(0[Xx]00000002\)/)) OR (data_win_eventdata_targetObject:/.*\\[Nn][Tt][Ll][Mm][Mm][Ii][Nn][Cc][Ll][Ii][Ee][Nn][Tt][Ss][Ee][Cc]/ AND (data_win_eventdata_details:/[Dd][Ww][Oo][Rr][Dd] \(0[Xx]00000000\)/ OR data_win_eventdata_details:/[Dd][Ww][Oo][Rr][Dd] \(0[Xx]00000010\)/ OR data_win_eventdata_details:/[Dd][Ww][Oo][Rr][Dd] \(0[Xx]00000020\)/ OR data_win_eventdata_details:/[Dd][Ww][Oo][Rr][Dd] \(0[Xx]00000030\)/)) OR data_win_eventdata_targetObject:/.*\\[Rr][Ee][Ss][Tt][Rr][Ii][Cc][Tt][Ss][Ee][Nn][Dd][Ii][Nn][Gg][Nn][Tt][Ll][Mm][Tt][Rr][Aa][Ff][Ff][Ii][Cc]/)
 
 correlation:
-  # Authored by the correlation engine for review. Related CoPilot Searches to run
-  # around an alert from this rule, scoped to the same host/user/IP within the window.
+  # Authored per-rule (behaviour-researched) for the correlation engine. Related CoPilot
+  # Searches + telemetry pivots to run around an alert, scoped to its host/user/ip/domain.
   related_rules:
-    - id: ec570e53-4c76-45a9-804d-dc3f355ff7a7
-      name: "7Zip Compressing Dump Files"
-      reason: "next kill-chain tactic: Collection"
-    - id: 0a1255c5-d732-4b62-ac02-b5152d34fb83
-      name: "ADExplorer Writing Complete AD Snapshot Into .dat File"
-      reason: "next kill-chain tactic: Discovery"
-    - id: 1ea13e8c-03ea-409b-877d-ce5c3d2c1cb3
-      name: "ADFS Database Named Pipe Connection By Uncommon Tool"
-      reason: "next kill-chain tactic: Collection"
-    - id: 75bf09fa-1dd7-4d18-9af9-dd9e492562eb
-      name: "ADSI-Cache File Creation By Uncommon Tool"
-      reason: "next kill-chain tactic: Command and Control"
-    - id: 33a2d1dd-f3b0-40bd-8baf-7974468927cc
-      name: "APT PRIVATELOG Image Load Pattern"
-      reason: "next kill-chain tactic: Privilege Escalation"
-    - id: 03e2746e-2b31-42f1-ab7a-eb39365b2422
-      name: "APT31 Judgement Panda Activity"
-      reason: "next kill-chain tactic: Credential Access"
-  window: 1h
+  - id: d3abac66-f11c-4ed0-8acb-50cc29c97eed
+    name: NetNTLM Downgrade Attack
+    reason: 'Security-log counterpart: the same lmcompatibilitylevel/NtlmMinClientSec/RestrictSendingNTLMTraffic change seen via audit events; confirms the downgrade took effect on this host.'
+  - id: e9d4ab66-a532-4ef7-a502-66a9e4a34f5d
+    name: NTLMv1 Logon Between Client and Server
+    reason: 'Direct consequence of the downgrade: once LmCompatibilityLevel is lowered, NTLMv1 logons appear whose challenge-response is trivially crackable.'
+  - id: b99a1518-1ad5-4f65-bc95-1ffff97a8fd0
+    name: HackTool - Inveigh Execution
+    reason: Inveigh/Responder-style poisoning is the usual reason to force weaker NetNTLM so captured hashes can be cracked or relayed.
+  - id: 5589ab4f-a767-433c-961d-c91f3f704db1
+    name: Potential SMB Relay Attack Tool Execution
+    reason: Attackers pair the downgrade with NTLM relay/capture tooling right after weakening NTLM settings.
+  - id: 8eef149c-bd26-49f2-9e5a-9b00e3af499b
+    name: Pass the Hash Activity 2
+    reason: Captured or cracked NTLM material is replayed as pass-the-hash for lateral movement; follow-on to the downgrade.
+  - id: d6a9b252-c666-4de6-8806-5561bbbd3bdc
+    name: Wdigest Enable UseLogonCredential
+    reason: Co-occurring LSA credential-hardening tampering by the same operator to expose cleartext or weak credentials.
+  - id: 1a2d6c47-75b0-45bd-b133-2c0be75349fd
+    name: Wdigest CredGuard Registry Modification
+    reason: Registry tampering under the same LSA/credential-protection keys, indicating a credential-access preparation phase.
+  - id: a642964e-bead-4bed-8910-1bb4d63e3b4d
+    name: HackTool - Mimikatz Execution
+    reason: Credential extraction tooling commonly run on the host after NTLM protections are weakened.
+  window: 2h
   enrichment_searches:
-  # Rule-specific telemetry pivots the engine runs around an alert from this rule,
-  # scoped to the alert's host/user/IP within the window (behaviour-targeted, not a sweep).
-    - name: "Autostart / security-setting registry changes on this host"
-      query: '(((data_win_system_eventID:"12" OR data_win_system_eventID:"13") AND (data_win_eventdata_targetObject:/.*[Cc][Uu][Rr][Rr][Ee][Nn][Tt][Vv][Ee][Rr][Ss][Ii][Oo][Nn]\\[Rr][Uu][Nn].*/ OR data_win_eventdata_targetObject:/.*[Cc][Uu][Rr][Rr][Ee][Nn][Tt][Vv][Ee][Rr][Ss][Ii][Oo][Nn]\\[Rr][Uu][Nn][Oo][Nn][Cc][Ee].*/ OR data_win_eventdata_targetObject:/.*[Cc][Uu][Rr][Rr][Ee][Nn][Tt][Cc][Oo][Nn][Tt][Rr][Oo][Ll][Ss][Ee][Tt]\\[Ss][Ee][Rr][Vv][Ii][Cc][Ee][Ss]\\.*/ OR data_win_eventdata_targetObject:/.*[Ii][Mm][Aa][Gg][Ee] [Ff][Ii][Ll][Ee] [Ee][Xx][Ee][Cc][Uu][Tt][Ii][Oo][Nn] [Oo][Pp][Tt][Ii][Oo][Nn][Ss]\\.*/ OR data_win_eventdata_targetObject:/.*[Ww][Ii][Nn][Ll][Oo][Gg][Oo][Nn]\\[Ss][Hh][Ee][Ll][Ll].*/ OR data_win_eventdata_targetObject:/.*[Ww][Ii][Nn][Ll][Oo][Gg][Oo][Nn]\\[Uu][Ss][Ee][Rr][Ii][Nn][Ii][Tt].*/ OR data_win_eventdata_targetObject:/.*[Cc][Uu][Rr][Rr][Ee][Nn][Tt][Vv][Ee][Rr][Ss][Ii][Oo][Nn]\\[Ee][Xx][Pp][Ll][Oo][Rr][Ee][Rr]\\[Rr][Uu][Nn].*/ OR data_win_eventdata_targetObject:/.*[Pp][Oo][Ll][Ii][Cc][Ii][Ee][Ss]\\[Ee][Xx][Pp][Ll][Oo][Rr][Ee][Rr]\\[Rr][Uu][Nn].*/ OR data_win_eventdata_targetObject:/.*[Cc][Uu][Rr][Rr][Ee][Nn][Tt][Vv][Ee][Rr][Ss][Ii][Oo][Nn]\\[Ww][Ii][Nn][Dd][Oo][Ww][Ss]\\[Ll][Oo][Aa][Dd].*/)) OR (data_win_system_eventID:"1" AND (data_win_eventdata_commandLine:/.*[Ss][Ee][Tt]-[Mm][Pp][Pp][Rr][Ee][Ff][Ee][Rr][Ee][Nn][Cc][Ee].*/ OR data_win_eventdata_commandLine:/.*[Dd][Ii][Ss][Aa][Bb][Ll][Ee][Rr][Ee][Aa][Ll][Tt][Ii][Mm][Ee][Mm][Oo][Nn][Ii][Tt][Oo][Rr][Ii][Nn][Gg].*/ OR data_win_eventdata_commandLine:/.*[Dd][Ii][Ss][Aa][Bb][Ll][Ee][Aa][Nn][Tt][Ii][Ss][Pp][Yy][Ww][Aa][Rr][Ee].*/ OR data_win_eventdata_commandLine:/.*[Aa][Dd][Dd]-[Mm][Pp][Pp][Rr][Ee][Ff][Ee][Rr][Ee][Nn][Cc][Ee] -[Ee][Xx][Cc][Ll][Uu][Ss][Ii][Oo][Nn][Pp][Aa][Tt][Hh].*/ OR data_win_eventdata_commandLine:/.*[Ww][Ee][Vv][Tt][Uu][Tt][Ii][Ll].*/ OR data_win_eventdata_commandLine:/.*[Cc][Ll][Ee][Aa][Rr]-[Ee][Vv][Ee][Nn][Tt][Ll][Oo][Gg].*/ OR data_win_eventdata_commandLine:/.*[Ff][Ss][Uu][Tt][Ii][Ll] [Uu][Ss][Nn] [Dd][Ee][Ll][Ee][Tt][Ee][Jj][Oo][Uu][Rr][Nn][Aa][Ll].*/ OR data_win_eventdata_commandLine:/.*[Vv][Ss][Ss][Aa][Dd][Mm][Ii][Nn].*/ OR data_win_eventdata_commandLine:/.*[Ss][Tt][Oo][Pp]-[Ss][Ee][Rr][Vv][Ii][Cc][Ee].*/ OR data_win_eventdata_commandLine:/.*[Ss][Cc] [Ss][Tt][Oo][Pp].*/ OR data_win_eventdata_commandLine:/.*[Ss][Cc] [Cc][Oo][Nn][Ff][Ii][Gg].*/)))'
-      pivot_on: [host]
-      window: 2h
-    - name: "Other writes to the same registry location on this host"
-      query: '(data_win_system_eventID:"12" OR data_win_system_eventID:"13") AND (data_win_eventdata_targetObject:/.*[Cc][Oo][Nn][Tt][Rr][Oo][Ll][Ss][Ee][Tt].*/ OR data_win_eventdata_targetObject:/.*[Ll][Mm][Cc][Oo][Mm][Pp][Aa][Tt][Ii][Bb][Ii][Ll][Ii][Tt][Yy][Ll][Ee][Vv][Ee][Ll].*/ OR data_win_eventdata_targetObject:/.*[Nn][Tt][Ll][Mm][Mm][Ii][Nn][Cc][Ll][Ii][Ee][Nn][Tt][Ss][Ee][Cc].*/ OR data_win_eventdata_targetObject:/.*[Rr][Ee][Ss][Tt][Rr][Ii][Cc][Tt][Ss][Ee][Nn][Dd][Ii][Nn][Gg][Nn][Tt][Ll][Mm][Tt][Rr][Aa][Ff][Ff][Ii][Cc].*/)'
-      pivot_on: [host]
-      window: 4h
-    - name: "Follow-on LOLBin / signed-binary-proxy execution on this host"
-      query: 'data_win_system_eventID:"1" AND data_win_eventdata_image:/.*(\\[Rr][Uu][Nn][Dd][Ll][Ll]32\.[Ee][Xx][Ee]|\\[Rr][Ee][Gg][Ss][Vv][Rr]32\.[Ee][Xx][Ee]|\\[Mm][Ss][Hh][Tt][Aa]\.[Ee][Xx][Ee]|\\[Ii][Nn][Ss][Tt][Aa][Ll][Ll][Uu][Tt][Ii][Ll]\.[Ee][Xx][Ee]|\\[Rr][Ee][Gg][Aa][Ss][Mm]\.[Ee][Xx][Ee]|\\[Rr][Ee][Gg][Ss][Vv][Cc][Ss]\.[Ee][Xx][Ee]|\\[Mm][Ss][Bb][Uu][Ii][Ll][Dd]\.[Ee][Xx][Ee]|\\[Cc][Ee][Rr][Tt][Uu][Tt][Ii][Ll]\.[Ee][Xx][Ee]|\\[Bb][Ii][Tt][Ss][Aa][Dd][Mm][Ii][Nn]\.[Ee][Xx][Ee]|\\[Ww][Mm][Ii][Cc]\.[Ee][Xx][Ee]|\\[Cc][Mm][Ss][Tt][Pp]\.[Ee][Xx][Ee]|\\[Oo][Dd][Bb][Cc][Cc][Oo][Nn][Ff]\.[Ee][Xx][Ee]|\\[Ff][Oo][Rr][Ff][Ii][Ll][Ee][Ss]\.[Ee][Xx][Ee]|\\[Pp][Cc][Aa][Ll][Uu][Aa]\.[Ee][Xx][Ee]|\\[Mm][Aa][Vv][Ii][Nn][Jj][Ee][Cc][Tt]\.[Ee][Xx][Ee]|\\[Ss][Cc][Rr][Ii][Pp][Tt][Rr][Uu][Nn][Nn][Ee][Rr]\.[Ee][Xx][Ee])/'
-      pivot_on: [host]
-      window: 1h
-    - name: "Autostart persistence written on this host"
-      query: '(data_win_system_eventID:"12" OR data_win_system_eventID:"13") AND (data_win_eventdata_targetObject:/.*[Cc][Uu][Rr][Rr][Ee][Nn][Tt][Vv][Ee][Rr][Ss][Ii][Oo][Nn]\\[Rr][Uu][Nn].*/ OR data_win_eventdata_targetObject:/.*[Cc][Uu][Rr][Rr][Ee][Nn][Tt][Vv][Ee][Rr][Ss][Ii][Oo][Nn]\\[Rr][Uu][Nn][Oo][Nn][Cc][Ee].*/ OR data_win_eventdata_targetObject:/.*[Cc][Uu][Rr][Rr][Ee][Nn][Tt][Cc][Oo][Nn][Tt][Rr][Oo][Ll][Ss][Ee][Tt]\\[Ss][Ee][Rr][Vv][Ii][Cc][Ee][Ss]\\.*/ OR data_win_eventdata_targetObject:/.*[Ii][Mm][Aa][Gg][Ee] [Ff][Ii][Ll][Ee] [Ee][Xx][Ee][Cc][Uu][Tt][Ii][Oo][Nn] [Oo][Pp][Tt][Ii][Oo][Nn][Ss]\\.*/ OR data_win_eventdata_targetObject:/.*[Ww][Ii][Nn][Ll][Oo][Gg][Oo][Nn]\\[Ss][Hh][Ee][Ll][Ll].*/ OR data_win_eventdata_targetObject:/.*[Ww][Ii][Nn][Ll][Oo][Gg][Oo][Nn]\\[Uu][Ss][Ee][Rr][Ii][Nn][Ii][Tt].*/ OR data_win_eventdata_targetObject:/.*[Cc][Uu][Rr][Rr][Ee][Nn][Tt][Vv][Ee][Rr][Ss][Ii][Oo][Nn]\\[Ee][Xx][Pp][Ll][Oo][Rr][Ee][Rr]\\[Rr][Uu][Nn].*/ OR data_win_eventdata_targetObject:/.*[Pp][Oo][Ll][Ii][Cc][Ii][Ee][Ss]\\[Ee][Xx][Pp][Ll][Oo][Rr][Ee][Rr]\\[Rr][Uu][Nn].*/ OR data_win_eventdata_targetObject:/.*[Cc][Uu][Rr][Rr][Ee][Nn][Tt][Vv][Ee][Rr][Ss][Ii][Oo][Nn]\\[Ww][Ii][Nn][Dd][Oo][Ww][Ss]\\[Ll][Oo][Aa][Dd].*/)'
-      pivot_on: [host]
-      window: 2h
+  # Behaviour-targeted hunts the engine runs around the alert (not a sweep).
+  - name: Reg/PowerShell commands setting NTLM or LSA policy values
+    query: data_win_system_eventID:"1" AND data_win_eventdata_commandLine:(*lmcompatibilitylevel* OR *NtlmMinClientSec* OR *RestrictSendingNTLMTraffic* OR *NoLMHash* OR *UseLogonCredential*)
+    pivot_on:
+    - host
+    window: 2h
+  - name: NTLM relay / poisoning tooling executed
+    query: data_win_system_eventID:"1" AND (data_win_eventdata_image:/.*\\([Ii]nveigh|[Rr]esponder|[Nn]tlmrelayx|[Ss]mbrelayx|[Mm]ulti[Rr]elay).*/ OR data_win_eventdata_commandLine:(*Invoke-Inveigh* OR *ntlmrelayx* OR *Responder.py* OR *smbrelayx*))
+    pivot_on:
+    - host
+    window: 4h
+  - name: 'Credential store access: LSASS handle or SAM/SECURITY hive save'
+    query: (data_win_system_eventID:"10" AND data_win_eventdata_targetImage:/.*\\[Ll][Ss][Aa][Ss][Ss]\\.[Ee][Xx][Ee]/) OR (data_win_system_eventID:"1" AND data_win_eventdata_commandLine:*reg*save* AND (data_win_eventdata_commandLine:*sam* OR data_win_eventdata_commandLine:*security*))
+    pivot_on:
+    - host
+    window: 4h
+  - name: NTLMv1 logons on this host
+    query: data_win_system_eventID:"4624" AND data_win_eventdata_authenticationPackageName:"NTLM" AND data_win_eventdata_lmPackageName:"NTLM V1"
+    pivot_on:
+    - host
+    window: 6h
+  - name: Outbound SMB connections from non-system processes
+    query: data_win_system_eventID:"3" AND (data_win_eventdata_destinationPort:"445" OR data_win_eventdata_destinationPort:"139") AND data_win_eventdata_initiated:"true" AND NOT data_win_eventdata_image:"System"
+    pivot_on:
+    - host
+    window: 2h

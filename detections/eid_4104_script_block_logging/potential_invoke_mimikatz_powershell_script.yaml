@@ -162,44 +162,58 @@ graylog:
   query: data_win_system_eventID:"4104" AND ((data_win_eventdata_scriptBlockText:/.*[Dd][Uu][Mm][Pp][Cc][Rr][Ee][Dd][Ss].*/ AND data_win_eventdata_scriptBlockText:/.*[Dd][Uu][Mm][Pp][Cc][Ee][Rr][Tt][Ss].*/) OR data_win_eventdata_scriptBlockText:/.*[Ss][Ee][Kk][Uu][Rr][Ll][Ss][Aa]::[Ll][Oo][Gg][Oo][Nn][Pp][Aa][Ss][Ss][Ww][Oo][Rr][Dd][Ss].*/ OR (data_win_eventdata_scriptBlockText:/.*[Cc][Rr][Yy][Pp][Tt][Oo]::[Cc][Ee][Rr][Tt][Ii][Ff][Ii][Cc][Aa][Tt][Ee][Ss].*/ AND data_win_eventdata_scriptBlockText:/.*[Cc][Ee][Rr][Tt]_[Ss][Yy][Ss][Tt][Ee][Mm]_[Ss][Tt][Oo][Rr][Ee]_[Ll][Oo][Cc][Aa][Ll]_[Mm][Aa][Cc][Hh][Ii][Nn][Ee].*/))
 
 correlation:
-  # Authored by the correlation engine for review. Related CoPilot Searches to run
-  # around an alert from this rule, scoped to the same host/user/IP within the window.
+  # Authored per-rule (behaviour-researched) for the correlation engine. Related CoPilot
+  # Searches + telemetry pivots to run around an alert, scoped to its host/user/ip/domain.
   related_rules:
-    - id: ec570e53-4c76-45a9-804d-dc3f355ff7a7
-      name: "7Zip Compressing Dump Files"
-      reason: "next kill-chain tactic: Collection"
-    - id: 0a1255c5-d732-4b62-ac02-b5152d34fb83
-      name: "ADExplorer Writing Complete AD Snapshot Into .dat File"
-      reason: "next kill-chain tactic: Discovery"
-    - id: 1ea13e8c-03ea-409b-877d-ce5c3d2c1cb3
-      name: "ADFS Database Named Pipe Connection By Uncommon Tool"
-      reason: "next kill-chain tactic: Collection"
-    - id: 75bf09fa-1dd7-4d18-9af9-dd9e492562eb
-      name: "ADSI-Cache File Creation By Uncommon Tool"
-      reason: "next kill-chain tactic: Command and Control"
-    - id: 03e2746e-2b31-42f1-ab7a-eb39365b2422
-      name: "APT31 Judgement Panda Activity"
-      reason: "next kill-chain tactic: Credential Access"
-    - id: fc028194-969d-4122-8abe-0470d5b8f12f
-      name: "Access to Browser Login Data"
-      reason: "next kill-chain tactic: Credential Access"
+  - id: 403c2cc0-7f6b-4925-9423-bfa573bed7eb
+    name: Suspicious PowerShell Download - Powershell Script
+    reason: 'Precursor: Invoke-Mimikatz is normally pulled into memory with a download cradle (DownloadString/IEX) before its script block is logged.'
+  - id: a21e3484-c94d-11eb-b55b-acde48001122
+    name: Unloading AMSI via Reflection
+    reason: 'Precursor: attackers disable AMSI in the same PowerShell session so the in-memory Mimikatz script is not blocked at load.'
+  - id: 8148c29c-c952-11eb-9255-acde48001122
+    name: Detect Mimikatz With PowerShell Script Block Logging
+    reason: 'Co-occurring: alternate script-block signature for the same Mimikatz module; both firing raises confidence and reveals other Mimikatz commands in the session.'
+  - id: 84c174ab-d3ef-481f-9c86-a50d0b8e3edb
+    name: PowerShell Get-Process LSASS in ScriptBlock
+    reason: 'Co-occurring: the script resolves the LSASS process to read credential material from its memory.'
+  - id: a642964e-bead-4bed-8910-1bb4d63e3b4d
+    name: HackTool - Mimikatz Execution
+    reason: 'Co-occurring: same tool run as a native binary via process creation (fallback if the PowerShell variant is blocked).'
+  - id: 99c49d9c-34ea-45f7-84a7-4751ae6b2cbc
+    name: Dump Credentials from Windows Credential Manager With PowerShell
+    reason: 'Co-occurring: parallel credential harvesting from the same PowerShell session, widening the stolen-credential set.'
+  - id: a861d835-af37-4930-bcd6-5b178bfb54df
+    name: Suspicious Kerberos Ticket Request via PowerShell Script - ScriptBlock
+    reason: 'Follow-on: after dumping credentials/tickets, attackers request service tickets (Kerberoasting) to extend access.'
+  - id: 13bbd574-83ac-11ec-99d4-acde48001122
+    name: Mimikatz PassTheTicket CommandLine Parameters
+    reason: 'Follow-on: harvested Kerberos tickets are injected with kerberos::ptt to impersonate the account for lateral movement.'
   window: 1h
   enrichment_searches:
-  # Rule-specific telemetry pivots the engine runs around an alert from this rule,
-  # scoped to the alert's host/user/IP within the window (behaviour-targeted, not a sweep).
-    - name: "Memory/credential-dump creation & LSASS access on this host"
-      query: '((data_win_system_eventID:"1" AND data_win_eventdata_image:/.*(\\[Pp][Rr][Oo][Cc][Dd][Uu][Mm][Pp]\.[Ee][Xx][Ee]|\\[Pp][Rr][Oo][Cc][Dd][Uu][Mm][Pp]64\.[Ee][Xx][Ee]|\\[Ss][Qq][Ll][Dd][Uu][Mm][Pp][Ee][Rr]\.[Ee][Xx][Ee]|\\[Cc][Rr][Ee][Aa][Tt][Ee][Dd][Uu][Mm][Pp]\.[Ee][Xx][Ee]|\\[Rr][Dd][Rr][Ll][Ee][Aa][Kk][Dd][Ii][Aa][Gg]\.[Ee][Xx][Ee]|\\[Dd][Uu][Mm][Pp][Ee][Rr][Tt]\.[Ee][Xx][Ee]|\\[Nn][Aa][Nn][Oo][Dd][Uu][Mm][Pp]\.[Ee][Xx][Ee]|\\[Aa][Vv][Dd][Uu][Mm][Pp]\.[Ee][Xx][Ee])/) OR (data_win_system_eventID:"1" AND (data_win_eventdata_commandLine:/.*[Cc][Oo][Mm][Ss][Vv][Cc][Ss]\.[Dd][Ll][Ll].*/ OR data_win_eventdata_commandLine:/.*[Mm][Ii][Nn][Ii][Dd][Uu][Mm][Pp].*/ OR data_win_eventdata_commandLine:/.*[Dd][Uu][Mm][Pp][Ee][Rr][Tt].*/ OR data_win_eventdata_commandLine:/.*[Nn][Aa][Nn][Oo][Dd][Uu][Mm][Pp].*/ OR data_win_eventdata_commandLine:/.*[Ll][Ss][Aa][Ss][Ss].*/ OR data_win_eventdata_commandLine:/.*[Ss][Ee][Kk][Uu][Rr][Ll][Ss][Aa].*/ OR data_win_eventdata_commandLine:/.*[Nn][Tt][Dd][Ss]\.[Dd][Ii][Tt].*/ OR data_win_eventdata_commandLine:/.*[Nn][Tt][Dd][Ss][Uu][Tt][Ii][Ll].*/)) OR (data_win_system_eventID:"10" AND data_win_eventdata_targetImage:/.*(\\[Ll][Ss][Aa][Ss][Ss]\.[Ee][Xx][Ee])/))'
-      pivot_on: [host]
-      window: 1h
-    - name: "This account's logon activity across hosts (harvested-credential use)"
-      query: '(data_win_system_eventID:"4624" OR data_win_system_eventID:"4625")'
-      pivot_on: [user]
-      window: 6h
-    - name: "Remote-execution / lateral-movement tooling on this host"
-      query: '(data_win_system_eventID:"1" AND data_win_eventdata_image:/.*(\\[Pp][Ss][Ee][Xx][Ee][Cc]\.[Ee][Xx][Ee]|\\[Pp][Ss][Ee][Xx][Ee][Ss][Vv][Cc]\.[Ee][Xx][Ee]|\\[Pp][Aa][Ee][Xx][Ee][Cc]\.[Ee][Xx][Ee]|\\[Ww][Ii][Nn][Rr][Ss]\.[Ee][Xx][Ee]|\\[Mm][Ss][Tt][Ss][Cc]\.[Ee][Xx][Ee]|\\[Ww][Mm][Ii][Cc]\.[Ee][Xx][Ee])/) OR (data_win_system_eventID:"1" AND data_win_eventdata_image:/.*(\\[Pp][Oo][Ww][Ee][Rr][Ss][Hh][Ee][Ll][Ll]\.[Ee][Xx][Ee]|\\[Pp][Ww][Ss][Hh]\.[Ee][Xx][Ee])/ AND (data_win_eventdata_commandLine:/.*[Ii][Nn][Vv][Oo][Kk][Ee]-[Cc][Oo][Mm][Mm][Aa][Nn][Dd].*/ OR data_win_eventdata_commandLine:/.*[Nn][Ee][Ww]-[Pp][Ss][Ss][Ee][Ss][Ss][Ii][Oo][Nn].*/ OR data_win_eventdata_commandLine:/.*[Ee][Nn][Tt][Ee][Rr]-[Pp][Ss][Ss][Ee][Ss][Ss][Ii][Oo][Nn].*/ OR data_win_eventdata_commandLine:/.*-[Cc][Oo][Mm][Pp][Uu][Tt][Ee][Rr][Nn][Aa][Mm][Ee].*/))'
-      pivot_on: [host]
-      window: 2h
-    - name: "Download / AMSI-bypass / encoded script blocks on this host"
-      query: 'data_win_system_eventID:"4104" AND (data_win_eventdata_scriptBlockText:/.*[Dd][Oo][Ww][Nn][Ll][Oo][Aa][Dd][Ss][Tt][Rr][Ii][Nn][Gg].*/ OR data_win_eventdata_scriptBlockText:/.*[Dd][Oo][Ww][Nn][Ll][Oo][Aa][Dd][Ff][Ii][Ll][Ee].*/ OR data_win_eventdata_scriptBlockText:/.*[Ii][Nn][Vv][Oo][Kk][Ee]-[Ww][Ee][Bb][Rr][Ee][Qq][Uu][Ee][Ss][Tt].*/ OR data_win_eventdata_scriptBlockText:/.*[Nn][Ee][Tt]\.[Ww][Ee][Bb][Cc][Ll][Ii][Ee][Nn][Tt].*/ OR data_win_eventdata_scriptBlockText:/.*[Ff][Rr][Oo][Mm][Bb][Aa][Ss][Ee]64[Ss][Tt][Rr][Ii][Nn][Gg].*/ OR data_win_eventdata_scriptBlockText:/.*[Ii][Ee][Xx].*/ OR data_win_eventdata_scriptBlockText:/.*[Ii][Nn][Vv][Oo][Kk][Ee]-[Ee][Xx][Pp][Rr][Ee][Ss][Ss][Ii][Oo][Nn].*/ OR data_win_eventdata_scriptBlockText:/.*[Ss][Tt][Aa][Rr][Tt]-[Bb][Ii][Tt][Ss][Tt][Rr][Aa][Nn][Ss][Ff][Ee][Rr].*/ OR data_win_eventdata_scriptBlockText:/.*[Aa][Mm][Ss][Ii][Uu][Tt][Ii][Ll][Ss].*/ OR data_win_eventdata_scriptBlockText:/.*-[Ee][Nn][Cc].*/ OR data_win_eventdata_scriptBlockText:/.*-[Ee][Nn][Cc][Oo][Dd][Ee][Dd][Cc][Oo][Mm][Mm][Aa][Nn][Dd].*/ OR data_win_eventdata_scriptBlockText:/.*[Rr][Ee][Ff][Ll][Ee][Cc][Tt][Ii][Oo][Nn]\.[Aa][Ss][Ss][Ee][Mm][Bb][Ll][Yy].*/)'
-      pivot_on: [host]
-      window: 1h
+  # Behaviour-targeted hunts the engine runs around the alert (not a sweep).
+  - name: Other Mimikatz modules and LSA/SAM/DPAPI abuse in script blocks
+    query: data_win_system_eventID:"4104" AND (data_win_eventdata_scriptBlockText:/.*[Ll][Ss][Aa][Dd][Uu][Mm][Pp].*/ OR data_win_eventdata_scriptBlockText:/.*[Kk][Ee][Rr][Bb][Ee][Rr][Oo][Ss]::.*/ OR data_win_eventdata_scriptBlockText:/.*[Pp][Rr][Ii][Vv][Ii][Ll][Ee][Gg][Ee]::[Dd][Ee][Bb][Uu][Gg].*/ OR data_win_eventdata_scriptBlockText:/.*[Tt][Oo][Kk][Ee][Nn]::[Ee][Ll][Ee][Vv][Aa][Tt][Ee].*/ OR data_win_eventdata_scriptBlockText:/.*[Dd][Pp][Aa][Pp][Ii]::.*/ OR data_win_eventdata_scriptBlockText:/.*[Ll][Ss][Aa][Dd][Uu][Mm][Pp]::[Ss][Aa][Mm].*/ OR data_win_eventdata_scriptBlockText:/.*[Mm][Ii][Mm][Ii][Kk][Aa][Tt][Zz].*/ OR data_win_eventdata_scriptBlockText:/.*[Ii][Nn][Vv][Oo][Kk][Ee]-[Mm][Ii][Mm][Ii][Kk][Aa][Tt][Zz].*/)
+    pivot_on:
+    - host
+    window: 2h
+  - name: Script download cradles and AMSI bypass that staged the script
+    query: data_win_system_eventID:"4104" AND (data_win_eventdata_scriptBlockText:/.*[Dd][Oo][Ww][Nn][Ll][Oo][Aa][Dd][Ss][Tt][Rr][Ii][Nn][Gg].*/ OR data_win_eventdata_scriptBlockText:/.*[Ii][Nn][Vv][Oo][Kk][Ee]-[Ww][Ee][Bb][Rr][Ee][Qq][Uu][Ee][Ss][Tt].*/ OR data_win_eventdata_scriptBlockText:/.*[Nn][Ee][Tt]\.[Ww][Ee][Bb][Cc][Ll][Ii][Ee][Nn][Tt].*/ OR data_win_eventdata_scriptBlockText:/.*[Aa][Mm][Ss][Ii][Uu][Tt][Ii][Ll][Ss].*/ OR data_win_eventdata_scriptBlockText:/.*[Aa][Mm][Ss][Ii][Ii][Nn][Ii][Tt][Ff][Aa][Ii][Ll][Ee][Dd].*/ OR data_win_eventdata_scriptBlockText:/.*[Rr][Ee][Ff][Ll][Ee][Cc][Tt][Ii][Oo][Nn]\.[Aa][Ss][Ss][Ee][Mm][Bb][Ll][Yy].*/)
+    pivot_on:
+    - host
+    window: 1h
+  - name: LSASS access and credential-dump files by non-PowerShell tools
+    query: (data_win_system_eventID:"10" AND data_win_eventdata_targetImage:/.*[Ll][Ss][Aa][Ss][Ss]\.[Ee][Xx][Ee]/) OR (data_win_system_eventID:"1" AND (data_win_eventdata_commandLine:/.*[Cc][Oo][Mm][Ss][Vv][Cc][Ss].*[Mm][Ii][Nn][Ii][Dd][Uu][Mm][Pp].*/ OR data_win_eventdata_commandLine:/.*[Pp][Rr][Oo][Cc][Dd][Uu][Mm][Pp].*/ OR data_win_eventdata_commandLine:/.*[Ss][Ee][Kk][Uu][Rr][Ll][Ss][Aa].*/ OR data_win_eventdata_commandLine:/.*[Rr][Ee][Gg].*[Ss][Aa][Vv][Ee].*[Hh][Kk][Ll][Mm]\\[Ss][Aa][Mm].*/)) OR (data_win_system_eventID:"11" AND data_win_eventdata_targetFilename:/.*(lsass.*\.dmp|\.kirbi)/)
+    pivot_on:
+    - host
+    window: 1h
+  - name: Network logons using the account after the credential theft
+    query: data_win_system_eventID:"4624" AND (data_win_eventdata_logonType:"3" OR data_win_eventdata_logonType:"9" OR data_win_eventdata_logonType:"10")
+    pivot_on:
+    - user
+    window: 6h
+  - name: Lateral-movement execution from this host after credential theft
+    query: (data_win_system_eventID:"1" AND (data_win_eventdata_image:/.*(\\[Pp][Ss][Ee][Xx][Ee][Cc]\.[Ee][Xx][Ee]|\\[Ww][Mm][Ii][Cc]\.[Ee][Xx][Ee]|\\[Ww][Ii][Nn][Rr][Ss]\.[Ee][Xx][Ee])/ OR data_win_eventdata_commandLine:/.*([Ee][Nn][Tt][Ee][Rr]-[Pp][Ss][Ss][Ee][Ss][Ss][Ii][Oo][Nn]|[Ii][Nn][Vv][Oo][Kk][Ee]-[Cc][Oo][Mm][Mm][Aa][Nn][Dd]|[Nn][Ee][Ww]-[Pp][Ss][Ss][Ee][Ss][Ss][Ii][Oo][Nn]|\\\\[A-Za-z0-9.-]+\\[Aa][Dd][Mm][Ii][Nn]\$).*/)) OR (data_win_system_eventID:"3" AND (data_win_eventdata_destinationPort:"445" OR data_win_eventdata_destinationPort:"5985" OR data_win_eventdata_destinationPort:"5986" OR data_win_eventdata_destinationPort:"135"))
+    pivot_on:
+    - host
+    window: 4h

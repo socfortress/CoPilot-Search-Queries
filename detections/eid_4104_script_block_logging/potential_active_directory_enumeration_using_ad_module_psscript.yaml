@@ -154,23 +154,59 @@ graylog:
   query: data_win_system_eventID:"4104" AND ((data_win_eventdata_scriptBlockText:/.*[Ii][Mm][Pp][Oo][Rr][Tt]-[Mm][Oo][Dd][Uu][Ll][Ee] .*/ AND data_win_eventdata_scriptBlockText:/.*[Mm][Ii][Cc][Rr][Oo][Ss][Oo][Ff][Tt]\.[Aa][Cc][Tt][Ii][Vv][Ee][Dd][Ii][Rr][Ee][Cc][Tt][Oo][Rr][Yy]\.[Mm][Aa][Nn][Aa][Gg][Ee][Mm][Ee][Nn][Tt]\.[Dd][Ll][Ll].*/) OR data_win_eventdata_scriptBlockText:/.*[Ii][Pp][Mm][Oo] [Mm][Ii][Cc][Rr][Oo][Ss][Oo][Ff][Tt]\.[Aa][Cc][Tt][Ii][Vv][Ee][Dd][Ii][Rr][Ee][Cc][Tt][Oo][Rr][Yy]\.[Mm][Aa][Nn][Aa][Gg][Ee][Mm][Ee][Nn][Tt]\.[Dd][Ll][Ll].*/)
 
 correlation:
-  # Authored by the correlation engine for review.
+  # Authored per-rule (behaviour-researched) for the correlation engine. Related CoPilot
+  # Searches + telemetry pivots to run around an alert, scoped to its host/user/ip/domain.
+  related_rules:
+  - id: 74176142-4684-4d8a-8b0a-713257e7df8e
+    name: Potential Active Directory Enumeration Using AD Module - PsModule
+    reason: Same Import-Module of Microsoft.ActiveDirectory.Management.dll seen via module logging (4103); corroborates the script block with a second log source.
+  - id: 70bc5215-526f-4477-963c-a47a5c9ebd12
+    name: Potential Active Directory Enumeration Using AD Module - ProcCreation
+    reason: Process-creation view of the same AD-module load (command line); confirms the PowerShell process that ran it.
+  - id: dcd74b95-3f36-4ed9-9598-0490951643aa
+    name: PowerView PowerShell Cmdlets - ScriptBlock
+    reason: Operators using the dependency-free AD module often also run PowerView cmdlets for deeper AD recon in the same session.
+  - id: 96c982fe-3d08-4df4-bed2-eb14e02f21c8
+    name: Get-ADUser Enumeration Using UserAccountControl Flags
+    reason: Once the AD module is loaded, Get-ADUser with UAC filters (roastable/no-preauth accounts) is the typical next query.
+  - id: 1eeed653-dbc8-4187-ad0c-eeebb20e6599
+    name: Potential SPN Enumeration Via Setspn.EXE
+    reason: SPN discovery for Kerberoasting commonly follows AD enumeration on the same host.
+  - id: 970455a1-4ac2-47e1-a9a5-9e75443ddcb9
+    name: Windows PowerView Kerberos Service Ticket Request
+    reason: Enumeration of service accounts leads to service-ticket requests (Kerberoasting) as the follow-on credential attack.
+  - id: f376c8a7-a2d0-4ddc-aa0c-16c17236d962
+    name: HackTool - Bloodhound/Sharphound Execution
+    reason: Parallel or subsequent graph-based AD collection by the same operator on the same host.
+  - id: 02773bed-83bf-469f-b7ff-e676e7d78bab
+    name: BloodHound Collection Files
+    reason: File artefacts (zip/json) written by AD collectors indicate the enumeration output was staged.
+  window: 2h
   enrichment_searches:
-  # Rule-specific telemetry pivots the engine runs around an alert from this rule,
-  # scoped to the alert's host/user/IP within the window (behaviour-targeted, not a sweep).
-    - name: "Remote-execution / lateral-movement tooling on this host"
-      query: '(data_win_system_eventID:"1" AND data_win_eventdata_image:/.*(\\[Pp][Ss][Ee][Xx][Ee][Cc]\.[Ee][Xx][Ee]|\\[Pp][Ss][Ee][Xx][Ee][Ss][Vv][Cc]\.[Ee][Xx][Ee]|\\[Pp][Aa][Ee][Xx][Ee][Cc]\.[Ee][Xx][Ee]|\\[Ww][Ii][Nn][Rr][Ss]\.[Ee][Xx][Ee]|\\[Mm][Ss][Tt][Ss][Cc]\.[Ee][Xx][Ee]|\\[Ww][Mm][Ii][Cc]\.[Ee][Xx][Ee])/) OR (data_win_system_eventID:"1" AND data_win_eventdata_image:/.*(\\[Pp][Oo][Ww][Ee][Rr][Ss][Hh][Ee][Ll][Ll]\.[Ee][Xx][Ee]|\\[Pp][Ww][Ss][Hh]\.[Ee][Xx][Ee])/ AND (data_win_eventdata_commandLine:/.*[Ii][Nn][Vv][Oo][Kk][Ee]-[Cc][Oo][Mm][Mm][Aa][Nn][Dd].*/ OR data_win_eventdata_commandLine:/.*[Nn][Ee][Ww]-[Pp][Ss][Ss][Ee][Ss][Ss][Ii][Oo][Nn].*/ OR data_win_eventdata_commandLine:/.*[Ee][Nn][Tt][Ee][Rr]-[Pp][Ss][Ss][Ee][Ss][Ss][Ii][Oo][Nn].*/ OR data_win_eventdata_commandLine:/.*-[Cc][Oo][Mm][Pp][Uu][Tt][Ee][Rr][Nn][Aa][Mm][Ee].*/))'
-      pivot_on: [host]
-      window: 2h
-    - name: "Download / AMSI-bypass / encoded script blocks on this host"
-      query: 'data_win_system_eventID:"4104" AND (data_win_eventdata_scriptBlockText:/.*[Dd][Oo][Ww][Nn][Ll][Oo][Aa][Dd][Ss][Tt][Rr][Ii][Nn][Gg].*/ OR data_win_eventdata_scriptBlockText:/.*[Dd][Oo][Ww][Nn][Ll][Oo][Aa][Dd][Ff][Ii][Ll][Ee].*/ OR data_win_eventdata_scriptBlockText:/.*[Ii][Nn][Vv][Oo][Kk][Ee]-[Ww][Ee][Bb][Rr][Ee][Qq][Uu][Ee][Ss][Tt].*/ OR data_win_eventdata_scriptBlockText:/.*[Nn][Ee][Tt]\.[Ww][Ee][Bb][Cc][Ll][Ii][Ee][Nn][Tt].*/ OR data_win_eventdata_scriptBlockText:/.*[Ff][Rr][Oo][Mm][Bb][Aa][Ss][Ee]64[Ss][Tt][Rr][Ii][Nn][Gg].*/ OR data_win_eventdata_scriptBlockText:/.*[Ii][Ee][Xx].*/ OR data_win_eventdata_scriptBlockText:/.*[Ii][Nn][Vv][Oo][Kk][Ee]-[Ee][Xx][Pp][Rr][Ee][Ss][Ss][Ii][Oo][Nn].*/ OR data_win_eventdata_scriptBlockText:/.*[Ss][Tt][Aa][Rr][Tt]-[Bb][Ii][Tt][Ss][Tt][Rr][Aa][Nn][Ss][Ff][Ee][Rr].*/ OR data_win_eventdata_scriptBlockText:/.*[Aa][Mm][Ss][Ii][Uu][Tt][Ii][Ll][Ss].*/ OR data_win_eventdata_scriptBlockText:/.*-[Ee][Nn][Cc].*/ OR data_win_eventdata_scriptBlockText:/.*-[Ee][Nn][Cc][Oo][Dd][Ee][Dd][Cc][Oo][Mm][Mm][Aa][Nn][Dd].*/ OR data_win_eventdata_scriptBlockText:/.*[Rr][Ee][Ff][Ll][Ee][Cc][Tt][Ii][Oo][Nn]\.[Aa][Ss][Ss][Ee][Mm][Bb][Ll][Yy].*/)'
-      pivot_on: [host]
-      window: 1h
-    - name: "Follow-on LOLBin / signed-binary-proxy execution on this host"
-      query: 'data_win_system_eventID:"1" AND data_win_eventdata_image:/.*(\\[Rr][Uu][Nn][Dd][Ll][Ll]32\.[Ee][Xx][Ee]|\\[Rr][Ee][Gg][Ss][Vv][Rr]32\.[Ee][Xx][Ee]|\\[Mm][Ss][Hh][Tt][Aa]\.[Ee][Xx][Ee]|\\[Ii][Nn][Ss][Tt][Aa][Ll][Ll][Uu][Tt][Ii][Ll]\.[Ee][Xx][Ee]|\\[Rr][Ee][Gg][Aa][Ss][Mm]\.[Ee][Xx][Ee]|\\[Rr][Ee][Gg][Ss][Vv][Cc][Ss]\.[Ee][Xx][Ee]|\\[Mm][Ss][Bb][Uu][Ii][Ll][Dd]\.[Ee][Xx][Ee]|\\[Cc][Ee][Rr][Tt][Uu][Tt][Ii][Ll]\.[Ee][Xx][Ee]|\\[Bb][Ii][Tt][Ss][Aa][Dd][Mm][Ii][Nn]\.[Ee][Xx][Ee]|\\[Ww][Mm][Ii][Cc]\.[Ee][Xx][Ee]|\\[Cc][Mm][Ss][Tt][Pp]\.[Ee][Xx][Ee]|\\[Oo][Dd][Bb][Cc][Cc][Oo][Nn][Ff]\.[Ee][Xx][Ee]|\\[Ff][Oo][Rr][Ff][Ii][Ll][Ee][Ss]\.[Ee][Xx][Ee]|\\[Pp][Cc][Aa][Ll][Uu][Aa]\.[Ee][Xx][Ee]|\\[Mm][Aa][Vv][Ii][Nn][Jj][Ee][Cc][Tt]\.[Ee][Xx][Ee]|\\[Ss][Cc][Rr][Ii][Pp][Tt][Rr][Uu][Nn][Nn][Ee][Rr]\.[Ee][Xx][Ee])/'
-      pivot_on: [host]
-      window: 1h
-    - name: "Ransomware / recovery-inhibition behaviour on this host"
-      query: '(data_win_eventdata_commandLine:/.*[Vv][Ss][Ss][Aa][Dd][Mm][Ii][Nn].*/ OR data_win_eventdata_commandLine:/.*[Ss][Hh][Aa][Dd][Oo][Ww][Cc][Oo][Pp][Yy].*/ OR data_win_eventdata_commandLine:/.*[Bb][Cc][Dd][Ee][Dd][Ii][Tt].*/ OR data_win_eventdata_commandLine:/.*[Ww][Bb][Aa][Dd][Mm][Ii][Nn].*/ OR data_win_eventdata_commandLine:/.*[Cc][Ii][Pp][Hh][Ee][Rr] \/[Ww].*/ OR data_win_eventdata_commandLine:/.*[Ww][Mm][Ii][Cc] [Ss][Hh][Aa][Dd][Oo][Ww][Cc][Oo][Pp][Yy] [Dd][Ee][Ll][Ee][Tt][Ee].*/) OR (data_win_system_eventID:"1" AND data_win_eventdata_image:/.*(\\[Vv][Ss][Ss][Aa][Dd][Mm][Ii][Nn]\.[Ee][Xx][Ee]|\\[Ww][Bb][Aa][Dd][Mm][Ii][Nn]\.[Ee][Xx][Ee])/)'
-      pivot_on: [host]
-      window: 2h
+  # Behaviour-targeted hunts the engine runs around the alert (not a sweep).
+  - name: Other AD enumeration cmdlets in script blocks (Get-AD*, PowerView)
+    query: data_win_system_eventID:"4104" AND (data_win_eventdata_scriptBlockText:/.*[Gg]et-[Aa][Dd](User|Computer|Group|GroupMember|Domain|DomainController|Forest|Trust|ObjectAcl|Object).*/ OR data_win_eventdata_scriptBlockText:/.*[Gg]et-[Dd]omain(User|Computer|Controller|Trust|Group|SPNTicket).*/ OR data_win_eventdata_scriptBlockText:/.*[Ff]ind-[Ll]ocal[Aa]dmin[Aa]ccess.*/ OR data_win_eventdata_scriptBlockText:/.*[Ii]nvoke-[Bb]lood[Hh]ound.*/)
+    pivot_on:
+    - host
+    window: 2h
+  - name: AD recon tooling and LDAP/SPN discovery processes
+    query: data_win_system_eventID:"1" AND (data_win_eventdata_image:/.*\\([Aa]d[Ff]ind|[Ss]harp[Hh]ound|[Ss]etspn|[Dd]squery|[Nn]ltest|[Ll]difde|[Cc]svde)\.[Ee][Xx][Ee]/ OR data_win_eventdata_commandLine:/.*([Nn]et1? (group|user|accounts) .*\/domain|[Nn]ltest.*\/dclist|[Nn]ltest.*\/domain_trusts).*/)
+    pivot_on:
+    - host
+    window: 2h
+  - name: Kerberoasting / delegation abuse after AD enumeration
+    query: data_win_system_eventID:"4104" AND (data_win_eventdata_scriptBlockText:/.*[Rr]equest-[Ss][Pp][Nn]([Tt]icket).*/ OR data_win_eventdata_scriptBlockText:/.*[Ii]nvoke-[Kk]erberoast.*/ OR data_win_eventdata_scriptBlockText:/.*KerberosRequestorSecurityToken.*/ OR data_win_eventdata_scriptBlockText:/.*[Ss]ervicePrincipalName.*/)
+    pivot_on:
+    - host
+    - user
+    window: 4h
+  - name: AD collection output staged or AD module DLL dropped/loaded
+    query: (data_win_system_eventID:"11" AND (data_win_eventdata_targetFilename:/.*[Bb]lood[Hh]ound.*/ OR data_win_eventdata_targetFilename:/.*_BloodHound\.zip/ OR data_win_eventdata_targetFilename:/.*[Mm]icrosoft\.[Aa]ctive[Dd]irectory\.[Mm]anagement\.[Dd][Ll][Ll]/)) OR (data_win_system_eventID:"7" AND data_win_eventdata_imageLoaded:/.*[Mm]icrosoft\.[Aa]ctive[Dd]irectory\.[Mm]anagement.*/)
+    pivot_on:
+    - host
+    window: 2h
+  - name: Network connections to domain controller LDAP/Kerberos ports from PowerShell
+    query: data_win_system_eventID:"3" AND data_win_eventdata_image:/.*\\([Pp]ower[Ss]hell|[Pp]wsh)\.[Ee][Xx][Ee]/ AND (data_win_eventdata_destinationPort:"389" OR data_win_eventdata_destinationPort:"636" OR data_win_eventdata_destinationPort:"3268" OR data_win_eventdata_destinationPort:"88" OR data_win_eventdata_destinationPort:"9389")
+    pivot_on:
+    - host
+    window: 1h

@@ -114,37 +114,47 @@ graylog:
   query: (full_log:/.*\/etc\/at\.allow.*/ OR full_log:/.*\/etc\/at\.deny.*/) AND NOT _exists_:data_win_system_eventID AND NOT rule_groups:/.*windows.*/
 
 correlation:
-  # Authored by the correlation engine for review. Related CoPilot Searches to run
-  # around an alert from this rule, scoped to the same host/user/IP within the window.
+  # Authored per-rule (behaviour-researched) for the correlation engine. Related CoPilot
+  # Searches + telemetry pivots to run around an alert, scoped to its host/user/ip/domain.
   related_rules:
-    - id: cb909b3e-512b-11ec-aa31-3e22fbd008af
-      name: "Possible Lateral Movement PowerShell Spawn"
-      reason: "same analytic story: Scheduled Tasks"
-    - id: 12c80db8-ef62-4456-92df-b23e1b3219f6
-      name: "Windows Enable Win32 ScheduledJob via Registry"
-      reason: "same analytic story: Scheduled Tasks"
-    - id: ddf82fcb-e9ee-40e3-8712-a50b5bf323fc
-      name: "Windows PowerShell ScheduleTask"
-      reason: "same analytic story: Scheduled Tasks"
-    - id: windows-scheduled-task-created-public-path-001
-      name: "Windows Scheduled Task Created Within Public Path"
-      reason: "same analytic story: Scheduled Tasks"
-    - id: windows-scheduled-task-created-spawn-shell-001
-      name: "Windows Scheduled Task Created to Spawn Shell"
-      reason: "same analytic story: Scheduled Tasks"
-  window: 1h
+  - id: linux-auditd-at-application-execution-001
+    name: Linux Auditd At Application Execution
+    reason: Editing at.allow/at.deny permits or unblocks at; actual at use follows.
+  - id: linux-auditd-crontab-directory-files-modification-001
+    name: Linux Auditd Crontab Directory Files Modification
+    reason: Alternative scheduled-task persistence from the same actor.
+  - id: linux-append-cronjob-entry-001
+    name: Linux Append Cronjob Entry On Existing Cronjob File
+    reason: Parallel cron persistence used when at is restricted.
+  - id: linux-service-file-created-in-systemd-directory-001
+    name: Linux Service File Created In Systemd Directory
+    reason: Another persistent execution mechanism often combined with at.
+  - id: linux-sudo-or-su-execution-001
+    name: Linux Sudo Or Su Execution
+    reason: Writing /etc/at.* needs root; sudo/su precedes the change.
+  - id: linux-auditd-add-user-001
+    name: Linux Auditd Add User
+    reason: at.allow lists users; adding an account then allowing it to use at is a persistence pairing.
+  window: 6h
   enrichment_searches:
-  # Rule-specific telemetry pivots the engine runs around an alert from this rule,
-  # scoped to the alert's host/user/IP within the window (behaviour-targeted, not a sweep).
-    - name: "Cron / at / systemd-timer scheduling on this host"
-      query: '((data_process_exec_process_binary:/.*(\/[Cc][Rr][Oo][Nn][Tt][Aa][Bb]|\/[Aa][Tt])/) OR (data_process_exec_process_arguments:/.*\/[Ee][Tt][Cc]\/[Cc][Rr][Oo][Nn].*/) OR (data_process_exec_process_arguments:/.*[Ss][Yy][Ss][Tt][Ee][Mm][Dd]\/[Ss][Yy][Ss][Tt][Ee][Mm].*/) OR (data_process_exec_process_arguments:/.*\.[Tt][Ii][Mm][Ee][Rr].*/))'
-      pivot_on: [host]
-      window: 4h
-    - name: "Shell / interpreter execution on this host"
-      query: '((data_process_exec_process_binary:/.*(\/[Bb][Aa][Ss][Hh]|\/[Ss][Hh]|\/[Dd][Aa][Ss][Hh]|\/[Zz][Ss][Hh]|\/[Kk][Ss][Hh]|\/[Aa][Ss][Hh]|\/[Bb][Uu][Ss][Yy][Bb][Oo][Xx])/) OR (data_process_exec_process_binary:/.*(\/[Pp][Yy][Tt][Hh][Oo][Nn]|\/[Pp][Yy][Tt][Hh][Oo][Nn]3|\/[Pp][Ee][Rr][Ll]|\/[Rr][Uu][Bb][Yy]|\/[Pp][Hh][Pp]|\/[Nn][Oo][Dd][Ee]|\/[Ll][Uu][Aa]|\/[Aa][Ww][Kk])/))'
-      pivot_on: [host]
-      window: 1h
-    - name: "Reconnaissance commands on this host"
-      query: 'data_process_exec_process_binary:/.*(\/[Ww][Hh][Oo][Aa][Mm][Ii]|\/[Ii][Dd]|\/[Uu][Nn][Aa][Mm][Ee]|\/[Hh][Oo][Ss][Tt][Nn][Aa][Mm][Ee]|\/[Hh][Oo][Ss][Tt][Nn][Aa][Mm][Ee][Cc][Tt][Ll]|\/[Ss][Ss]|\/[Nn][Ee][Tt][Ss][Tt][Aa][Tt]|\/[Ii][Ff][Cc][Oo][Nn][Ff][Ii][Gg]|\/[Aa][Rr][Pp]|\/[Ww]|\/[Ww][Hh][Oo]|\/[Ll][Aa][Ss][Tt]|\/[Ll][Ss][Oo][Ff]|\/[Nn][Mm][Aa][Pp]|\/[Dd][Ii][Gg]|\/[Ff][Ii][Nn][Dd])/'
-      pivot_on: [host]
-      window: 1h
+  # Behaviour-targeted hunts the engine runs around the alert (not a sweep).
+  - name: Edits to at allow/deny lists
+    query: data_process_exec_process_arguments:/.*(\/[Ee][Tt][Cc]\/[Aa][Tt]\.(allow|deny)).*/
+    pivot_on: host
+    window: 6h
+  - name: at / batch scheduling commands
+    query: (data_process_exec_process_binary:/.*(\/[Aa][Tt]|\/[Aa][Tt][Dd]|\/[Bb][Aa][Tt][Cc][Hh])/ OR data_process_exec_process_arguments:/.*(\/[Vv][Aa][Rr]\/[Ss][Pp][Oo][Oo][Ll]\/[Cc][Rr][Oo][Nn]\/[Aa][Tt][Jj][Oo][Bb][Ss]|\/[Ee][Tt][Cc]\/[Aa][Tt]\.(allow|deny)).*/)
+    pivot_on: host
+    window: 6h
+  - name: Cron and systemd timer scheduling
+    query: (data_process_exec_process_binary:/.*(\/[Cc][Rr][Oo][Nn][Tt][Aa][Bb])/ OR data_process_exec_process_arguments:/.*(\/[Ee][Tt][Cc]\/[Cc][Rr][Oo][Nn]|\/[Vv][Aa][Rr]\/[Ss][Pp][Oo][Oo][Ll]\/[Cc][Rr][Oo][Nn]).*/) OR data_process_exec_process_arguments:/.*(\.[Tt][Ii][Mm][Ee][Rr]).*/
+    pivot_on: host
+    window: 6h
+  - name: Privilege use around the change
+    query: data_process_exec_process_binary:/.*(\/[Ss][Uu][Dd][Oo]|\/[Ss][Uu]|\/[Pp][Kk][Ee][Xx][Ee][Cc]|\/[Dd][Oo][Aa][Ss])/
+    pivot_on: user
+    window: 2h
+  - name: Account creation or modification
+    query: data_process_exec_process_binary:/.*(\/[Uu][Ss][Ee][Rr][Aa][Dd][Dd]|\/[Aa][Dd][Dd][Uu][Ss][Ee][Rr]|\/[Uu][Ss][Ee][Rr][Mm][Oo][Dd]|\/[Cc][Hh][Pp][Aa][Ss][Ss][Ww][Dd]|\/[Pp][Aa][Ss][Ss][Ww][Dd])/
+    pivot_on: host
+    window: 6h

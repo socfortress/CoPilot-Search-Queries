@@ -146,44 +146,58 @@ graylog:
   query: data_win_system_eventID:"4104" AND data_win_eventdata_scriptBlockText:/.*[Ff][Rr][Oo][Mm][Bb][Aa][Ss][Ee]64[Ss][Tt][Rr][Ii][Nn][Gg].*/ AND data_win_eventdata_scriptBlockText:/.*[Mm][Ee][Mm][Oo][Rr][Yy][Ss][Tt][Rr][Ee][Aa][Mm].*/ AND data_win_eventdata_scriptBlockText:/.*[Hh]4[Ss][Ii].*/
 
 correlation:
-  # Authored by the correlation engine for review. Related CoPilot Searches to run
-  # around an alert from this rule, scoped to the same host/user/IP within the window.
+  # Authored per-rule (behaviour-researched) for the correlation engine. Related CoPilot
+  # Searches + telemetry pivots to run around an alert, scoped to its host/user/ip/domain.
   related_rules:
-    - id: 75bf09fa-1dd7-4d18-9af9-dd9e492562eb
-      name: "ADSI-Cache File Creation By Uncommon Tool"
-      reason: "next kill-chain tactic: Command and Control"
-    - id: 639c9081-f482-47d3-a0bd-ddee3d4ecd76
-      name: "All Backups Deleted Via Wbadmin.EXE"
-      reason: "next kill-chain tactic: Impact"
-    - id: 0b9ad457-2554-44c1-82c2-d56a99c42377
-      name: "Anydesk Temporary Artefact"
-      reason: "next kill-chain tactic: Command and Control"
-    - id: 7cff77e1-9663-46a3-8260-17f2e1aa9d0a
-      name: "AppX Package Installation Attempts Via AppInstaller.EXE"
-      reason: "next kill-chain tactic: Command and Control"
-    - id: 1f0f6176-6482-4027-b151-00071af39d7e
-      name: "Arbitrary File Download Via ConfigSecurityPolicy.EXE"
-      reason: "next kill-chain tactic: Exfiltration"
-    - id: eee00933-a761-4cd0-be70-c42fe91731e7
-      name: "Arbitrary File Download Via GfxDownloadWrapper.EXE"
-      reason: "next kill-chain tactic: Command and Control"
+  - id: 98767d61-b2e8-4d71-b661-e36783ee24c1
+    name: Gzip Archive Decode Via PowerShell
+    reason: Same gzip+base64 (H4sI) decode technique seen at process-creation level; the command-line twin of this script-block detection, confirming the loader ran from a powershell.exe command line.
+  - id: 20e5497e-331c-4cd5-8d36-935f6e2a9a07
+    name: Invoke-Obfuscation COMPRESS OBFUSCATION - PowerShell
+    reason: Invoke-Obfuscation COMPRESS wraps payloads in DeflateStream/MemoryStream over base64 - the same decompress-in-memory loader pattern, indicating a tooled obfuscation wrapper.
+  - id: ddcd88cb-7f62-4ce5-86f9-1704190feb0a
+    name: Potential In-Memory Execution Using Reflection.Assembly
+    reason: Decompressed gzip bytes are commonly a .NET assembly loaded via Assembly.Load; this is the typical next stage after the decode.
+  - id: windows-powershell-fileless-process-injection-via-getprocaddress-001
+    name: Powershell Fileless Process Injection via GetProcAddress
+    reason: Decoded payload may be shellcode that the same script injects via GetProcAddress/VirtualAlloc P/Invoke - fileless execution follow-on.
+  - id: 16b37b70-6fcf-4814-a092-c36bd3aafcbd
+    name: PowerShell ShellCode
+    reason: Decompressed blob executed as raw shellcode via VirtualAlloc/CreateThread in the same script block family.
+  - id: 403c2cc0-7f6b-4925-9423-bfa573bed7eb
+    name: Suspicious PowerShell Download - Powershell Script
+    reason: The base64 gzip stage is usually fetched by a download cradle first (precursor) or chained to a second-stage download afterwards.
+  - id: a21e3484-c94d-11eb-b55b-acde48001122
+    name: Unloading AMSI via Reflection
+    reason: Loaders that decode packed payloads in memory often disable AMSI first so the decoded script is not scanned; co-occurring defense evasion.
+  - id: 0a99eb3e-1617-41bd-b095-13dc767f3def
+    name: HackTool - Jlaive In-Memory Assembly Execution
+    reason: Jlaive packers decode a compressed/encrypted .NET payload and run it in memory from a stub, the same gzip-decode-then-execute behaviour.
   window: 1h
   enrichment_searches:
-  # Rule-specific telemetry pivots the engine runs around an alert from this rule,
-  # scoped to the alert's host/user/IP within the window (behaviour-targeted, not a sweep).
-    - name: "Archive / staging & outbound-transfer tooling on this host"
-      query: '(((data_win_system_eventID:"1" AND data_win_eventdata_image:/.*(\\7[Zz]\.[Ee][Xx][Ee]|\\7[Zz][Aa]\.[Ee][Xx][Ee]|\\7[Zz][Rr]\.[Ee][Xx][Ee]|\\[Rr][Aa][Rr]\.[Ee][Xx][Ee]|\\[Ww][Ii][Nn][Rr][Aa][Rr]\.[Ee][Xx][Ee]|\\[Ww][Zz][Zz][Ii][Pp]\.[Ee][Xx][Ee]|\\[Mm][Aa][Kk][Ee][Cc][Aa][Bb]\.[Ee][Xx][Ee])/) OR (data_win_eventdata_commandLine:/.*[Cc][Oo][Mm][Pp][Rr][Ee][Ss][Ss]-[Aa][Rr][Cc][Hh][Ii][Vv][Ee].*/ OR data_win_eventdata_commandLine:/.*\.7[Zz].*/ OR data_win_eventdata_commandLine:/.*\.[Rr][Aa][Rr].*/ OR data_win_eventdata_commandLine:/.* -[Hh][Pp].*/)) OR (((data_win_system_eventID:"1" AND data_win_eventdata_image:/.*(\\[Rr][Cc][Ll][Oo][Nn][Ee]\.[Ee][Xx][Ee]|\\[Cc][Uu][Rr][Ll]\.[Ee][Xx][Ee]|\\[Ww][Gg][Ee][Tt]\.[Ee][Xx][Ee]|\\[Ww][Ii][Nn][Ss][Cc][Pp]\.[Ee][Xx][Ee]|\\[Pp][Ss][Cc][Pp]\.[Ee][Xx][Ee]|\\[Mm][Ee][Gg][Aa][Cc][Mm][Dd]\.[Ee][Xx][Ee]|\\[Mm][Ee][Gg][Aa][Ss][Yy][Nn][Cc]\.[Ee][Xx][Ee])/) OR ((data_win_eventdata_commandLine:/.*[Ii][Nn][Vv][Oo][Kk][Ee]-[Rr][Ee][Ss][Tt][Mm][Ee][Tt][Hh][Oo][Dd].*/ OR data_win_eventdata_commandLine:/.*[Ss][Tt][Aa][Rr][Tt]-[Bb][Ii][Tt][Ss][Tt][Rr][Aa][Nn][Ss][Ff][Ee][Rr].*/ OR data_win_eventdata_commandLine:/.*[Rr][Cc][Ll][Oo][Nn][Ee].*/ OR data_win_eventdata_commandLine:/.*[Tt][Rr][Aa][Nn][Ss][Ff][Ee][Rr]\.[Ss][Hh].*/ OR data_win_eventdata_commandLine:/.*[Aa][Nn][Oo][Nn][Ff][Ii][Ll][Ee][Ss].*/ OR data_win_eventdata_commandLine:/.*[Pp][Aa][Ss][Tt][Ee][Bb][Ii][Nn].*/ OR data_win_eventdata_commandLine:/.*[Mm][Ee][Gg][Aa]\.[Nn][Zz].*/ OR data_win_eventdata_commandLine:/.*-[Oo][Uu][Tt][Ff][Ii][Ll][Ee].*/ OR data_win_eventdata_commandLine:/.*[Uu][Pp][Ll][Oo][Aa][Dd][Ff][Ii][Ll][Ee].*/)))))'
-      pivot_on: [host]
-      window: 2h
-    - name: "Download / AMSI-bypass / encoded script blocks on this host"
-      query: 'data_win_system_eventID:"4104" AND (data_win_eventdata_scriptBlockText:/.*[Dd][Oo][Ww][Nn][Ll][Oo][Aa][Dd][Ss][Tt][Rr][Ii][Nn][Gg].*/ OR data_win_eventdata_scriptBlockText:/.*[Dd][Oo][Ww][Nn][Ll][Oo][Aa][Dd][Ff][Ii][Ll][Ee].*/ OR data_win_eventdata_scriptBlockText:/.*[Ii][Nn][Vv][Oo][Kk][Ee]-[Ww][Ee][Bb][Rr][Ee][Qq][Uu][Ee][Ss][Tt].*/ OR data_win_eventdata_scriptBlockText:/.*[Nn][Ee][Tt]\.[Ww][Ee][Bb][Cc][Ll][Ii][Ee][Nn][Tt].*/ OR data_win_eventdata_scriptBlockText:/.*[Ff][Rr][Oo][Mm][Bb][Aa][Ss][Ee]64[Ss][Tt][Rr][Ii][Nn][Gg].*/ OR data_win_eventdata_scriptBlockText:/.*[Ii][Ee][Xx].*/ OR data_win_eventdata_scriptBlockText:/.*[Ii][Nn][Vv][Oo][Kk][Ee]-[Ee][Xx][Pp][Rr][Ee][Ss][Ss][Ii][Oo][Nn].*/ OR data_win_eventdata_scriptBlockText:/.*[Ss][Tt][Aa][Rr][Tt]-[Bb][Ii][Tt][Ss][Tt][Rr][Aa][Nn][Ss][Ff][Ee][Rr].*/ OR data_win_eventdata_scriptBlockText:/.*[Aa][Mm][Ss][Ii][Uu][Tt][Ii][Ll][Ss].*/ OR data_win_eventdata_scriptBlockText:/.*-[Ee][Nn][Cc].*/ OR data_win_eventdata_scriptBlockText:/.*-[Ee][Nn][Cc][Oo][Dd][Ee][Dd][Cc][Oo][Mm][Mm][Aa][Nn][Dd].*/ OR data_win_eventdata_scriptBlockText:/.*[Rr][Ee][Ff][Ll][Ee][Cc][Tt][Ii][Oo][Nn]\.[Aa][Ss][Ss][Ee][Mm][Bb][Ll][Yy].*/)'
-      pivot_on: [host]
-      window: 1h
-    - name: "Follow-on LOLBin / signed-binary-proxy execution on this host"
-      query: 'data_win_system_eventID:"1" AND data_win_eventdata_image:/.*(\\[Rr][Uu][Nn][Dd][Ll][Ll]32\.[Ee][Xx][Ee]|\\[Rr][Ee][Gg][Ss][Vv][Rr]32\.[Ee][Xx][Ee]|\\[Mm][Ss][Hh][Tt][Aa]\.[Ee][Xx][Ee]|\\[Ii][Nn][Ss][Tt][Aa][Ll][Ll][Uu][Tt][Ii][Ll]\.[Ee][Xx][Ee]|\\[Rr][Ee][Gg][Aa][Ss][Mm]\.[Ee][Xx][Ee]|\\[Rr][Ee][Gg][Ss][Vv][Cc][Ss]\.[Ee][Xx][Ee]|\\[Mm][Ss][Bb][Uu][Ii][Ll][Dd]\.[Ee][Xx][Ee]|\\[Cc][Ee][Rr][Tt][Uu][Tt][Ii][Ll]\.[Ee][Xx][Ee]|\\[Bb][Ii][Tt][Ss][Aa][Dd][Mm][Ii][Nn]\.[Ee][Xx][Ee]|\\[Ww][Mm][Ii][Cc]\.[Ee][Xx][Ee]|\\[Cc][Mm][Ss][Tt][Pp]\.[Ee][Xx][Ee]|\\[Oo][Dd][Bb][Cc][Cc][Oo][Nn][Ff]\.[Ee][Xx][Ee]|\\[Ff][Oo][Rr][Ff][Ii][Ll][Ee][Ss]\.[Ee][Xx][Ee]|\\[Pp][Cc][Aa][Ll][Uu][Aa]\.[Ee][Xx][Ee]|\\[Mm][Aa][Vv][Ii][Nn][Jj][Ee][Cc][Tt]\.[Ee][Xx][Ee]|\\[Ss][Cc][Rr][Ii][Pp][Tt][Rr][Uu][Nn][Nn][Ee][Rr]\.[Ee][Xx][Ee])/'
-      pivot_on: [host]
-      window: 1h
-    - name: "Downloader / C2 tooling executed on this host"
-      query: '(data_win_system_eventID:"1" AND data_win_eventdata_image:/.*(\\[Cc][Ee][Rr][Tt][Uu][Tt][Ii][Ll]\.[Ee][Xx][Ee]|\\[Bb][Ii][Tt][Ss][Aa][Dd][Mm][Ii][Nn]\.[Ee][Xx][Ee]|\\[Cc][Uu][Rr][Ll]\.[Ee][Xx][Ee]|\\[Ww][Gg][Ee][Tt]\.[Ee][Xx][Ee])/) OR (data_win_eventdata_commandLine:/.*[Dd][Oo][Ww][Nn][Ll][Oo][Aa][Dd][Ss][Tt][Rr][Ii][Nn][Gg].*/ OR data_win_eventdata_commandLine:/.*[Dd][Oo][Ww][Nn][Ll][Oo][Aa][Dd][Ff][Ii][Ll][Ee].*/ OR data_win_eventdata_commandLine:/.*[Ii][Nn][Vv][Oo][Kk][Ee]-[Ww][Ee][Bb][Rr][Ee][Qq][Uu][Ee][Ss][Tt].*/ OR data_win_eventdata_commandLine:/.*[Nn][Ee][Tt]\.[Ww][Ee][Bb][Cc][Ll][Ii][Ee][Nn][Tt].*/ OR data_win_eventdata_commandLine:/.*[Ss][Tt][Aa][Rr][Tt]-[Bb][Ii][Tt][Ss][Tt][Rr][Aa][Nn][Ss][Ff][Ee][Rr].*/ OR data_win_eventdata_commandLine:/.*[Ii][Ww][Rr] .*/ OR data_win_eventdata_commandLine:/.*[Cc][Uu][Rr][Ll] .*/ OR data_win_eventdata_commandLine:/.*[Ww][Gg][Ee][Tt] .*/)'
-      pivot_on: [host]
-      window: 1h
+  # Behaviour-targeted hunts the engine runs around the alert (not a sweep).
+  - name: In-memory .NET assembly / shellcode loading in script blocks
+    query: data_win_system_eventID:"4104" AND (data_win_eventdata_scriptBlockText:/.*[Rr]eflection\.[Aa]ssembly.*/ OR data_win_eventdata_scriptBlockText:/.*[Aa]ssembly\]::[Ll]oad.*/ OR data_win_eventdata_scriptBlockText:/.*[Vv]irtual[Aa]lloc.*/ OR data_win_eventdata_scriptBlockText:/.*[Gg]et[Pp]roc[Aa]ddress.*/ OR data_win_eventdata_scriptBlockText:/.*[Cc]reate[Tt]hread.*/ OR data_win_eventdata_scriptBlockText:/.*[Mm]arshal.*[Cc]opy.*/ OR data_win_eventdata_scriptBlockText:/.*[Ii]nvoke-[Ee]xpression.*/ OR data_win_eventdata_scriptBlockText:/.*[Dd]eflate[Ss]tream.*/ OR data_win_eventdata_scriptBlockText:/.*[Gg][Zz]ip[Ss]tream.*/)
+    pivot_on:
+    - host
+    window: 1h
+  - name: PowerShell download cradle or AMSI tampering around the decode
+    query: data_win_system_eventID:"4104" AND (data_win_eventdata_scriptBlockText:/.*[Dd]ownload[Ss]tring.*/ OR data_win_eventdata_scriptBlockText:/.*[Dd]ownload[Dd]ata.*/ OR data_win_eventdata_scriptBlockText:/.*[Dd]ownload[Ff]ile.*/ OR data_win_eventdata_scriptBlockText:/.*[Ii]nvoke-[Ww]eb[Rr]equest.*/ OR data_win_eventdata_scriptBlockText:/.*[Nn]et\.[Ww]eb[Cc]lient.*/ OR data_win_eventdata_scriptBlockText:/.*[Aa]msi[Ii]nit[Ff]ailed.*/ OR data_win_eventdata_scriptBlockText:/.*[Aa]msi[Uu]tils.*/)
+    pivot_on:
+    - host
+    window: 1h
+  - name: PowerShell spawn with encoded or hidden command line
+    query: data_win_system_eventID:"1" AND data_win_eventdata_image:/.*\\[Pp]ower[Ss]hell(_ise)?\.[Ee][Xx][Ee]/ AND (data_win_eventdata_commandLine:/.*[Ff]rom[Bb]ase64[Ss]tring.*/ OR data_win_eventdata_commandLine:/.* -[Ee][Nn][Cc].*/ OR data_win_eventdata_commandLine:/.*[Ee]ncoded[Cc]ommand.*/ OR data_win_eventdata_commandLine:/.*[Hh]4[Ss][Ii].*/ OR data_win_eventdata_commandLine:/.*[Ww]indow[Ss]tyle +[Hh]idden.*/ OR data_win_eventdata_commandLine:/.* -[Nn]o[Pp].*/)
+    pivot_on:
+    - host
+    window: 1h
+  - name: Outbound network connections or DNS from powershell
+    query: ((data_win_system_eventID:"3" AND data_win_eventdata_image:/.*\\[Pp]ower[Ss]hell(_ise)?\.[Ee][Xx][Ee]/) OR (data_win_system_eventID:"22" AND data_win_eventdata_image:/.*\\[Pp]ower[Ss]hell(_ise)?\.[Ee][Xx][Ee]/))
+    pivot_on:
+    - host
+    window: 1h
+  - name: Process injection or access into other processes by powershell
+    query: ((data_win_system_eventID:"8" AND data_win_eventdata_sourceImage:/.*\\[Pp]ower[Ss]hell(_ise)?\.[Ee][Xx][Ee]/) OR (data_win_system_eventID:"10" AND data_win_eventdata_sourceImage:/.*\\[Pp]ower[Ss]hell(_ise)?\.[Ee][Xx][Ee]/ AND data_win_eventdata_grantedAccess:("0x1fffff" OR "0x1f3fff" OR "0x143a")) OR (data_win_system_eventID:"7" AND data_win_eventdata_image:/.*\\[Pp]ower[Ss]hell(_ise)?\.[Ee][Xx][Ee]/ AND data_win_eventdata_imageLoaded:/.*(clrjit|\\[Cc]lr)\.[Dd][Ll][Ll]/))
+    pivot_on:
+    - host
+    window: 1h

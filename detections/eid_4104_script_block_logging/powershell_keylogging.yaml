@@ -150,44 +150,58 @@ graylog:
   query: data_win_system_eventID:"4104" AND (data_win_eventdata_scriptBlockText:/.*[Gg][Ee][Tt]-[Kk][Ee][Yy][Ss][Tt][Rr][Oo][Kk][Ee][Ss].*/ OR (data_win_eventdata_scriptBlockText:/.*[Gg][Ee][Tt]-[Pp][Rr][Oo][Cc][Aa][Dd][Dd][Rr][Ee][Ss][Ss] [Uu][Ss][Ee][Rr]32\.[Dd][Ll][Ll] [Gg][Ee][Tt][Aa][Ss][Yy][Nn][Cc][Kk][Ee][Yy][Ss][Tt][Aa][Tt][Ee].*/ AND data_win_eventdata_scriptBlockText:/.*[Gg][Ee][Tt]-[Pp][Rr][Oo][Cc][Aa][Dd][Dd][Rr][Ee][Ss][Ss] [Uu][Ss][Ee][Rr]32\.[Dd][Ll][Ll] [Gg][Ee][Tt][Ff][Oo][Rr][Ee][Gg][Rr][Oo][Uu][Nn][Dd][Ww][Ii][Nn][Dd][Oo][Ww].*/))
 
 correlation:
-  # Authored by the correlation engine for review. Related CoPilot Searches to run
-  # around an alert from this rule, scoped to the same host/user/IP within the window.
+  # Authored per-rule (behaviour-researched) for the correlation engine. Related CoPilot
+  # Searches + telemetry pivots to run around an alert, scoped to its host/user/ip/domain.
   related_rules:
-    - id: ec570e53-4c76-45a9-804d-dc3f355ff7a7
-      name: "7Zip Compressing Dump Files"
-      reason: "next kill-chain tactic: Collection"
-    - id: 0a1255c5-d732-4b62-ac02-b5152d34fb83
-      name: "ADExplorer Writing Complete AD Snapshot Into .dat File"
-      reason: "next kill-chain tactic: Discovery"
-    - id: 1ea13e8c-03ea-409b-877d-ce5c3d2c1cb3
-      name: "ADFS Database Named Pipe Connection By Uncommon Tool"
-      reason: "next kill-chain tactic: Collection"
-    - id: 75bf09fa-1dd7-4d18-9af9-dd9e492562eb
-      name: "ADSI-Cache File Creation By Uncommon Tool"
-      reason: "next kill-chain tactic: Command and Control"
-    - id: 03e2746e-2b31-42f1-ab7a-eb39365b2422
-      name: "APT31 Judgement Panda Activity"
-      reason: "next kill-chain tactic: Credential Access"
-    - id: fc028194-969d-4122-8abe-0470d5b8f12f
-      name: "Access to Browser Login Data"
-      reason: "next kill-chain tactic: Credential Access"
-  window: 1h
+  - id: windows-clipboard-data-get-clipboard-001
+    name: Windows ClipBoard Data via Get-ClipBoard
+    reason: 'Sibling PowerShell input-capture technique: operators who deploy a keylogger commonly also harvest clipboard contents (copied passwords) in the same session.'
+  - id: 5e0b1936-8f99-4399-8ee2-9edc5b32e170
+    name: Windows Screen Capture Via Powershell
+    reason: Keyloggers like Get-Keystrokes are typically bundled with screenshot capture (Get-TimedScreenshot in PowerSploit); co-occurring user-surveillance collection on the same host.
+  - id: d4a11f63-2390-411c-9adf-d791fd152830
+    name: Windows Screen Capture with CopyFromScreen
+    reason: 'Same user-surveillance family: CopyFromScreen screenshotting alongside keystroke logging confirms a PowerShell spyware toolkit rather than a one-off test.'
+  - id: 403c2cc0-7f6b-4925-9423-bfa573bed7eb
+    name: Suspicious PowerShell Download - Powershell Script
+    reason: 'Precursor: the Get-Keystrokes script is usually pulled from a remote host via a download cradle immediately before it is executed in memory.'
+  - id: a21e3484-c94d-11eb-b55b-acde48001122
+    name: Unloading AMSI via Reflection
+    reason: 'Precursor: attackers disable AMSI before running known offensive PowerShell like Get-Keystrokes so the script block is not blocked by AV.'
+  - id: windows-powershell-fileless-process-injection-via-getprocaddress-001
+    name: Powershell Fileless Process Injection via GetProcAddress
+    reason: Shares the Get-ProcAddress/user32 P/Invoke reflection pattern of the keylogger; the same in-memory PowerShell tradecraft is used for injection payloads in the same session.
+  - id: ca8b77a9-d499-4095-b793-5d5f330d450e
+    name: PowerShell Credential Prompt
+    reason: 'Parallel credential-theft path: spoofed credential prompts complement passive keystroke capture to obtain the user''s password.'
+  - id: 59e8bf41-7472-412a-90d3-00f3afa452e9
+    name: Windows Exfiltration Over C2 Via Powershell UploadString
+    reason: 'Follow-on: captured keystroke logs are sent out by PowerShell, commonly via UploadString/web upload.'
+  window: 4h
   enrichment_searches:
-  # Rule-specific telemetry pivots the engine runs around an alert from this rule,
-  # scoped to the alert's host/user/IP within the window (behaviour-targeted, not a sweep).
-    - name: "Remote-execution / lateral-movement tooling on this host"
-      query: '(data_win_system_eventID:"1" AND data_win_eventdata_image:/.*(\\[Pp][Ss][Ee][Xx][Ee][Cc]\.[Ee][Xx][Ee]|\\[Pp][Ss][Ee][Xx][Ee][Ss][Vv][Cc]\.[Ee][Xx][Ee]|\\[Pp][Aa][Ee][Xx][Ee][Cc]\.[Ee][Xx][Ee]|\\[Ww][Ii][Nn][Rr][Ss]\.[Ee][Xx][Ee]|\\[Mm][Ss][Tt][Ss][Cc]\.[Ee][Xx][Ee]|\\[Ww][Mm][Ii][Cc]\.[Ee][Xx][Ee])/) OR (data_win_system_eventID:"1" AND data_win_eventdata_image:/.*(\\[Pp][Oo][Ww][Ee][Rr][Ss][Hh][Ee][Ll][Ll]\.[Ee][Xx][Ee]|\\[Pp][Ww][Ss][Hh]\.[Ee][Xx][Ee])/ AND (data_win_eventdata_commandLine:/.*[Ii][Nn][Vv][Oo][Kk][Ee]-[Cc][Oo][Mm][Mm][Aa][Nn][Dd].*/ OR data_win_eventdata_commandLine:/.*[Nn][Ee][Ww]-[Pp][Ss][Ss][Ee][Ss][Ss][Ii][Oo][Nn].*/ OR data_win_eventdata_commandLine:/.*[Ee][Nn][Tt][Ee][Rr]-[Pp][Ss][Ss][Ee][Ss][Ss][Ii][Oo][Nn].*/ OR data_win_eventdata_commandLine:/.*-[Cc][Oo][Mm][Pp][Uu][Tt][Ee][Rr][Nn][Aa][Mm][Ee].*/))'
-      pivot_on: [host]
-      window: 2h
-    - name: "Download / AMSI-bypass / encoded script blocks on this host"
-      query: 'data_win_system_eventID:"4104" AND (data_win_eventdata_scriptBlockText:/.*[Dd][Oo][Ww][Nn][Ll][Oo][Aa][Dd][Ss][Tt][Rr][Ii][Nn][Gg].*/ OR data_win_eventdata_scriptBlockText:/.*[Dd][Oo][Ww][Nn][Ll][Oo][Aa][Dd][Ff][Ii][Ll][Ee].*/ OR data_win_eventdata_scriptBlockText:/.*[Ii][Nn][Vv][Oo][Kk][Ee]-[Ww][Ee][Bb][Rr][Ee][Qq][Uu][Ee][Ss][Tt].*/ OR data_win_eventdata_scriptBlockText:/.*[Nn][Ee][Tt]\.[Ww][Ee][Bb][Cc][Ll][Ii][Ee][Nn][Tt].*/ OR data_win_eventdata_scriptBlockText:/.*[Ff][Rr][Oo][Mm][Bb][Aa][Ss][Ee]64[Ss][Tt][Rr][Ii][Nn][Gg].*/ OR data_win_eventdata_scriptBlockText:/.*[Ii][Ee][Xx].*/ OR data_win_eventdata_scriptBlockText:/.*[Ii][Nn][Vv][Oo][Kk][Ee]-[Ee][Xx][Pp][Rr][Ee][Ss][Ss][Ii][Oo][Nn].*/ OR data_win_eventdata_scriptBlockText:/.*[Ss][Tt][Aa][Rr][Tt]-[Bb][Ii][Tt][Ss][Tt][Rr][Aa][Nn][Ss][Ff][Ee][Rr].*/ OR data_win_eventdata_scriptBlockText:/.*[Aa][Mm][Ss][Ii][Uu][Tt][Ii][Ll][Ss].*/ OR data_win_eventdata_scriptBlockText:/.*-[Ee][Nn][Cc].*/ OR data_win_eventdata_scriptBlockText:/.*-[Ee][Nn][Cc][Oo][Dd][Ee][Dd][Cc][Oo][Mm][Mm][Aa][Nn][Dd].*/ OR data_win_eventdata_scriptBlockText:/.*[Rr][Ee][Ff][Ll][Ee][Cc][Tt][Ii][Oo][Nn]\.[Aa][Ss][Ss][Ee][Mm][Bb][Ll][Yy].*/)'
-      pivot_on: [host]
-      window: 1h
-    - name: "Follow-on LOLBin / signed-binary-proxy execution on this host"
-      query: 'data_win_system_eventID:"1" AND data_win_eventdata_image:/.*(\\[Rr][Uu][Nn][Dd][Ll][Ll]32\.[Ee][Xx][Ee]|\\[Rr][Ee][Gg][Ss][Vv][Rr]32\.[Ee][Xx][Ee]|\\[Mm][Ss][Hh][Tt][Aa]\.[Ee][Xx][Ee]|\\[Ii][Nn][Ss][Tt][Aa][Ll][Ll][Uu][Tt][Ii][Ll]\.[Ee][Xx][Ee]|\\[Rr][Ee][Gg][Aa][Ss][Mm]\.[Ee][Xx][Ee]|\\[Rr][Ee][Gg][Ss][Vv][Cc][Ss]\.[Ee][Xx][Ee]|\\[Mm][Ss][Bb][Uu][Ii][Ll][Dd]\.[Ee][Xx][Ee]|\\[Cc][Ee][Rr][Tt][Uu][Tt][Ii][Ll]\.[Ee][Xx][Ee]|\\[Bb][Ii][Tt][Ss][Aa][Dd][Mm][Ii][Nn]\.[Ee][Xx][Ee]|\\[Ww][Mm][Ii][Cc]\.[Ee][Xx][Ee]|\\[Cc][Mm][Ss][Tt][Pp]\.[Ee][Xx][Ee]|\\[Oo][Dd][Bb][Cc][Cc][Oo][Nn][Ff]\.[Ee][Xx][Ee]|\\[Ff][Oo][Rr][Ff][Ii][Ll][Ee][Ss]\.[Ee][Xx][Ee]|\\[Pp][Cc][Aa][Ll][Uu][Aa]\.[Ee][Xx][Ee]|\\[Mm][Aa][Vv][Ii][Nn][Jj][Ee][Cc][Tt]\.[Ee][Xx][Ee]|\\[Ss][Cc][Rr][Ii][Pp][Tt][Rr][Uu][Nn][Nn][Ee][Rr]\.[Ee][Xx][Ee])/'
-      pivot_on: [host]
-      window: 1h
-    - name: "Memory/credential-dump creation & LSASS access on this host"
-      query: '((data_win_system_eventID:"1" AND data_win_eventdata_image:/.*(\\[Pp][Rr][Oo][Cc][Dd][Uu][Mm][Pp]\.[Ee][Xx][Ee]|\\[Pp][Rr][Oo][Cc][Dd][Uu][Mm][Pp]64\.[Ee][Xx][Ee]|\\[Ss][Qq][Ll][Dd][Uu][Mm][Pp][Ee][Rr]\.[Ee][Xx][Ee]|\\[Cc][Rr][Ee][Aa][Tt][Ee][Dd][Uu][Mm][Pp]\.[Ee][Xx][Ee]|\\[Rr][Dd][Rr][Ll][Ee][Aa][Kk][Dd][Ii][Aa][Gg]\.[Ee][Xx][Ee]|\\[Dd][Uu][Mm][Pp][Ee][Rr][Tt]\.[Ee][Xx][Ee]|\\[Nn][Aa][Nn][Oo][Dd][Uu][Mm][Pp]\.[Ee][Xx][Ee]|\\[Aa][Vv][Dd][Uu][Mm][Pp]\.[Ee][Xx][Ee])/) OR (data_win_system_eventID:"1" AND (data_win_eventdata_commandLine:/.*[Cc][Oo][Mm][Ss][Vv][Cc][Ss]\.[Dd][Ll][Ll].*/ OR data_win_eventdata_commandLine:/.*[Mm][Ii][Nn][Ii][Dd][Uu][Mm][Pp].*/ OR data_win_eventdata_commandLine:/.*[Dd][Uu][Mm][Pp][Ee][Rr][Tt].*/ OR data_win_eventdata_commandLine:/.*[Nn][Aa][Nn][Oo][Dd][Uu][Mm][Pp].*/ OR data_win_eventdata_commandLine:/.*[Ll][Ss][Aa][Ss][Ss].*/ OR data_win_eventdata_commandLine:/.*[Ss][Ee][Kk][Uu][Rr][Ll][Ss][Aa].*/ OR data_win_eventdata_commandLine:/.*[Nn][Tt][Dd][Ss]\.[Dd][Ii][Tt].*/ OR data_win_eventdata_commandLine:/.*[Nn][Tt][Dd][Ss][Uu][Tt][Ii][Ll].*/)) OR (data_win_system_eventID:"10" AND data_win_eventdata_targetImage:/.*(\\[Ll][Ss][Aa][Ss][Ss]\.[Ee][Xx][Ee])/))'
-      pivot_on: [host]
-      window: 1h
+  # Behaviour-targeted hunts the engine runs around the alert (not a sweep).
+  - name: PowerShell keylogger/hooking APIs and screen/clipboard capture in script blocks
+    query: data_win_system_eventID:"4104" AND (data_win_eventdata_scriptBlockText:*GetAsyncKeyState* OR data_win_eventdata_scriptBlockText:*SetWindowsHookEx* OR data_win_eventdata_scriptBlockText:*GetKeyboardState* OR data_win_eventdata_scriptBlockText:*GetForegroundWindow* OR data_win_eventdata_scriptBlockText:*Get-TimedScreenshot* OR data_win_eventdata_scriptBlockText:*CopyFromScreen* OR data_win_eventdata_scriptBlockText:*Get-Clipboard*)
+    pivot_on:
+    - host
+    window: 4h
+  - name: Download cradle or AMSI/logging bypass delivering the script
+    query: data_win_system_eventID:"4104" AND (data_win_eventdata_scriptBlockText:*DownloadString* OR data_win_eventdata_scriptBlockText:*Invoke-WebRequest* OR data_win_eventdata_scriptBlockText:*Net.WebClient* OR data_win_eventdata_scriptBlockText:*amsiInitFailed* OR data_win_eventdata_scriptBlockText:*AmsiUtils* OR data_win_eventdata_scriptBlockText:*Add-Type*)
+    pivot_on:
+    - host
+    window: 2h
+  - name: PowerShell/script host process spawned with encoded or hidden command line
+    query: data_win_system_eventID:"1" AND data_win_eventdata_image:/.*[Pp]ower[Ss]hell.*\.exe/ AND (data_win_eventdata_commandLine:*-enc* OR data_win_eventdata_commandLine:*-w*hidden* OR data_win_eventdata_commandLine:*-nop* OR data_win_eventdata_commandLine:*IEX*)
+    pivot_on:
+    - host
+    window: 2h
+  - name: Keystroke log file written to disk
+    query: data_win_system_eventID:"11" AND (data_win_eventdata_targetFilename:*keylog* OR data_win_eventdata_targetFilename:*keystroke* OR data_win_eventdata_targetFilename:*.log OR data_win_eventdata_targetFilename:*.txt) AND data_win_eventdata_image:/.*[Pp]ower[Ss]hell.*\.exe/
+    pivot_on:
+    - host
+    window: 4h
+  - name: PowerShell outbound connection or exfil of captured data
+    query: (data_win_system_eventID:"3" AND data_win_eventdata_image:/.*[Pp]ower[Ss]hell.*\.exe/) OR (data_win_system_eventID:"4104" AND (data_win_eventdata_scriptBlockText:*UploadString* OR data_win_eventdata_scriptBlockText:*UploadFile* OR data_win_eventdata_scriptBlockText:*Invoke-RestMethod* OR data_win_eventdata_scriptBlockText:*Send-MailMessage*))
+    pivot_on:
+    - host
+    window: 6h

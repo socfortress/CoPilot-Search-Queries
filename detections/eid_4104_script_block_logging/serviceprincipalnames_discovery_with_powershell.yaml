@@ -146,58 +146,58 @@ graylog:
   query: data_win_system_eventID:"4104" AND data_win_eventdata_scriptBlockText:/.*KerberosRequestorSecurityToken.*/
 
 correlation:
-  # Authored by the correlation engine for review. Related CoPilot Searches to run
-  # around an alert from this rule, scoped to the same host/user/IP within the window.
+  # Authored per-rule (behaviour-researched) for the correlation engine. Related CoPilot
+  # Searches + telemetry pivots to run around an alert, scoped to its host/user/ip/domain.
   related_rules:
-    - id: de7fcadc-04f3-11ec-a241-acde48001122
-      name: "AdsiSearcher Account Discovery"
-      reason: "same analytic story: Active Directory Discovery"
-    - id: cc316032-924a-11eb-91a2-acde48001122
-      name: "DSQuery Domain Discovery"
-      reason: "same analytic story: Active Directory Discovery"
-    - id: f533ca6c-9440-4686-80cb-7f294c07812a
-      name: "Detect Certify With PowerShell Script Block Logging"
-      reason: "same analytic story: Malicious PowerShell"
-    - id: bc1dc6b8-c954-11eb-bade-acde48001122
-      name: "Detect Empire with PowerShell Script Block Logging"
-      reason: "same analytic story: Hellcat Ransomware"
-    - id: 8148c29c-c952-11eb-9255-acde48001122
-      name: "Detect Mimikatz With PowerShell Script Block Logging"
-      reason: "same analytic story: Hellcat Ransomware"
-    - id: 32e0baea-b3f1-11eb-a2ce-acde48001122
-      name: "Detect RClone Command-Line Usage"
-      reason: "same analytic story: Hellcat Ransomware"
-    - id: 6dca1124-b3ec-11eb-9328-acde48001122
-      name: "Detect Renamed RClone"
-      reason: "same analytic story: Hellcat Ransomware"
-    - id: 114c6bfe-9406-11ec-bcce-acde48001122
-      name: "Disabled Kerberos Pre-Authentication Discovery With Get-ADUser"
-      reason: "same analytic story: Active Directory Kerberos Attacks"
-    - id: b0b34e2c-90de-11ec-baeb-acde48001122
-      name: "Disabled Kerberos Pre-Authentication Discovery With PowerView"
-      reason: "same analytic story: Active Directory Kerberos Attacks"
-    - id: b1a8ce04-04c2-11ec-bea7-acde48001122
-      name: "Domain Account Discovery with Dsquery"
-      reason: "same analytic story: Active Directory Discovery"
-    - id: 383572e0-04c5-11ec-bdcc-acde48001122
-      name: "Domain Account Discovery with Wmic"
-      reason: "same analytic story: Active Directory Discovery"
-    - id: 41243735-89a7-4c83-bcdd-570aa78f00a1
-      name: "Domain Controller Discovery with Nltest"
-      reason: "same analytic story: Active Directory Discovery"
+  - id: a7093c28-796c-4ebb-9997-e2c18b870837
+    name: Windows PowerView SPN Discovery
+    reason: Same SPN enumeration step done through PowerView (Get-DomainUser -SPN); co-occurs when the operator uses a toolkit rather than raw .NET classes
+  - id: 970455a1-4ac2-47e1-a9a5-9e75443ddcb9
+    name: Windows PowerView Kerberos Service Ticket Request
+    reason: 'Direct follow-on: after SPNs are found, Get-DomainSPNTicket requests the service tickets whose hashes are cracked offline'
+  - id: a861d835-af37-4930-bcd6-5b178bfb54df
+    name: Suspicious Kerberos Ticket Request via PowerShell Script - ScriptBlock
+    reason: KerberosRequestorSecurityToken is also how scripts request TGS tickets; the same script often both lists SPNs and requests tickets for kerberoasting
+  - id: d04ae2b8-ad54-4de0-bd87-4bc1da66aa59
+    name: Kerberoasting Activity - Initial Query
+    reason: 'Domain-controller side confirmation: SPN query followed by a burst of 4769 TGS requests from the same account'
+  - id: 496a0e47-0a33-4dca-b009-9e6ca3591f39
+    name: Suspicious Kerberos RC4 Ticket Encryption
+    reason: Kerberoasting tools request RC4 (0x17) tickets so they are crackable; confirms the SPN discovery turned into ticket harvesting
+  - id: 1eeed653-dbc8-4187-ad0c-eeebb20e6599
+    name: Potential SPN Enumeration Via Setspn.EXE
+    reason: Equivalent SPN enumeration using setspn.exe (the rule says this class is equivalent); attackers often try both methods on the same host
+  - id: caa9a802-8bd8-4b9e-a5cd-4d6221670219
+    name: Suspicious Kerberos Ticket Request via CLI
+    reason: Command-line ticket request tooling (Rubeus/klist-style) is the alternative follow-on to the PowerShell ticket request
+  - id: dcd74b95-3f36-4ed9-9598-0490951643aa
+    name: PowerView PowerShell Cmdlets - ScriptBlock
+    reason: Broader PowerView use in the same session indicates a full AD recon toolkit was loaded, of which SPN discovery is one step
   window: 1h
   enrichment_searches:
-  # Rule-specific telemetry pivots the engine runs around an alert from this rule,
-  # scoped to the alert's host/user/IP within the window (behaviour-targeted, not a sweep).
-    - name: "Kerberos ticket requests for this account"
-      query: '(data_win_system_eventID:"4768" OR data_win_system_eventID:"4769" OR data_win_system_eventID:"4771")'
-      pivot_on: [user]
-      window: 6h
-    - name: "Download / AMSI-bypass / encoded script blocks on this host"
-      query: 'data_win_system_eventID:"4104" AND (data_win_eventdata_scriptBlockText:/.*[Dd][Oo][Ww][Nn][Ll][Oo][Aa][Dd][Ss][Tt][Rr][Ii][Nn][Gg].*/ OR data_win_eventdata_scriptBlockText:/.*[Dd][Oo][Ww][Nn][Ll][Oo][Aa][Dd][Ff][Ii][Ll][Ee].*/ OR data_win_eventdata_scriptBlockText:/.*[Ii][Nn][Vv][Oo][Kk][Ee]-[Ww][Ee][Bb][Rr][Ee][Qq][Uu][Ee][Ss][Tt].*/ OR data_win_eventdata_scriptBlockText:/.*[Nn][Ee][Tt]\.[Ww][Ee][Bb][Cc][Ll][Ii][Ee][Nn][Tt].*/ OR data_win_eventdata_scriptBlockText:/.*[Ff][Rr][Oo][Mm][Bb][Aa][Ss][Ee]64[Ss][Tt][Rr][Ii][Nn][Gg].*/ OR data_win_eventdata_scriptBlockText:/.*[Ii][Ee][Xx].*/ OR data_win_eventdata_scriptBlockText:/.*[Ii][Nn][Vv][Oo][Kk][Ee]-[Ee][Xx][Pp][Rr][Ee][Ss][Ss][Ii][Oo][Nn].*/ OR data_win_eventdata_scriptBlockText:/.*[Ss][Tt][Aa][Rr][Tt]-[Bb][Ii][Tt][Ss][Tt][Rr][Aa][Nn][Ss][Ff][Ee][Rr].*/ OR data_win_eventdata_scriptBlockText:/.*[Aa][Mm][Ss][Ii][Uu][Tt][Ii][Ll][Ss].*/ OR data_win_eventdata_scriptBlockText:/.*-[Ee][Nn][Cc].*/ OR data_win_eventdata_scriptBlockText:/.*-[Ee][Nn][Cc][Oo][Dd][Ee][Dd][Cc][Oo][Mm][Mm][Aa][Nn][Dd].*/ OR data_win_eventdata_scriptBlockText:/.*[Rr][Ee][Ff][Ll][Ee][Cc][Tt][Ii][Oo][Nn]\.[Aa][Ss][Ss][Ee][Mm][Bb][Ll][Yy].*/)'
-      pivot_on: [host]
-      window: 1h
-    - name: "Follow-on LOLBin / signed-binary-proxy execution on this host"
-      query: 'data_win_system_eventID:"1" AND data_win_eventdata_image:/.*(\\[Rr][Uu][Nn][Dd][Ll][Ll]32\.[Ee][Xx][Ee]|\\[Rr][Ee][Gg][Ss][Vv][Rr]32\.[Ee][Xx][Ee]|\\[Mm][Ss][Hh][Tt][Aa]\.[Ee][Xx][Ee]|\\[Ii][Nn][Ss][Tt][Aa][Ll][Ll][Uu][Tt][Ii][Ll]\.[Ee][Xx][Ee]|\\[Rr][Ee][Gg][Aa][Ss][Mm]\.[Ee][Xx][Ee]|\\[Rr][Ee][Gg][Ss][Vv][Cc][Ss]\.[Ee][Xx][Ee]|\\[Mm][Ss][Bb][Uu][Ii][Ll][Dd]\.[Ee][Xx][Ee]|\\[Cc][Ee][Rr][Tt][Uu][Tt][Ii][Ll]\.[Ee][Xx][Ee]|\\[Bb][Ii][Tt][Ss][Aa][Dd][Mm][Ii][Nn]\.[Ee][Xx][Ee]|\\[Ww][Mm][Ii][Cc]\.[Ee][Xx][Ee]|\\[Cc][Mm][Ss][Tt][Pp]\.[Ee][Xx][Ee]|\\[Oo][Dd][Bb][Cc][Cc][Oo][Nn][Ff]\.[Ee][Xx][Ee]|\\[Ff][Oo][Rr][Ff][Ii][Ll][Ee][Ss]\.[Ee][Xx][Ee]|\\[Pp][Cc][Aa][Ll][Uu][Aa]\.[Ee][Xx][Ee]|\\[Mm][Aa][Vv][Ii][Nn][Jj][Ee][Cc][Tt]\.[Ee][Xx][Ee]|\\[Ss][Cc][Rr][Ii][Pp][Tt][Rr][Uu][Nn][Nn][Ee][Rr]\.[Ee][Xx][Ee])/'
-      pivot_on: [host]
-      window: 1h
+  # Behaviour-targeted hunts the engine runs around the alert (not a sweep).
+  - name: Kerberoast tooling and ticket-request script blocks
+    query: data_win_system_eventID:"4104" AND (data_win_eventdata_scriptBlockText:/.*[Ii]nvoke-[Kk]erberoast.*/ OR data_win_eventdata_scriptBlockText:/.*[Gg]et-[Dd]omain[Ss][Pp][Nn][Tt]icket.*/ OR data_win_eventdata_scriptBlockText:/.*[Rr]equest-[Ss][Pp][Nn][Tt]icket.*/ OR data_win_eventdata_scriptBlockText:/.*[Rr]ubeus.*/ OR data_win_eventdata_scriptBlockText:/.*[Ss]ystem\.[Ii]dentity[Mm]odel\.[Tt]okens.*/ OR data_win_eventdata_scriptBlockText:/.*[Gg]et-[Nn]et[Uu]ser.*-[Ss][Pp][Nn].*/)
+    pivot_on:
+    - host
+    window: 2h
+  - name: Kerberos service tickets (TGS) with RC4 encryption by this account
+    query: data_win_system_eventID:"4769" AND data_win_eventdata_ticketEncryptionType:"0x17"
+    pivot_on:
+    - user
+    window: 6h
+  - name: SPN tooling and ticket-handling processes
+    query: data_win_system_eventID:"1" AND (data_win_eventdata_image:/.*\\[Ss][Ee][Tt][Ss][Pp][Nn]\.[Ee][Xx][Ee]/ OR data_win_eventdata_image:/.*\\[Rr][Uu][Bb][Ee][Uu][Ss]\.[Ee][Xx][Ee]/ OR data_win_eventdata_image:/.*\\[Kk][Ll][Ii][Ss][Tt]\.[Ee][Xx][Ee]/ OR data_win_eventdata_commandLine:/.*[Kk][Ee][Rr][Bb][Ee][Rr][Oo][Aa][Ss][Tt].*/ OR data_win_eventdata_commandLine:/.*[Aa][Ss][Kk][Tt][Gg][Ss].*/)
+    pivot_on:
+    - host
+    window: 2h
+  - name: Kerberos ticket or hash files written to disk
+    query: data_win_system_eventID:"11" AND (data_win_eventdata_targetFilename:*.kirbi OR data_win_eventdata_targetFilename:/.*[Kk][Ee][Rr][Bb][Ee][Rr][Oo][Aa][Ss][Tt].*/ OR data_win_eventdata_targetFilename:/.*[Hh][Aa][Ss][Hh][Cc][Aa][Tt].*/ OR data_win_eventdata_targetFilename:/.*[Tt][Gg][Ss][Hh][Aa][Ss][Hh].*/)
+    pivot_on:
+    - host
+    window: 4h
+  - name: PowerShell connections to LDAP / Kerberos / Global Catalog ports
+    query: data_win_system_eventID:"3" AND data_win_eventdata_image:/.*[Pp]ower[Ss]hell.*/ AND (data_win_eventdata_destinationPort:"389" OR data_win_eventdata_destinationPort:"636" OR data_win_eventdata_destinationPort:"3268" OR data_win_eventdata_destinationPort:"88")
+    pivot_on:
+    - host
+    window: 2h

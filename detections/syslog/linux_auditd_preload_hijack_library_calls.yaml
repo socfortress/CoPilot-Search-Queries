@@ -113,43 +113,46 @@ graylog:
   query: full_log:/.*LD_PRELOAD.*/ AND NOT _exists_:data_win_system_eventID AND NOT rule_groups:/.*windows.*/
 
 correlation:
-  # Authored by the correlation engine for review. Related CoPilot Searches to run
-  # around an alert from this rule, scoped to the same host/user/IP within the window.
+  # Authored per-rule (behaviour-researched) for the correlation engine. Related CoPilot
+  # Searches + telemetry pivots to run around an alert, scoped to its host/user/ip/domain.
   related_rules:
-    - id: 683e6196-b8e8-11eb-9a79-acde48001122
-      name: "Detect Renamed PSExec"
-      reason: "same analytic story: China-Nexus Threat Activity"
-    - id: 1b7bfb2c-b8e6-11eb-99ac-acde48001122
-      name: "Detect Renamed WinRAR"
-      reason: "same analytic story: China-Nexus Threat Activity"
-    - id: 9be56c82-b1cc-4318-87eb-d138afaaca39
-      name: "Malicious PowerShell Process - Execution Policy Bypass"
-      reason: "same analytic story: China-Nexus Threat Activity"
-    - id: windows-archive-collected-data-via-rar-001
-      name: "Windows Archive Collected Data via Rar"
-      reason: "same analytic story: Salt Typhoon"
-    - id: windows-curl-download-suspicious-path-001
-      name: "Windows Curl Download to Suspicious Path"
-      reason: "same analytic story: Salt Typhoon"
-    - id: windows-malicious-powershell-process-execution-policy-bypass-001
-      name: "Windows Malicious PowerShell Process - Execution Policy Bypass"
-      reason: "same analytic story: Salt Typhoon"
-    - id: windows-powershell-4104-hunting-001
-      name: "Windows PowerShell 4104 Hunting"
-      reason: "same analytic story: Salt Typhoon"
-  window: 1h
+  - id: linux-preload-hijack-via-preload-file-001
+    name: Linux Preload Hijack Via Preload File
+    reason: LD_PRELOAD per-process injection is often paired with a persistent /etc/ld.so.preload entry to make the hook system-wide.
+  - id: 4b3cb710-5e83-4715-8c45-8b2b5b3e5751
+    name: Modification of ld.so.preload
+    reason: Auditd view of writes to ld.so.preload on the same host confirms the hijack was made persistent.
+  - id: linux-medusa-rootkit-001
+    name: Linux Medusa Rootkit
+    reason: Medusa is an LD_PRELOAD userland rootkit; its artifacts confirm the preload was a rootkit install.
+  - id: linux-ingress-tool-transfer-hunting-001
+    name: Linux Ingress Tool Transfer Hunting
+    reason: The malicious shared object is usually downloaded just before being preloaded.
+  - id: a94cdd87-6c54-4678-a6cc-2814ffe5a13d
+    name: Unix Shell Configuration Modification
+    reason: LD_PRELOAD exported in .bashrc/profile is a user-level persistence variant of the same hijack.
+  - id: a39d7fa7-3fbd-4dc2-97e1-d87f546b1bbc
+    name: Program Executions in Suspicious Folders
+    reason: Hook libraries and loader binaries typically sit in /tmp, /dev/shm or similar writable paths.
+  - id: f7158a64-6204-4d6d-868a-6e6378b467e0
+    name: Suspicious C2 Activities
+    reason: Preload-based implants typically beacon out once hooked processes run.
+  window: 2h
   enrichment_searches:
-  # Rule-specific telemetry pivots the engine runs around an alert from this rule,
-  # scoped to the alert's host/user/IP within the window (behaviour-targeted, not a sweep).
-    - name: "Shell / interpreter execution on this host"
-      query: '((data_process_exec_process_binary:/.*(\/[Bb][Aa][Ss][Hh]|\/[Ss][Hh]|\/[Dd][Aa][Ss][Hh]|\/[Zz][Ss][Hh]|\/[Kk][Ss][Hh]|\/[Aa][Ss][Hh]|\/[Bb][Uu][Ss][Yy][Bb][Oo][Xx])/) OR (data_process_exec_process_binary:/.*(\/[Pp][Yy][Tt][Hh][Oo][Nn]|\/[Pp][Yy][Tt][Hh][Oo][Nn]3|\/[Pp][Ee][Rr][Ll]|\/[Rr][Uu][Bb][Yy]|\/[Pp][Hh][Pp]|\/[Nn][Oo][Dd][Ee]|\/[Ll][Uu][Aa]|\/[Aa][Ww][Kk])/))'
-      pivot_on: [host]
-      window: 1h
-    - name: "Reconnaissance commands on this host"
-      query: 'data_process_exec_process_binary:/.*(\/[Ww][Hh][Oo][Aa][Mm][Ii]|\/[Ii][Dd]|\/[Uu][Nn][Aa][Mm][Ee]|\/[Hh][Oo][Ss][Tt][Nn][Aa][Mm][Ee]|\/[Hh][Oo][Ss][Tt][Nn][Aa][Mm][Ee][Cc][Tt][Ll]|\/[Ss][Ss]|\/[Nn][Ee][Tt][Ss][Tt][Aa][Tt]|\/[Ii][Ff][Cc][Oo][Nn][Ff][Ii][Gg]|\/[Aa][Rr][Pp]|\/[Ww]|\/[Ww][Hh][Oo]|\/[Ll][Aa][Ss][Tt]|\/[Ll][Ss][Oo][Ff]|\/[Nn][Mm][Aa][Pp]|\/[Dd][Ii][Gg]|\/[Ff][Ii][Nn][Dd])/'
-      pivot_on: [host]
-      window: 1h
-    - name: "Privilege-escalation tooling executed on this host"
-      query: 'data_process_exec_process_binary:/.*(\/[Ss][Uu][Dd][Oo]|\/[Ss][Uu]|\/[Pp][Kk][Ee][Xx][Ee][Cc]|\/[Dd][Oo][Aa][Ss]|\/[Ss][Ee][Tt][Cc][Aa][Pp]|\/[Cc][Hh][Ss][Hh]|\/[Nn][Ee][Ww][Gg][Rr][Pp])/'
-      pivot_on: [host]
-      window: 2h
+  # Behaviour-targeted hunts the engine runs around the alert (not a sweep).
+  - name: Shared object dropped in writable path
+    query: data_process_exec_process_binary:/.*(\/[Gg][Cc][Cc]|\/[Cc][Cc]|\/[Ll][Dd]|\/[Mm][Vv]|\/[Cc][Pp]|\/[Ww][Gg][Ee][Tt]|\/[Cc][Uu][Rr][Ll])/ AND data_process_exec_process_arguments:/.*(\.so|\/tmp\/|\/dev\/shm\/|\/var\/tmp\/).*/
+    pivot_on: host
+    window: 2h
+  - name: Preload file or loader config touched
+    query: data_process_exec_process_arguments:/.*([Ll][Dd]\.[Ss][Oo]\.[Pp][Rr][Ee][Ll][Oo][Aa][Dd]|[Ll][Dd]\.[Ss][Oo]\.[Cc][Oo][Nn][Ff]|[Ll][Dd]_[Ll][Ii][Bb][Rr][Aa][Rr][Yy]_[Pp][Aa][Tt][Hh]).*/
+    pivot_on: host
+    window: 4h
+  - name: Shell persistence file edits
+    query: data_process_exec_process_arguments:/.*(\.[Bb][Aa][Ss][Hh][Rr][Cc]|\.[Bb][Aa][Ss][Hh]_[Pp][Rr][Oo][Ff][Ii][Ll][Ee]|\.[Pp][Rr][Oo][Ff][Ii][Ll][Ee]|\/[Ee][Tt][Cc]\/[Pp][Rr][Oo][Ff][Ii][Ll][Ee]).*/
+    pivot_on: user
+    window: 4h
+  - name: Outbound tooling after hook
+    query: data_process_exec_process_binary:/.*(\/[Cc][Uu][Rr][Ll]|\/[Ww][Gg][Ee][Tt]|\/[Nn][Cc]|\/[Nn][Cc][Aa][Tt]|\/[Ss][Ss][Hh])/
+    pivot_on: host
+    window: 2h

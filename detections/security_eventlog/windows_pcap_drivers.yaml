@@ -168,35 +168,58 @@ graylog:
   query: data_win_system_eventID:"4697" AND (data_win_eventdata_serviceFileName:/.*[Pp][Cc][Aa][Pp].*/ OR data_win_eventdata_serviceFileName:/.*[Nn][Pp][Cc][Aa][Pp].*/ OR data_win_eventdata_serviceFileName:/.*[Nn][Pp][Ff].*/ OR data_win_eventdata_serviceFileName:/.*[Nn][Mm]3.*/ OR data_win_eventdata_serviceFileName:/.*[Nn][Dd][Ii][Ss][Cc][Aa][Pp].*/ OR data_win_eventdata_serviceFileName:/.*[Nn][Mm][Nn][Tt].*/ OR data_win_eventdata_serviceFileName:/.*[Ww][Ii][Nn][Dd][Ii][Vv][Ee][Rr][Tt].*/ OR data_win_eventdata_serviceFileName:/.*[Uu][Ss][Bb][Pp][Cc][Aa][Pp].*/ OR data_win_eventdata_serviceFileName:/.*[Pp][Kk][Tt][Mm][Oo][Nn].*/)
 
 correlation:
-  # Authored by the correlation engine for review. Related CoPilot Searches to run
-  # around an alert from this rule, scoped to the same host/user/IP within the window.
+  # Authored per-rule (behaviour-researched) for the correlation engine. Related CoPilot
+  # Searches + telemetry pivots to run around an alert, scoped to its host/user/ip/domain.
   related_rules:
-    - id: 35ba1d85-724d-42a3-889f-2e2362bcaf23
-      name: "AD Privileged Users or Groups Reconnaissance"
-      reason: "next kill-chain tactic: Discovery"
-    - id: 17d619c1-e020-4347-957e-1d1207455c93
-      name: "Active Directory Replication from Non Machine Account"
-      reason: "next kill-chain tactic: Credential Access"
-    - id: 87261fb2-69d0-42fe-b9de-88c6b5f65a43
-      name: "Atera Agent Installation"
-      reason: "next kill-chain tactic: Command and Control"
-  window: 1h
+  - id: ba1f7802-adc7-48b4-9ecb-81e227fddfd5
+    name: Potential Network Sniffing Activity Using Network Tools
+    reason: Capture driver is only useful once a sniffer (tshark/WinDump) runs; this is the user-mode follow-on that confirms the driver is being used.
+  - id: d3c3861d-c504-4c77-ba55-224ba82d0118
+    name: New Network Trace Capture Started Via Netsh.EXE
+    reason: Driverless alternative/companion capture path (netsh trace start) on the same host; confirms active packet collection.
+  - id: da34e323-1e65-42db-83be-a6725ac2caa3
+    name: Potential Packet Capture Activity Via Start-NetEventSession - ScriptBlock
+    reason: PowerShell native capture via NetEventSession often runs alongside or instead of installing Npcap.
+  - id: 679085d5-f427-4484-9f58-1dc30a7c426d
+    name: WinDivert Driver Load
+    reason: WinDivert is in this rule's driver list; its Sysmon driver-load event is the load-time confirmation of the same packet interception service.
+  - id: 431a1fdb-4799-4f3b-91c3-a683b003fc49
+    name: New Kernel Driver Via SC.EXE
+    reason: Capture drivers are often registered by sc create type=kernel; same service-install event seen from process creation, revealing the installing parent.
+  - id: a2ea3ae7-d3d0-40a0-a55c-25a45c87cac1
+    name: Suspicious Driver Install by pnputil.exe
+    reason: Alternate driver staging route preceding or substituting for the 4697 service install.
+  - id: f63508a0-c809-4435-b3be-ed819394d612
+    name: Potential Privileged System Service Operation - SeLoadDriverPrivilege
+    reason: Loading a kernel capture driver requires SeLoadDriverPrivilege; the privilege-use event ties the install to the account that exercised it.
+  - id: c4e92a97-a9ff-4392-9d2d-7a4c642768ca
+    name: Service Installed By Unusual Client - Security
+    reason: Flags the same 4697 install made from an atypical client/logon, separating a remote or attacker-driven install from admin tooling setup.
+  window: 2h
   enrichment_searches:
-  # Rule-specific telemetry pivots the engine runs around an alert from this rule,
-  # scoped to the alert's host/user/IP within the window (behaviour-targeted, not a sweep).
-    - name: "Remote-execution / lateral-movement tooling on this host"
-      query: '(data_win_system_eventID:"1" AND data_win_eventdata_image:/.*(\\[Pp][Ss][Ee][Xx][Ee][Cc]\.[Ee][Xx][Ee]|\\[Pp][Ss][Ee][Xx][Ee][Ss][Vv][Cc]\.[Ee][Xx][Ee]|\\[Pp][Aa][Ee][Xx][Ee][Cc]\.[Ee][Xx][Ee]|\\[Ww][Ii][Nn][Rr][Ss]\.[Ee][Xx][Ee]|\\[Mm][Ss][Tt][Ss][Cc]\.[Ee][Xx][Ee]|\\[Ww][Mm][Ii][Cc]\.[Ee][Xx][Ee])/) OR (data_win_system_eventID:"1" AND data_win_eventdata_image:/.*(\\[Pp][Oo][Ww][Ee][Rr][Ss][Hh][Ee][Ll][Ll]\.[Ee][Xx][Ee]|\\[Pp][Ww][Ss][Hh]\.[Ee][Xx][Ee])/ AND (data_win_eventdata_commandLine:/.*[Ii][Nn][Vv][Oo][Kk][Ee]-[Cc][Oo][Mm][Mm][Aa][Nn][Dd].*/ OR data_win_eventdata_commandLine:/.*[Nn][Ee][Ww]-[Pp][Ss][Ss][Ee][Ss][Ss][Ii][Oo][Nn].*/ OR data_win_eventdata_commandLine:/.*[Ee][Nn][Tt][Ee][Rr]-[Pp][Ss][Ss][Ee][Ss][Ss][Ii][Oo][Nn].*/ OR data_win_eventdata_commandLine:/.*-[Cc][Oo][Mm][Pp][Uu][Tt][Ee][Rr][Nn][Aa][Mm][Ee].*/))'
-      pivot_on: [host]
-      window: 2h
-    - name: "This account's logon activity across hosts"
-      query: '(data_win_system_eventID:"4624" OR data_win_system_eventID:"4625")'
-      pivot_on: [user]
-      window: 6h
-    - name: "Account / group / privilege changes involving this account"
-      query: '(data_win_system_eventID:"4720" OR data_win_system_eventID:"4722" OR data_win_system_eventID:"4724" OR data_win_system_eventID:"4728" OR data_win_system_eventID:"4732" OR data_win_system_eventID:"4756" OR data_win_system_eventID:"4672")'
-      pivot_on: [user]
-      window: 6h
-    - name: "Memory/credential-dump creation & LSASS access on this host"
-      query: '((data_win_system_eventID:"1" AND data_win_eventdata_image:/.*(\\[Pp][Rr][Oo][Cc][Dd][Uu][Mm][Pp]\.[Ee][Xx][Ee]|\\[Pp][Rr][Oo][Cc][Dd][Uu][Mm][Pp]64\.[Ee][Xx][Ee]|\\[Ss][Qq][Ll][Dd][Uu][Mm][Pp][Ee][Rr]\.[Ee][Xx][Ee]|\\[Cc][Rr][Ee][Aa][Tt][Ee][Dd][Uu][Mm][Pp]\.[Ee][Xx][Ee]|\\[Rr][Dd][Rr][Ll][Ee][Aa][Kk][Dd][Ii][Aa][Gg]\.[Ee][Xx][Ee]|\\[Dd][Uu][Mm][Pp][Ee][Rr][Tt]\.[Ee][Xx][Ee]|\\[Nn][Aa][Nn][Oo][Dd][Uu][Mm][Pp]\.[Ee][Xx][Ee]|\\[Aa][Vv][Dd][Uu][Mm][Pp]\.[Ee][Xx][Ee])/) OR (data_win_system_eventID:"1" AND (data_win_eventdata_commandLine:/.*[Cc][Oo][Mm][Ss][Vv][Cc][Ss]\.[Dd][Ll][Ll].*/ OR data_win_eventdata_commandLine:/.*[Mm][Ii][Nn][Ii][Dd][Uu][Mm][Pp].*/ OR data_win_eventdata_commandLine:/.*[Dd][Uu][Mm][Pp][Ee][Rr][Tt].*/ OR data_win_eventdata_commandLine:/.*[Nn][Aa][Nn][Oo][Dd][Uu][Mm][Pp].*/ OR data_win_eventdata_commandLine:/.*[Ll][Ss][Aa][Ss][Ss].*/ OR data_win_eventdata_commandLine:/.*[Ss][Ee][Kk][Uu][Rr][Ll][Ss][Aa].*/ OR data_win_eventdata_commandLine:/.*[Nn][Tt][Dd][Ss]\.[Dd][Ii][Tt].*/ OR data_win_eventdata_commandLine:/.*[Nn][Tt][Dd][Ss][Uu][Tt][Ii][Ll].*/)) OR (data_win_system_eventID:"10" AND data_win_eventdata_targetImage:/.*(\\[Ll][Ss][Aa][Ss][Ss]\.[Ee][Xx][Ee])/))'
-      pivot_on: [host]
-      window: 1h
+  # Behaviour-targeted hunts the engine runs around the alert (not a sweep).
+  - name: Packet sniffer / capture tool execution
+    query: data_win_system_eventID:"1" AND (data_win_eventdata_image:/.*\\[Tt][Ss][Hh][Aa][Rr][Kk]\.[Ee][Xx][Ee]/ OR data_win_eventdata_image:/.*\\[Dd][Uu][Mm][Pp][Cc][Aa][Pp]\.[Ee][Xx][Ee]/ OR data_win_eventdata_image:/.*\\[Ww][Ii][Nn][Dd][Uu][Mm][Pp]\.[Ee][Xx][Ee]/ OR data_win_eventdata_image:/.*\\[Ww][Ii][Rr][Ee][Ss][Hh][Aa][Rr][Kk]\.[Ee][Xx][Ee]/ OR data_win_eventdata_image:/.*\\[Nn][Mm][Aa][Pp]\.[Ee][Xx][Ee]/ OR data_win_eventdata_image:/.*\\[Pp][Kk][Tt][Mm][Oo][Nn]\.[Ee][Xx][Ee]/ OR (data_win_eventdata_image:/.*\\[Nn][Ee][Tt][Ss][Hh]\.[Ee][Xx][Ee]/ AND data_win_eventdata_commandLine:/.*[Tt][Rr][Aa][Cc][Ee].*/))
+    pivot_on:
+    - host
+    window: 2h
+  - name: Capture driver or tool dropped to disk
+    query: data_win_system_eventID:"11" AND (data_win_eventdata_targetFilename:/.*([Nn][Pp][Cc][Aa][Pp]|[Ww][Ii][Nn][Pp][Cc][Aa][Pp]|[Ww][Ii][Nn][Dd][Ii][Vv][Ee][Rr][Tt]|[Uu][Ss][Bb][Pp][Cc][Aa][Pp]|[Nn][Pp][Ff]).*\.([Ss][Yy][Ss]|[Dd][Ll][Ll]|[Ee][Xx][Ee]|[Pp][Cc][Aa][Pp]|[Pp][Cc][Aa][Pp][Nn][Gg]|[Ee][Tt][Ll])/ OR data_win_eventdata_targetFilename:/.*\.([Pp][Cc][Aa][Pp]|[Pp][Cc][Aa][Pp][Nn][Gg]|[Ee][Tt][Ll])/)
+    pivot_on:
+    - host
+    window: 2h
+  - name: Kernel driver loads and driver-install commands
+    query: (data_win_system_eventID:"6" AND (data_win_eventdata_imageLoaded:/.*([Nn][Pp][Cc][Aa][Pp]|[Nn][Pp][Ff]|[Ww][Ii][Nn][Dd][Ii][Vv][Ee][Rr][Tt]|[Uu][Ss][Bb][Pp][Cc][Aa][Pp]|[Nn][Dd][Ii][Ss][Cc][Aa][Pp]).*/)) OR (data_win_system_eventID:"1" AND ((data_win_eventdata_image:/.*\\[Ss][Cc]\.[Ee][Xx][Ee]/ AND data_win_eventdata_commandLine:/.*[Kk][Ee][Rr][Nn][Ee][Ll].*/) OR (data_win_eventdata_image:/.*\\[Pp][Nn][Pp][Uu][Tt][Ii][Ll]\.[Ee][Xx][Ee]/ AND data_win_eventdata_commandLine:/.*-[Aa].*/)))
+    pivot_on:
+    - host
+    window: 2h
+  - name: Network discovery and credential-exposure follow-up
+    query: (data_win_system_eventID:"1" AND (data_win_eventdata_image:/.*\\([Aa][Rr][Pp]|[Nn][Ee][Tt][Ss][Tt][Aa][Tt]|[Nn][Mm][Aa][Pp]|[Rr][Oo][Uu][Tt][Ee]|[Nn][Ss][Ll][Oo][Oo][Kk][Uu][Pp])\.[Ee][Xx][Ee]/ OR data_win_eventdata_commandLine:/.*([Rr][Ee][Ss][Pp][Oo][Nn][Dd][Ee][Rr]|[Ii][Nn][Vv][Ee][Oo][Hh]|[Ii][Mm][Pp][Aa][Cc][Kk][Ee][Tt]|[Pp][Oo][Ww][Ee][Rr][Ss][Pp][Ll][Oo][Ii][Tt]|[Mm][Ii][Mm][Ii][Kk][Aa][Tt][Zz]).*/)) OR (data_win_system_eventID:"10" AND data_win_eventdata_targetImage:/.*\\[Ll][Ss][Aa][Ss][Ss]\.[Ee][Xx][Ee]/)
+    pivot_on:
+    - host
+    window: 4h
+  - name: Capture staging, archiving and exfil on this host
+    query: data_win_system_eventID:"1" AND ((data_win_eventdata_image:/.*\\([Rr][Aa][Rr]|7[Zz]|[Tt][Aa][Rr]|[Cc][Uu][Rr][Ll]|[Bb][Ii][Tt][Ss][Aa][Dd][Mm][Ii][Nn]|[Cc][Ee][Rr][Tt][Uu][Tt][Ii][Ll])\.[Ee][Xx][Ee]/ AND data_win_eventdata_commandLine:/.*([Pp][Cc][Aa][Pp]|[Ee][Tt][Ll]).*/) OR (data_win_eventdata_image:/.*\\[Pp][Oo][Ww][Ee][Rr][Ss][Hh][Ee][Ll][Ll]\.[Ee][Xx][Ee]/ AND data_win_eventdata_commandLine:/.*[Cc][Oo][Mm][Pp][Rr][Ee][Ss][Ss]-[Aa][Rr][Cc][Hh][Ii][Vv][Ee].*/))
+    pivot_on:
+    - host
+    window: 6h

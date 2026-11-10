@@ -149,19 +149,58 @@ graylog:
   query: (data_win_eventdata_accessList:/.*%%4417.*/ OR data_win_eventdata_accessList:/.*%%4418.*/) AND (data_win_system_eventID:"4656" OR data_win_system_eventID:"4663") AND data_win_eventdata_objectName:/.*\\[Mm][Ii][Cc][Rr][Oo][Ss][Oo][Ff][Tt]\\[Ww][Ii][Nn][Dd][Oo][Ww][Ss] [Dd][Ee][Ff][Ee][Nn][Dd][Ee][Rr]\\[Ee][Xx][Cc][Ll][Uu][Ss][Ii][Oo][Nn][Ss]\\.*/
 
 correlation:
-  # Authored by the correlation engine for review.
+  # Authored per-rule (behaviour-researched) for the correlation engine. Related CoPilot
+  # Searches + telemetry pivots to run around an alert, scoped to its host/user/ip/domain.
+  related_rules:
+  - id: 1321dc4e-a1fe-481d-a016-52c45f0c8b4f
+    name: Windows Defender Exclusions Added
+    reason: Defender's own operational event confirming the exclusion write actually succeeded after this handle request on the Exclusions key.
+  - id: a982fc9c-6333-4ffb-a51d-addb04e8b529
+    name: Windows Defender Exclusions Added - Registry
+    reason: 'Sysmon EID 13 registry value set under Defender Exclusions: the actual write following the access request, identifying the writing process image.'
+  - id: 17769c90-230e-488b-a463-e05c08e9d48f
+    name: Powershell Defender Exclusion
+    reason: Add-MpPreference -ExclusionPath/Process is the most common way the Exclusions key gets written; shows the command line behind the access.
+  - id: c1344fa2-323b-4d2e-9176-84b4d4821c88
+    name: Windows Defender Exclusions Added - PowerShell
+    reason: Script block (4104) evidence of the exclusion cmdlet, revealing which paths were excluded and by what loader script.
+  - id: 48917adc-a28e-4f5d-b729-11e75da8941f
+    name: Suspicious Windows Defender Folder Exclusion Added Via Reg.EXE
+    reason: Alternative exclusion route via reg.exe add on the same Exclusions registry key this alert saw opened for write.
+  - id: b28e58e4-2a72-4fae-bdee-0fbe904db642
+    name: Windows Defender Real-time Protection Disabled
+    reason: Attackers who add exclusions often escalate to disabling real-time protection entirely to stage payloads.
+  - id: 49e5bc24-8b86-49f1-b743-535f332c2856
+    name: Microsoft Defender Tamper Protection Trigger
+    reason: Tamper Protection firing means a Defender config change was attempted by a non-sanctioned process, confirming hostile intent.
+  - id: 801bd44f-ceed-4eb6-887c-11544633c0aa
+    name: Windows Defender Configuration Changes
+    reason: Generic Defender config change that co-occurs when exclusions are written or other protections are altered in the same session.
+  window: 1h
   enrichment_searches:
-  # Rule-specific telemetry pivots the engine runs around an alert from this rule,
-  # scoped to the alert's host/user/IP within the window (behaviour-targeted, not a sweep).
-    - name: "This account's logon activity across hosts"
-      query: '(data_win_system_eventID:"4624" OR data_win_system_eventID:"4625")'
-      pivot_on: [user]
-      window: 6h
-    - name: "Account / group / privilege changes involving this account"
-      query: '(data_win_system_eventID:"4720" OR data_win_system_eventID:"4722" OR data_win_system_eventID:"4724" OR data_win_system_eventID:"4728" OR data_win_system_eventID:"4732" OR data_win_system_eventID:"4756" OR data_win_system_eventID:"4672")'
-      pivot_on: [user]
-      window: 6h
-    - name: "Memory/credential-dump creation & LSASS access on this host"
-      query: '((data_win_system_eventID:"1" AND data_win_eventdata_image:/.*(\\[Pp][Rr][Oo][Cc][Dd][Uu][Mm][Pp]\.[Ee][Xx][Ee]|\\[Pp][Rr][Oo][Cc][Dd][Uu][Mm][Pp]64\.[Ee][Xx][Ee]|\\[Ss][Qq][Ll][Dd][Uu][Mm][Pp][Ee][Rr]\.[Ee][Xx][Ee]|\\[Cc][Rr][Ee][Aa][Tt][Ee][Dd][Uu][Mm][Pp]\.[Ee][Xx][Ee]|\\[Rr][Dd][Rr][Ll][Ee][Aa][Kk][Dd][Ii][Aa][Gg]\.[Ee][Xx][Ee]|\\[Dd][Uu][Mm][Pp][Ee][Rr][Tt]\.[Ee][Xx][Ee]|\\[Nn][Aa][Nn][Oo][Dd][Uu][Mm][Pp]\.[Ee][Xx][Ee]|\\[Aa][Vv][Dd][Uu][Mm][Pp]\.[Ee][Xx][Ee])/) OR (data_win_system_eventID:"1" AND (data_win_eventdata_commandLine:/.*[Cc][Oo][Mm][Ss][Vv][Cc][Ss]\.[Dd][Ll][Ll].*/ OR data_win_eventdata_commandLine:/.*[Mm][Ii][Nn][Ii][Dd][Uu][Mm][Pp].*/ OR data_win_eventdata_commandLine:/.*[Dd][Uu][Mm][Pp][Ee][Rr][Tt].*/ OR data_win_eventdata_commandLine:/.*[Nn][Aa][Nn][Oo][Dd][Uu][Mm][Pp].*/ OR data_win_eventdata_commandLine:/.*[Ll][Ss][Aa][Ss][Ss].*/ OR data_win_eventdata_commandLine:/.*[Ss][Ee][Kk][Uu][Rr][Ll][Ss][Aa].*/ OR data_win_eventdata_commandLine:/.*[Nn][Tt][Dd][Ss]\.[Dd][Ii][Tt].*/ OR data_win_eventdata_commandLine:/.*[Nn][Tt][Dd][Ss][Uu][Tt][Ii][Ll].*/)) OR (data_win_system_eventID:"10" AND data_win_eventdata_targetImage:/.*(\\[Ll][Ss][Aa][Ss][Ss]\.[Ee][Xx][Ee])/))'
-      pivot_on: [host]
-      window: 1h
+  # Behaviour-targeted hunts the engine runs around the alert (not a sweep).
+  - name: Process that wrote Defender exclusions (cmdline)
+    query: data_win_system_eventID:"1" AND (data_win_eventdata_commandLine:/.*[Aa]dd-[Mm]p[Pp]reference.*/ OR data_win_eventdata_commandLine:/.*[Ee]xclusion(Path|Process|Extension).*/ OR data_win_eventdata_commandLine:/.*[Ss]et-[Mm]p[Pp]reference.*/ OR data_win_eventdata_commandLine:/.*[Dd]efender\\[Ee]xclusions.*/)
+    pivot_on:
+    - host
+    window: 1h
+  - name: Registry writes to Defender exclusions and protection settings
+    query: (data_win_system_eventID:"12" OR data_win_system_eventID:"13") AND data_win_eventdata_targetObject:/.*[Ww]indows [Dd]efender.*/ AND (data_win_eventdata_targetObject:/.*[Ee]xclusions.*/ OR data_win_eventdata_targetObject:/.*[Dd]isable(AntiSpyware|RealtimeMonitoring|BehaviorMonitoring|IOAVProtection|AntiVirus).*/ OR data_win_eventdata_targetObject:/.*[Tt]amper.*/)
+    pivot_on:
+    - host
+    window: 1h
+  - name: Executable/script files dropped in user-writable paths
+    query: data_win_system_eventID:"11" AND (data_win_eventdata_targetFilename:/.*\\[Tt]emp\\.*[.](exe|dll|ps1|bat|scr)/ OR data_win_eventdata_targetFilename:/.*\\[Pp]rogram[Dd]ata\\.*[.](exe|dll|ps1)/ OR data_win_eventdata_targetFilename:/.*\\[Pp]ublic\\.*[.](exe|dll|ps1)/ OR data_win_eventdata_targetFilename:/.*\\[Aa]pp[Dd]ata\\.*[.](exe|dll|ps1|scr)/)
+    pivot_on:
+    - host
+    window: 2h
+  - name: Download and encoded PowerShell staging after exclusion
+    query: data_win_system_eventID:"1" AND (data_win_eventdata_commandLine:/.*([Ii]nvoke-[Ww]eb[Rr]equest|[Dd]ownload(String|File)|[Ii][Ee][Xx]|[Bb]its[Tt]ransfer|[Cc]ertutil.*urlcache).*/ OR data_win_eventdata_commandLine:/.*(-[Ee]nc|-[Ee]ncodedcommand|[Ff]rom[Bb]ase64[Ss]tring).*/)
+    pivot_on:
+    - host
+    window: 2h
+  - name: Persistence created after Defender weakened
+    query: (data_win_system_eventID:"1" AND (data_win_eventdata_commandLine:/.*[Ss]chtasks.*[Cc]reate.*/ OR data_win_eventdata_commandLine:/.*sc.*create.*binpath.*/ )) OR (data_win_system_eventID:"13" AND data_win_eventdata_targetObject:/.*[Cc]urrent[Vv]ersion\\[Rr]un.*/)
+    pivot_on:
+    - host
+    window: 4h

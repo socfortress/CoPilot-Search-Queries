@@ -108,40 +108,49 @@ graylog:
   query: full_log:/.*crontab.*/ AND NOT _exists_:data_win_system_eventID AND NOT rule_groups:/.*windows.*/
 
 correlation:
-  # Authored by the correlation engine for review. Related CoPilot Searches to run
-  # around an alert from this rule, scoped to the same host/user/IP within the window.
+  # Authored per-rule (behaviour-researched) for the correlation engine. Related CoPilot
+  # Searches + telemetry pivots to run around an alert, scoped to its host/user/ip/domain.
   related_rules:
-    - id: 26f86252-1549-45e1-a212-eb26840e86bc
-      name: "File Download or Read to Pipe Execution"
-      reason: "same analytic story: Linux Living Off The Land"
-    - id: cb909b3e-512b-11ec-aa31-3e22fbd008af
-      name: "Possible Lateral Movement PowerShell Spawn"
-      reason: "same analytic story: Scheduled Tasks"
-    - id: 12c80db8-ef62-4456-92df-b23e1b3219f6
-      name: "Windows Enable Win32 ScheduledJob via Registry"
-      reason: "same analytic story: Scheduled Tasks"
-    - id: ddf82fcb-e9ee-40e3-8712-a50b5bf323fc
-      name: "Windows PowerShell ScheduleTask"
-      reason: "same analytic story: Scheduled Tasks"
-    - id: windows-scheduled-task-created-public-path-001
-      name: "Windows Scheduled Task Created Within Public Path"
-      reason: "same analytic story: Scheduled Tasks"
-    - id: windows-scheduled-task-created-spawn-shell-001
-      name: "Windows Scheduled Task Created to Spawn Shell"
-      reason: "same analytic story: Scheduled Tasks"
-  window: 1h
+  - id: linux-auditd-crontab-listing-001
+    name: Linux Auditd Crontab Listing
+    reason: Listing existing jobs commonly precedes editing for persistence.
+  - id: linux-auditd-crontab-directory-files-modification-001
+    name: Linux Auditd Crontab Directory Files Modification
+    reason: Direct writes to cron directories are the parallel persistence route.
+  - id: linux-append-cronjob-entry-001
+    name: Linux Append Cronjob Entry On Existing Cronjob File
+    reason: Appending to cron files is the same persistence outcome.
+  - id: 4e2a6c91-7f3d-4b6e-9a4f-1c8b0e5a92d4
+    name: Crontab Interactive Edit Execution
+    reason: Tetragon confirmation of the interactive edit.
+  - id: 6b14bac8-3e3a-4324-8109-42f0546a347f
+    name: Scheduled Cron Task/Job - Linux
+    reason: Shows the scheduled task created.
+  - id: c2e234de-03a3-41e1-b39a-1e56dc17ba67
+    name: Remove Scheduled Cron Task/Job
+    reason: Removal of jobs indicates cleanup or tampering.
+  - id: 9f5d1b72-2e3f-4c6d-8a7e-1b2c3d4f5e6b
+    name: Linux Cron File Deletion
+    reason: Cron file deletion after use points to anti-forensics.
+  - id: linux-sudo-or-su-execution-001
+    name: Linux Sudo Or Su Execution
+    reason: Editing another user's or root crontab requires elevation.
+  window: 6h
   enrichment_searches:
-  # Rule-specific telemetry pivots the engine runs around an alert from this rule,
-  # scoped to the alert's host/user/IP within the window (behaviour-targeted, not a sweep).
-    - name: "Cron scheduling on this host"
-      query: '((data_process_exec_process_binary:/.*(\/[Cc][Rr][Oo][Nn][Tt][Aa][Bb])/) OR (data_process_exec_process_arguments:/.*\/[Ee][Tt][Cc]\/[Cc][Rr][Oo][Nn].*/))'
-      pivot_on: [host]
-      window: 4h
-    - name: "Shell / interpreter execution on this host"
-      query: '((data_process_exec_process_binary:/.*(\/[Bb][Aa][Ss][Hh]|\/[Ss][Hh]|\/[Dd][Aa][Ss][Hh]|\/[Zz][Ss][Hh]|\/[Kk][Ss][Hh]|\/[Aa][Ss][Hh]|\/[Bb][Uu][Ss][Yy][Bb][Oo][Xx])/) OR (data_process_exec_process_binary:/.*(\/[Pp][Yy][Tt][Hh][Oo][Nn]|\/[Pp][Yy][Tt][Hh][Oo][Nn]3|\/[Pp][Ee][Rr][Ll]|\/[Rr][Uu][Bb][Yy]|\/[Pp][Hh][Pp]|\/[Nn][Oo][Dd][Ee]|\/[Ll][Uu][Aa]|\/[Aa][Ww][Kk])/))'
-      pivot_on: [host]
-      window: 1h
-    - name: "Reconnaissance commands on this host"
-      query: 'data_process_exec_process_binary:/.*(\/[Ww][Hh][Oo][Aa][Mm][Ii]|\/[Ii][Dd]|\/[Uu][Nn][Aa][Mm][Ee]|\/[Hh][Oo][Ss][Tt][Nn][Aa][Mm][Ee]|\/[Hh][Oo][Ss][Tt][Nn][Aa][Mm][Ee][Cc][Tt][Ll]|\/[Ss][Ss]|\/[Nn][Ee][Tt][Ss][Tt][Aa][Tt]|\/[Ii][Ff][Cc][Oo][Nn][Ff][Ii][Gg]|\/[Aa][Rr][Pp]|\/[Ww]|\/[Ww][Hh][Oo]|\/[Ll][Aa][Ss][Tt]|\/[Ll][Ss][Oo][Ff]|\/[Nn][Mm][Aa][Pp]|\/[Dd][Ii][Gg]|\/[Ff][Ii][Nn][Dd])/'
-      pivot_on: [host]
-      window: 1h
+  # Behaviour-targeted hunts the engine runs around the alert (not a sweep).
+  - name: Crontab and cron file changes
+    query: (full_log:/.*(crontab|\/etc\/cron|\/var\/spool\/cron).*/) AND NOT _exists_:data_win_system_eventID AND NOT rule_groups:/.*windows.*/
+    pivot_on: host
+    window: 6h
+  - name: Download-and-execute payload staging
+    query: (data_process_exec_process_binary:/.*(curl|wget).*/) AND (data_process_exec_process_arguments:/.*(sh|-O|-o|\/tmp\/).*/)
+    pivot_on: host
+    window: 4h
+  - name: Binaries run from writable paths
+    query: (data_process_exec_process_binary:/(\/tmp\/|\/dev\/shm\/|\/var\/tmp\/).*/) AND NOT _exists_:data_win_system_eventID
+    pivot_on: host
+    window: 6h
+  - name: Other persistence mechanisms
+    query: (full_log:/.*(systemd\/system|rc\.local|\.bashrc|authorized_keys|init\.d).*/) AND NOT rule_groups:/.*windows.*/
+    pivot_on: host
+    window: 6h

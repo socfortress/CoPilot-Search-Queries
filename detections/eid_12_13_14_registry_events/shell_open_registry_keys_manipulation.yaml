@@ -194,44 +194,58 @@ graylog:
   query: (data_win_system_eventID:"12" OR data_win_system_eventID:"13" OR data_win_system_eventID:"14") AND ((data_win_eventdata_eventType:/[Ss][Ee][Tt][Vv][Aa][Ll][Uu][Ee]/ AND data_win_eventdata_targetObject:/.*[Cc][Ll][Aa][Ss][Ss][Ee][Ss]\\[Mm][Ss]-[Ss][Ee][Tt][Tt][Ii][Nn][Gg][Ss]\\[Ss][Hh][Ee][Ll][Ll]\\[Oo][Pp][Ee][Nn]\\[Cc][Oo][Mm][Mm][Aa][Nn][Dd]\\[Ss][Yy][Mm][Bb][Oo][Ll][Ii][Cc][Ll][Ii][Nn][Kk][Vv][Aa][Ll][Uu][Ee]/ AND data_win_eventdata_details:/.*\\[Ss][Oo][Ff][Tt][Ww][Aa][Rr][Ee]\\[Cc][Ll][Aa][Ss][Ss][Ee][Ss]\\\{.*/) OR data_win_eventdata_targetObject:/.*[Cc][Ll][Aa][Ss][Ss][Ee][Ss]\\[Mm][Ss]-[Ss][Ee][Tt][Tt][Ii][Nn][Gg][Ss]\\[Ss][Hh][Ee][Ll][Ll]\\[Oo][Pp][Ee][Nn]\\[Cc][Oo][Mm][Mm][Aa][Nn][Dd]\\[Dd][Ee][Ll][Ee][Gg][Aa][Tt][Ee][Ee][Xx][Ee][Cc][Uu][Tt][Ee]/ OR (data_win_eventdata_eventType:/[Ss][Ee][Tt][Vv][Aa][Ll][Uu][Ee]/ AND (data_win_eventdata_targetObject:/.*[Cc][Ll][Aa][Ss][Ss][Ee][Ss]\\[Mm][Ss]-[Ss][Ee][Tt][Tt][Ii][Nn][Gg][Ss]\\[Ss][Hh][Ee][Ll][Ll]\\[Oo][Pp][Ee][Nn]\\[Cc][Oo][Mm][Mm][Aa][Nn][Dd]\\\([Dd][Ee][Ff][Aa][Uu][Ll][Tt]\)/ OR data_win_eventdata_targetObject:/.*[Cc][Ll][Aa][Ss][Ss][Ee][Ss]\\[Ee][Xx][Ee][Ff][Ii][Ll][Ee]\\[Ss][Hh][Ee][Ll][Ll]\\[Oo][Pp][Ee][Nn]\\[Cc][Oo][Mm][Mm][Aa][Nn][Dd]\\\([Dd][Ee][Ff][Aa][Uu][Ll][Tt]\)/) AND _exists_:data_win_eventdata_details AND NOT (data_win_eventdata_details:/\([Ee][Mm][Pp][Tt][Yy]\)/)))
 
 correlation:
-  # Authored by the correlation engine for review. Related CoPilot Searches to run
-  # around an alert from this rule, scoped to the same host/user/IP within the window.
+  # Authored per-rule (behaviour-researched) for the correlation engine. Related CoPilot
+  # Searches + telemetry pivots to run around an alert, scoped to its host/user/ip/domain.
   related_rules:
-    - id: ec570e53-4c76-45a9-804d-dc3f355ff7a7
-      name: "7Zip Compressing Dump Files"
-      reason: "next kill-chain tactic: Collection"
-    - id: 0a1255c5-d732-4b62-ac02-b5152d34fb83
-      name: "ADExplorer Writing Complete AD Snapshot Into .dat File"
-      reason: "next kill-chain tactic: Discovery"
-    - id: 1ea13e8c-03ea-409b-877d-ce5c3d2c1cb3
-      name: "ADFS Database Named Pipe Connection By Uncommon Tool"
-      reason: "next kill-chain tactic: Collection"
-    - id: 75bf09fa-1dd7-4d18-9af9-dd9e492562eb
-      name: "ADSI-Cache File Creation By Uncommon Tool"
-      reason: "next kill-chain tactic: Command and Control"
-    - id: 33a2d1dd-f3b0-40bd-8baf-7974468927cc
-      name: "APT PRIVATELOG Image Load Pattern"
-      reason: "next kill-chain tactic: Privilege Escalation"
-    - id: 03e2746e-2b31-42f1-ab7a-eb39365b2422
-      name: "APT31 Judgement Panda Activity"
-      reason: "next kill-chain tactic: Credential Access"
+  - id: 7f741dcf-fc22-4759-87b4-9ae8376676a2
+    name: Bypass UAC via Fodhelper.exe
+    reason: fodhelper.exe auto-elevates and reads HKCU ms-settings\shell\open\command; its launch right after the key write is the execution half of the same UACMe bypass
+  - id: 3c05e90d-7eba-4324-9972-5d7f711a60a8
+    name: UAC Bypass Tools Using ComputerDefaults
+    reason: computerdefaults.exe is the other auto-elevating binary that consumes the ms-settings shell-open hijack, so the key write is followed by its launch
+  - id: dd3ee8cc-f751-41c9-ba53-5a32ed47e563
+    name: Registry Modification of MS-settings Protocol Handler
+    reason: Same ms-settings handler key modified, seen from the reg.exe/process side; confirms the writer was a scripted command line
+  - id: 46dd5308-4572-4d12-aa43-8938f0184d4f
+    name: Bypass UAC Using DelegateExecute
+    reason: DelegateExecute value is the other half of the ms-settings hijack (an empty DelegateExecute is needed for the command to run), co-occurring in the same registry sequence
+  - id: 9e8894c0-0ae0-11ef-9d85-1f2942bec57c
+    name: Suspicious Shell Open Command Registry Modification
+    reason: Generic shell\open\command value writes by non-system processes cover the exefile/other class hijack variants of the same technique
+  - id: 44a22d59-b175-4f13-8c16-cbaef5b581ff
+    name: New File Association Using Exefile
+    reason: Exefile association tampering is the persistence variant (T1546.001) of the exefile\shell\open\command write this rule also matches
+  - id: 6ea3bf32-9680-422d-9f50-e90716b12a66
+    name: UAC Bypass Via Wsreset
+    reason: Sibling registry-based bypass (AppX shell open command hijack run through wsreset.exe) used interchangeably by the same tooling when ms-settings is blocked
+  - id: 48437c39-9e5f-47fb-af95-3d663c3f2919
+    name: UAC Disabled
+    reason: After elevation attackers commonly weaken UAC (EnableLUA/ConsentPrompt) to make later elevated actions silent
   window: 1h
   enrichment_searches:
-  # Rule-specific telemetry pivots the engine runs around an alert from this rule,
-  # scoped to the alert's host/user/IP within the window (behaviour-targeted, not a sweep).
-    - name: "UAC-bypass / privilege-escalation binaries on this host"
-      query: 'data_win_system_eventID:"1" AND (data_win_eventdata_image:/.*(\\[Ff][Oo][Dd][Hh][Ee][Ll][Pp][Ee][Rr]\.[Ee][Xx][Ee]|\\[Ee][Vv][Ee][Nn][Tt][Vv][Ww][Rr]\.[Ee][Xx][Ee]|\\[Ss][Dd][Cc][Ll][Tt]\.[Ee][Xx][Ee]|\\[Cc][Oo][Mm][Pp][Uu][Tt][Ee][Rr][Dd][Ee][Ff][Aa][Uu][Ll][Tt][Ss]\.[Ee][Xx][Ee]|\\[Ss][Ll][Uu][Ii]\.[Ee][Xx][Ee]|\\[Ww][Ss][Rr][Ee][Ss][Ee][Tt]\.[Ee][Xx][Ee])/ OR data_win_eventdata_parentImage:/.*(\\[Ff][Oo][Dd][Hh][Ee][Ll][Pp][Ee][Rr]\.[Ee][Xx][Ee]|\\[Ee][Vv][Ee][Nn][Tt][Vv][Ww][Rr]\.[Ee][Xx][Ee]|\\[Ss][Dd][Cc][Ll][Tt]\.[Ee][Xx][Ee]|\\[Cc][Oo][Mm][Pp][Uu][Tt][Ee][Rr][Dd][Ee][Ff][Aa][Uu][Ll][Tt][Ss]\.[Ee][Xx][Ee]|\\[Ss][Ll][Uu][Ii]\.[Ee][Xx][Ee]|\\[Ww][Ss][Rr][Ee][Ss][Ee][Tt]\.[Ee][Xx][Ee])/)'
-      pivot_on: [host]
-      window: 2h
-    - name: "Autostart persistence written on this host (Run keys, services, IFEO)"
-      query: '(data_win_system_eventID:"12" OR data_win_system_eventID:"13") AND (data_win_eventdata_targetObject:/.*[Cc][Uu][Rr][Rr][Ee][Nn][Tt][Vv][Ee][Rr][Ss][Ii][Oo][Nn]\\[Rr][Uu][Nn].*/ OR data_win_eventdata_targetObject:/.*[Cc][Uu][Rr][Rr][Ee][Nn][Tt][Vv][Ee][Rr][Ss][Ii][Oo][Nn]\\[Rr][Uu][Nn][Oo][Nn][Cc][Ee].*/ OR data_win_eventdata_targetObject:/.*[Cc][Uu][Rr][Rr][Ee][Nn][Tt][Cc][Oo][Nn][Tt][Rr][Oo][Ll][Ss][Ee][Tt]\\[Ss][Ee][Rr][Vv][Ii][Cc][Ee][Ss]\\.*/ OR data_win_eventdata_targetObject:/.*[Ii][Mm][Aa][Gg][Ee] [Ff][Ii][Ll][Ee] [Ee][Xx][Ee][Cc][Uu][Tt][Ii][Oo][Nn] [Oo][Pp][Tt][Ii][Oo][Nn][Ss]\\.*/ OR data_win_eventdata_targetObject:/.*[Ww][Ii][Nn][Ll][Oo][Gg][Oo][Nn]\\[Ss][Hh][Ee][Ll][Ll].*/ OR data_win_eventdata_targetObject:/.*[Ww][Ii][Nn][Ll][Oo][Gg][Oo][Nn]\\[Uu][Ss][Ee][Rr][Ii][Nn][Ii][Tt].*/ OR data_win_eventdata_targetObject:/.*[Cc][Uu][Rr][Rr][Ee][Nn][Tt][Vv][Ee][Rr][Ss][Ii][Oo][Nn]\\[Ee][Xx][Pp][Ll][Oo][Rr][Ee][Rr]\\[Rr][Uu][Nn].*/ OR data_win_eventdata_targetObject:/.*[Pp][Oo][Ll][Ii][Cc][Ii][Ee][Ss]\\[Ee][Xx][Pp][Ll][Oo][Rr][Ee][Rr]\\[Rr][Uu][Nn].*/ OR data_win_eventdata_targetObject:/.*[Cc][Uu][Rr][Rr][Ee][Nn][Tt][Vv][Ee][Rr][Ss][Ii][Oo][Nn]\\[Ww][Ii][Nn][Dd][Oo][Ww][Ss]\\[Ll][Oo][Aa][Dd].*/)'
-      pivot_on: [host]
-      window: 2h
-    - name: "Other writes to the same registry location on this host"
-      query: '(data_win_system_eventID:"12" OR data_win_system_eventID:"13") AND (data_win_eventdata_targetObject:/.*[Ss][Yy][Mm][Bb][Oo][Ll][Ii][Cc][Ll][Ii][Nn][Kk][Vv][Aa][Ll][Uu][Ee].*/ OR data_win_eventdata_targetObject:/.*[Dd][Ee][Ll][Ee][Gg][Aa][Tt][Ee][Ee][Xx][Ee][Cc][Uu][Tt][Ee].*/ OR data_win_eventdata_targetObject:/.*\([Dd][Ee][Ff][Aa][Uu][Ll][Tt]\).*/)'
-      pivot_on: [host]
-      window: 4h
-    - name: "Memory/credential-dump creation & LSASS access on this host"
-      query: '((data_win_system_eventID:"1" AND data_win_eventdata_image:/.*(\\[Pp][Rr][Oo][Cc][Dd][Uu][Mm][Pp]\.[Ee][Xx][Ee]|\\[Pp][Rr][Oo][Cc][Dd][Uu][Mm][Pp]64\.[Ee][Xx][Ee]|\\[Ss][Qq][Ll][Dd][Uu][Mm][Pp][Ee][Rr]\.[Ee][Xx][Ee]|\\[Cc][Rr][Ee][Aa][Tt][Ee][Dd][Uu][Mm][Pp]\.[Ee][Xx][Ee]|\\[Rr][Dd][Rr][Ll][Ee][Aa][Kk][Dd][Ii][Aa][Gg]\.[Ee][Xx][Ee]|\\[Dd][Uu][Mm][Pp][Ee][Rr][Tt]\.[Ee][Xx][Ee]|\\[Nn][Aa][Nn][Oo][Dd][Uu][Mm][Pp]\.[Ee][Xx][Ee]|\\[Aa][Vv][Dd][Uu][Mm][Pp]\.[Ee][Xx][Ee])/) OR (data_win_system_eventID:"1" AND (data_win_eventdata_commandLine:/.*[Cc][Oo][Mm][Ss][Vv][Cc][Ss]\.[Dd][Ll][Ll].*/ OR data_win_eventdata_commandLine:/.*[Mm][Ii][Nn][Ii][Dd][Uu][Mm][Pp].*/ OR data_win_eventdata_commandLine:/.*[Dd][Uu][Mm][Pp][Ee][Rr][Tt].*/ OR data_win_eventdata_commandLine:/.*[Nn][Aa][Nn][Oo][Dd][Uu][Mm][Pp].*/ OR data_win_eventdata_commandLine:/.*[Ll][Ss][Aa][Ss][Ss].*/ OR data_win_eventdata_commandLine:/.*[Ss][Ee][Kk][Uu][Rr][Ll][Ss][Aa].*/ OR data_win_eventdata_commandLine:/.*[Nn][Tt][Dd][Ss]\.[Dd][Ii][Tt].*/ OR data_win_eventdata_commandLine:/.*[Nn][Tt][Dd][Ss][Uu][Tt][Ii][Ll].*/)) OR (data_win_system_eventID:"10" AND data_win_eventdata_targetImage:/.*(\\[Ll][Ss][Aa][Ss][Ss]\.[Ee][Xx][Ee])/))'
-      pivot_on: [host]
-      window: 1h
+  # Behaviour-targeted hunts the engine runs around the alert (not a sweep).
+  - name: Auto-elevating UAC-bypass binaries launched (fodhelper/computerdefaults/slui/sdclt/eventvwr/wsreset)
+    query: data_win_system_eventID:"1" AND data_win_eventdata_image:/.*\\([Ff][Oo][Dd][Hh][Ee][Ll][Pp][Ee][Rr]|[Cc][Oo][Mm][Pp][Uu][Tt][Ee][Rr][Dd][Ee][Ff][Aa][Uu][Ll][Tt][Ss]|[Ss][Ll][Uu][Ii]|[Ss][Dd][Cc][Ll][Tt]|[Ee][Vv][Ee][Nn][Tt][Vv][Ww][Rr]|[Ww][Ss][Rr][Ee][Ss][Ee][Tt])\.[Ee][Xx][Ee]/
+    pivot_on:
+    - host
+    window: 1h
+  - name: High-integrity child spawned by an auto-elevating binary (hijacked command executed)
+    query: data_win_system_eventID:"1" AND data_win_eventdata_parentImage:/.*\\([Ff][Oo][Dd][Hh][Ee][Ll][Pp][Ee][Rr]|[Cc][Oo][Mm][Pp][Uu][Tt][Ee][Rr][Dd][Ee][Ff][Aa][Uu][Ll][Tt][Ss]|[Ss][Ll][Uu][Ii]|[Ss][Dd][Cc][Ll][Tt]|[Ee][Vv][Ee][Nn][Tt][Vv][Ww][Rr]|[Ww][Ss][Rr][Ee][Ss][Ee][Tt])\.[Ee][Xx][Ee]/ AND data_win_eventdata_image:/.*\\([Cc][Mm][Dd]|[Pp][Oo][Ww][Ee][Rr][Ss][Hh][Ee][Ll][Ll]|[Pp][Ww][Ss][Hh]|[Mm][Ss][Hh][Tt][Aa]|[Rr][Uu][Nn][Dd][Ll][Ll]32|[Rr][Ee][Gg][Ss][Vv][Rr]32|[Cc][Ss][Cc][Rr][Ii][Pp][Tt]|[Ww][Ss][Cc][Rr][Ii][Pp][Tt])\.[Ee][Xx][Ee]/
+    pivot_on:
+    - host
+    window: 1h
+  - name: Registry hijack cleanup or sibling shell-open/DelegateExecute writes
+    query: (data_win_system_eventID:"12" OR data_win_system_eventID:"13" OR data_win_system_eventID:"14") AND data_win_eventdata_targetObject:/.*([Mm][Ss]-[Ss][Ee][Tt][Tt][Ii][Nn][Gg][Ss]|[Ee][Xx][Ee][Ff][Ii][Ll][Ee]|[Mm][Ss][Cc][Ff][Ii][Ll][Ee]|[Aa][Pp][Pp][Xx][^\\]*)\\[Ss][Hh][Ee][Ll][Ll]\\[Oo][Pp][Ee][Nn]\\[Cc][Oo][Mm][Mm][Aa][Nn][Dd].*/
+    pivot_on:
+    - host
+    window: 4h
+  - name: UAC / defender weakening registry writes after elevation
+    query: data_win_system_eventID:"13" AND (data_win_eventdata_targetObject:/.*[Pp][Oo][Ll][Ii][Cc][Ii][Ee][Ss]\\[Ss][Yy][Ss][Tt][Ee][Mm]\\(EnableLUA|ConsentPromptBehaviorAdmin|LocalAccountTokenFilterPolicy|PromptOnSecureDesktop).*/ OR data_win_eventdata_targetObject:/.*[Ww][Ii][Nn][Dd][Oo][Ww][Ss] [Dd][Ee][Ff][Ee][Nn][Dd][Ee][Rr]\\(Exclusions|Real-Time Protection).*/)
+    pivot_on:
+    - host
+    window: 2h
+  - name: Persistence autostart writes following the privilege escalation
+    query: (data_win_system_eventID:"12" OR data_win_system_eventID:"13") AND (data_win_eventdata_targetObject:/.*[Cc][Uu][Rr][Rr][Ee][Nn][Tt][Vv][Ee][Rr][Ss][Ii][Oo][Nn]\\[Rr][Uu][Nn]([Oo][Nn][Cc][Ee])?\\.*/ OR data_win_eventdata_targetObject:/.*[Ss][Yy][Ss][Tt][Ee][Mm]\\[Cc][Uu][Rr][Rr][Ee][Nn][Tt][Cc][Oo][Nn][Tt][Rr][Oo][Ll][Ss][Ee][Tt]\\[Ss][Ee][Rr][Vv][Ii][Cc][Ee][Ss]\\.*/ OR data_win_eventdata_targetObject:/.*[Ww][Ii][Nn][Ll][Oo][Gg][Oo][Nn]\\([Ss][Hh][Ee][Ll][Ll]|[Uu][Ss][Ee][Rr][Ii][Nn][Ii][Tt]).*/)
+    pivot_on:
+    - host
+    window: 4h

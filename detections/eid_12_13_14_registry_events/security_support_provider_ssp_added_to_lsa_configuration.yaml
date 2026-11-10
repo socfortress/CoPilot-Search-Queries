@@ -170,44 +170,55 @@ graylog:
   query: (data_win_system_eventID:"12" OR data_win_system_eventID:"13" OR data_win_system_eventID:"14") AND (data_win_eventdata_targetObject:/.*\\[Cc][Oo][Nn][Tt][Rr][Oo][Ll]\\[Ll][Ss][Aa]\\[Ss][Ee][Cc][Uu][Rr][Ii][Tt][Yy] [Pp][Aa][Cc][Kk][Aa][Gg][Ee][Ss]/ OR data_win_eventdata_targetObject:/.*\\[Cc][Oo][Nn][Tt][Rr][Oo][Ll]\\[Ll][Ss][Aa]\\[Oo][Ss][Cc][Oo][Nn][Ff][Ii][Gg]\\[Ss][Ee][Cc][Uu][Rr][Ii][Tt][Yy] [Pp][Aa][Cc][Kk][Aa][Gg][Ee][Ss]/) AND NOT (data_win_eventdata_image:/[Cc]:\\[Ww][Ii][Nn][Dd][Oo][Ww][Ss]\\[Ss][Yy][Ss][Tt][Ee][Mm]32\\[Mm][Ss][Ii][Ee][Xx][Ee][Cc]\.[Ee][Xx][Ee]/ OR data_win_eventdata_image:/[Cc]:\\[Ww][Ii][Nn][Dd][Oo][Ww][Ss]\\[Ss][Yy][Ss][Ww][Oo][Ww]64\\[Mm][Ss][Ii][Ee][Xx][Ee][Cc]\.[Ee][Xx][Ee]/ OR NOT _exists_:data_win_eventdata_image)
 
 correlation:
-  # Authored by the correlation engine for review. Related CoPilot Searches to run
-  # around an alert from this rule, scoped to the same host/user/IP within the window.
+  # Authored per-rule (behaviour-researched) for the correlation engine. Related CoPilot
+  # Searches + telemetry pivots to run around an alert, scoped to its host/user/ip/domain.
   related_rules:
-    - id: ec570e53-4c76-45a9-804d-dc3f355ff7a7
-      name: "7Zip Compressing Dump Files"
-      reason: "next kill-chain tactic: Collection"
-    - id: 0a1255c5-d732-4b62-ac02-b5152d34fb83
-      name: "ADExplorer Writing Complete AD Snapshot Into .dat File"
-      reason: "next kill-chain tactic: Discovery"
-    - id: 1ea13e8c-03ea-409b-877d-ce5c3d2c1cb3
-      name: "ADFS Database Named Pipe Connection By Uncommon Tool"
-      reason: "next kill-chain tactic: Collection"
-    - id: 75bf09fa-1dd7-4d18-9af9-dd9e492562eb
-      name: "ADSI-Cache File Creation By Uncommon Tool"
-      reason: "next kill-chain tactic: Command and Control"
-    - id: 33a2d1dd-f3b0-40bd-8baf-7974468927cc
-      name: "APT PRIVATELOG Image Load Pattern"
-      reason: "next kill-chain tactic: Privilege Escalation"
-    - id: 03e2746e-2b31-42f1-ab7a-eb39365b2422
-      name: "APT31 Judgement Panda Activity"
-      reason: "next kill-chain tactic: Credential Access"
+  - id: 857c8db3-c89b-42fb-882b-f681c7cf4da2
+    name: Unsigned Image Loaded Into LSASS Process
+    reason: 'Payoff of this registry change: after reboot or AddSecurityPackage the registered SSP DLL is loaded into lsass.exe; an unsigned load confirms the SSP is live.'
+  - id: b3503044-60ce-4bf4-bbcb-e3db98788823
+    name: DLL Load via LSASS
+    reason: 'Companion persistence path: LSA-loaded DLLs registered via registry (Authentication/Notification packages, Security Packages) execute inside LSASS to harvest credentials.'
+  - id: b7966f4a-b333-455b-8370-8ca53c229762
+    name: Dropping Of Password Filter DLL
+    reason: 'Sibling LSA credential-capture implant: attackers who register an SSP often also stage a password filter DLL and its Notification Packages key for the same plaintext-harvest purpose.'
+  - id: 0442defa-b4a2-41c9-ae2c-ea7042fc4701
+    name: Potential Credential Dumping Attempt Using New NetworkProvider - REG
+    reason: Parallel registry-based credential-sniffing provider (NetworkProvider order key) used with the same intent as a rogue SSP, often by the same tooling.
+  - id: baef1ec6-2ca9-47a3-97cc-4cf2bda10b77
+    name: Potential Credential Dumping Attempt Using New NetworkProvider - CLI
+    reason: Command-line variant of the rogue credential provider registration, commonly run alongside or instead of SSP install when hardening blocks one route.
+  - id: 8c0eca51-0f88-4db2-9183-fdfb10c703f9
+    name: LSA PPL Protection Setting Modification via CommandLine
+    reason: 'Precursor: LSA RunAsPPL must be disabled before an unsigned SSP DLL can load into lsass, so tampering with it shortly before this alert is causal.'
+  - id: 5ef9853e-4d0e-4a70-846f-a9ca37d876da
+    name: Potential Credential Dumping Activity Via LSASS
+    reason: 'Fallback/parallel credential theft: if SSP is not yet loaded the actor reads LSASS memory directly on the same host.'
   window: 1h
   enrichment_searches:
-  # Rule-specific telemetry pivots the engine runs around an alert from this rule,
-  # scoped to the alert's host/user/IP within the window (behaviour-targeted, not a sweep).
-    - name: "Autostart persistence written on this host (Run keys, services, IFEO)"
-      query: '(data_win_system_eventID:"12" OR data_win_system_eventID:"13") AND (data_win_eventdata_targetObject:/.*[Cc][Uu][Rr][Rr][Ee][Nn][Tt][Vv][Ee][Rr][Ss][Ii][Oo][Nn]\\[Rr][Uu][Nn].*/ OR data_win_eventdata_targetObject:/.*[Cc][Uu][Rr][Rr][Ee][Nn][Tt][Vv][Ee][Rr][Ss][Ii][Oo][Nn]\\[Rr][Uu][Nn][Oo][Nn][Cc][Ee].*/ OR data_win_eventdata_targetObject:/.*[Cc][Uu][Rr][Rr][Ee][Nn][Tt][Cc][Oo][Nn][Tt][Rr][Oo][Ll][Ss][Ee][Tt]\\[Ss][Ee][Rr][Vv][Ii][Cc][Ee][Ss]\\.*/ OR data_win_eventdata_targetObject:/.*[Ii][Mm][Aa][Gg][Ee] [Ff][Ii][Ll][Ee] [Ee][Xx][Ee][Cc][Uu][Tt][Ii][Oo][Nn] [Oo][Pp][Tt][Ii][Oo][Nn][Ss]\\.*/ OR data_win_eventdata_targetObject:/.*[Ww][Ii][Nn][Ll][Oo][Gg][Oo][Nn]\\[Ss][Hh][Ee][Ll][Ll].*/ OR data_win_eventdata_targetObject:/.*[Ww][Ii][Nn][Ll][Oo][Gg][Oo][Nn]\\[Uu][Ss][Ee][Rr][Ii][Nn][Ii][Tt].*/ OR data_win_eventdata_targetObject:/.*[Cc][Uu][Rr][Rr][Ee][Nn][Tt][Vv][Ee][Rr][Ss][Ii][Oo][Nn]\\[Ee][Xx][Pp][Ll][Oo][Rr][Ee][Rr]\\[Rr][Uu][Nn].*/ OR data_win_eventdata_targetObject:/.*[Pp][Oo][Ll][Ii][Cc][Ii][Ee][Ss]\\[Ee][Xx][Pp][Ll][Oo][Rr][Ee][Rr]\\[Rr][Uu][Nn].*/ OR data_win_eventdata_targetObject:/.*[Cc][Uu][Rr][Rr][Ee][Nn][Tt][Vv][Ee][Rr][Ss][Ii][Oo][Nn]\\[Ww][Ii][Nn][Dd][Oo][Ww][Ss]\\[Ll][Oo][Aa][Dd].*/)'
-      pivot_on: [host]
-      window: 2h
-    - name: "Other executions of this tool-set on this host (any arguments)"
-      query: 'data_win_system_eventID:"1" AND data_win_eventdata_image:/.*(\\[Mm][Ss][Ii][Ee][Xx][Ee][Cc]\.[Ee][Xx][Ee])/'
-      pivot_on: [host]
-      window: 2h
-    - name: "Memory/credential-dump creation & LSASS access on this host"
-      query: '((data_win_system_eventID:"1" AND data_win_eventdata_image:/.*(\\[Pp][Rr][Oo][Cc][Dd][Uu][Mm][Pp]\.[Ee][Xx][Ee]|\\[Pp][Rr][Oo][Cc][Dd][Uu][Mm][Pp]64\.[Ee][Xx][Ee]|\\[Ss][Qq][Ll][Dd][Uu][Mm][Pp][Ee][Rr]\.[Ee][Xx][Ee]|\\[Cc][Rr][Ee][Aa][Tt][Ee][Dd][Uu][Mm][Pp]\.[Ee][Xx][Ee]|\\[Rr][Dd][Rr][Ll][Ee][Aa][Kk][Dd][Ii][Aa][Gg]\.[Ee][Xx][Ee]|\\[Dd][Uu][Mm][Pp][Ee][Rr][Tt]\.[Ee][Xx][Ee]|\\[Nn][Aa][Nn][Oo][Dd][Uu][Mm][Pp]\.[Ee][Xx][Ee]|\\[Aa][Vv][Dd][Uu][Mm][Pp]\.[Ee][Xx][Ee])/) OR (data_win_system_eventID:"1" AND (data_win_eventdata_commandLine:/.*[Cc][Oo][Mm][Ss][Vv][Cc][Ss]\.[Dd][Ll][Ll].*/ OR data_win_eventdata_commandLine:/.*[Mm][Ii][Nn][Ii][Dd][Uu][Mm][Pp].*/ OR data_win_eventdata_commandLine:/.*[Dd][Uu][Mm][Pp][Ee][Rr][Tt].*/ OR data_win_eventdata_commandLine:/.*[Nn][Aa][Nn][Oo][Dd][Uu][Mm][Pp].*/ OR data_win_eventdata_commandLine:/.*[Ll][Ss][Aa][Ss][Ss].*/ OR data_win_eventdata_commandLine:/.*[Ss][Ee][Kk][Uu][Rr][Ll][Ss][Aa].*/ OR data_win_eventdata_commandLine:/.*[Nn][Tt][Dd][Ss]\.[Dd][Ii][Tt].*/ OR data_win_eventdata_commandLine:/.*[Nn][Tt][Dd][Ss][Uu][Tt][Ii][Ll].*/)) OR (data_win_system_eventID:"10" AND data_win_eventdata_targetImage:/.*(\\[Ll][Ss][Aa][Ss][Ss]\.[Ee][Xx][Ee])/))'
-      pivot_on: [host]
-      window: 1h
-    - name: "Autostart persistence written on this host"
-      query: '(data_win_system_eventID:"12" OR data_win_system_eventID:"13") AND (data_win_eventdata_targetObject:/.*[Cc][Uu][Rr][Rr][Ee][Nn][Tt][Vv][Ee][Rr][Ss][Ii][Oo][Nn]\\[Rr][Uu][Nn].*/ OR data_win_eventdata_targetObject:/.*[Cc][Uu][Rr][Rr][Ee][Nn][Tt][Vv][Ee][Rr][Ss][Ii][Oo][Nn]\\[Rr][Uu][Nn][Oo][Nn][Cc][Ee].*/ OR data_win_eventdata_targetObject:/.*[Cc][Uu][Rr][Rr][Ee][Nn][Tt][Cc][Oo][Nn][Tt][Rr][Oo][Ll][Ss][Ee][Tt]\\[Ss][Ee][Rr][Vv][Ii][Cc][Ee][Ss]\\.*/ OR data_win_eventdata_targetObject:/.*[Ii][Mm][Aa][Gg][Ee] [Ff][Ii][Ll][Ee] [Ee][Xx][Ee][Cc][Uu][Tt][Ii][Oo][Nn] [Oo][Pp][Tt][Ii][Oo][Nn][Ss]\\.*/ OR data_win_eventdata_targetObject:/.*[Ww][Ii][Nn][Ll][Oo][Gg][Oo][Nn]\\[Ss][Hh][Ee][Ll][Ll].*/ OR data_win_eventdata_targetObject:/.*[Ww][Ii][Nn][Ll][Oo][Gg][Oo][Nn]\\[Uu][Ss][Ee][Rr][Ii][Nn][Ii][Tt].*/ OR data_win_eventdata_targetObject:/.*[Cc][Uu][Rr][Rr][Ee][Nn][Tt][Vv][Ee][Rr][Ss][Ii][Oo][Nn]\\[Ee][Xx][Pp][Ll][Oo][Rr][Ee][Rr]\\[Rr][Uu][Nn].*/ OR data_win_eventdata_targetObject:/.*[Pp][Oo][Ll][Ii][Cc][Ii][Ee][Ss]\\[Ee][Xx][Pp][Ll][Oo][Rr][Ee][Rr]\\[Rr][Uu][Nn].*/ OR data_win_eventdata_targetObject:/.*[Cc][Uu][Rr][Rr][Ee][Nn][Tt][Vv][Ee][Rr][Ss][Ii][Oo][Nn]\\[Ww][Ii][Nn][Dd][Oo][Ww][Ss]\\[Ll][Oo][Aa][Dd].*/)'
-      pivot_on: [host]
-      window: 2h
+  # Behaviour-targeted hunts the engine runs around the alert (not a sweep).
+  - name: LSA registry configuration tampering (Notification/Authentication Packages, RunAsPPL, WDigest)
+    query: (data_win_system_eventID:"12" OR data_win_system_eventID:"13") AND (data_win_eventdata_targetObject:/.*[Cc][Oo][Nn][Tt][Rr][Oo][Ll]\\[Ll][Ss][Aa]\\([Nn][Oo][Tt][Ii][Ff][Ii][Cc][Aa][Tt][Ii][Oo][Nn] [Pp][Aa][Cc][Kk][Aa][Gg][Ee][Ss]|[Aa][Uu][Tt][Hh][Ee][Nn][Tt][Ii][Cc][Aa][Tt][Ii][Oo][Nn] [Pp][Aa][Cc][Kk][Aa][Gg][Ee][Ss]|[Rr][Uu][Nn][Aa][Ss][Pp][Pp][Ll]).*/ OR data_win_eventdata_targetObject:/.*[Ww][Dd][Ii][Gg][Ee][Ss][Tt]\\[Uu][Ss][Ee][Ll][Oo][Gg][Oo][Nn][Cc][Rr][Ee][Dd][Ee][Nn][Tt][Ii][Aa][Ll].*/ OR data_win_eventdata_targetObject:/.*[Nn][Ee][Tt][Ww][Oo][Rr][Kk][Pp][Rr][Oo][Vv][Ii][Dd][Ee][Rr]\\[Oo][Rr][Dd][Ee][Rr].*/)
+    pivot_on:
+    - host
+    window: 2h
+  - name: Unsigned or unusual DLL loaded into lsass.exe
+    query: data_win_system_eventID:"7" AND data_win_eventdata_image:/.*\\[Ll][Ss][Aa][Ss][Ss]\.[Ee][Xx][Ee]/ AND NOT data_win_eventdata_signed:"true"
+    pivot_on:
+    - host
+    window: 6h
+  - name: DLL written into System32 or a staging path (candidate SSP/password filter binary)
+    query: data_win_system_eventID:"11" AND data_win_eventdata_targetFilename:/.*\.[Dd][Ll][Ll]/ AND (data_win_eventdata_targetFilename:/.*\\[Ww][Ii][Nn][Dd][Oo][Ww][Ss]\\[Ss][Yy][Ss][Tt][Ee][Mm]32\\.*/ OR data_win_eventdata_targetFilename:/.*\\[Tt][Ee][Mm][Pp]\\.*/ OR data_win_eventdata_targetFilename:/.*\\[Pp][Rr][Oo][Gg][Rr][Aa][Mm][Dd][Aa][Tt][Aa]\\.*/)
+    pivot_on:
+    - host
+    window: 2h
+  - name: Tooling used to install an SSP (mimilib, Install-SSP, AddSecurityPackage)
+    query: (data_win_system_eventID:"1" AND (data_win_eventdata_commandLine:*mimilib* OR data_win_eventdata_commandLine:*Install\-SSP* OR data_win_eventdata_commandLine:*AddSecurityPackage* OR data_win_eventdata_commandLine:*Security\ Packages*)) OR (data_win_system_eventID:"4104" AND (data_win_eventdata_scriptBlockText:*Install\-SSP* OR data_win_eventdata_scriptBlockText:*AddSecurityPackage* OR data_win_eventdata_scriptBlockText:*mimilib*))
+    pivot_on:
+    - host
+    window: 2h
+  - name: 'Credential harvest artifacts: kiwissp.log / mimilsa.log or LSASS access'
+    query: (data_win_system_eventID:"11" AND (data_win_eventdata_targetFilename:*kiwissp* OR data_win_eventdata_targetFilename:*mimilsa.log* OR data_win_eventdata_targetFilename:*mimilib.dll*)) OR (data_win_system_eventID:"10" AND data_win_eventdata_targetImage:/.*\\[Ll][Ss][Aa][Ss][Ss]\.[Ee][Xx][Ee]/)
+    pivot_on:
+    - host
+    window: 6h

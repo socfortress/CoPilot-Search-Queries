@@ -166,19 +166,50 @@ graylog:
   query: data_win_system_eventID:"1" AND (data_win_eventdata_image:/.*\\[Pp][Oo][Ww][Ee][Rr][Ss][Hh][Ee][Ll][Ll]\.[Ee][Xx][Ee]/ OR data_win_eventdata_originalFileName:/[Pp][Oo][Ww][Ee][Rr][Ss][Hh][Ee][Ll][Ll]\.[Ee][Xx][Ee]/) AND data_win_eventdata_commandLine:/.*[Ss][Ee][Tt]-[Ss][Ee][Rr][Vv][Ii][Cc][Ee].*/ AND data_win_eventdata_commandLine:/.*-[Ss][Tt][Aa][Rr][Tt][Uu][Pp][Tt][Yy][Pp][Ee].*/ AND (data_win_eventdata_commandLine:/.*[Dd][Ii][Ss][Aa][Bb][Ll][Ee][Dd].*/ OR data_win_eventdata_commandLine:/.*[Mm][Aa][Nn][Uu][Aa][Ll].*/)
 
 correlation:
-  # Authored by the correlation engine for review.
+  # Authored per-rule (behaviour-researched) for the correlation engine. Related CoPilot
+  # Searches + telemetry pivots to run around an alert, scoped to its host/user/ip/domain.
+  related_rules:
+  - id: a95b9b42-1308-4735-a1af-abb1c5e6f5ac
+    name: Suspicious Service DACL Modification Via Set-Service Cmdlet
+    reason: Set-Service is also abused to modify service DACLs; same cmdlet, different goal.
+  - id: 514e4c3a-c77d-4cde-a00f-046425e2301e
+    name: Abuse of Service Permissions to Hide Services Via Set-Service
+    reason: Set-Service used to hide services; co-occurs in service-tampering chains.
+  - id: windows-powershell-start-or-stop-service-001
+    name: PowerShell Start or Stop Service
+    reason: Disabled services are usually stopped via PowerShell too.
+  - id: 85c312b7-f44d-4a51-a024-d671c40b49fc
+    name: Service StartupType Change Via Sc.EXE
+    reason: sc.exe equivalent for the same effect.
+  - id: c0514f28-fdae-42df-b886-06e2b2bc5b37
+    name: Service Startup Type Change Via Wmic.EXE
+    reason: WMIC equivalent for the same effect.
+  - id: e1aa95de-610a-427d-b9e7-9b46cfafbe6a
+    name: Windows Defender Service Disabled - Registry
+    reason: Registry evidence that the Defender service was disabled.
+  - id: cf2e938e-9a3e-4fe8-a347-411642b28a9f
+    name: Potential PowerShell Execution Policy Tampering - ProcCreation
+    reason: PowerShell execution-policy tampering often precedes tooling-based evasion.
+  window: 2h
   enrichment_searches:
-  # Rule-specific telemetry pivots the engine runs around an alert from this rule,
-  # scoped to the alert's host/user/IP within the window (behaviour-targeted, not a sweep).
-    - name: "Autostart persistence written on this host (Run keys, services, IFEO)"
-      query: '(data_win_system_eventID:"12" OR data_win_system_eventID:"13") AND (data_win_eventdata_targetObject:/.*[Cc][Uu][Rr][Rr][Ee][Nn][Tt][Vv][Ee][Rr][Ss][Ii][Oo][Nn]\\[Rr][Uu][Nn].*/ OR data_win_eventdata_targetObject:/.*[Cc][Uu][Rr][Rr][Ee][Nn][Tt][Vv][Ee][Rr][Ss][Ii][Oo][Nn]\\[Rr][Uu][Nn][Oo][Nn][Cc][Ee].*/ OR data_win_eventdata_targetObject:/.*[Cc][Uu][Rr][Rr][Ee][Nn][Tt][Cc][Oo][Nn][Tt][Rr][Oo][Ll][Ss][Ee][Tt]\\[Ss][Ee][Rr][Vv][Ii][Cc][Ee][Ss]\\.*/ OR data_win_eventdata_targetObject:/.*[Ii][Mm][Aa][Gg][Ee] [Ff][Ii][Ll][Ee] [Ee][Xx][Ee][Cc][Uu][Tt][Ii][Oo][Nn] [Oo][Pp][Tt][Ii][Oo][Nn][Ss]\\.*/ OR data_win_eventdata_targetObject:/.*[Ww][Ii][Nn][Ll][Oo][Gg][Oo][Nn]\\[Ss][Hh][Ee][Ll][Ll].*/ OR data_win_eventdata_targetObject:/.*[Ww][Ii][Nn][Ll][Oo][Gg][Oo][Nn]\\[Uu][Ss][Ee][Rr][Ii][Nn][Ii][Tt].*/ OR data_win_eventdata_targetObject:/.*[Cc][Uu][Rr][Rr][Ee][Nn][Tt][Vv][Ee][Rr][Ss][Ii][Oo][Nn]\\[Ee][Xx][Pp][Ll][Oo][Rr][Ee][Rr]\\[Rr][Uu][Nn].*/ OR data_win_eventdata_targetObject:/.*[Pp][Oo][Ll][Ii][Cc][Ii][Ee][Ss]\\[Ee][Xx][Pp][Ll][Oo][Rr][Ee][Rr]\\[Rr][Uu][Nn].*/ OR data_win_eventdata_targetObject:/.*[Cc][Uu][Rr][Rr][Ee][Nn][Tt][Vv][Ee][Rr][Ss][Ii][Oo][Nn]\\[Ww][Ii][Nn][Dd][Oo][Ww][Ss]\\[Ll][Oo][Aa][Dd].*/)'
-      pivot_on: [host]
-      window: 4h
-    - name: "Follow-on LOLBin / signed-binary-proxy execution on this host"
-      query: 'data_win_system_eventID:"1" AND data_win_eventdata_image:/.*(\\[Rr][Uu][Nn][Dd][Ll][Ll]32\.[Ee][Xx][Ee]|\\[Rr][Ee][Gg][Ss][Vv][Rr]32\.[Ee][Xx][Ee]|\\[Mm][Ss][Hh][Tt][Aa]\.[Ee][Xx][Ee]|\\[Ii][Nn][Ss][Tt][Aa][Ll][Ll][Uu][Tt][Ii][Ll]\.[Ee][Xx][Ee]|\\[Rr][Ee][Gg][Aa][Ss][Mm]\.[Ee][Xx][Ee]|\\[Rr][Ee][Gg][Ss][Vv][Cc][Ss]\.[Ee][Xx][Ee]|\\[Mm][Ss][Bb][Uu][Ii][Ll][Dd]\.[Ee][Xx][Ee]|\\[Cc][Ee][Rr][Tt][Uu][Tt][Ii][Ll]\.[Ee][Xx][Ee]|\\[Bb][Ii][Tt][Ss][Aa][Dd][Mm][Ii][Nn]\.[Ee][Xx][Ee]|\\[Ww][Mm][Ii][Cc]\.[Ee][Xx][Ee]|\\[Cc][Mm][Ss][Tt][Pp]\.[Ee][Xx][Ee]|\\[Oo][Dd][Bb][Cc][Cc][Oo][Nn][Ff]\.[Ee][Xx][Ee]|\\[Ff][Oo][Rr][Ff][Ii][Ll][Ee][Ss]\.[Ee][Xx][Ee]|\\[Pp][Cc][Aa][Ll][Uu][Aa]\.[Ee][Xx][Ee]|\\[Mm][Aa][Vv][Ii][Nn][Jj][Ee][Cc][Tt]\.[Ee][Xx][Ee]|\\[Ss][Cc][Rr][Ii][Pp][Tt][Rr][Uu][Nn][Nn][Ee][Rr]\.[Ee][Xx][Ee])/'
-      pivot_on: [host]
-      window: 1h
-    - name: "Outbound connections by script interpreters on this host"
-      query: 'data_win_system_eventID:"3" AND data_win_eventdata_image:/.*(\\[Pp][Oo][Ww][Ee][Rr][Ss][Hh][Ee][Ll][Ll]\.[Ee][Xx][Ee]|\\[Pp][Ww][Ss][Hh]\.[Ee][Xx][Ee]|\\[Pp][Oo][Ww][Ee][Rr][Ss][Hh][Ee][Ll][Ll]_[Ii][Ss][Ee]\.[Ee][Xx][Ee]|\\[Cc][Mm][Dd]\.[Ee][Xx][Ee]|\\[Ww][Ss][Cc][Rr][Ii][Pp][Tt]\.[Ee][Xx][Ee]|\\[Cc][Ss][Cc][Rr][Ii][Pp][Tt]\.[Ee][Xx][Ee]|\\[Mm][Ss][Hh][Tt][Aa]\.[Ee][Xx][Ee]|\\[Rr][Uu][Nn][Dd][Ll][Ll]32\.[Ee][Xx][Ee]|\\[Rr][Ee][Gg][Ss][Vv][Rr]32\.[Ee][Xx][Ee])/'
-      pivot_on: [host]
-      window: 1h
+  # Behaviour-targeted hunts the engine runs around the alert (not a sweep).
+  - name: PowerShell service stop/disable cmdlets
+    query: data_win_system_eventID:1 AND data_win_eventdata_commandLine:/.*(Stop-Service|Set-Service|Remove-Service).*/
+    pivot_on: host
+    window: 2h
+  - name: Defender tampering via PowerShell
+    query: data_win_system_eventID:1 AND data_win_eventdata_commandLine:/.*(Set-MpPreference|Add-MpPreference|DisableRealtimeMonitoring).*/
+    pivot_on: host
+    window: 4h
+  - name: Encoded or hidden PowerShell launches
+    query: data_win_system_eventID:1 AND data_win_eventdata_commandLine:/.*[Pp]ower[Ss]hell.*( -[Ee]nc| -[Ee]ncodedcommand| -[Ww]indowstyle +[Hh]idden| -[Nn]op).*/
+    pivot_on: host
+    window: 4h
+  - name: Services Start value set to disabled
+    query: data_win_system_eventID:13 AND data_win_eventdata_targetObject:/.*CurrentControlSet.Services.*Start/ AND data_win_eventdata_details:"DWORD (0x00000004)"
+    pivot_on: host
+    window: 2h
+  - name: Shadow copy and backup deletion
+    query: data_win_system_eventID:1 AND data_win_eventdata_commandLine:/.*(vssadmin.*delete|wbadmin.*delete|Win32_ShadowCopy).*/
+    pivot_on: host
+    window: 6h

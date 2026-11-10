@@ -148,19 +148,58 @@ graylog:
   query: data_win_system_eventID:"11" AND (data_win_eventdata_targetFilename:/.*[Dd][Ss]7002\.[Ll][Nn][Kk].*/ OR data_win_eventdata_targetFilename:/.*[Dd][Ss]7002\.[Pp][Dd][Ff].*/ OR data_win_eventdata_targetFilename:/.*[Dd][Ss]7002\.[Zz][Ii][Pp].*/)
 
 correlation:
-  # Authored by the correlation engine for review.
+  # Authored per-rule (behaviour-researched) for the correlation engine. Related CoPilot
+  # Searches + telemetry pivots to run around an alert, scoped to its host/user/ip/domain.
+  related_rules:
+  - id: 7453575c-a747-40b9-839b-125a0aae324b
+    name: APT29 2018 Phishing Campaign CommandLine Indicators
+    reason: 'Same campaign, next stage: the ds7002.pdf.lnk shortcut launches PowerShell (-noni -ep bypass) and rundll32 cyzfc.dat,PointFunctionCall; a hit confirms the dropped files were opened and executed.'
+  - id: 3215aa19-f060-4332-86d5-5602511f3ca8
+    name: Suspicious LNK Double Extension File Created
+    reason: ds7002.pdf.lnk is a PDF-masquerading shortcut; the generic double-extension LNK creation is the same lure artifact seen when the zip is extracted.
+  - id: windows-process-creating-lnk-suspicious-location-001
+    name: Windows Process Creating LNK File in Suspicious Location
+    reason: Extraction of the zip (or the malicious process itself) drops the lure .lnk into a user-writable location, the same file-creation event seen from the process side.
+  - id: 654fcc6d-840d-4844-9b07-2c3300e54a26
+    name: Legitimate Application Dropped Archive
+    reason: ds7002.zip arrives as an email/browser-delivered archive; an app such as a mail client or browser writing a zip precedes the extraction that creates the lure files.
+  - id: a018fdc3-46a3-44e5-9afb-2cd4af1d4b39
+    name: Suspicious Execution From Outlook Temporary Folder
+    reason: 'Phishing delivery path: attachments opened from the Outlook temp folder lead to the zip/lnk executing from there.'
+  - id: e593cf51-88db-4ee1-b920-37e89012a3c9
+    name: Potentially Suspicious Rundll32 Activity
+    reason: The campaign's payload is a dropped DLL (cyzfc.dat) run through rundll32 with an exported function; this catches that proxy-execution pattern.
+  - id: ae9c6a7c-9521-42a6-915e-5aaa8689d529
+    name: CobaltStrike Load by Rundll32
+    reason: The APT29 2018 payload was a Cobalt Strike-style beacon DLL loaded via rundll32, the expected implant stage after the LNK runs.
+  - id: 24357373-078f-44ed-9ac4-6d334a668a11
+    name: Direct Autorun Keys Modification
+    reason: Post-compromise persistence for the loaded implant via Run keys is the typical next step after initial execution.
+  window: 2h
   enrichment_searches:
-  # Rule-specific telemetry pivots the engine runs around an alert from this rule,
-  # scoped to the alert's host/user/IP within the window (behaviour-targeted, not a sweep).
-    - name: "Follow-on LOLBin / signed-binary-proxy execution on this host"
-      query: 'data_win_system_eventID:"1" AND data_win_eventdata_image:/.*(\\[Rr][Uu][Nn][Dd][Ll][Ll]32\.[Ee][Xx][Ee]|\\[Rr][Ee][Gg][Ss][Vv][Rr]32\.[Ee][Xx][Ee]|\\[Mm][Ss][Hh][Tt][Aa]\.[Ee][Xx][Ee]|\\[Ii][Nn][Ss][Tt][Aa][Ll][Ll][Uu][Tt][Ii][Ll]\.[Ee][Xx][Ee]|\\[Rr][Ee][Gg][Aa][Ss][Mm]\.[Ee][Xx][Ee]|\\[Rr][Ee][Gg][Ss][Vv][Cc][Ss]\.[Ee][Xx][Ee]|\\[Mm][Ss][Bb][Uu][Ii][Ll][Dd]\.[Ee][Xx][Ee]|\\[Cc][Ee][Rr][Tt][Uu][Tt][Ii][Ll]\.[Ee][Xx][Ee]|\\[Bb][Ii][Tt][Ss][Aa][Dd][Mm][Ii][Nn]\.[Ee][Xx][Ee]|\\[Ww][Mm][Ii][Cc]\.[Ee][Xx][Ee]|\\[Cc][Mm][Ss][Tt][Pp]\.[Ee][Xx][Ee]|\\[Oo][Dd][Bb][Cc][Cc][Oo][Nn][Ff]\.[Ee][Xx][Ee]|\\[Ff][Oo][Rr][Ff][Ii][Ll][Ee][Ss]\.[Ee][Xx][Ee]|\\[Pp][Cc][Aa][Ll][Uu][Aa]\.[Ee][Xx][Ee]|\\[Mm][Aa][Vv][Ii][Nn][Jj][Ee][Cc][Tt]\.[Ee][Xx][Ee]|\\[Ss][Cc][Rr][Ii][Pp][Tt][Rr][Uu][Nn][Nn][Ee][Rr]\.[Ee][Xx][Ee])/'
-      pivot_on: [host]
-      window: 1h
-    - name: "Execution of programs from user-writable paths on this host"
-      query: 'data_win_system_eventID:"1" AND (data_win_eventdata_image:/.*\\[Uu][Ss][Ee][Rr][Ss]\\.*/ OR data_win_eventdata_image:/.*\\[Pp][Rr][Oo][Gg][Rr][Aa][Mm][Dd][Aa][Tt][Aa]\\.*/ OR data_win_eventdata_image:/.*\\[Ww][Ii][Nn][Dd][Oo][Ww][Ss]\\[Tt][Ee][Mm][Pp]\\.*/ OR data_win_eventdata_image:/.*\\[Aa][Pp][Pp][Dd][Aa][Tt][Aa]\\.*/ OR data_win_eventdata_image:/.*\\[Pp][Uu][Bb][Ll][Ii][Cc]\\.*/ OR data_win_eventdata_image:/.*\\\$[Rr][Ee][Cc][Yy][Cc][Ll][Ee].*/)'
-      pivot_on: [host]
-      window: 1h
-    - name: "Autostart persistence written on this host"
-      query: '(data_win_system_eventID:"12" OR data_win_system_eventID:"13") AND (data_win_eventdata_targetObject:/.*[Cc][Uu][Rr][Rr][Ee][Nn][Tt][Vv][Ee][Rr][Ss][Ii][Oo][Nn]\\[Rr][Uu][Nn].*/ OR data_win_eventdata_targetObject:/.*[Cc][Uu][Rr][Rr][Ee][Nn][Tt][Vv][Ee][Rr][Ss][Ii][Oo][Nn]\\[Rr][Uu][Nn][Oo][Nn][Cc][Ee].*/ OR data_win_eventdata_targetObject:/.*[Cc][Uu][Rr][Rr][Ee][Nn][Tt][Cc][Oo][Nn][Tt][Rr][Oo][Ll][Ss][Ee][Tt]\\[Ss][Ee][Rr][Vv][Ii][Cc][Ee][Ss]\\.*/ OR data_win_eventdata_targetObject:/.*[Ii][Mm][Aa][Gg][Ee] [Ff][Ii][Ll][Ee] [Ee][Xx][Ee][Cc][Uu][Tt][Ii][Oo][Nn] [Oo][Pp][Tt][Ii][Oo][Nn][Ss]\\.*/ OR data_win_eventdata_targetObject:/.*[Ww][Ii][Nn][Ll][Oo][Gg][Oo][Nn]\\[Ss][Hh][Ee][Ll][Ll].*/ OR data_win_eventdata_targetObject:/.*[Ww][Ii][Nn][Ll][Oo][Gg][Oo][Nn]\\[Uu][Ss][Ee][Rr][Ii][Nn][Ii][Tt].*/ OR data_win_eventdata_targetObject:/.*[Cc][Uu][Rr][Rr][Ee][Nn][Tt][Vv][Ee][Rr][Ss][Ii][Oo][Nn]\\[Ee][Xx][Pp][Ll][Oo][Rr][Ee][Rr]\\[Rr][Uu][Nn].*/ OR data_win_eventdata_targetObject:/.*[Pp][Oo][Ll][Ii][Cc][Ii][Ee][Ss]\\[Ee][Xx][Pp][Ll][Oo][Rr][Ee][Rr]\\[Rr][Uu][Nn].*/ OR data_win_eventdata_targetObject:/.*[Cc][Uu][Rr][Rr][Ee][Nn][Tt][Vv][Ee][Rr][Ss][Ii][Oo][Nn]\\[Ww][Ii][Nn][Dd][Oo][Ww][Ss]\\[Ll][Oo][Aa][Dd].*/)'
-      pivot_on: [host]
-      window: 2h
+  # Behaviour-targeted hunts the engine runs around the alert (not a sweep).
+  - name: PowerShell/cmd launched from LNK with bypass and hidden flags
+    query: data_win_system_eventID:"1" AND data_win_eventdata_image:/.*\\([Pp]ower[Ss]hell|[Cc]md)\.[Ee][Xx][Ee]/ AND (data_win_eventdata_commandLine:*\-[Ee][Pp]* OR data_win_eventdata_commandLine:*\-[Nn][Oo][Nn][Ii]* OR data_win_eventdata_commandLine:*[Ee]xecution[Pp]olicy* OR data_win_eventdata_commandLine:*[Hh]idden*) AND data_win_eventdata_parentImage:/.*\\[Ee]xplorer\.[Ee][Xx][Ee]/
+    pivot_on:
+    - host
+    window: 1h
+  - name: Rundll32 loading a .dat/.tmp or non-DLL payload with exported function
+    query: data_win_system_eventID:"1" AND data_win_eventdata_image:/.*\\[Rr]undll32\.[Ee][Xx][Ee]/ AND (data_win_eventdata_commandLine:*.dat,* OR data_win_eventdata_commandLine:*.tmp,* OR data_win_eventdata_commandLine:*PointFunctionCall* OR data_win_eventdata_commandLine:*\\AppData\\* OR data_win_eventdata_commandLine:*\\Temp\\*)
+    pivot_on:
+    - host
+    window: 2h
+  - name: Executable/DLL/dat payloads dropped into user-writable paths
+    query: data_win_system_eventID:"11" AND data_win_eventdata_targetFilename:/.*\\([Aa]pp[Dd]ata|[Tt]emp|[Pp]ublic|[Pp]rogram[Dd]ata)\\.*\.([Dd][Ll][Ll]|[Ee][Xx][Ee]|[Dd][Aa][Tt]|[Pp][Ss]1|[Vv][Bb][Ss]|[Jj][Ss])/ AND NOT data_win_eventdata_targetFilename:*ds7002*
+    pivot_on:
+    - host
+    window: 1h
+  - name: Outbound connections from rundll32/powershell after lure execution
+    query: data_win_system_eventID:"3" AND data_win_eventdata_image:/.*\\([Rr]undll32|[Pp]ower[Ss]hell)\.[Ee][Xx][Ee]/ AND data_win_eventdata_initiated:"true"
+    pivot_on:
+    - host
+    window: 2h
+  - name: Run-key / startup persistence set after phishing execution
+    query: (data_win_system_eventID:"13" AND data_win_eventdata_targetObject:/.*[Cc]urrent[Vv]ersion\\[Rr]un.*/) OR (data_win_system_eventID:"11" AND data_win_eventdata_targetFilename:/.*\\[Ss]tart [Mm]enu\\[Pp]rograms\\[Ss]tartup\\.*/)
+    pivot_on:
+    - host
+    window: 4h

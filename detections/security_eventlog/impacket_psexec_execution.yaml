@@ -148,32 +148,58 @@ graylog:
   query: data_win_system_eventID:"5145" AND data_win_eventdata_shareName:/\\\\\*\\[Ii][Pp][Cc]\$/ AND (data_win_eventdata_relativeTargetName:/.*[Rr][Ee][Mm][Cc][Oo][Mm]_[Ss][Tt][Dd][Ii][Nn].*/ OR data_win_eventdata_relativeTargetName:/.*[Rr][Ee][Mm][Cc][Oo][Mm]_[Ss][Tt][Dd][Oo][Uu][Tt].*/ OR data_win_eventdata_relativeTargetName:/.*[Rr][Ee][Mm][Cc][Oo][Mm]_[Ss][Tt][Dd][Ee][Rr][Rr].*/)
 
 correlation:
-  # Authored by the correlation engine for review. Related CoPilot Searches to run
-  # around an alert from this rule, scoped to the same host/user/IP within the window.
+  # Authored per-rule (behaviour-researched) for the correlation engine. Related CoPilot
+  # Searches + telemetry pivots to run around an alert, scoped to its host/user/ip/domain.
   related_rules:
-    - id: 87261fb2-69d0-42fe-b9de-88c6b5f65a43
-      name: "Atera Agent Installation"
-      reason: "next kill-chain tactic: Command and Control"
-    - id: 48d91a3a-2363-43ba-a456-ca71ac3da5c2
-      name: "Audit CVE Event"
-      reason: "next kill-chain tactic: Lateral Movement"
+  - id: 6fb63b40-e02a-403e-9ffd-3bcc1d749442
+    name: Metasploit Or Impacket Service Installation Via SMB PsExec
+    reason: 'Same psexec.py session: after the RemCom pipes are opened over IPC$, the tool installs a random-named service (4697, %systemroot%\<8 chars>.exe) on the target; the service install is the execution step of this same chain.'
+  - id: c462f537-a1e3-41a6-b5fc-b2c2cef9bf82
+    name: Suspicious PsExec Execution
+    reason: 'Co-occurring 5145 IPC$ pipe access: the -stdin/-stdout/-stderr pipes of PsExec-compatible tools (non-PSEXESVC) are the sibling signature of the RemCom_* pipes, confirming remote service-based execution.'
+  - id: 586a8d6b-6bfe-4ad9-9d78-888cd2fe50c3
+    name: Remote Service Activity via SVCCTL Named Pipe
+    reason: 'Precursor: psexec.py first writes to the svcctl pipe over IPC$ to create and start its service before the RemCom pipes appear.'
+  - id: b210394c-ba12-4f89-9117-44a2464b9511
+    name: SMB Create Remote File Admin Share
+    reason: 'Precursor: psexec.py uploads its randomly-named service binary to ADMIN$/C$ over SMB with write access before the service is created.'
+  - id: c4e92a97-a9ff-4392-9d2d-7a4c642768ca
+    name: Service Installed By Unusual Client - Security
+    reason: Remote service creation via SCM from a network client (no local client process) is how the psexec.py service lands; corroborates the 4697 side.
+  - id: f0d1feba-4344-4ca9-8121-a6c97bd6df52
+    name: Credential Dumping Tools Service Execution - Security
+    reason: 'Follow-on: operators commonly use the SYSTEM shell from psexec.py to run credential dumping tools as services (mimikatz/pwdump/fgexec/gsecdump).'
+  - id: 4627c6ae-6899-46e2-aa0c-6ebcb1becd19
+    name: HackTool - Impacket Tools Execution
+    reason: Process-side evidence of the Impacket toolkit on the source or target host; the attacker box usually runs other Impacket tools (secretsdump, wmiexec) alongside psexec.py.
+  - id: a642964e-bead-4bed-8910-1bb4d63e3b4d
+    name: HackTool - Mimikatz Execution
+    reason: 'Likely next step: a SYSTEM shell obtained through psexec.py is used to dump LSASS credentials for further lateral movement.'
   window: 1h
   enrichment_searches:
-  # Rule-specific telemetry pivots the engine runs around an alert from this rule,
-  # scoped to the alert's host/user/IP within the window (behaviour-targeted, not a sweep).
-    - name: "Remote-execution / lateral-movement tooling on this host"
-      query: '(data_win_system_eventID:"1" AND data_win_eventdata_image:/.*(\\[Pp][Ss][Ee][Xx][Ee][Cc]\.[Ee][Xx][Ee]|\\[Pp][Ss][Ee][Xx][Ee][Ss][Vv][Cc]\.[Ee][Xx][Ee]|\\[Pp][Aa][Ee][Xx][Ee][Cc]\.[Ee][Xx][Ee]|\\[Ww][Ii][Nn][Rr][Ss]\.[Ee][Xx][Ee]|\\[Mm][Ss][Tt][Ss][Cc]\.[Ee][Xx][Ee]|\\[Ww][Mm][Ii][Cc]\.[Ee][Xx][Ee])/) OR (data_win_system_eventID:"1" AND data_win_eventdata_image:/.*(\\[Pp][Oo][Ww][Ee][Rr][Ss][Hh][Ee][Ll][Ll]\.[Ee][Xx][Ee]|\\[Pp][Ww][Ss][Hh]\.[Ee][Xx][Ee])/ AND (data_win_eventdata_commandLine:/.*[Ii][Nn][Vv][Oo][Kk][Ee]-[Cc][Oo][Mm][Mm][Aa][Nn][Dd].*/ OR data_win_eventdata_commandLine:/.*[Nn][Ee][Ww]-[Pp][Ss][Ss][Ee][Ss][Ss][Ii][Oo][Nn].*/ OR data_win_eventdata_commandLine:/.*[Ee][Nn][Tt][Ee][Rr]-[Pp][Ss][Ss][Ee][Ss][Ss][Ii][Oo][Nn].*/ OR data_win_eventdata_commandLine:/.*-[Cc][Oo][Mm][Pp][Uu][Tt][Ee][Rr][Nn][Aa][Mm][Ee].*/))'
-      pivot_on: [host]
-      window: 2h
-    - name: "Memory/credential-dump creation & LSASS access on this host"
-      query: '((data_win_system_eventID:"1" AND data_win_eventdata_image:/.*(\\[Pp][Rr][Oo][Cc][Dd][Uu][Mm][Pp]\.[Ee][Xx][Ee]|\\[Pp][Rr][Oo][Cc][Dd][Uu][Mm][Pp]64\.[Ee][Xx][Ee]|\\[Ss][Qq][Ll][Dd][Uu][Mm][Pp][Ee][Rr]\.[Ee][Xx][Ee]|\\[Cc][Rr][Ee][Aa][Tt][Ee][Dd][Uu][Mm][Pp]\.[Ee][Xx][Ee]|\\[Rr][Dd][Rr][Ll][Ee][Aa][Kk][Dd][Ii][Aa][Gg]\.[Ee][Xx][Ee]|\\[Dd][Uu][Mm][Pp][Ee][Rr][Tt]\.[Ee][Xx][Ee]|\\[Nn][Aa][Nn][Oo][Dd][Uu][Mm][Pp]\.[Ee][Xx][Ee]|\\[Aa][Vv][Dd][Uu][Mm][Pp]\.[Ee][Xx][Ee])/) OR (data_win_system_eventID:"1" AND (data_win_eventdata_commandLine:/.*[Cc][Oo][Mm][Ss][Vv][Cc][Ss]\.[Dd][Ll][Ll].*/ OR data_win_eventdata_commandLine:/.*[Mm][Ii][Nn][Ii][Dd][Uu][Mm][Pp].*/ OR data_win_eventdata_commandLine:/.*[Dd][Uu][Mm][Pp][Ee][Rr][Tt].*/ OR data_win_eventdata_commandLine:/.*[Nn][Aa][Nn][Oo][Dd][Uu][Mm][Pp].*/ OR data_win_eventdata_commandLine:/.*[Ll][Ss][Aa][Ss][Ss].*/ OR data_win_eventdata_commandLine:/.*[Ss][Ee][Kk][Uu][Rr][Ll][Ss][Aa].*/ OR data_win_eventdata_commandLine:/.*[Nn][Tt][Dd][Ss]\.[Dd][Ii][Tt].*/ OR data_win_eventdata_commandLine:/.*[Nn][Tt][Dd][Ss][Uu][Tt][Ii][Ll].*/)) OR (data_win_system_eventID:"10" AND data_win_eventdata_targetImage:/.*(\\[Ll][Ss][Aa][Ss][Ss]\.[Ee][Xx][Ee])/))'
-      pivot_on: [host]
-      window: 1h
-    - name: "This account's logon activity across hosts"
-      query: '(data_win_system_eventID:"4624" OR data_win_system_eventID:"4625")'
-      pivot_on: [user]
-      window: 6h
-    - name: "Account / group / privilege changes involving this account"
-      query: '(data_win_system_eventID:"4720" OR data_win_system_eventID:"4722" OR data_win_system_eventID:"4724" OR data_win_system_eventID:"4728" OR data_win_system_eventID:"4732" OR data_win_system_eventID:"4756" OR data_win_system_eventID:"4672")'
-      pivot_on: [user]
-      window: 6h
+  # Behaviour-targeted hunts the engine runs around the alert (not a sweep).
+  - name: Remote service installation (random-named service binary / cmd-based service)
+    query: (data_win_system_eventID:"4697" OR data_win_system_eventID:"7045") AND (data_win_eventdata_serviceFileName:/.*[Ww][Ii][Nn][Dd][Oo][Ww][Ss]\[A-Za-z]{8}\.[Ee][Xx][Ee].*/ OR data_win_eventdata_serviceFileName:/.*%[Ss][Yy][Ss][Tt][Ee][Mm][Rr][Oo][Oo][Tt]%\.*/ OR data_win_eventdata_serviceFileName:/.*[Cc][Oo][Mm][Ss][Pp][Ee][Cc].*/ OR data_win_eventdata_serviceFileName:/.*[Pp][Oo][Ww][Ee][Rr][Ss][Hh][Ee][Ll][Ll].*/)
+    pivot_on:
+    - host
+    window: 1h
+  - name: Shells spawned by the remote service (services.exe or random 8-char binary as parent)
+    query: data_win_system_eventID:"1" AND (data_win_eventdata_parentImage:/.*\[Ss][Ee][Rr][Vv][Ii][Cc][Ee][Ss]\.[Ee][Xx][Ee]/ OR data_win_eventdata_parentImage:/.*[Ww][Ii][Nn][Dd][Oo][Ww][Ss]\[A-Za-z]{8}\.[Ee][Xx][Ee]/) AND data_win_eventdata_image:/.*\([Cc][Mm][Dd]|[Pp][Oo][Ww][Ee][Rr][Ss][Hh][Ee][Ll][Ll]|[Pp][Ww][Ss][Hh]|[Rr][Uu][Nn][Dd][Ll][Ll]32|[Mm][Ss][Hh][Tt][Aa]|[Cc][Ee][Rr][Tt][Uu][Tt][Ii][Ll]|[Ww][Mm][Ii][Cc])\.[Ee][Xx][Ee]/
+    pivot_on:
+    - host
+    window: 1h
+  - name: SMB admin share and RPC pipe access around the session
+    query: data_win_system_eventID:"5145" AND (data_win_eventdata_shareName:/.*(ADMIN|[Cc])\$/ OR data_win_eventdata_relativeTargetName:/.*([Ss][Vv][Cc][Cc][Tt][Ll]|[Aa][Tt][Ss][Vv][Cc]|[Ww][Ii][Nn][Rr][Ee][Gg]|[Ss][Aa][Mm][Rr]|[Ll][Ss][Aa][Rr][Pp][Cc]|[Dd][Rr][Ss][Uu][Aa][Pp][Ii]).*/)
+    pivot_on:
+    - host
+    window: 2h
+  - name: Network (type 3) NTLM logons and explicit-credential use by this account
+    query: (data_win_system_eventID:"4624" AND data_win_eventdata_logonType:"3" AND data_win_eventdata_authenticationPackageName:"NTLM") OR data_win_system_eventID:"4648" OR data_win_system_eventID:"4672"
+    pivot_on:
+    - user
+    window: 6h
+  - name: 'Post-exploitation from the SYSTEM shell: LSASS access, hive/NTDS dumping, shadow copies'
+    query: (data_win_system_eventID:"10" AND data_win_eventdata_targetImage:/.*\[Ll][Ss][Aa][Ss][Ss]\.[Ee][Xx][Ee]/) OR (data_win_system_eventID:"1" AND (data_win_eventdata_commandLine:/.*[Rr][Ee][Gg](\.[Ee][Xx][Ee])? +[Ss][Aa][Vv][Ee] +.*([Ss][Aa][Mm]|[Ss][Yy][Ss][Tt][Ee][Mm]|[Ss][Ee][Cc][Uu][Rr][Ii][Tt][Yy]).*/ OR data_win_eventdata_commandLine:/.*[Nn][Tt][Dd][Ss][Uu][Tt][Ii][Ll].*/ OR data_win_eventdata_commandLine:/.*[Vv][Ss][Ss][Aa][Dd][Mm][Ii][Nn].*[Ss][Hh][Aa][Dd][Oo][Ww].*/ OR data_win_eventdata_commandLine:/.*[Cc][Oo][Mm][Ss][Vv][Cc][Ss].*[Mm][Ii][Nn][Ii][Dd][Uu][Mm][Pp].*/))
+    pivot_on:
+    - host
+    window: 2h

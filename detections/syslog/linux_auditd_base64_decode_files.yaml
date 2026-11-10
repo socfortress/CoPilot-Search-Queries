@@ -119,25 +119,55 @@ graylog:
   query: full_log:/.*base64.*/ AND (full_log:/.*\"-d\".*/ OR full_log:/.*\"--decode\".*/) AND NOT _exists_:data_win_system_eventID AND NOT rule_groups:/.*windows.*/
 
 correlation:
-  # Authored by the correlation engine for review. Related CoPilot Searches to run
-  # around an alert from this rule, scoped to the same host/user/IP within the window.
+  # Authored per-rule (behaviour-researched) for the correlation engine. Related CoPilot
+  # Searches + telemetry pivots to run around an alert, scoped to its host/user/ip/domain.
   related_rules:
-    - id: 26f86252-1549-45e1-a212-eb26840e86bc
-      name: "File Download or Read to Pipe Execution"
-      reason: "same analytic story: Linux Living Off The Land"
-  window: 1h
+  - id: b7c4d8e1-5f2a-4c9b-8d3e-4f5a6b7c8d9e
+    name: Linux Suspicious Base64 Execution
+    reason: Decoded payload being piped/executed is the direct follow-on
+  - id: ba592c6d-6888-43c3-b8c6-689b8fe47337
+    name: Linux Base64 Encoded Pipe to Shell
+    reason: Same decode used as base64 -d | sh
+  - id: 55e862a8-dd9c-4651-807a-f21fcad56716
+    name: Python One-Liners with Base64 Decoding - Linux
+    reason: Alternate decoding path for the same payload staging
+  - id: a2d9e2f3-0f43-4c7a-bcd9-9acfc0d723aa
+    name: Suspicious Download and Execute Pattern via Curl/Wget
+    reason: Encoded payload is typically fetched just before decode
+  - id: linux-ingress-tool-transfer-hunting-001
+    name: Linux Ingress Tool Transfer Hunting
+    reason: Tool download that supplies the encoded blob
+  - id: linux-setuid-using-chmod-utility-001
+    name: Linux Setuid Using Chmod Utility
+    reason: Decoded binary is chmod-ed executable/setuid before running
+  - id: linux-append-cronjob-entry-001
+    name: Linux Append Cronjob Entry On Existing Cronjob File
+    reason: Decoded payload often installed via cron persistence
+  window: 2h
   enrichment_searches:
-  # Rule-specific telemetry pivots the engine runs around an alert from this rule,
-  # scoped to the alert's host/user/IP within the window (behaviour-targeted, not a sweep).
-    - name: "Shell / interpreter execution on this host"
-      query: '((data_process_exec_process_binary:/.*(\/[Bb][Aa][Ss][Hh]|\/[Ss][Hh]|\/[Dd][Aa][Ss][Hh]|\/[Zz][Ss][Hh]|\/[Kk][Ss][Hh]|\/[Aa][Ss][Hh]|\/[Bb][Uu][Ss][Yy][Bb][Oo][Xx])/) OR (data_process_exec_process_binary:/.*(\/[Pp][Yy][Tt][Hh][Oo][Nn]|\/[Pp][Yy][Tt][Hh][Oo][Nn]3|\/[Pp][Ee][Rr][Ll]|\/[Rr][Uu][Bb][Yy]|\/[Pp][Hh][Pp]|\/[Nn][Oo][Dd][Ee]|\/[Ll][Uu][Aa]|\/[Aa][Ww][Kk])/))'
-      pivot_on: [host]
-      window: 1h
-    - name: "Reconnaissance commands on this host"
-      query: 'data_process_exec_process_binary:/.*(\/[Ww][Hh][Oo][Aa][Mm][Ii]|\/[Ii][Dd]|\/[Uu][Nn][Aa][Mm][Ee]|\/[Hh][Oo][Ss][Tt][Nn][Aa][Mm][Ee]|\/[Hh][Oo][Ss][Tt][Nn][Aa][Mm][Ee][Cc][Tt][Ll]|\/[Ss][Ss]|\/[Nn][Ee][Tt][Ss][Tt][Aa][Tt]|\/[Ii][Ff][Cc][Oo][Nn][Ff][Ii][Gg]|\/[Aa][Rr][Pp]|\/[Ww]|\/[Ww][Hh][Oo]|\/[Ll][Aa][Ss][Tt]|\/[Ll][Ss][Oo][Ff]|\/[Nn][Mm][Aa][Pp]|\/[Dd][Ii][Gg]|\/[Ff][Ii][Nn][Dd])/'
-      pivot_on: [host]
-      window: 1h
-    - name: "Privilege-escalation tooling executed on this host"
-      query: 'data_process_exec_process_binary:/.*(\/[Ss][Uu][Dd][Oo]|\/[Ss][Uu]|\/[Pp][Kk][Ee][Xx][Ee][Cc]|\/[Dd][Oo][Aa][Ss]|\/[Ss][Ee][Tt][Cc][Aa][Pp]|\/[Cc][Hh][Ss][Hh]|\/[Nn][Ee][Ww][Gg][Rr][Pp])/'
-      pivot_on: [host]
-      window: 2h
+  # Behaviour-targeted hunts the engine runs around the alert (not a sweep).
+  - name: Download of payload before decode
+    query: full_log:/.*(curl|wget|fetch|tftp|scp).*/ AND full_log:/.*(http|ftp|:\/\/).*/
+    pivot_on:
+    - host
+    window: 2h
+  - name: Pipe-to-shell or eval of decoded output
+    query: full_log:/.*base64.*/ AND full_log:/.*(\|\s*(ba|z|da)?sh|eval|bash -c|python.* -c|perl -e).*/
+    pivot_on:
+    - host
+    window: 2h
+  - name: Executable permission set on staged file
+    query: full_log:/.*chmod.*/ AND full_log:/.*(\+x|755|777|4755|u\+s).*/
+    pivot_on:
+    - host
+    window: 2h
+  - name: Execution from tmp/shm staging paths
+    query: data_process_exec_process_binary:/.*(\/tmp\/|\/dev\/shm\/|\/var\/tmp\/).*/
+    pivot_on:
+    - host
+    window: 2h
+  - name: Persistence installed after decode
+    query: full_log:/.*(authorized_keys|\/etc\/sudoers|crontab|\/etc\/cron|\.bashrc|\.profile|rc\.local|systemd\/system).*/
+    pivot_on:
+    - host
+    window: 4h

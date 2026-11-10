@@ -132,19 +132,58 @@ graylog:
   query: data_win_system_providerName:/[Ss][Ee][Rr][Vv][Ii][Cc][Ee] [Cc][Oo][Nn][Tt][Rr][Oo][Ll] [Mm][Aa][Nn][Aa][Gg][Ee][Rr]/ AND data_win_system_eventID:"7045" AND data_win_eventdata_serviceName:/[Rr][Tt][Cc][Oo][Rr][Ee]64/
 
 correlation:
-  # Authored by the correlation engine for review.
+  # Authored per-rule (behaviour-researched) for the correlation engine. Related CoPilot
+  # Searches + telemetry pivots to run around an alert, scoped to its host/user/ip/domain.
+  related_rules:
+  - id: 39b64854-5497-4b57-a448-40977b8c9679
+    name: Malicious Driver Load By Name
+    reason: Sysmon EID 6 confirms the RTCore64.sys (or other known-bad) driver was actually loaded into the kernel right after the 7045 service install.
+  - id: e76ca062-4de0-4d79-8d90-160a0d335eca
+    name: PUA - Kernel Driver Utility (KDU) Execution
+    reason: KDU is the other common BYOVD loader; RTCore64 is one of its supported providers, so either may be the tool that registered the service.
+  - id: 431a1fdb-4799-4f3b-91c3-a683b003fc49
+    name: New Kernel Driver Via SC.EXE
+    reason: Most BYOVD loaders register the vulnerable driver with 'sc create type= kernel'; this is the process-side view of the same service installation.
+  - id: 17a1be64-8d88-40bf-b5ff-a4f7a50ebcc8
+    name: Suspicious New Service Creation
+    reason: Captures the command line and parent that created the RTCore64 service, identifying the dropper or operator shell.
+  - id: 2c4523d5-d481-4ed0-8ec3-7fbf0cb41a75
+    name: Driver Load From A Temporary Directory
+    reason: Attackers drop RTCore64.sys into temp or user-writable paths before loading it, unlike the legitimate MSI Afterburner install under Program Files.
+  - id: 22154f0e-5132-4a54-aa78-cc62f6def531
+    name: Vulnerable Driver Blocklist Registry Tampering Via CommandLine
+    reason: BYOVD only works if Microsoft's vulnerable driver blocklist is off; attackers disable it just before loading RTCore64.
+  - id: eb2d07d4-49cb-4523-801a-da002df36602
+    name: HackTool - EDRSilencer Execution
+    reason: The purpose of RTCore64 abuse (CheekyBlinder) is blinding EDR; EDR-silencing tooling is the expected follow-on.
+  - id: 5ef9853e-4d0e-4a70-846f-a9ca37d876da
+    name: Potential Credential Dumping Activity Via LSASS
+    reason: With EDR callbacks removed and kernel access gained, credential theft from LSASS is the typical next objective.
+  window: 2h
   enrichment_searches:
-  # Rule-specific telemetry pivots the engine runs around an alert from this rule,
-  # scoped to the alert's host/user/IP within the window (behaviour-targeted, not a sweep).
-    - name: "Follow-on LOLBin / signed-binary-proxy execution on this host"
-      query: 'data_win_system_eventID:"1" AND data_win_eventdata_image:/.*(\\[Rr][Uu][Nn][Dd][Ll][Ll]32\.[Ee][Xx][Ee]|\\[Rr][Ee][Gg][Ss][Vv][Rr]32\.[Ee][Xx][Ee]|\\[Mm][Ss][Hh][Tt][Aa]\.[Ee][Xx][Ee]|\\[Ii][Nn][Ss][Tt][Aa][Ll][Ll][Uu][Tt][Ii][Ll]\.[Ee][Xx][Ee]|\\[Rr][Ee][Gg][Aa][Ss][Mm]\.[Ee][Xx][Ee]|\\[Rr][Ee][Gg][Ss][Vv][Cc][Ss]\.[Ee][Xx][Ee]|\\[Mm][Ss][Bb][Uu][Ii][Ll][Dd]\.[Ee][Xx][Ee]|\\[Cc][Ee][Rr][Tt][Uu][Tt][Ii][Ll]\.[Ee][Xx][Ee]|\\[Bb][Ii][Tt][Ss][Aa][Dd][Mm][Ii][Nn]\.[Ee][Xx][Ee]|\\[Ww][Mm][Ii][Cc]\.[Ee][Xx][Ee]|\\[Cc][Mm][Ss][Tt][Pp]\.[Ee][Xx][Ee]|\\[Oo][Dd][Bb][Cc][Cc][Oo][Nn][Ff]\.[Ee][Xx][Ee]|\\[Ff][Oo][Rr][Ff][Ii][Ll][Ee][Ss]\.[Ee][Xx][Ee]|\\[Pp][Cc][Aa][Ll][Uu][Aa]\.[Ee][Xx][Ee]|\\[Mm][Aa][Vv][Ii][Nn][Jj][Ee][Cc][Tt]\.[Ee][Xx][Ee]|\\[Ss][Cc][Rr][Ii][Pp][Tt][Rr][Uu][Nn][Nn][Ee][Rr]\.[Ee][Xx][Ee])/'
-      pivot_on: [host]
-      window: 1h
-    - name: "Service installations on this host"
-      query: 'data_win_system_eventID:"7045"'
-      pivot_on: [host]
-      window: 6h
-    - name: "Autostart persistence written on this host (Run keys, services, IFEO)"
-      query: '(data_win_system_eventID:"12" OR data_win_system_eventID:"13") AND (data_win_eventdata_targetObject:/.*[Cc][Uu][Rr][Rr][Ee][Nn][Tt][Vv][Ee][Rr][Ss][Ii][Oo][Nn]\\[Rr][Uu][Nn].*/ OR data_win_eventdata_targetObject:/.*[Cc][Uu][Rr][Rr][Ee][Nn][Tt][Vv][Ee][Rr][Ss][Ii][Oo][Nn]\\[Rr][Uu][Nn][Oo][Nn][Cc][Ee].*/ OR data_win_eventdata_targetObject:/.*[Cc][Uu][Rr][Rr][Ee][Nn][Tt][Cc][Oo][Nn][Tt][Rr][Oo][Ll][Ss][Ee][Tt]\\[Ss][Ee][Rr][Vv][Ii][Cc][Ee][Ss]\\.*/ OR data_win_eventdata_targetObject:/.*[Ii][Mm][Aa][Gg][Ee] [Ff][Ii][Ll][Ee] [Ee][Xx][Ee][Cc][Uu][Tt][Ii][Oo][Nn] [Oo][Pp][Tt][Ii][Oo][Nn][Ss]\\.*/ OR data_win_eventdata_targetObject:/.*[Ww][Ii][Nn][Ll][Oo][Gg][Oo][Nn]\\[Ss][Hh][Ee][Ll][Ll].*/ OR data_win_eventdata_targetObject:/.*[Ww][Ii][Nn][Ll][Oo][Gg][Oo][Nn]\\[Uu][Ss][Ee][Rr][Ii][Nn][Ii][Tt].*/ OR data_win_eventdata_targetObject:/.*[Cc][Uu][Rr][Rr][Ee][Nn][Tt][Vv][Ee][Rr][Ss][Ii][Oo][Nn]\\[Ee][Xx][Pp][Ll][Oo][Rr][Ee][Rr]\\[Rr][Uu][Nn].*/ OR data_win_eventdata_targetObject:/.*[Pp][Oo][Ll][Ii][Cc][Ii][Ee][Ss]\\[Ee][Xx][Pp][Ll][Oo][Rr][Ee][Rr]\\[Rr][Uu][Nn].*/ OR data_win_eventdata_targetObject:/.*[Cc][Uu][Rr][Rr][Ee][Nn][Tt][Vv][Ee][Rr][Ss][Ii][Oo][Nn]\\[Ww][Ii][Nn][Dd][Oo][Ww][Ss]\\[Ll][Oo][Aa][Dd].*/)'
-      pivot_on: [host]
-      window: 4h
+  # Behaviour-targeted hunts the engine runs around the alert (not a sweep).
+  - name: Kernel driver loaded or .sys dropped in writable path (RTCore64 payload)
+    query: (data_win_system_eventID:"6" AND data_win_eventdata_imageLoaded:/.*[Rr][Tt][Cc][Oo][Rr][Ee]64.*/) OR (data_win_system_eventID:"11" AND data_win_eventdata_targetFilename:/.*[Rr][Tt][Cc][Oo][Rr][Ee]64.*/)
+    pivot_on:
+    - host
+    window: 2h
+  - name: Service/driver created via sc.exe or driver-install tooling
+    query: data_win_system_eventID:"1" AND ((data_win_eventdata_image:/.*\\[Ss][Cc]\.[Ee][Xx][Ee]/ AND data_win_eventdata_commandLine:/.*[Cc][Rr][Ee][Aa][Tt][Ee].*[Rr][Tt][Cc][Oo][Rr][Ee].*/) OR (data_win_eventdata_image:/.*\\[Pp][Nn][Pp][Uu][Tt][Ii][Ll]\.[Ee][Xx][Ee]/) OR data_win_eventdata_commandLine:/.*[Rr][Tt][Cc][Oo][Rr][Ee]64.*/)
+    pivot_on:
+    - host
+    window: 2h
+  - name: Security tooling tampering after driver load (Defender/EDR disable, blocklist off)
+    query: (data_win_system_eventID:"13" AND (data_win_eventdata_targetObject:/.*[Vv][Uu][Ll][Nn][Ee][Rr][Aa][Bb][Ll][Ee][Dd][Rr][Ii][Vv][Ee][Rr][Bb][Ll][Oo][Cc][Kk][Ll][Ii][Ss][Tt][Ee][Nn][Aa][Bb][Ll][Ee].*/ OR data_win_eventdata_targetObject:/.*[Ww][Ii][Nn][Dd][Ee][Ff][Ee][Nn][Dd].*[Dd][Ii][Ss][Aa][Bb][Ll][Ee].*/)) OR (data_win_system_eventID:"1" AND data_win_eventdata_commandLine:/.*([Ss][Ee][Tt]-[Mm][Pp][Pp][Rr][Ee][Ff][Ee][Rr][Ee][Nn][Cc][Ee]|[Ss][Cc] +(stop|config|delete) +(WinDefend|Sense|CSFalcon|SentinelAgent|CbDefense|[Mm][Ss][Ss][Ee][Nn][Ss][Ee])).*/)
+    pivot_on:
+    - host
+    window: 2h
+  - name: LSASS access or memory dump on host
+    query: (data_win_system_eventID:"10" AND data_win_eventdata_targetImage:/.*[Ll][Ss][Aa][Ss][Ss]\.[Ee][Xx][Ee]/) OR (data_win_system_eventID:"11" AND data_win_eventdata_targetFilename:/.*[Ll][Ss][Aa][Ss][Ss].*\.[Dd][Mm][Pp]/)
+    pivot_on:
+    - host
+    window: 4h
+  - name: 'Precursor: tool download or privileged logon preceding driver install'
+    query: (data_win_system_eventID:"11" AND data_win_eventdata_targetFilename:/.*\.[Ss][Yy][Ss]/ AND NOT data_win_eventdata_targetFilename:/.*[Ww][Ii][Nn][Dd][Oo][Ww][Ss]\\[Ss][Yy][Ss][Tt][Ee][Mm]32.*/) OR (data_win_system_eventID:"4672")
+    pivot_on:
+    - host
+    window: 6h

@@ -145,23 +145,52 @@ graylog:
   query: data_win_system_eventID:"11" AND data_win_eventdata_image:/.*\\[Aa][Ss][Pp][Nn][Ee][Tt]_[Cc][Oo][Mm][Pp][Ii][Ll][Ee][Rr]\.[Ee][Xx][Ee]/ AND data_win_eventdata_targetFilename:/.*\\[Tt][Ee][Mm][Pp][Oo][Rr][Aa][Rr][Yy] [Aa][Ss][Pp]\.[Nn][Ee][Tt] [Ff][Ii][Ll][Ee][Ss]\\.*/ AND data_win_eventdata_targetFilename:/.*\\[Aa][Ss][Ss][Ee][Mm][Bb][Ll][Yy]\\[Tt][Mm][Pp]\\.*/ AND data_win_eventdata_targetFilename:/.*\.[Dd][Ll][Ll].*/
 
 correlation:
-  # Authored by the correlation engine for review.
+  # Authored per-rule (behaviour-researched) for the correlation engine. Related CoPilot
+  # Searches + telemetry pivots to run around an alert, scoped to its host/user/ip/domain.
+  related_rules:
+  - id: a01b8329-5953-4f73-ae2d-aa01e1f35f00
+    name: AspNetCompiler Execution
+    reason: The process launch of aspnet_compiler.exe that necessarily precedes the DLL being written to Temporary ASP.NET Files; its command line shows the -v/-p source path being compiled.
+  - id: 9f50fe98-fe5c-4a2d-86c7-fad7f63ed622
+    name: Potentially Suspicious ASP.NET Compilation Via AspNetCompiler
+    reason: 'Same invocation seen from the argument side: compilation of a source tree in a user-writable or odd path is what turns this DLL write into a build-provider proxy-execution attempt.'
+  - id: 9ccba514-7cb6-4c5c-b377-700758f2f120
+    name: Suspicious Child Process of AspNetCompiler
+    reason: 'Follow-on: once the attacker-built assembly runs inside or beside aspnet_compiler, it spawns cmd/powershell/rundll32 children; confirms the compiled DLL was executed.'
+  - id: 33be4333-2c6b-44f4-ae28-102cdbde0a31
+    name: Suspicious Msbuild Execution By Uncommon Parent Process
+    reason: Sibling .NET build-tool LOLBin (T1127) used the same way to compile and run attacker code; operators often rotate between msbuild and aspnet_compiler.
+  - id: 213b3148-24ea-11ec-93a2-acde48001122
+    name: MSBuild Suspicious Spawned By Script Process
+    reason: Co-occurring trusted-developer-utility abuse launched from a script host, a typical delivery chain preceding compiled-payload execution.
+  - id: windows-dll-loaded-temp-dir-001
+    name: Windows DLL Module Loaded in Temp Dir
+    reason: 'Follow-on: the freshly compiled assembly under Temporary ASP.NET Files/assembly\tmp is loaded as a module from a temp directory.'
+  window: 1h
   enrichment_searches:
-  # Rule-specific telemetry pivots the engine runs around an alert from this rule,
-  # scoped to the alert's host/user/IP within the window (behaviour-targeted, not a sweep).
-    - name: "Other executions of this tool-set on this host (any arguments)"
-      query: 'data_win_system_eventID:"1" AND data_win_eventdata_image:/.*(\\[Aa][Ss][Pp][Nn][Ee][Tt]_[Cc][Oo][Mm][Pp][Ii][Ll][Ee][Rr]\.[Ee][Xx][Ee])/'
-      pivot_on: [host]
-      window: 2h
-    - name: "Autostart persistence written on this host (Run keys, services, IFEO)"
-      query: '(data_win_system_eventID:"12" OR data_win_system_eventID:"13") AND (data_win_eventdata_targetObject:/.*[Cc][Uu][Rr][Rr][Ee][Nn][Tt][Vv][Ee][Rr][Ss][Ii][Oo][Nn]\\[Rr][Uu][Nn].*/ OR data_win_eventdata_targetObject:/.*[Cc][Uu][Rr][Rr][Ee][Nn][Tt][Vv][Ee][Rr][Ss][Ii][Oo][Nn]\\[Rr][Uu][Nn][Oo][Nn][Cc][Ee].*/ OR data_win_eventdata_targetObject:/.*[Cc][Uu][Rr][Rr][Ee][Nn][Tt][Cc][Oo][Nn][Tt][Rr][Oo][Ll][Ss][Ee][Tt]\\[Ss][Ee][Rr][Vv][Ii][Cc][Ee][Ss]\\.*/ OR data_win_eventdata_targetObject:/.*[Ii][Mm][Aa][Gg][Ee] [Ff][Ii][Ll][Ee] [Ee][Xx][Ee][Cc][Uu][Tt][Ii][Oo][Nn] [Oo][Pp][Tt][Ii][Oo][Nn][Ss]\\.*/ OR data_win_eventdata_targetObject:/.*[Ww][Ii][Nn][Ll][Oo][Gg][Oo][Nn]\\[Ss][Hh][Ee][Ll][Ll].*/ OR data_win_eventdata_targetObject:/.*[Ww][Ii][Nn][Ll][Oo][Gg][Oo][Nn]\\[Uu][Ss][Ee][Rr][Ii][Nn][Ii][Tt].*/ OR data_win_eventdata_targetObject:/.*[Cc][Uu][Rr][Rr][Ee][Nn][Tt][Vv][Ee][Rr][Ss][Ii][Oo][Nn]\\[Ee][Xx][Pp][Ll][Oo][Rr][Ee][Rr]\\[Rr][Uu][Nn].*/ OR data_win_eventdata_targetObject:/.*[Pp][Oo][Ll][Ii][Cc][Ii][Ee][Ss]\\[Ee][Xx][Pp][Ll][Oo][Rr][Ee][Rr]\\[Rr][Uu][Nn].*/ OR data_win_eventdata_targetObject:/.*[Cc][Uu][Rr][Rr][Ee][Nn][Tt][Vv][Ee][Rr][Ss][Ii][Oo][Nn]\\[Ww][Ii][Nn][Dd][Oo][Ww][Ss]\\[Ll][Oo][Aa][Dd].*/)'
-      pivot_on: [host]
-      window: 4h
-    - name: "Execution of programs from user-writable paths on this host"
-      query: 'data_win_system_eventID:"1" AND (data_win_eventdata_image:/.*\\[Uu][Ss][Ee][Rr][Ss]\\.*/ OR data_win_eventdata_image:/.*\\[Pp][Rr][Oo][Gg][Rr][Aa][Mm][Dd][Aa][Tt][Aa]\\.*/ OR data_win_eventdata_image:/.*\\[Ww][Ii][Nn][Dd][Oo][Ww][Ss]\\[Tt][Ee][Mm][Pp]\\.*/ OR data_win_eventdata_image:/.*\\[Aa][Pp][Pp][Dd][Aa][Tt][Aa]\\.*/ OR data_win_eventdata_image:/.*\\[Pp][Uu][Bb][Ll][Ii][Cc]\\.*/ OR data_win_eventdata_image:/.*\\\$[Rr][Ee][Cc][Yy][Cc][Ll][Ee].*/)'
-      pivot_on: [host]
-      window: 1h
-    - name: "Autostart persistence written on this host"
-      query: '(data_win_system_eventID:"12" OR data_win_system_eventID:"13") AND (data_win_eventdata_targetObject:/.*[Cc][Uu][Rr][Rr][Ee][Nn][Tt][Vv][Ee][Rr][Ss][Ii][Oo][Nn]\\[Rr][Uu][Nn].*/ OR data_win_eventdata_targetObject:/.*[Cc][Uu][Rr][Rr][Ee][Nn][Tt][Vv][Ee][Rr][Ss][Ii][Oo][Nn]\\[Rr][Uu][Nn][Oo][Nn][Cc][Ee].*/ OR data_win_eventdata_targetObject:/.*[Cc][Uu][Rr][Rr][Ee][Nn][Tt][Cc][Oo][Nn][Tt][Rr][Oo][Ll][Ss][Ee][Tt]\\[Ss][Ee][Rr][Vv][Ii][Cc][Ee][Ss]\\.*/ OR data_win_eventdata_targetObject:/.*[Ii][Mm][Aa][Gg][Ee] [Ff][Ii][Ll][Ee] [Ee][Xx][Ee][Cc][Uu][Tt][Ii][Oo][Nn] [Oo][Pp][Tt][Ii][Oo][Nn][Ss]\\.*/ OR data_win_eventdata_targetObject:/.*[Ww][Ii][Nn][Ll][Oo][Gg][Oo][Nn]\\[Ss][Hh][Ee][Ll][Ll].*/ OR data_win_eventdata_targetObject:/.*[Ww][Ii][Nn][Ll][Oo][Gg][Oo][Nn]\\[Uu][Ss][Ee][Rr][Ii][Nn][Ii][Tt].*/ OR data_win_eventdata_targetObject:/.*[Cc][Uu][Rr][Rr][Ee][Nn][Tt][Vv][Ee][Rr][Ss][Ii][Oo][Nn]\\[Ee][Xx][Pp][Ll][Oo][Rr][Ee][Rr]\\[Rr][Uu][Nn].*/ OR data_win_eventdata_targetObject:/.*[Pp][Oo][Ll][Ii][Cc][Ii][Ee][Ss]\\[Ee][Xx][Pp][Ll][Oo][Rr][Ee][Rr]\\[Rr][Uu][Nn].*/ OR data_win_eventdata_targetObject:/.*[Cc][Uu][Rr][Rr][Ee][Nn][Tt][Vv][Ee][Rr][Ss][Ii][Oo][Nn]\\[Ww][Ii][Nn][Dd][Oo][Ww][Ss]\\[Ll][Oo][Aa][Dd].*/)'
-      pivot_on: [host]
-      window: 2h
+  # Behaviour-targeted hunts the engine runs around the alert (not a sweep).
+  - name: aspnet_compiler.exe launch with its command line and parent
+    query: data_win_system_eventID:"1" AND data_win_eventdata_image:/.*\\[Aa][Ss][Pp][Nn][Ee][Tt]_[Cc][Oo][Mm][Pp][Ii][Ll][Ee][Rr]\.[Ee][Xx][Ee]/
+    pivot_on:
+    - host
+    window: 1h
+  - name: Children spawned by aspnet_compiler.exe after compilation
+    query: data_win_system_eventID:"1" AND data_win_eventdata_parentImage:/.*\\[Aa][Ss][Pp][Nn][Ee][Tt]_[Cc][Oo][Mm][Pp][Ii][Ll][Ee][Rr]\.[Ee][Xx][Ee]/
+    pivot_on:
+    - host
+    window: 1h
+  - name: Network or DNS activity from aspnet_compiler.exe or the compiled assembly
+    query: (data_win_system_eventID:"3" OR data_win_system_eventID:"22") AND data_win_eventdata_image:/.*\\[Aa][Ss][Pp][Nn][Ee][Tt]_[Cc][Oo][Mm][Pp][Ii][Ll][Ee][Rr]\.[Ee][Xx][Ee]/
+    pivot_on:
+    - host
+    window: 2h
+  - name: Other .NET build tools abused to compile and run code (msbuild, csc, vbc)
+    query: data_win_system_eventID:"1" AND (data_win_eventdata_image:/.*\\[Mm][Ss][Bb][Uu][Ii][Ll][Dd]\.[Ee][Xx][Ee]/ OR data_win_eventdata_image:/.*\\[Cc][Ss][Cc]\.[Ee][Xx][Ee]/ OR data_win_eventdata_image:/.*\\[Vv][Bb][Cc]\.[Ee][Xx][Ee]/ OR data_win_eventdata_image:/.*\\[Ii][Nn][Ss][Tt][Aa][Ll][Ll][Uu][Tt][Ii][Ll]\.[Ee][Xx][Ee]/)
+    pivot_on:
+    - host
+    window: 2h
+  - name: Script hosts or Office apps launching the compiler (delivery stage)
+    query: data_win_system_eventID:"1" AND (data_win_eventdata_parentImage:/.*\\[Pp][Oo][Ww][Ee][Rr][Ss][Hh][Ee][Ll][Ll]\.[Ee][Xx][Ee]/ OR data_win_eventdata_parentImage:/.*\\[Cc][Mm][Dd]\.[Ee][Xx][Ee]/ OR data_win_eventdata_parentImage:/.*\\[Ww][Ss][Cc][Rr][Ii][Pp][Tt]\.[Ee][Xx][Ee]/ OR data_win_eventdata_parentImage:/.*\\[Ww][Ii][Nn][Ww][Oo][Rr][Dd]\.[Ee][Xx][Ee]/) AND data_win_eventdata_image:/.*\\[Aa][Ss][Pp][Nn][Ee][Tt]_[Cc][Oo][Mm][Pp][Ii][Ll][Ee][Rr]\.[Ee][Xx][Ee]/
+    pivot_on:
+    - host
+    window: 2h

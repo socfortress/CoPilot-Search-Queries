@@ -168,41 +168,55 @@ graylog:
   query: data_win_system_eventID:"4698" AND (data_win_eventdata_taskContent:/.*:\\[Pp][Rr][Oo][Gg][Rr][Aa][Mm][Dd][Aa][Tt][Aa]\\.*/ OR data_win_eventdata_taskContent:/.*\\[Aa][Pp][Pp][Dd][Aa][Tt][Aa]\\[Ll][Oo][Cc][Aa][Ll]\\.*/) AND data_win_eventdata_taskContent:/.*[Rr][Uu][Nn][Dd][Ll][Ll]32.*/ AND data_win_eventdata_taskContent:/.*\.[Ww][Ll][Ll].*/ AND data_win_eventdata_taskContent:/.*\#1.*/ AND (data_win_eventdata_taskContent:/.*[Oo][Nn][Ee][Dd][Rr][Ii][Vv][Ee].*/ OR data_win_eventdata_taskContent:/.*[Ss][Ee][Nn][Ss] [Aa][Pp][Ii].*/)
 
 correlation:
-  # Authored by the correlation engine for review. Related CoPilot Searches to run
-  # around an alert from this rule, scoped to the same host/user/IP within the window.
+  # Authored per-rule (behaviour-researched) for the correlation engine. Related CoPilot
+  # Searches + telemetry pivots to run around an alert, scoped to its host/user/ip/domain.
   related_rules:
-    - id: 0255a820-e564-4e40-af2b-6ac61160335c
-      name: "A New Trust Was Created To A Domain"
-      reason: "next kill-chain tactic: Persistence"
-    - id: 35ba1d85-724d-42a3-889f-2e2362bcaf23
-      name: "AD Privileged Users or Groups Reconnaissance"
-      reason: "next kill-chain tactic: Discovery"
-    - id: 9eb99343-d336-4020-a3cd-67f3819e68ee
-      name: "Account Tampering - Suspicious Failed Logon Reasons"
-      reason: "next kill-chain tactic: Persistence"
-    - id: 17d619c1-e020-4347-957e-1d1207455c93
-      name: "Active Directory Replication from Non Machine Account"
-      reason: "next kill-chain tactic: Credential Access"
-    - id: 300bac00-e041-4ee2-9c36-e262656a6ecc
-      name: "Active Directory User Backdoors"
-      reason: "next kill-chain tactic: Persistence"
+  - id: 64a871dd-83f6-4e5f-80fc-5a7ca3a8a819
+    name: Kapeka Backdoor Persistence Activity
+    reason: Same Kapeka persistence stage seen from process creation (schtasks /create ONSTART or reg.exe autorun); confirms the 4698 task was made via schtasks.exe
+  - id: e98f741c-6a5b-4c83-bc2a-1f4e58d07b12
+    name: Kapeka Backdoor Execution Via RunDLL32.EXE
+    reason: The scheduled task runs rundll32 on a .wll in ProgramData/AppData Local; this is the process execution when the task fires
+  - id: a7e6b1f9-8d2c-4f1e-9a7d-63e4c8a2bf4c
+    name: Kapeka Backdoor Loaded Via Rundll32.EXE
+    reason: Image-load evidence that rundll32 loaded the Kapeka .wll payload the task points at
+  - id: 20228d05-dd68-435d-8b4e-e7e64938880c
+    name: Potential Kapeka Decrypted Backdoor Indicator
+    reason: 'Dropper-stage precursor: the decrypted backdoor file written to disk before the task was registered'
+  - id: c0c67b21-eb8a-4c84-a395-40473ec3b482
+    name: Kapeka Backdoor Autorun Persistence
+    reason: Kapeka uses a Run-key autorun when not elevated; redundant persistence co-occurring on the same host
+  - id: cbaa3ef3-07a9-4c8e-82d1-9e40578da7fd
+    name: Kapeka Backdoor Configuration Persistence
+    reason: Kapeka stores its C2 configuration in the registry after installing persistence; follow-on to the task creation
+  - id: f40017b3-cb2e-4335-ab5d-3babf679c1de
+    name: Remote DLL Load Via Rundll32.EXE
+    reason: Generic rundll32 loading a DLL from an unusual or remote location, overlapping the task's rundll32 payload execution
   window: 1h
   enrichment_searches:
-  # Rule-specific telemetry pivots the engine runs around an alert from this rule,
-  # scoped to the alert's host/user/IP within the window (behaviour-targeted, not a sweep).
-    - name: "Scheduled-task creation on this host"
-      query: '((data_win_system_eventID:"1" AND data_win_eventdata_image:/.*(\\[Ss][Cc][Hh][Tt][Aa][Ss][Kk][Ss]\.[Ee][Xx][Ee]|\\[Aa][Tt]\.[Ee][Xx][Ee])/) OR ((data_win_system_eventID:"4698" OR data_win_system_eventID:"4702")))'
-      pivot_on: [host]
-      window: 4h
-    - name: "Memory/credential-dump creation & LSASS access on this host"
-      query: '((data_win_system_eventID:"1" AND data_win_eventdata_image:/.*(\\[Pp][Rr][Oo][Cc][Dd][Uu][Mm][Pp]\.[Ee][Xx][Ee]|\\[Pp][Rr][Oo][Cc][Dd][Uu][Mm][Pp]64\.[Ee][Xx][Ee]|\\[Ss][Qq][Ll][Dd][Uu][Mm][Pp][Ee][Rr]\.[Ee][Xx][Ee]|\\[Cc][Rr][Ee][Aa][Tt][Ee][Dd][Uu][Mm][Pp]\.[Ee][Xx][Ee]|\\[Rr][Dd][Rr][Ll][Ee][Aa][Kk][Dd][Ii][Aa][Gg]\.[Ee][Xx][Ee]|\\[Dd][Uu][Mm][Pp][Ee][Rr][Tt]\.[Ee][Xx][Ee]|\\[Nn][Aa][Nn][Oo][Dd][Uu][Mm][Pp]\.[Ee][Xx][Ee]|\\[Aa][Vv][Dd][Uu][Mm][Pp]\.[Ee][Xx][Ee])/) OR (data_win_system_eventID:"1" AND (data_win_eventdata_commandLine:/.*[Cc][Oo][Mm][Ss][Vv][Cc][Ss]\.[Dd][Ll][Ll].*/ OR data_win_eventdata_commandLine:/.*[Mm][Ii][Nn][Ii][Dd][Uu][Mm][Pp].*/ OR data_win_eventdata_commandLine:/.*[Dd][Uu][Mm][Pp][Ee][Rr][Tt].*/ OR data_win_eventdata_commandLine:/.*[Nn][Aa][Nn][Oo][Dd][Uu][Mm][Pp].*/ OR data_win_eventdata_commandLine:/.*[Ll][Ss][Aa][Ss][Ss].*/ OR data_win_eventdata_commandLine:/.*[Ss][Ee][Kk][Uu][Rr][Ll][Ss][Aa].*/ OR data_win_eventdata_commandLine:/.*[Nn][Tt][Dd][Ss]\.[Dd][Ii][Tt].*/ OR data_win_eventdata_commandLine:/.*[Nn][Tt][Dd][Ss][Uu][Tt][Ii][Ll].*/)) OR (data_win_system_eventID:"10" AND data_win_eventdata_targetImage:/.*(\\[Ll][Ss][Aa][Ss][Ss]\.[Ee][Xx][Ee])/))'
-      pivot_on: [host]
-      window: 1h
-    - name: "This account's logon activity across hosts"
-      query: '(data_win_system_eventID:"4624" OR data_win_system_eventID:"4625")'
-      pivot_on: [user]
-      window: 6h
-    - name: "Account / group / privilege changes involving this account"
-      query: '(data_win_system_eventID:"4720" OR data_win_system_eventID:"4722" OR data_win_system_eventID:"4724" OR data_win_system_eventID:"4728" OR data_win_system_eventID:"4732" OR data_win_system_eventID:"4756" OR data_win_system_eventID:"4672")'
-      pivot_on: [user]
-      window: 6h
+  # Behaviour-targeted hunts the engine runs around the alert (not a sweep).
+  - name: Rundll32 launching a .wll payload on this host
+    query: data_win_system_eventID:"1" AND data_win_eventdata_image:/.*\\[Rr][Uu][Nn][Dd][Ll][Ll]32\.[Ee][Xx][Ee]/ AND data_win_eventdata_commandLine:/.*\.[Ww][Ll][Ll].*/
+    pivot_on:
+    - host
+    window: 4h
+  - name: Backdoor .wll or OneDrive/Sens Api lookalike dropped in ProgramData/AppData Local
+    query: data_win_system_eventID:"11" AND (data_win_eventdata_targetFilename:/.*\.[Ww][Ll][Ll]/ OR (data_win_eventdata_targetFilename:/.*([Pp][Rr][Oo][Gg][Rr][Aa][Mm][Dd][Aa][Tt][Aa]|[Aa][Pp][Pp][Dd][Aa][Tt][Aa]\\[Ll][Oo][Cc][Aa][Ll]).*/ AND (data_win_eventdata_targetFilename:/.*[Oo][Nn][Ee][Dd][Rr][Ii][Vv][Ee].*/ OR data_win_eventdata_targetFilename:/.*[Ss][Ee][Nn][Ss] [Aa][Pp][Ii].*/)))
+    pivot_on:
+    - host
+    window: 4h
+  - name: Registry autorun/config writes for Kapeka persistence
+    query: (data_win_system_eventID:"12" OR data_win_system_eventID:"13") AND (data_win_eventdata_targetObject:/.*[Cc][Uu][Rr][Rr][Ee][Nn][Tt][Vv][Ee][Rr][Ss][Ii][Oo][Nn]\\[Rr][Uu][Nn].*/ OR data_win_eventdata_targetObject:/.*[Ss][Ee][Nn][Ss] [Aa][Pp][Ii].*/) AND (data_win_eventdata_details:/.*[Rr][Uu][Nn][Dd][Ll][Ll]32.*/ OR data_win_eventdata_details:/.*\.[Ww][Ll][Ll].*/)
+    pivot_on:
+    - host
+    window: 4h
+  - name: Rundll32 network connections and DNS (backdoor C2)
+    query: (data_win_system_eventID:"3" OR data_win_system_eventID:"22") AND data_win_eventdata_image:/.*\\[Rr][Uu][Nn][Dd][Ll][Ll]32\.[Ee][Xx][Ee]/
+    pivot_on:
+    - host
+    window: 2h
+  - name: Office app spawning rundll32/schtasks/script host (dropper delivery)
+    query: data_win_system_eventID:"1" AND data_win_eventdata_parentImage:/.*\\([Ww][Ii][Nn][Ww][Oo][Rr][Dd]|[Ee][Xx][Cc][Ee][Ll]|[Oo][Uu][Tt][Ll][Oo][Oo][Kk])\.[Ee][Xx][Ee]/ AND data_win_eventdata_image:/.*\\([Rr][Uu][Nn][Dd][Ll][Ll]32|[Ss][Cc][Hh][Tt][Aa][Ss][Kk][Ss]|[Cc][Mm][Dd]|[Pp][Oo][Ww][Ee][Rr][Ss][Hh][Ee][Ll][Ll]|[Ww][Ss][Cc][Rr][Ii][Pp][Tt])\.[Ee][Xx][Ee]/
+    pivot_on:
+    - host
+    window: 6h

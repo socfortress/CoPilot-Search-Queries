@@ -146,19 +146,52 @@ graylog:
   query: data_win_system_providerName:/[Ss][Ee][Rr][Vv][Ii][Cc][Ee] [Cc][Oo][Nn][Tt][Rr][Oo][Ll] [Mm][Aa][Nn][Aa][Gg][Ee][Rr]/ AND data_win_system_eventID:"7034" AND (data_win_eventdata_param1:/.*[Mm][Ee][Ss][Ss][Aa][Gg][Ee] [Qq][Uu][Ee][Uu][Ii][Nn][Gg].*/ OR data_win_eventdata_binary:/.*4[Dd]0053004[Dd]005100.*/ OR data_win_eventdata_binary:/.*6[Dd]0073006[Dd]007100.*/)
 
 correlation:
-  # Authored by the correlation engine for review.
+  # Authored per-rule (behaviour-researched) for the correlation engine. Related CoPilot
+  # Searches + telemetry pivots to run around an alert, scoped to its host/user/ip/domain.
+  related_rules:
+  - id: ae94b10d-fee9-4767-82bb-439b309d5a27
+    name: MSMQ Corrupted Packet Encountered
+    reason: 'Same MSMQ service: a malformed packet logged by MSMQ just before the crash is the QueueJumper (CVE-2023-21554) exploit attempt that kills mqsvc.exe.'
+  - id: d6b5520d-3934-48b4-928c-2aa3f92d6963
+    name: Important Windows Service Terminated With Error
+    reason: Sibling SCM detection (7023/7024) for the same services; a failed exploit often yields both a termination and an error-exit on restart.
+  - id: 882fbe50-d8d7-4e29-ae80-0648a8556866
+    name: Crash Dump Created By Operating System
+    reason: A service killed by memory corruption frequently leaves a crash dump, confirming a crash rather than an administrative stop.
+  - id: 17a1be64-8d88-40bf-b5ff-a4f7a50ebcc8
+    name: Suspicious New Service Creation
+    reason: After a successful RCE in a service, attackers commonly create a new service for persistence or SYSTEM execution.
+  - id: 5a105d34-05fc-401e-8553-272b45c1522d
+    name: CobaltStrike Service Installations - System
+    reason: 'Post-exploitation follow-on: C2 payloads from service exploits are often installed as services (7045).'
+  - id: d26ce60c-2151-403c-9a42-49420d87b5e4
+    name: HackTool Service Registration or Execution
+    reason: Hacktool services registered after the crashed service was exploited indicate lateral movement tooling.
+  window: 1h
   enrichment_searches:
-  # Rule-specific telemetry pivots the engine runs around an alert from this rule,
-  # scoped to the alert's host/user/IP within the window (behaviour-targeted, not a sweep).
-    - name: "Service installations on this host"
-      query: 'data_win_system_eventID:"7045"'
-      pivot_on: [host]
-      window: 6h
-    - name: "Follow-on LOLBin / signed-binary-proxy execution on this host"
-      query: 'data_win_system_eventID:"1" AND data_win_eventdata_image:/.*(\\[Rr][Uu][Nn][Dd][Ll][Ll]32\.[Ee][Xx][Ee]|\\[Rr][Ee][Gg][Ss][Vv][Rr]32\.[Ee][Xx][Ee]|\\[Mm][Ss][Hh][Tt][Aa]\.[Ee][Xx][Ee]|\\[Ii][Nn][Ss][Tt][Aa][Ll][Ll][Uu][Tt][Ii][Ll]\.[Ee][Xx][Ee]|\\[Rr][Ee][Gg][Aa][Ss][Mm]\.[Ee][Xx][Ee]|\\[Rr][Ee][Gg][Ss][Vv][Cc][Ss]\.[Ee][Xx][Ee]|\\[Mm][Ss][Bb][Uu][Ii][Ll][Dd]\.[Ee][Xx][Ee]|\\[Cc][Ee][Rr][Tt][Uu][Tt][Ii][Ll]\.[Ee][Xx][Ee]|\\[Bb][Ii][Tt][Ss][Aa][Dd][Mm][Ii][Nn]\.[Ee][Xx][Ee]|\\[Ww][Mm][Ii][Cc]\.[Ee][Xx][Ee]|\\[Cc][Mm][Ss][Tt][Pp]\.[Ee][Xx][Ee]|\\[Oo][Dd][Bb][Cc][Cc][Oo][Nn][Ff]\.[Ee][Xx][Ee]|\\[Ff][Oo][Rr][Ff][Ii][Ll][Ee][Ss]\.[Ee][Xx][Ee]|\\[Pp][Cc][Aa][Ll][Uu][Aa]\.[Ee][Xx][Ee]|\\[Mm][Aa][Vv][Ii][Nn][Jj][Ee][Cc][Tt]\.[Ee][Xx][Ee]|\\[Ss][Cc][Rr][Ii][Pp][Tt][Rr][Uu][Nn][Nn][Ee][Rr]\.[Ee][Xx][Ee])/'
-      pivot_on: [host]
-      window: 2h
-    - name: "Memory/credential-dump creation & LSASS access on this host"
-      query: '((data_win_system_eventID:"1" AND data_win_eventdata_image:/.*(\\[Pp][Rr][Oo][Cc][Dd][Uu][Mm][Pp]\.[Ee][Xx][Ee]|\\[Pp][Rr][Oo][Cc][Dd][Uu][Mm][Pp]64\.[Ee][Xx][Ee]|\\[Ss][Qq][Ll][Dd][Uu][Mm][Pp][Ee][Rr]\.[Ee][Xx][Ee]|\\[Cc][Rr][Ee][Aa][Tt][Ee][Dd][Uu][Mm][Pp]\.[Ee][Xx][Ee]|\\[Rr][Dd][Rr][Ll][Ee][Aa][Kk][Dd][Ii][Aa][Gg]\.[Ee][Xx][Ee]|\\[Dd][Uu][Mm][Pp][Ee][Rr][Tt]\.[Ee][Xx][Ee]|\\[Nn][Aa][Nn][Oo][Dd][Uu][Mm][Pp]\.[Ee][Xx][Ee]|\\[Aa][Vv][Dd][Uu][Mm][Pp]\.[Ee][Xx][Ee])/) OR (data_win_system_eventID:"1" AND (data_win_eventdata_commandLine:/.*[Cc][Oo][Mm][Ss][Vv][Cc][Ss]\.[Dd][Ll][Ll].*/ OR data_win_eventdata_commandLine:/.*[Mm][Ii][Nn][Ii][Dd][Uu][Mm][Pp].*/ OR data_win_eventdata_commandLine:/.*[Dd][Uu][Mm][Pp][Ee][Rr][Tt].*/ OR data_win_eventdata_commandLine:/.*[Nn][Aa][Nn][Oo][Dd][Uu][Mm][Pp].*/ OR data_win_eventdata_commandLine:/.*[Ll][Ss][Aa][Ss][Ss].*/ OR data_win_eventdata_commandLine:/.*[Ss][Ee][Kk][Uu][Rr][Ll][Ss][Aa].*/ OR data_win_eventdata_commandLine:/.*[Nn][Tt][Dd][Ss]\.[Dd][Ii][Tt].*/ OR data_win_eventdata_commandLine:/.*[Nn][Tt][Dd][Ss][Uu][Tt][Ii][Ll].*/)) OR (data_win_system_eventID:"10" AND data_win_eventdata_targetImage:/.*(\\[Ll][Ss][Aa][Ss][Ss]\.[Ee][Xx][Ee])/))'
-      pivot_on: [host]
-      window: 1h
+  # Behaviour-targeted hunts the engine runs around the alert (not a sweep).
+  - name: Child processes spawned by MSMQ service (mqsvc.exe)
+    query: data_win_system_eventID:"1" AND data_win_eventdata_parentImage:/.*[Mm][Qq][Ss][Vv][Cc]\.[Ee][Xx][Ee]/
+    pivot_on:
+    - host
+    window: 2h
+  - name: Inbound connections to MSMQ port 1801
+    query: data_win_system_eventID:"3" AND data_win_eventdata_destinationPort:"1801" AND data_win_eventdata_initiated:"false"
+    pivot_on:
+    - host
+    window: 2h
+  - name: Service Control Manager new service installs and failures
+    query: data_win_system_providerName:/[Ss][Ee][Rr][Vv][Ii][Cc][Ee] [Cc][Oo][Nn][Tt][Rr][Oo][Ll] [Mm][Aa][Nn][Aa][Gg][Ee][Rr]/ AND (data_win_system_eventID:"7045" OR data_win_system_eventID:"7031" OR data_win_system_eventID:"7023" OR data_win_system_eventID:"7024")
+    pivot_on:
+    - host
+    window: 6h
+  - name: Application crash and WER faults around the service
+    query: (data_win_system_eventID:"1000" OR data_win_system_eventID:"1001") AND (data_win_system_providerName:/[Aa][Pp][Pp][Ll][Ii][Cc][Aa][Tt][Ii][Oo][Nn] [Ee][Rr][Rr][Oo][Rr]/ OR data_win_system_providerName:/[Ww][Ii][Nn][Dd][Oo][Ww][Ss] [Ee][Rr][Rr][Oo][Rr] [Rr][Ee][Pp][Oo][Rr][Tt][Ii][Nn][Gg]/)
+    pivot_on:
+    - host
+    window: 1h
+  - name: 'Payload staging: suspicious interpreters or file drops under SYSTEM'
+    query: data_win_system_eventID:"1" AND data_win_eventdata_image:/.*(\\[Cc][Mm][Dd]|\\[Pp][Oo][Ww][Ee][Rr][Ss][Hh][Ee][Ll][Ll]|\\[Cc][Ee][Rr][Tt][Uu][Tt][Ii][Ll]|\\[Bb][Ii][Tt][Ss][Aa][Dd][Mm][Ii][Nn])\.[Ee][Xx][Ee]/ AND data_win_eventdata_user:/.*[Ss][Yy][Ss][Tt][Ee][Mm]/
+    pivot_on:
+    - host
+    window: 2h

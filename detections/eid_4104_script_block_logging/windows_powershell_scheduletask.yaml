@@ -149,62 +149,58 @@ graylog:
   query: data_win_system_eventID:"4104" AND (data_win_eventdata_scriptBlockText:/.*New-ScheduledTask.*/ OR data_win_eventdata_scriptBlockText:/.*Register-ScheduledTask.*/ OR data_win_eventdata_scriptBlockText:/.*Set-ScheduledTask.*/ OR data_win_eventdata_scriptBlockText:/.*Start-ScheduledTask.*/ OR data_win_eventdata_scriptBlockText:/.*Enable-ScheduledTask.*/ OR data_win_eventdata_scriptBlockText:/.*Register-ClusteredScheduledTask.*/ OR data_win_eventdata_scriptBlockText:/.*Set-ClusteredScheduledTask.*/)
 
 correlation:
-  # Authored by the correlation engine for review. Related CoPilot Searches to run
-  # around an alert from this rule, scoped to the same host/user/IP within the window.
+  # Authored per-rule (behaviour-researched) for the correlation engine. Related CoPilot
+  # Searches + telemetry pivots to run around an alert, scoped to its host/user/ip/domain.
   related_rules:
-    - id: 8148c29c-c952-11eb-9255-acde48001122
-      name: "Detect Mimikatz With PowerShell Script Block Logging"
-      reason: "same analytic story: Scattered Spider"
-    - id: ccad96d7-a48c-4f13-8b9c-9f6a31cba454
-      name: "Detect Remote Access Software Usage FileInfo"
-      reason: "same analytic story: Scattered Spider"
-    - id: 2d10095e-05ae-11ec-8fdf-acde48001122
-      name: "Exchange PowerShell Module Usage"
-      reason: "same analytic story: Scattered Spider"
-    - id: c4db14d9-7909-48b4-a054-aa14d89dbb19
-      name: "Malicious PowerShell Process - Encoded Command"
-      reason: "same analytic story: Scattered Spider"
-    - id: cb909b3e-512b-11ec-aa31-3e22fbd008af
-      name: "Possible Lateral Movement PowerShell Spawn"
-      reason: "same analytic story: Scheduled Tasks"
-    - id: 018c1972-ca07-11eb-9473-acde48001122
-      name: "Recon Using WMI Class"
-      reason: "same analytic story: Scattered Spider"
-    - id: 12c80db8-ef62-4456-92df-b23e1b3219f6
-      name: "Windows Enable Win32 ScheduledJob via Registry"
-      reason: "same analytic story: Scheduled Tasks"
-    - id: windows-mimikatz-binary-execution-001
-      name: "Windows Mimikatz Binary Execution"
-      reason: "same analytic story: Scattered Spider"
-    - id: windows-powershell-4104-hunting-001
-      name: "Windows PowerShell 4104 Hunting"
-      reason: "same analytic story: Scattered Spider"
-    - id: windows-scheduled-task-created-public-path-001
-      name: "Windows Scheduled Task Created Within Public Path"
-      reason: "same analytic story: Scheduled Tasks"
-    - id: windows-scheduled-task-created-spawn-shell-001
-      name: "Windows Scheduled Task Created to Spawn Shell"
-      reason: "same analytic story: Scheduled Tasks"
-    - id: ec570e53-4c76-45a9-804d-dc3f355ff7a7
-      name: "7Zip Compressing Dump Files"
-      reason: "next kill-chain tactic: Collection"
+  - id: 363eccc0-279a-4ccf-a3ab-24c2e63b11fb
+    name: Powershell Create Scheduled Task
+    reason: Sibling 4104 detection for the same task-creation cmdlets; co-firing on the same script block confirms the task is being registered, not merely referenced.
+  - id: windows-scheduled-task-created-spawn-shell-001
+    name: Windows Scheduled Task Created to Spawn Shell
+    reason: Reveals whether the registered task action launches cmd/powershell, i.e. the persistence payload the cmdlet just installed.
+  - id: windows-scheduled-task-created-public-path-001
+    name: Windows Scheduled Task Created Within Public Path
+    reason: Task action pointing at a world-writable path such as C:\Users\Public indicates a dropped payload being persisted.
+  - id: 47c69803-2c09-408b-b40a-063c064cbb16
+    name: Windows PowerShell WMI Win32 ScheduledJob
+    reason: Alternate PowerShell route to scheduled execution (Win32_ScheduledJob); attackers switch between ScheduledTasks cmdlets and WMI on the same host.
+  - id: 80e1f67a-4596-4351-98f5-a9c3efabac95
+    name: Suspicious Scheduled Task Write to System32 Tasks
+    reason: Register-ScheduledTask writes the task XML to System32\Tasks; a file write by an unusual process confirms on-disk persistence.
+  - id: 4720b7df-40c3-48fd-bbdf-fd4b3c464f0d
+    name: Scheduled TaskCache Change by Uncommon Program
+    reason: Registering a task populates the TaskCache registry; an uncommon writer corroborates the cmdlet registration.
+  - id: c1344fa2-323b-4d2e-9176-84b4d4821c88
+    name: Windows Defender Exclusions Added - PowerShell
+    reason: 'Common companion step: attacker excludes the payload path from Defender before scheduling it to run.'
+  - id: fa2559c8-1197-471d-9cdd-05a0273d4522
+    name: Potential AMSI Bypass Script Using NULL Bits
+    reason: Scripts that register tasks from a malicious loader often first blind AMSI in the same PowerShell session.
   window: 1h
   enrichment_searches:
-  # Rule-specific telemetry pivots the engine runs around an alert from this rule,
-  # scoped to the alert's host/user/IP within the window (behaviour-targeted, not a sweep).
-    - name: "Outbound connections by script interpreters on this host"
-      query: 'data_win_system_eventID:"3" AND data_win_eventdata_image:/.*(\\[Pp][Oo][Ww][Ee][Rr][Ss][Hh][Ee][Ll][Ll]\.[Ee][Xx][Ee]|\\[Pp][Ww][Ss][Hh]\.[Ee][Xx][Ee]|\\[Pp][Oo][Ww][Ee][Rr][Ss][Hh][Ee][Ll][Ll]_[Ii][Ss][Ee]\.[Ee][Xx][Ee]|\\[Cc][Mm][Dd]\.[Ee][Xx][Ee]|\\[Ww][Ss][Cc][Rr][Ii][Pp][Tt]\.[Ee][Xx][Ee]|\\[Cc][Ss][Cc][Rr][Ii][Pp][Tt]\.[Ee][Xx][Ee]|\\[Mm][Ss][Hh][Tt][Aa]\.[Ee][Xx][Ee]|\\[Rr][Uu][Nn][Dd][Ll][Ll]32\.[Ee][Xx][Ee]|\\[Rr][Ee][Gg][Ss][Vv][Rr]32\.[Ee][Xx][Ee])/'
-      pivot_on: [host]
-      window: 1h
-    - name: "Scheduled-task creation on this host"
-      query: '((data_win_system_eventID:"1" AND data_win_eventdata_image:/.*(\\[Ss][Cc][Hh][Tt][Aa][Ss][Kk][Ss]\.[Ee][Xx][Ee]|\\[Aa][Tt]\.[Ee][Xx][Ee])/) OR ((data_win_system_eventID:"4698" OR data_win_system_eventID:"4702")))'
-      pivot_on: [host]
-      window: 4h
-    - name: "Follow-on LOLBin / signed-binary-proxy execution on this host"
-      query: 'data_win_system_eventID:"1" AND data_win_eventdata_image:/.*(\\[Rr][Uu][Nn][Dd][Ll][Ll]32\.[Ee][Xx][Ee]|\\[Rr][Ee][Gg][Ss][Vv][Rr]32\.[Ee][Xx][Ee]|\\[Mm][Ss][Hh][Tt][Aa]\.[Ee][Xx][Ee]|\\[Ii][Nn][Ss][Tt][Aa][Ll][Ll][Uu][Tt][Ii][Ll]\.[Ee][Xx][Ee]|\\[Rr][Ee][Gg][Aa][Ss][Mm]\.[Ee][Xx][Ee]|\\[Rr][Ee][Gg][Ss][Vv][Cc][Ss]\.[Ee][Xx][Ee]|\\[Mm][Ss][Bb][Uu][Ii][Ll][Dd]\.[Ee][Xx][Ee]|\\[Cc][Ee][Rr][Tt][Uu][Tt][Ii][Ll]\.[Ee][Xx][Ee]|\\[Bb][Ii][Tt][Ss][Aa][Dd][Mm][Ii][Nn]\.[Ee][Xx][Ee]|\\[Ww][Mm][Ii][Cc]\.[Ee][Xx][Ee]|\\[Cc][Mm][Ss][Tt][Pp]\.[Ee][Xx][Ee]|\\[Oo][Dd][Bb][Cc][Cc][Oo][Nn][Ff]\.[Ee][Xx][Ee]|\\[Ff][Oo][Rr][Ff][Ii][Ll][Ee][Ss]\.[Ee][Xx][Ee]|\\[Pp][Cc][Aa][Ll][Uu][Aa]\.[Ee][Xx][Ee]|\\[Mm][Aa][Vv][Ii][Nn][Jj][Ee][Cc][Tt]\.[Ee][Xx][Ee]|\\[Ss][Cc][Rr][Ii][Pp][Tt][Rr][Uu][Nn][Nn][Ee][Rr]\.[Ee][Xx][Ee])/'
-      pivot_on: [host]
-      window: 1h
-    - name: "Download / AMSI-bypass / encoded script blocks on this host"
-      query: 'data_win_system_eventID:"4104" AND (data_win_eventdata_scriptBlockText:/.*[Dd][Oo][Ww][Nn][Ll][Oo][Aa][Dd][Ss][Tt][Rr][Ii][Nn][Gg].*/ OR data_win_eventdata_scriptBlockText:/.*[Dd][Oo][Ww][Nn][Ll][Oo][Aa][Dd][Ff][Ii][Ll][Ee].*/ OR data_win_eventdata_scriptBlockText:/.*[Ii][Nn][Vv][Oo][Kk][Ee]-[Ww][Ee][Bb][Rr][Ee][Qq][Uu][Ee][Ss][Tt].*/ OR data_win_eventdata_scriptBlockText:/.*[Nn][Ee][Tt]\.[Ww][Ee][Bb][Cc][Ll][Ii][Ee][Nn][Tt].*/ OR data_win_eventdata_scriptBlockText:/.*[Ff][Rr][Oo][Mm][Bb][Aa][Ss][Ee]64[Ss][Tt][Rr][Ii][Nn][Gg].*/ OR data_win_eventdata_scriptBlockText:/.*[Ii][Ee][Xx].*/ OR data_win_eventdata_scriptBlockText:/.*[Ii][Nn][Vv][Oo][Kk][Ee]-[Ee][Xx][Pp][Rr][Ee][Ss][Ss][Ii][Oo][Nn].*/ OR data_win_eventdata_scriptBlockText:/.*[Ss][Tt][Aa][Rr][Tt]-[Bb][Ii][Tt][Ss][Tt][Rr][Aa][Nn][Ss][Ff][Ee][Rr].*/ OR data_win_eventdata_scriptBlockText:/.*[Aa][Mm][Ss][Ii][Uu][Tt][Ii][Ll][Ss].*/ OR data_win_eventdata_scriptBlockText:/.*-[Ee][Nn][Cc].*/ OR data_win_eventdata_scriptBlockText:/.*-[Ee][Nn][Cc][Oo][Dd][Ee][Dd][Cc][Oo][Mm][Mm][Aa][Nn][Dd].*/ OR data_win_eventdata_scriptBlockText:/.*[Rr][Ee][Ff][Ll][Ee][Cc][Tt][Ii][Oo][Nn]\.[Aa][Ss][Ss][Ee][Mm][Bb][Ll][Yy].*/)'
-      pivot_on: [host]
-      window: 1h
+  # Behaviour-targeted hunts the engine runs around the alert (not a sweep).
+  - name: Scheduled task creation via schtasks/at or Security 4698/4702 on this host
+    query: (data_win_system_eventID:"1" AND data_win_eventdata_image:/.*\\[Ss][Cc][Hh][Tt][Aa][Ss][Kk][Ss]\.[Ee][Xx][Ee]/ AND data_win_eventdata_commandLine:/.*(\/[Cc][Rr][Ee][Aa][Tt][Ee]|\/[Cc][Hh][Aa][Nn][Gg][Ee]|\/[Rr][Uu][Nn]).*/) OR data_win_system_eventID:"4698" OR data_win_system_eventID:"4702"
+    pivot_on:
+    - host
+    window: 4h
+  - name: Task XML or payload files written to Tasks dirs and user-writable paths
+    query: data_win_system_eventID:"11" AND (data_win_eventdata_targetFilename:/.*[Ww][Ii][Nn][Dd][Oo][Ww][Ss]\\[Ss][Yy][Ss][Tt][Ee][Mm]32\\[Tt][Aa][Ss][Kk][Ss]\\.*/ OR data_win_eventdata_targetFilename:/.*[Uu][Ss][Ee][Rr][Ss]\\[Pp][Uu][Bb][Ll][Ii][Cc]\\.*\.([Ee][Xx][Ee]|[Dd][Ll][Ll]|[Pp][Ss]1|[Bb][Aa][Tt]|[Vv][Bb][Ss])/ OR data_win_eventdata_targetFilename:/.*[Aa][Pp][Pp][Dd][Aa][Tt][Aa].*\.([Ee][Xx][Ee]|[Dd][Ll][Ll]|[Pp][Ss]1|[Bb][Aa][Tt]|[Vv][Bb][Ss])/)
+    pivot_on:
+    - host
+    window: 4h
+  - name: Script blocks with download cradles, encoded payloads or AMSI tampering on this host
+    query: data_win_system_eventID:"4104" AND (data_win_eventdata_scriptBlockText:/.*[Dd][Oo][Ww][Nn][Ll][Oo][Aa][Dd][Ss][Tt][Rr][Ii][Nn][Gg].*/ OR data_win_eventdata_scriptBlockText:/.*[Ii][Nn][Vv][Oo][Kk][Ee]-[Ww][Ee][Bb][Rr][Ee][Qq][Uu][Ee][Ss][Tt].*/ OR data_win_eventdata_scriptBlockText:/.*[Ff][Rr][Oo][Mm][Bb][Aa][Ss][Ee]64[Ss][Tt][Rr][Ii][Nn][Gg].*/ OR data_win_eventdata_scriptBlockText:/.*[Aa][Mm][Ss][Ii][Uu][Tt][Ii][Ll][Ss].*/ OR data_win_eventdata_scriptBlockText:/.*[Aa][Dd][Dd]-[Mm][Pp][Pp][Rr][Ee][Ff][Ee][Rr][Ee][Nn][Cc][Ee].*/ OR data_win_eventdata_scriptBlockText:/.*[Ss][Ee][Tt]-[Mm][Pp][Pp][Rr][Ee][Ff][Ee][Rr][Ee][Nn][Cc][Ee].*/)
+    pivot_on:
+    - host
+    window: 2h
+  - name: Child processes launched by the PowerShell session or task host
+    query: data_win_system_eventID:"1" AND (data_win_eventdata_parentImage:/.*[Pp][Oo][Ww][Ee][Rr][Ss][Hh][Ee][Ll][Ll]\.[Ee][Xx][Ee]/ OR data_win_eventdata_parentImage:/.*[Tt][Aa][Ss][Kk][Hh][Oo][Ss][Tt][Ww]?\.[Ee][Xx][Ee]/ OR data_win_eventdata_parentImage:/.*[Ss][Vv][Cc][Hh][Oo][Ss][Tt]\.[Ee][Xx][Ee]/) AND (data_win_eventdata_image:/.*\\([Cc][Mm][Dd]|[Rr][Uu][Nn][Dd][Ll][Ll]32|[Rr][Ee][Gg][Ss][Vv][Rr]32|[Mm][Ss][Hh][Tt][Aa]|[Ww][Mm][Ii][Cc]|[Cc][Ee][Rr][Tt][Uu][Tt][Ii][Ll]|[Bb][Ii][Tt][Ss][Aa][Dd][Mm][Ii][Nn]|[Nn][Ee][Tt]|[Ww][Hh][Oo][Aa][Mm][Ii])\.[Ee][Xx][Ee]/)
+    pivot_on:
+    - host
+    window: 2h
+  - name: Network connections from PowerShell or script interpreters
+    query: data_win_system_eventID:"3" AND data_win_eventdata_image:/.*\\([Pp][Oo][Ww][Ee][Rr][Ss][Hh][Ee][Ll][Ll]|[Pp][Ww][Ss][Hh]|[Ww][Ss][Cc][Rr][Ii][Pp][Tt]|[Cc][Ss][Cc][Rr][Ii][Pp][Tt]|[Mm][Ss][Hh][Tt][Aa])\.[Ee][Xx][Ee]/
+    pivot_on:
+    - host
+    window: 2h

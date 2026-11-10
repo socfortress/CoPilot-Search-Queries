@@ -109,19 +109,46 @@ graylog:
   query: full_log:/.*chown.*root.*/ AND NOT _exists_:data_win_system_eventID AND NOT rule_groups:/.*windows.*/
 
 correlation:
-  # Authored by the correlation engine for review.
+  # Authored per-rule (behaviour-researched) for the correlation engine. Related CoPilot
+  # Searches + telemetry pivots to run around an alert, scoped to its host/user/ip/domain.
+  related_rules:
+  - id: linux-setuid-using-chmod-utility-001
+    name: Linux Setuid Using Chmod Utility
+    reason: chown to root is typically paired with chmod u+s so a user-run file executes as root; this completes the SUID backdoor.
+  - id: linux-setuid-using-setcap-utility-001
+    name: Linux Setuid Using Setcap Utility
+    reason: Capabilities on a root-owned binary achieve the same privilege persistence as SUID.
+  - id: linux-sudo-or-su-execution-001
+    name: Linux Sudo Or Su Execution
+    reason: chown to root requires root; sudo/su just before shows how the privilege was obtained.
+  - id: linux-auditd-possible-access-sudoers-file-001
+    name: Linux Auditd Possible Access To Sudoers File
+    reason: Root-owned file tampering is often paired with sudoers edits for durable escalation.
+  - id: linux-append-cronjob-entry-001
+    name: Linux Append Cronjob Entry On Existing Cronjob File
+    reason: A root-owned script is commonly scheduled via cron to run as root.
+  - id: linux-service-file-created-in-systemd-directory-001
+    name: Linux Service File Created In Systemd Directory
+    reason: Root-owned payload may be wired into a new systemd unit for persistence.
+  - id: linux-auditd-add-user-001
+    name: Linux Auditd Add User
+    reason: Privilege staging often accompanies creation of a backdoor account.
+  window: 4h
   enrichment_searches:
-  # Rule-specific telemetry pivots the engine runs around an alert from this rule,
-  # scoped to the alert's host/user/IP within the window (behaviour-targeted, not a sweep).
-    - name: "Permission / ownership changes on this host"
-      query: 'data_process_exec_process_binary:/.*(\/[Cc][Hh][Mm][Oo][Dd]|\/[Cc][Hh][Oo][Ww][Nn]|\/[Cc][Hh][Aa][Tt][Tt][Rr]|\/[Ss][Ee][Tt][Ff][Aa][Cc][Ll])/'
-      pivot_on: [host]
-      window: 2h
-    - name: "Shell / interpreter execution on this host"
-      query: '((data_process_exec_process_binary:/.*(\/[Bb][Aa][Ss][Hh]|\/[Ss][Hh]|\/[Dd][Aa][Ss][Hh]|\/[Zz][Ss][Hh]|\/[Kk][Ss][Hh]|\/[Aa][Ss][Hh]|\/[Bb][Uu][Ss][Yy][Bb][Oo][Xx])/) OR (data_process_exec_process_binary:/.*(\/[Pp][Yy][Tt][Hh][Oo][Nn]|\/[Pp][Yy][Tt][Hh][Oo][Nn]3|\/[Pp][Ee][Rr][Ll]|\/[Rr][Uu][Bb][Yy]|\/[Pp][Hh][Pp]|\/[Nn][Oo][Dd][Ee]|\/[Ll][Uu][Aa]|\/[Aa][Ww][Kk])/))'
-      pivot_on: [host]
-      window: 1h
-    - name: "Reconnaissance commands on this host"
-      query: 'data_process_exec_process_binary:/.*(\/[Ww][Hh][Oo][Aa][Mm][Ii]|\/[Ii][Dd]|\/[Uu][Nn][Aa][Mm][Ee]|\/[Hh][Oo][Ss][Tt][Nn][Aa][Mm][Ee]|\/[Hh][Oo][Ss][Tt][Nn][Aa][Mm][Ee][Cc][Tt][Ll]|\/[Ss][Ss]|\/[Nn][Ee][Tt][Ss][Tt][Aa][Tt]|\/[Ii][Ff][Cc][Oo][Nn][Ff][Ii][Gg]|\/[Aa][Rr][Pp]|\/[Ww]|\/[Ww][Hh][Oo]|\/[Ll][Aa][Ss][Tt]|\/[Ll][Ss][Oo][Ff]|\/[Nn][Mm][Aa][Pp]|\/[Dd][Ii][Gg]|\/[Ff][Ii][Nn][Dd])/'
-      pivot_on: [host]
-      window: 1h
+  # Behaviour-targeted hunts the engine runs around the alert (not a sweep).
+  - name: chmod/chattr/setfacl/setcap on same host (SUID or permission change)
+    query: data_process_exec_process_binary:/.*(\/[Cc][Hh][Mm][Oo][Dd]|\/[Cc][Hh][Aa][Tt][Tt][Rr]|\/[Ss][Ee][Tt][Ff][Aa][Cc][Ll]|\/[Ss][Ee][Tt][Cc][Aa][Pp])/
+    pivot_on: host
+    window: 2h
+  - name: Execution from world-writable paths
+    query: data_process_exec_process_binary:/.*(\/tmp\/|\/dev\/shm\/|\/var\/tmp\/).*/
+    pivot_on: host
+    window: 4h
+  - name: sudo/su privilege use by the user
+    query: data_process_exec_process_binary:/.*(\/[Ss][Uu][Dd][Oo]|\/[Ss][Uu])/
+    pivot_on: user
+    window: 2h
+  - name: Cron/systemd persistence edits
+    query: full_log:/.*([Cc][Rr][Oo][Nn][Tt][Aa][Bb]|/[Ee][Tt][Cc]/[Cc][Rr][Oo][Nn]|[Ss][Yy][Ss][Tt][Ee][Mm][Dd]/[Ss][Yy][Ss][Tt][Ee][Mm]|[Ss][Yy][Ss][Tt][Ee][Mm][Cc][Tt][Ll] [Ee][Nn][Aa][Bb][Ll][Ee]).*/
+    pivot_on: host
+    window: 4h

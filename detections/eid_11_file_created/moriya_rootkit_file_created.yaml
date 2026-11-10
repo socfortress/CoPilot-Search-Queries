@@ -137,44 +137,58 @@ graylog:
   query: data_win_system_eventID:"11" AND data_win_eventdata_targetFilename:/[Cc]:\\[Ww][Ii][Nn][Dd][Oo][Ww][Ss]\\[Ss][Yy][Ss][Tt][Ee][Mm]32\\[Dd][Rr][Ii][Vv][Ee][Rr][Ss]\\[Mm][Oo][Rr][Ii][Yy][Aa][Ss][Tt][Rr][Ee][Aa][Mm][Ww][Aa][Tt][Cc][Hh][Mm][Ee][Nn]\.[Ss][Yy][Ss]/
 
 correlation:
-  # Authored by the correlation engine for review. Related CoPilot Searches to run
-  # around an alert from this rule, scoped to the same host/user/IP within the window.
+  # Authored per-rule (behaviour-researched) for the correlation engine. Related CoPilot
+  # Searches + telemetry pivots to run around an alert, scoped to its host/user/ip/domain.
   related_rules:
-    - id: ec570e53-4c76-45a9-804d-dc3f355ff7a7
-      name: "7Zip Compressing Dump Files"
-      reason: "next kill-chain tactic: Collection"
-    - id: 0a1255c5-d732-4b62-ac02-b5152d34fb83
-      name: "ADExplorer Writing Complete AD Snapshot Into .dat File"
-      reason: "next kill-chain tactic: Discovery"
-    - id: 1ea13e8c-03ea-409b-877d-ce5c3d2c1cb3
-      name: "ADFS Database Named Pipe Connection By Uncommon Tool"
-      reason: "next kill-chain tactic: Collection"
-    - id: 75bf09fa-1dd7-4d18-9af9-dd9e492562eb
-      name: "ADSI-Cache File Creation By Uncommon Tool"
-      reason: "next kill-chain tactic: Command and Control"
-    - id: 33a2d1dd-f3b0-40bd-8baf-7974468927cc
-      name: "APT PRIVATELOG Image Load Pattern"
-      reason: "next kill-chain tactic: Privilege Escalation"
-    - id: 03e2746e-2b31-42f1-ab7a-eb39365b2422
-      name: "APT31 Judgement Panda Activity"
-      reason: "next kill-chain tactic: Credential Access"
+  - id: 431a1fdb-4799-4f3b-91c3-a683b003fc49
+    name: New Kernel Driver Via SC.EXE
+    reason: Moriya's MoriyaStreamWatchmen.sys must be registered as a kernel service to load; sc create type= kernel is the usual install step right after the file drop.
+  - id: 17a1be64-8d88-40bf-b5ff-a4f7a50ebcc8
+    name: Suspicious New Service Creation
+    reason: Driver-backed rootkit persistence is a new service pointing at the dropped .sys in System32\drivers.
+  - id: 2c4523d5-d481-4ed0-8ec3-7fbf0cb41a75
+    name: Driver Load From A Temporary Directory
+    reason: Operators often stage and load the rootkit driver from a temp path before or alongside copying it into System32\drivers.
+  - id: 39b64854-5497-4b57-a448-40977b8c9679
+    name: Malicious Driver Load By Name
+    reason: The Sysmon EID 6 driver-load that follows the file creation when the rootkit is actually started.
+  - id: a2ea3ae7-d3d0-40a0-a55c-25a45c87cac1
+    name: Suspicious Driver Install by pnputil.exe
+    reason: Alternative driver staging route used to install an attacker-supplied .sys without sc.exe.
+  - id: 22154f0e-5132-4a54-aa78-cc62f6def531
+    name: Vulnerable Driver Blocklist Registry Tampering Via CommandLine
+    reason: Loading an unsigned/unknown kernel driver on modern Windows often requires first weakening driver blocklist or signing protections.
+  - id: fdfcbd78-48f1-4a4b-90ac-d82241e368c5
+    name: PsExec Service Execution
+    reason: TunnelSnake operators spread the implant laterally with PsExec-style service execution; the rootkit drop may be the result of remote execution.
+  - id: 4d7cda18-1b12-4e52-b45c-d28653210df8
+    name: Sysmon Driver Unloaded Via Fltmc.EXE
+    reason: Rootkit operators blind telemetry by unloading the Sysmon filter driver after installing their own kernel component.
   window: 1h
   enrichment_searches:
-  # Rule-specific telemetry pivots the engine runs around an alert from this rule,
-  # scoped to the alert's host/user/IP within the window (behaviour-targeted, not a sweep).
-    - name: "Service installation / creation on this host"
-      query: '((data_win_system_eventID:"7045") OR (data_win_system_eventID:"1" AND data_win_eventdata_image:/.*(\\[Ss][Cc]\.[Ee][Xx][Ee])/ AND (data_win_eventdata_commandLine:/.*[Cc][Rr][Ee][Aa][Tt][Ee].*/ OR data_win_eventdata_commandLine:/.*[Cc][Oo][Nn][Ff][Ii][Gg].*/ OR data_win_eventdata_commandLine:/.*[Bb][Ii][Nn][Pp][Aa][Tt][Hh].*/ OR data_win_eventdata_commandLine:/.*[Bb][Ii][Nn][Pp][Aa][Tt][Hh].*/)))'
-      pivot_on: [host]
-      window: 4h
-    - name: "Memory/credential-dump creation & LSASS access on this host"
-      query: '((data_win_system_eventID:"1" AND data_win_eventdata_image:/.*(\\[Pp][Rr][Oo][Cc][Dd][Uu][Mm][Pp]\.[Ee][Xx][Ee]|\\[Pp][Rr][Oo][Cc][Dd][Uu][Mm][Pp]64\.[Ee][Xx][Ee]|\\[Ss][Qq][Ll][Dd][Uu][Mm][Pp][Ee][Rr]\.[Ee][Xx][Ee]|\\[Cc][Rr][Ee][Aa][Tt][Ee][Dd][Uu][Mm][Pp]\.[Ee][Xx][Ee]|\\[Rr][Dd][Rr][Ll][Ee][Aa][Kk][Dd][Ii][Aa][Gg]\.[Ee][Xx][Ee]|\\[Dd][Uu][Mm][Pp][Ee][Rr][Tt]\.[Ee][Xx][Ee]|\\[Nn][Aa][Nn][Oo][Dd][Uu][Mm][Pp]\.[Ee][Xx][Ee]|\\[Aa][Vv][Dd][Uu][Mm][Pp]\.[Ee][Xx][Ee])/) OR (data_win_system_eventID:"1" AND (data_win_eventdata_commandLine:/.*[Cc][Oo][Mm][Ss][Vv][Cc][Ss]\.[Dd][Ll][Ll].*/ OR data_win_eventdata_commandLine:/.*[Mm][Ii][Nn][Ii][Dd][Uu][Mm][Pp].*/ OR data_win_eventdata_commandLine:/.*[Dd][Uu][Mm][Pp][Ee][Rr][Tt].*/ OR data_win_eventdata_commandLine:/.*[Nn][Aa][Nn][Oo][Dd][Uu][Mm][Pp].*/ OR data_win_eventdata_commandLine:/.*[Ll][Ss][Aa][Ss][Ss].*/ OR data_win_eventdata_commandLine:/.*[Ss][Ee][Kk][Uu][Rr][Ll][Ss][Aa].*/ OR data_win_eventdata_commandLine:/.*[Nn][Tt][Dd][Ss]\.[Dd][Ii][Tt].*/ OR data_win_eventdata_commandLine:/.*[Nn][Tt][Dd][Ss][Uu][Tt][Ii][Ll].*/)) OR (data_win_system_eventID:"10" AND data_win_eventdata_targetImage:/.*(\\[Ll][Ss][Aa][Ss][Ss]\.[Ee][Xx][Ee])/))'
-      pivot_on: [host]
-      window: 1h
-    - name: "Execution of programs from user-writable paths on this host"
-      query: 'data_win_system_eventID:"1" AND (data_win_eventdata_image:/.*\\[Uu][Ss][Ee][Rr][Ss]\\.*/ OR data_win_eventdata_image:/.*\\[Pp][Rr][Oo][Gg][Rr][Aa][Mm][Dd][Aa][Tt][Aa]\\.*/ OR data_win_eventdata_image:/.*\\[Ww][Ii][Nn][Dd][Oo][Ww][Ss]\\[Tt][Ee][Mm][Pp]\\.*/ OR data_win_eventdata_image:/.*\\[Aa][Pp][Pp][Dd][Aa][Tt][Aa]\\.*/ OR data_win_eventdata_image:/.*\\[Pp][Uu][Bb][Ll][Ii][Cc]\\.*/ OR data_win_eventdata_image:/.*\\\$[Rr][Ee][Cc][Yy][Cc][Ll][Ee].*/)'
-      pivot_on: [host]
-      window: 1h
-    - name: "Autostart persistence written on this host"
-      query: '(data_win_system_eventID:"12" OR data_win_system_eventID:"13") AND (data_win_eventdata_targetObject:/.*[Cc][Uu][Rr][Rr][Ee][Nn][Tt][Vv][Ee][Rr][Ss][Ii][Oo][Nn]\\[Rr][Uu][Nn].*/ OR data_win_eventdata_targetObject:/.*[Cc][Uu][Rr][Rr][Ee][Nn][Tt][Vv][Ee][Rr][Ss][Ii][Oo][Nn]\\[Rr][Uu][Nn][Oo][Nn][Cc][Ee].*/ OR data_win_eventdata_targetObject:/.*[Cc][Uu][Rr][Rr][Ee][Nn][Tt][Cc][Oo][Nn][Tt][Rr][Oo][Ll][Ss][Ee][Tt]\\[Ss][Ee][Rr][Vv][Ii][Cc][Ee][Ss]\\.*/ OR data_win_eventdata_targetObject:/.*[Ii][Mm][Aa][Gg][Ee] [Ff][Ii][Ll][Ee] [Ee][Xx][Ee][Cc][Uu][Tt][Ii][Oo][Nn] [Oo][Pp][Tt][Ii][Oo][Nn][Ss]\\.*/ OR data_win_eventdata_targetObject:/.*[Ww][Ii][Nn][Ll][Oo][Gg][Oo][Nn]\\[Ss][Hh][Ee][Ll][Ll].*/ OR data_win_eventdata_targetObject:/.*[Ww][Ii][Nn][Ll][Oo][Gg][Oo][Nn]\\[Uu][Ss][Ee][Rr][Ii][Nn][Ii][Tt].*/ OR data_win_eventdata_targetObject:/.*[Cc][Uu][Rr][Rr][Ee][Nn][Tt][Vv][Ee][Rr][Ss][Ii][Oo][Nn]\\[Ee][Xx][Pp][Ll][Oo][Rr][Ee][Rr]\\[Rr][Uu][Nn].*/ OR data_win_eventdata_targetObject:/.*[Pp][Oo][Ll][Ii][Cc][Ii][Ee][Ss]\\[Ee][Xx][Pp][Ll][Oo][Rr][Ee][Rr]\\[Rr][Uu][Nn].*/ OR data_win_eventdata_targetObject:/.*[Cc][Uu][Rr][Rr][Ee][Nn][Tt][Vv][Ee][Rr][Ss][Ii][Oo][Nn]\\[Ww][Ii][Nn][Dd][Oo][Ww][Ss]\\[Ll][Oo][Aa][Dd].*/)'
-      pivot_on: [host]
-      window: 2h
+  # Behaviour-targeted hunts the engine runs around the alert (not a sweep).
+  - name: Moriya driver loaded or service registered
+    query: (data_win_system_eventID:"6" AND data_win_eventdata_imageLoaded:*[Mm]oriya*) OR (data_win_system_eventID:"7045" AND data_win_eventdata_imagePath:*[Mm]oriya*) OR (data_win_system_eventID:"1" AND data_win_eventdata_commandLine:*[Mm]oriya*)
+    pivot_on:
+    - host
+    window: 4h
+  - name: Kernel driver service created via sc.exe or driver service registry key
+    query: (data_win_system_eventID:"1" AND data_win_eventdata_image:/.*\\[Ss][Cc]\.[Ee][Xx][Ee]/ AND data_win_eventdata_commandLine:/.*[Cc][Rr][Ee][Aa][Tt][Ee].*/ AND (data_win_eventdata_commandLine:/.*[Kk][Ee][Rr][Nn][Ee][Ll].*/ OR data_win_eventdata_commandLine:/.*[Dd][Rr][Ii][Vv][Ee][Rr][Ss]\\.*\.[Ss][Yy][Ss].*/)) OR (data_win_system_eventID:"13" AND data_win_eventdata_targetObject:/.*[Cc][Uu][Rr][Rr][Ee][Nn][Tt][Cc][Oo][Nn][Tt][Rr][Oo][Ll][Ss][Ee][Tt]\\[Ss][Ee][Rr][Vv][Ii][Cc][Ee][Ss]\\.*\\[Ii][Mm][Aa][Gg][Ee][Pp][Aa][Tt][Hh]/ AND data_win_eventdata_details:*.sys*)
+    pivot_on:
+    - host
+    window: 2h
+  - name: Other .sys files written to the drivers directory
+    query: data_win_system_eventID:"11" AND data_win_eventdata_targetFilename:/.*\\[Ss][Yy][Ss][Tt][Ee][Mm]32\\[Dd][Rr][Ii][Vv][Ee][Rr][Ss]\\.*\.[Ss][Yy][Ss]/
+    pivot_on:
+    - host
+    window: 6h
+  - name: Driver loads from non-standard paths
+    query: data_win_system_eventID:"6" AND NOT data_win_eventdata_imageLoaded:/[Cc]:\\[Ww][Ii][Nn][Dd][Oo][Ww][Ss]\\[Ss][Yy][Ss][Tt][Ee][Mm]32\\.*/
+    pivot_on:
+    - host
+    window: 4h
+  - name: Lateral tool transfer and remote service execution preceding the drop
+    query: (data_win_system_eventID:"1" AND (data_win_eventdata_image:*[Pp][Ss][Ee][Xx][Ee]*  OR data_win_eventdata_parentImage:*[Ww][Mm][Ii][Pp][Rr][Vv][Ss][Ee]* OR data_win_eventdata_parentImage:*[Ss][Vv][Cc][Hh][Oo][Ss][Tt]*)) OR (data_win_system_eventID:"3" AND data_win_eventdata_destinationPort:("445" OR "135" OR "5985"))
+    pivot_on:
+    - host
+    window: 6h

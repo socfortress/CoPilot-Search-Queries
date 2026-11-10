@@ -158,19 +158,58 @@ graylog:
   query: data_win_system_eventID:"7036" AND data_win_system_providerName:/[Ss][Ee][Rr][Vv][Ii][Cc][Ee] [Cc][Oo][Nn][Tt][Rr][Oo][Ll] [Mm][Aa][Nn][Aa][Gg][Ee][Rr]/ AND (data_win_eventdata_param1:/[Ww][Ii][Nn][Dd][Oo][Ww][Ss] [Dd][Ee][Ff][Ee][Nn][Dd][Ee][Rr] [Aa][Nn][Tt][Ii][Vv][Ii][Rr][Uu][Ss] [Ss][Ee][Rr][Vv][Ii][Cc][Ee]/ OR data_win_eventdata_param1:/[Ss][Ee][Rr][Vv][Ii][Cc][Ee] [Aa][Nn][Tt][Ii][Vv][Ii][Rr][Uu][Ss] [Mm][Ii][Cc][Rr][Oo][Ss][Oo][Ff][Tt] [Dd][Ee][Ff][Ee][Nn][Dd][Ee][Rr]/) AND (data_win_eventdata_param2:/[Ss][Tt][Oo][Pp][Pp][Ee][Dd]/ OR data_win_eventdata_param2:/[Aa][Rr][Rr][Êê][Tt][Éé]/)
 
 correlation:
-  # Authored by the correlation engine for review.
+  # Authored per-rule (behaviour-researched) for the correlation engine. Related CoPilot
+  # Searches + telemetry pivots to run around an alert, scoped to its host/user/ip/domain.
+  related_rules:
+  - id: 49e5bc24-8b86-49f1-b743-535f332c2856
+    name: Microsoft Defender Tamper Protection Trigger
+    reason: Tamper Protection blocking an attempt to stop/alter Defender is the failed-attempt twin of this service stop; shows what the actor tried.
+  - id: b28e58e4-2a72-4fae-bdee-0fbe904db642
+    name: Windows Defender Real-time Protection Disabled
+    reason: Defender engine is typically degraded in the same window as the service stop; confirms deliberate defense impairment rather than a restart.
+  - id: 07e3cb2c-0608-410d-be4b-1511cb1a0448
+    name: Tamper Windows Defender Remove-MpPreference
+    reason: Precursor/co-occurring PowerShell Defender preference tampering that precedes or accompanies the service being stopped.
+  - id: 17769c90-230e-488b-a463-e05c08e9d48f
+    name: Powershell Defender Exclusion
+    reason: Attackers add exclusions before or alongside stopping Defender so payloads survive if it restarts.
+  - id: 1321dc4e-a1fe-481d-a016-52c45f0c8b4f
+    name: Windows Defender Exclusions Added
+    reason: Defender-side record of exclusions added in the same tampering sequence that ends with the service stopped.
+  - id: 5e95028c-5229-4214-afae-d653d573d0ec
+    name: Security Service Disabled Via Reg.EXE
+    reason: Setting a service Start value to disabled via reg.exe is a common mechanism that causes the 7036 stopped event.
+  - id: windows-attempt-stop-security-service-001
+    name: Windows Attempt To Stop Security Service
+    reason: sc/net stop of security services is the process-level command that produces this Service Control Manager stop event.
+  - id: fdb829a8-db84-4832-b64b-3e964cd44f01
+    name: Windows Eventlog Cleared Via Wevtutil
+    reason: Log clearing commonly follows blinding the AV to cover tracks before ransomware or payload staging.
+  window: 2h
   enrichment_searches:
-  # Rule-specific telemetry pivots the engine runs around an alert from this rule,
-  # scoped to the alert's host/user/IP within the window (behaviour-targeted, not a sweep).
-    - name: "Service installations on this host"
-      query: 'data_win_system_eventID:"7045"'
-      pivot_on: [host]
-      window: 6h
-    - name: "Follow-on LOLBin / signed-binary-proxy execution on this host"
-      query: 'data_win_system_eventID:"1" AND data_win_eventdata_image:/.*(\\[Rr][Uu][Nn][Dd][Ll][Ll]32\.[Ee][Xx][Ee]|\\[Rr][Ee][Gg][Ss][Vv][Rr]32\.[Ee][Xx][Ee]|\\[Mm][Ss][Hh][Tt][Aa]\.[Ee][Xx][Ee]|\\[Ii][Nn][Ss][Tt][Aa][Ll][Ll][Uu][Tt][Ii][Ll]\.[Ee][Xx][Ee]|\\[Rr][Ee][Gg][Aa][Ss][Mm]\.[Ee][Xx][Ee]|\\[Rr][Ee][Gg][Ss][Vv][Cc][Ss]\.[Ee][Xx][Ee]|\\[Mm][Ss][Bb][Uu][Ii][Ll][Dd]\.[Ee][Xx][Ee]|\\[Cc][Ee][Rr][Tt][Uu][Tt][Ii][Ll]\.[Ee][Xx][Ee]|\\[Bb][Ii][Tt][Ss][Aa][Dd][Mm][Ii][Nn]\.[Ee][Xx][Ee]|\\[Ww][Mm][Ii][Cc]\.[Ee][Xx][Ee]|\\[Cc][Mm][Ss][Tt][Pp]\.[Ee][Xx][Ee]|\\[Oo][Dd][Bb][Cc][Cc][Oo][Nn][Ff]\.[Ee][Xx][Ee]|\\[Ff][Oo][Rr][Ff][Ii][Ll][Ee][Ss]\.[Ee][Xx][Ee]|\\[Pp][Cc][Aa][Ll][Uu][Aa]\.[Ee][Xx][Ee]|\\[Mm][Aa][Vv][Ii][Nn][Jj][Ee][Cc][Tt]\.[Ee][Xx][Ee]|\\[Ss][Cc][Rr][Ii][Pp][Tt][Rr][Uu][Nn][Nn][Ee][Rr]\.[Ee][Xx][Ee])/'
-      pivot_on: [host]
-      window: 2h
-    - name: "Memory/credential-dump creation & LSASS access on this host"
-      query: '((data_win_system_eventID:"1" AND data_win_eventdata_image:/.*(\\[Pp][Rr][Oo][Cc][Dd][Uu][Mm][Pp]\.[Ee][Xx][Ee]|\\[Pp][Rr][Oo][Cc][Dd][Uu][Mm][Pp]64\.[Ee][Xx][Ee]|\\[Ss][Qq][Ll][Dd][Uu][Mm][Pp][Ee][Rr]\.[Ee][Xx][Ee]|\\[Cc][Rr][Ee][Aa][Tt][Ee][Dd][Uu][Mm][Pp]\.[Ee][Xx][Ee]|\\[Rr][Dd][Rr][Ll][Ee][Aa][Kk][Dd][Ii][Aa][Gg]\.[Ee][Xx][Ee]|\\[Dd][Uu][Mm][Pp][Ee][Rr][Tt]\.[Ee][Xx][Ee]|\\[Nn][Aa][Nn][Oo][Dd][Uu][Mm][Pp]\.[Ee][Xx][Ee]|\\[Aa][Vv][Dd][Uu][Mm][Pp]\.[Ee][Xx][Ee])/) OR (data_win_system_eventID:"1" AND (data_win_eventdata_commandLine:/.*[Cc][Oo][Mm][Ss][Vv][Cc][Ss]\.[Dd][Ll][Ll].*/ OR data_win_eventdata_commandLine:/.*[Mm][Ii][Nn][Ii][Dd][Uu][Mm][Pp].*/ OR data_win_eventdata_commandLine:/.*[Dd][Uu][Mm][Pp][Ee][Rr][Tt].*/ OR data_win_eventdata_commandLine:/.*[Nn][Aa][Nn][Oo][Dd][Uu][Mm][Pp].*/ OR data_win_eventdata_commandLine:/.*[Ll][Ss][Aa][Ss][Ss].*/ OR data_win_eventdata_commandLine:/.*[Ss][Ee][Kk][Uu][Rr][Ll][Ss][Aa].*/ OR data_win_eventdata_commandLine:/.*[Nn][Tt][Dd][Ss]\.[Dd][Ii][Tt].*/ OR data_win_eventdata_commandLine:/.*[Nn][Tt][Dd][Ss][Uu][Tt][Ii][Ll].*/)) OR (data_win_system_eventID:"10" AND data_win_eventdata_targetImage:/.*(\\[Ll][Ss][Aa][Ss][Ss]\.[Ee][Xx][Ee])/))'
-      pivot_on: [host]
-      window: 1h
+  # Behaviour-targeted hunts the engine runs around the alert (not a sweep).
+  - name: Commands stopping or disabling Defender services
+    query: data_win_system_eventID:"1" AND (data_win_eventdata_commandLine:/.*[Ss][Cc]\.?[Ee]?[Xx]?[Ee]? +(stop|config).*([Ww]in[Dd]efend|[Ss]ense|[Ww]d[Ff]ilter|[Ww]d[Bb]oot|[Ww]d[Nn]is[Ss]vc).*/ OR data_win_eventdata_commandLine:/.*[Nn]et1? +stop.*([Ww]in[Dd]efend|[Ss]ense).*/ OR data_win_eventdata_commandLine:/.*[Ss]top-[Ss]ervice.*([Ww]in[Dd]efend|[Ss]ense).*/ OR data_win_eventdata_commandLine:/.*[Dd]isable[Aa]nti[Ss]pyware.*/ OR data_win_eventdata_commandLine:/.*[Ss]et-[Mm]p[Pp]reference.*/)
+    pivot_on:
+    - host
+    window: 1h
+  - name: Defender and security-service registry tampering
+    query: (data_win_system_eventID:"13" OR data_win_system_eventID:"12") AND (data_win_eventdata_targetObject:/.*[Ww]indows [Dd]efender.*/ OR data_win_eventdata_targetObject:/.*[Ss]ervices.[Ww]in[Dd]efend.*/ OR data_win_eventdata_targetObject:/.*[Ss]ervices.[Ss]ense.*/)
+    pivot_on:
+    - host
+    window: 2h
+  - name: Other security-tool services stopped or service config changes
+    query: (data_win_system_eventID:"7040" OR data_win_system_eventID:"7036" OR data_win_system_eventID:"7045") AND data_win_system_providerName:/[Ss]ervice [Cc]ontrol [Mm]anager/
+    pivot_on:
+    - host
+    window: 2h
+  - name: Payload staging and execution after protection loss
+    query: data_win_system_eventID:"1" AND (data_win_eventdata_image:/.*\([Pp]ower[Ss]hell|[Cc]md|[Mm]shta|[Cc]ertutil|[Bb]itsadmin)\.[Ee][Xx][Ee]/ AND (data_win_eventdata_commandLine:/.*([Ii][Ee][Xx]|[Dd]ownload[Ss]tring|[Ii]nvoke-[Ww]eb[Rr]equest|-[Ee]nc|[Uu]rlcache|http).*/))
+    pivot_on:
+    - host
+    window: 2h
+  - name: Log clearing and recovery inhibition
+    query: data_win_system_eventID:"1" AND (data_win_eventdata_commandLine:/.*[Ww]evtutil.*(cl|clear-log).*/ OR data_win_eventdata_commandLine:/.*[Vv]ssadmin.*[Dd]elete.*/ OR data_win_eventdata_commandLine:/.*[Bb]cdedit.*[Rr]ecovery.*/ OR data_win_eventdata_commandLine:/.*[Cc]lear-[Ee]vent[Ll]og.*/)
+    pivot_on:
+    - host
+    window: 4h

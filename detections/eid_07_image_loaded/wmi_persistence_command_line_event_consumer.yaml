@@ -138,44 +138,58 @@ graylog:
   query: data_win_system_eventID:"7" AND data_win_eventdata_image:/[Cc]:\\[Ww][Ii][Nn][Dd][Oo][Ww][Ss]\\[Ss][Yy][Ss][Tt][Ee][Mm]32\\[Ww][Bb][Ee][Mm]\\[Ww][Mm][Ii][Pp][Rr][Vv][Ss][Ee]\.[Ee][Xx][Ee]/ AND data_win_eventdata_imageLoaded:/.*\\[Ww][Bb][Ee][Mm][Cc][Oo][Nn][Ss]\.[Dd][Ll][Ll]/
 
 correlation:
-  # Authored by the correlation engine for review. Related CoPilot Searches to run
-  # around an alert from this rule, scoped to the same host/user/IP within the window.
+  # Authored per-rule (behaviour-researched) for the correlation engine. Related CoPilot
+  # Searches + telemetry pivots to run around an alert, scoped to its host/user/ip/domain.
   related_rules:
-    - id: ec570e53-4c76-45a9-804d-dc3f355ff7a7
-      name: "7Zip Compressing Dump Files"
-      reason: "next kill-chain tactic: Collection"
-    - id: 0a1255c5-d732-4b62-ac02-b5152d34fb83
-      name: "ADExplorer Writing Complete AD Snapshot Into .dat File"
-      reason: "next kill-chain tactic: Discovery"
-    - id: 1ea13e8c-03ea-409b-877d-ce5c3d2c1cb3
-      name: "ADFS Database Named Pipe Connection By Uncommon Tool"
-      reason: "next kill-chain tactic: Collection"
-    - id: 75bf09fa-1dd7-4d18-9af9-dd9e492562eb
-      name: "ADSI-Cache File Creation By Uncommon Tool"
-      reason: "next kill-chain tactic: Command and Control"
-    - id: 33a2d1dd-f3b0-40bd-8baf-7974468927cc
-      name: "APT PRIVATELOG Image Load Pattern"
-      reason: "next kill-chain tactic: Privilege Escalation"
-    - id: 03e2746e-2b31-42f1-ab7a-eb39365b2422
-      name: "APT31 Judgement Panda Activity"
-      reason: "next kill-chain tactic: Credential Access"
+  - id: ec1d5e28-8f3b-4188-a6f8-6e8df81dc28e
+    name: WMI Persistence - Script Event Consumer
+    reason: Sibling WMI permanent-subscription consumer type (ActiveScriptEventConsumer via scrcons.exe); attackers often deploy both consumer kinds from one MOF/script, so co-occurrence confirms a WMI backdoor.
+  - id: b439f47d-ef52-4b29-9a2f-57d8a96cb6b8
+    name: WMI ActiveScriptEventConsumers Activity Via Scrcons.EXE DLL Load
+    reason: Image-load counterpart for the script consumer (scrcons.exe loading scripting DLLs); same persistence mechanism, different consumer class.
+  - id: 0f06a3a5-6a09-413f-8743-e6cf35561297
+    name: WMI Event Subscription
+    reason: Sysmon EID 19/20/21 records the filter/consumer/binding creation that precedes WmiPrvSE loading wbemcons.dll; direct precursor evidence of the subscription.
+  - id: windows-wmi-permanent-event-subscription-001
+    name: Windows WMI Permanent Event Subscription
+    reason: Detects creation of the permanent EventFilter/Consumer/Binding that causes wbemcons.dll to load when the filter fires.
+  - id: fe21810c-2a8c-478f-8dd3-5a287fb2a0e0
+    name: Suspicious Scripting in a WMI Consumer
+    reason: Inspects the consumer payload itself for scripting/command content; confirms the subscription is malicious rather than benign management.
+  - id: 1dd05363-104e-4b4a-b963-196a534b03a1
+    name: Potential Suspicious Mofcomp Execution
+    reason: mofcomp.exe compiling a MOF is the classic way to install the consumer registered just before this image load.
+  - id: 8a582fe2-0882-4b89-a82a-da6b2dc32937
+    name: Suspicious WmiPrvSE Child Process
+    reason: When the consumer fires, the CommandLineEventConsumer payload runs as a child of WmiPrvSE.exe; this is the execution follow-on.
+  - id: d21374ff-f574-44a7-9998-4a8c8bf33d7d
+    name: WmiPrvSE Spawned A Process
+    reason: Generic detection of the payload process launched by the consumer from WmiPrvSE.exe.
   window: 1h
   enrichment_searches:
-  # Rule-specific telemetry pivots the engine runs around an alert from this rule,
-  # scoped to the alert's host/user/IP within the window (behaviour-targeted, not a sweep).
-    - name: "Autostart persistence written on this host (Run keys, services, IFEO)"
-      query: '(data_win_system_eventID:"12" OR data_win_system_eventID:"13") AND (data_win_eventdata_targetObject:/.*[Cc][Uu][Rr][Rr][Ee][Nn][Tt][Vv][Ee][Rr][Ss][Ii][Oo][Nn]\\[Rr][Uu][Nn].*/ OR data_win_eventdata_targetObject:/.*[Cc][Uu][Rr][Rr][Ee][Nn][Tt][Vv][Ee][Rr][Ss][Ii][Oo][Nn]\\[Rr][Uu][Nn][Oo][Nn][Cc][Ee].*/ OR data_win_eventdata_targetObject:/.*[Cc][Uu][Rr][Rr][Ee][Nn][Tt][Cc][Oo][Nn][Tt][Rr][Oo][Ll][Ss][Ee][Tt]\\[Ss][Ee][Rr][Vv][Ii][Cc][Ee][Ss]\\.*/ OR data_win_eventdata_targetObject:/.*[Ii][Mm][Aa][Gg][Ee] [Ff][Ii][Ll][Ee] [Ee][Xx][Ee][Cc][Uu][Tt][Ii][Oo][Nn] [Oo][Pp][Tt][Ii][Oo][Nn][Ss]\\.*/ OR data_win_eventdata_targetObject:/.*[Ww][Ii][Nn][Ll][Oo][Gg][Oo][Nn]\\[Ss][Hh][Ee][Ll][Ll].*/ OR data_win_eventdata_targetObject:/.*[Ww][Ii][Nn][Ll][Oo][Gg][Oo][Nn]\\[Uu][Ss][Ee][Rr][Ii][Nn][Ii][Tt].*/ OR data_win_eventdata_targetObject:/.*[Cc][Uu][Rr][Rr][Ee][Nn][Tt][Vv][Ee][Rr][Ss][Ii][Oo][Nn]\\[Ee][Xx][Pp][Ll][Oo][Rr][Ee][Rr]\\[Rr][Uu][Nn].*/ OR data_win_eventdata_targetObject:/.*[Pp][Oo][Ll][Ii][Cc][Ii][Ee][Ss]\\[Ee][Xx][Pp][Ll][Oo][Rr][Ee][Rr]\\[Rr][Uu][Nn].*/ OR data_win_eventdata_targetObject:/.*[Cc][Uu][Rr][Rr][Ee][Nn][Tt][Vv][Ee][Rr][Ss][Ii][Oo][Nn]\\[Ww][Ii][Nn][Dd][Oo][Ww][Ss]\\[Ll][Oo][Aa][Dd].*/)'
-      pivot_on: [host]
-      window: 2h
-    - name: "Other executions of this tool-set on this host (any arguments)"
-      query: 'data_win_system_eventID:"1" AND data_win_eventdata_image:/.*(\\[Ww][Mm][Ii][Pp][Rr][Vv][Ss][Ee]\.[Ee][Xx][Ee])/'
-      pivot_on: [host]
-      window: 2h
-    - name: "Memory/credential-dump creation & LSASS access on this host"
-      query: '((data_win_system_eventID:"1" AND data_win_eventdata_image:/.*(\\[Pp][Rr][Oo][Cc][Dd][Uu][Mm][Pp]\.[Ee][Xx][Ee]|\\[Pp][Rr][Oo][Cc][Dd][Uu][Mm][Pp]64\.[Ee][Xx][Ee]|\\[Ss][Qq][Ll][Dd][Uu][Mm][Pp][Ee][Rr]\.[Ee][Xx][Ee]|\\[Cc][Rr][Ee][Aa][Tt][Ee][Dd][Uu][Mm][Pp]\.[Ee][Xx][Ee]|\\[Rr][Dd][Rr][Ll][Ee][Aa][Kk][Dd][Ii][Aa][Gg]\.[Ee][Xx][Ee]|\\[Dd][Uu][Mm][Pp][Ee][Rr][Tt]\.[Ee][Xx][Ee]|\\[Nn][Aa][Nn][Oo][Dd][Uu][Mm][Pp]\.[Ee][Xx][Ee]|\\[Aa][Vv][Dd][Uu][Mm][Pp]\.[Ee][Xx][Ee])/) OR (data_win_system_eventID:"1" AND (data_win_eventdata_commandLine:/.*[Cc][Oo][Mm][Ss][Vv][Cc][Ss]\.[Dd][Ll][Ll].*/ OR data_win_eventdata_commandLine:/.*[Mm][Ii][Nn][Ii][Dd][Uu][Mm][Pp].*/ OR data_win_eventdata_commandLine:/.*[Dd][Uu][Mm][Pp][Ee][Rr][Tt].*/ OR data_win_eventdata_commandLine:/.*[Nn][Aa][Nn][Oo][Dd][Uu][Mm][Pp].*/ OR data_win_eventdata_commandLine:/.*[Ll][Ss][Aa][Ss][Ss].*/ OR data_win_eventdata_commandLine:/.*[Ss][Ee][Kk][Uu][Rr][Ll][Ss][Aa].*/ OR data_win_eventdata_commandLine:/.*[Nn][Tt][Dd][Ss]\.[Dd][Ii][Tt].*/ OR data_win_eventdata_commandLine:/.*[Nn][Tt][Dd][Ss][Uu][Tt][Ii][Ll].*/)) OR (data_win_system_eventID:"10" AND data_win_eventdata_targetImage:/.*(\\[Ll][Ss][Aa][Ss][Ss]\.[Ee][Xx][Ee])/))'
-      pivot_on: [host]
-      window: 1h
-    - name: "DLL sideloading / execution from user-writable paths on this host"
-      query: '((data_win_system_eventID:"7" AND (data_win_eventdata_imageLoaded:/.*\\[Uu][Ss][Ee][Rr][Ss]\\.*/ OR data_win_eventdata_imageLoaded:/.*\\[Pp][Rr][Oo][Gg][Rr][Aa][Mm][Dd][Aa][Tt][Aa]\\.*/ OR data_win_eventdata_imageLoaded:/.*\\[Ww][Ii][Nn][Dd][Oo][Ww][Ss]\\[Tt][Ee][Mm][Pp]\\.*/ OR data_win_eventdata_imageLoaded:/.*\\[Aa][Pp][Pp][Dd][Aa][Tt][Aa]\\.*/ OR data_win_eventdata_imageLoaded:/.*\\[Pp][Uu][Bb][Ll][Ii][Cc]\\.*/ OR data_win_eventdata_imageLoaded:/.*\\\$[Rr][Ee][Cc][Yy][Cc][Ll][Ee].*/)) OR (data_win_system_eventID:"1" AND (data_win_eventdata_image:/.*\\[Uu][Ss][Ee][Rr][Ss]\\.*/ OR data_win_eventdata_image:/.*\\[Pp][Rr][Oo][Gg][Rr][Aa][Mm][Dd][Aa][Tt][Aa]\\.*/ OR data_win_eventdata_image:/.*\\[Ww][Ii][Nn][Dd][Oo][Ww][Ss]\\[Tt][Ee][Mm][Pp]\\.*/ OR data_win_eventdata_image:/.*\\[Aa][Pp][Pp][Dd][Aa][Tt][Aa]\\.*/ OR data_win_eventdata_image:/.*\\[Pp][Uu][Bb][Ll][Ii][Cc]\\.*/ OR data_win_eventdata_image:/.*\\\$[Rr][Ee][Cc][Yy][Cc][Ll][Ee].*/)))'
-      pivot_on: [host]
-      window: 2h
+  # Behaviour-targeted hunts the engine runs around the alert (not a sweep).
+  - name: Processes spawned by WmiPrvSE (consumer payload execution)
+    query: data_win_system_eventID:"1" AND data_win_eventdata_parentImage:/.*\\[Ww][Mm][Ii][Pp][Rr][Vv][Ss][Ee]\.[Ee][Xx][Ee]/
+    pivot_on:
+    - host
+    window: 1h
+  - name: WMI subscription creation tooling (mofcomp, wmic, PowerShell CIM/WMI)
+    query: data_win_system_eventID:"1" AND (data_win_eventdata_image:/.*\\[Mm][Oo][Ff][Cc][Oo][Mm][Pp]\.[Ee][Xx][Ee]/ OR data_win_eventdata_commandLine:/.*([Cc]ommand[Ll]ine[Ee]vent[Cc]onsumer|__[Ee]vent[Ff]ilter|__[Ff]ilter[Tt]o[Cc]onsumer[Bb]inding|[Ss]et-[Ww]mi[Ii]nstance|[Nn]ew-[Cc]im[Ii]nstance|[Aa]ctive[Ss]cript[Ee]vent[Cc]onsumer).*/)
+    pivot_on:
+    - host
+    window: 2h
+  - name: WMI event filter/consumer/binding records (Sysmon 19/20/21)
+    query: (data_win_system_eventID:"19" OR data_win_system_eventID:"20" OR data_win_system_eventID:"21")
+    pivot_on:
+    - host
+    window: 6h
+  - name: MOF or script payload files dropped before subscription
+    query: data_win_system_eventID:"11" AND data_win_eventdata_targetFilename:/.*\.([Mm][Oo][Ff]|[Pp][Ss]1|[Vv][Bb][Ss]|[Bb][Aa][Tt]|[Jj][Ss])/
+    pivot_on:
+    - host
+    window: 2h
+  - name: Network connections from WmiPrvSE or its payload (C2 / staging)
+    query: data_win_system_eventID:"3" AND data_win_eventdata_image:/.*\\[Ww][Mm][Ii][Pp][Rr][Vv][Ss][Ee]\.[Ee][Xx][Ee]/
+    pivot_on:
+    - host
+    window: 2h

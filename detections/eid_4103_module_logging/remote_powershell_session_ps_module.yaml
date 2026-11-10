@@ -149,44 +149,59 @@ graylog:
   query: data_win_system_eventID:"4103" AND data_win_eventdata_contextInfo:/.* = [Ss][Ee][Rr][Vv][Ee][Rr][Rr][Ee][Mm][Oo][Tt][Ee][Hh][Oo][Ss][Tt] .*/ AND data_win_eventdata_contextInfo:/.*[Ww][Ss][Mm][Pp][Rr][Oo][Vv][Hh][Oo][Ss][Tt]\.[Ee][Xx][Ee].*/ AND _exists_:data_win_eventdata_contextInfo AND NOT (data_win_eventdata_contextInfo:/.*\\[Ww][Ii][Nn][Dd][Oo][Ww][Ss]\\[Ss][Yy][Ss][Tt][Ee][Mm]32\\[Ww][Ii][Nn][Dd][Oo][Ww][Ss][Pp][Oo][Ww][Ee][Rr][Ss][Hh][Ee][Ll][Ll]\\[Vv]1\.0\\[Mm][Oo][Dd][Uu][Ll][Ee][Ss]\\[Mm][Ii][Cc][Rr][Oo][Ss][Oo][Ff][Tt]\.[Pp][Oo][Ww][Ee][Rr][Ss][Hh][Ee][Ll][Ll]\.[Aa][Rr][Cc][Hh][Ii][Vv][Ee]\\[Mm][Ii][Cc][Rr][Oo][Ss][Oo][Ff][Tt]\.[Pp][Oo][Ww][Ee][Rr][Ss][Hh][Ee][Ll][Ll]\.[Aa][Rr][Cc][Hh][Ii][Vv][Ee]\.[Pp][Ss][Mm]1.*/)
 
 correlation:
-  # Authored by the correlation engine for review. Related CoPilot Searches to run
-  # around an alert from this rule, scoped to the same host/user/IP within the window.
+  # Authored per-rule (behaviour-researched) for the correlation engine. Related CoPilot
+  # Searches + telemetry pivots to run around an alert, scoped to its host/user/ip/domain.
   related_rules:
-    - id: ec570e53-4c76-45a9-804d-dc3f355ff7a7
-      name: "7Zip Compressing Dump Files"
-      reason: "next kill-chain tactic: Collection"
-    - id: 0a1255c5-d732-4b62-ac02-b5152d34fb83
-      name: "ADExplorer Writing Complete AD Snapshot Into .dat File"
-      reason: "next kill-chain tactic: Discovery"
-    - id: 1ea13e8c-03ea-409b-877d-ce5c3d2c1cb3
-      name: "ADFS Database Named Pipe Connection By Uncommon Tool"
-      reason: "next kill-chain tactic: Collection"
-    - id: 75bf09fa-1dd7-4d18-9af9-dd9e492562eb
-      name: "ADSI-Cache File Creation By Uncommon Tool"
-      reason: "next kill-chain tactic: Command and Control"
-    - id: 33a2d1dd-f3b0-40bd-8baf-7974468927cc
-      name: "APT PRIVATELOG Image Load Pattern"
-      reason: "next kill-chain tactic: Privilege Escalation"
-    - id: 9aa01d62-7667-4d3b-acb8-8cb5103e2014
-      name: "APT27 - Emissary Panda Activity"
-      reason: "next kill-chain tactic: Execution"
+  - id: c539afac-c12a-46ed-b1bd-5a5567c9f045
+    name: Potential Remote PowerShell Session Initiated
+    reason: 'Network-side view of the same WinRM session: inbound connection to 5985/5986 immediately precedes the wsmprovhost-hosted 4103 module log.'
+  - id: 734f8d9b-42b8-41b2-bcf5-abaf49d5a3c8
+    name: Remote PowerShell Session Host Process (WinRM)
+    reason: Process-creation of wsmprovhost.exe is the host process of this same inbound remoting session, corroborating it from the Sysmon side.
+  - id: 5cc2cda8-f261-4d88-a2de-e9e193c86716
+    name: Suspicious Processes Spawned by WinRM
+    reason: 'Follow-on: the remote operator typically spawns cmd/net/whoami children from the WinRM host once connected.'
+  - id: ad1f4bb9-8dfb-4765-adb6-2a7cfb6c0f94
+    name: Suspicious WSMAN Provider Image Loads
+    reason: Loading of WSMAN provider DLLs into non-standard processes is the signature of PowerShell remoting being hosted or abused, co-occurring with the session.
+  - id: 79df3f68-dccb-48e9-9171-b75cbc37c51d
+    name: Potential Lateral Movement via Windows Remote Shell
+    reason: WinRS is the alternative WinRM lateral-movement channel; an actor using remoting often mixes PS remoting and winrs against the same targets.
+  - id: a197e378-d31b-41c0-9635-cfdf1c1bb423
+    name: HackTool - WinRM Access Via Evil-WinRM
+    reason: Evil-WinRM operator tooling produces exactly this inbound wsmprovhost session on the victim; confirms attacker-driven rather than admin remoting.
+  - id: 9df0dd3a-1a5c-47e3-a2bc-30ed177646a0
+    name: Remote Code Execute via Winrm.vbs
+    reason: Another WinRM-based remote execution path used for lateral movement, likely from the same source host.
+  - id: cb909b3e-512b-11ec-aa31-3e22fbd008af
+    name: Possible Lateral Movement PowerShell Spawn
+    reason: PowerShell spawned by remote-execution parents (WinRM/WMI/DCOM) is the process-level consequence of the remote session landing.
   window: 1h
   enrichment_searches:
-  # Rule-specific telemetry pivots the engine runs around an alert from this rule,
-  # scoped to the alert's host/user/IP within the window (behaviour-targeted, not a sweep).
-    - name: "Outbound connections by script interpreters on this host"
-      query: 'data_win_system_eventID:"3" AND data_win_eventdata_image:/.*(\\[Pp][Oo][Ww][Ee][Rr][Ss][Hh][Ee][Ll][Ll]\.[Ee][Xx][Ee]|\\[Pp][Ww][Ss][Hh]\.[Ee][Xx][Ee]|\\[Pp][Oo][Ww][Ee][Rr][Ss][Hh][Ee][Ll][Ll]_[Ii][Ss][Ee]\.[Ee][Xx][Ee]|\\[Cc][Mm][Dd]\.[Ee][Xx][Ee]|\\[Ww][Ss][Cc][Rr][Ii][Pp][Tt]\.[Ee][Xx][Ee]|\\[Cc][Ss][Cc][Rr][Ii][Pp][Tt]\.[Ee][Xx][Ee]|\\[Mm][Ss][Hh][Tt][Aa]\.[Ee][Xx][Ee]|\\[Rr][Uu][Nn][Dd][Ll][Ll]32\.[Ee][Xx][Ee]|\\[Rr][Ee][Gg][Ss][Vv][Rr]32\.[Ee][Xx][Ee])/'
-      pivot_on: [host]
-      window: 1h
-    - name: "Remote-execution / lateral-movement tooling on this host"
-      query: '(data_win_system_eventID:"1" AND data_win_eventdata_image:/.*(\\[Pp][Ss][Ee][Xx][Ee][Cc]\.[Ee][Xx][Ee]|\\[Pp][Ss][Ee][Xx][Ee][Ss][Vv][Cc]\.[Ee][Xx][Ee]|\\[Pp][Aa][Ee][Xx][Ee][Cc]\.[Ee][Xx][Ee]|\\[Ww][Ii][Nn][Rr][Ss]\.[Ee][Xx][Ee]|\\[Mm][Ss][Tt][Ss][Cc]\.[Ee][Xx][Ee]|\\[Ww][Mm][Ii][Cc]\.[Ee][Xx][Ee])/) OR (data_win_system_eventID:"1" AND data_win_eventdata_image:/.*(\\[Pp][Oo][Ww][Ee][Rr][Ss][Hh][Ee][Ll][Ll]\.[Ee][Xx][Ee]|\\[Pp][Ww][Ss][Hh]\.[Ee][Xx][Ee])/ AND (data_win_eventdata_commandLine:/.*[Ii][Nn][Vv][Oo][Kk][Ee]-[Cc][Oo][Mm][Mm][Aa][Nn][Dd].*/ OR data_win_eventdata_commandLine:/.*[Nn][Ee][Ww]-[Pp][Ss][Ss][Ee][Ss][Ss][Ii][Oo][Nn].*/ OR data_win_eventdata_commandLine:/.*[Ee][Nn][Tt][Ee][Rr]-[Pp][Ss][Ss][Ee][Ss][Ss][Ii][Oo][Nn].*/ OR data_win_eventdata_commandLine:/.*-[Cc][Oo][Mm][Pp][Uu][Tt][Ee][Rr][Nn][Aa][Mm][Ee].*/))'
-      pivot_on: [host]
-      window: 2h
-    - name: "Memory/credential-dump creation & LSASS access on this host"
-      query: '((data_win_system_eventID:"1" AND data_win_eventdata_image:/.*(\\[Pp][Rr][Oo][Cc][Dd][Uu][Mm][Pp]\.[Ee][Xx][Ee]|\\[Pp][Rr][Oo][Cc][Dd][Uu][Mm][Pp]64\.[Ee][Xx][Ee]|\\[Ss][Qq][Ll][Dd][Uu][Mm][Pp][Ee][Rr]\.[Ee][Xx][Ee]|\\[Cc][Rr][Ee][Aa][Tt][Ee][Dd][Uu][Mm][Pp]\.[Ee][Xx][Ee]|\\[Rr][Dd][Rr][Ll][Ee][Aa][Kk][Dd][Ii][Aa][Gg]\.[Ee][Xx][Ee]|\\[Dd][Uu][Mm][Pp][Ee][Rr][Tt]\.[Ee][Xx][Ee]|\\[Nn][Aa][Nn][Oo][Dd][Uu][Mm][Pp]\.[Ee][Xx][Ee]|\\[Aa][Vv][Dd][Uu][Mm][Pp]\.[Ee][Xx][Ee])/) OR (data_win_system_eventID:"1" AND (data_win_eventdata_commandLine:/.*[Cc][Oo][Mm][Ss][Vv][Cc][Ss]\.[Dd][Ll][Ll].*/ OR data_win_eventdata_commandLine:/.*[Mm][Ii][Nn][Ii][Dd][Uu][Mm][Pp].*/ OR data_win_eventdata_commandLine:/.*[Dd][Uu][Mm][Pp][Ee][Rr][Tt].*/ OR data_win_eventdata_commandLine:/.*[Nn][Aa][Nn][Oo][Dd][Uu][Mm][Pp].*/ OR data_win_eventdata_commandLine:/.*[Ll][Ss][Aa][Ss][Ss].*/ OR data_win_eventdata_commandLine:/.*[Ss][Ee][Kk][Uu][Rr][Ll][Ss][Aa].*/ OR data_win_eventdata_commandLine:/.*[Nn][Tt][Dd][Ss]\.[Dd][Ii][Tt].*/ OR data_win_eventdata_commandLine:/.*[Nn][Tt][Dd][Ss][Uu][Tt][Ii][Ll].*/)) OR (data_win_system_eventID:"10" AND data_win_eventdata_targetImage:/.*(\\[Ll][Ss][Aa][Ss][Ss]\.[Ee][Xx][Ee])/))'
-      pivot_on: [host]
-      window: 1h
-    - name: "Download / AMSI-bypass / encoded script blocks on this host"
-      query: 'data_win_system_eventID:"4104" AND (data_win_eventdata_scriptBlockText:/.*[Dd][Oo][Ww][Nn][Ll][Oo][Aa][Dd][Ss][Tt][Rr][Ii][Nn][Gg].*/ OR data_win_eventdata_scriptBlockText:/.*[Dd][Oo][Ww][Nn][Ll][Oo][Aa][Dd][Ff][Ii][Ll][Ee].*/ OR data_win_eventdata_scriptBlockText:/.*[Ii][Nn][Vv][Oo][Kk][Ee]-[Ww][Ee][Bb][Rr][Ee][Qq][Uu][Ee][Ss][Tt].*/ OR data_win_eventdata_scriptBlockText:/.*[Nn][Ee][Tt]\.[Ww][Ee][Bb][Cc][Ll][Ii][Ee][Nn][Tt].*/ OR data_win_eventdata_scriptBlockText:/.*[Ff][Rr][Oo][Mm][Bb][Aa][Ss][Ee]64[Ss][Tt][Rr][Ii][Nn][Gg].*/ OR data_win_eventdata_scriptBlockText:/.*[Ii][Ee][Xx].*/ OR data_win_eventdata_scriptBlockText:/.*[Ii][Nn][Vv][Oo][Kk][Ee]-[Ee][Xx][Pp][Rr][Ee][Ss][Ss][Ii][Oo][Nn].*/ OR data_win_eventdata_scriptBlockText:/.*[Ss][Tt][Aa][Rr][Tt]-[Bb][Ii][Tt][Ss][Tt][Rr][Aa][Nn][Ss][Ff][Ee][Rr].*/ OR data_win_eventdata_scriptBlockText:/.*[Aa][Mm][Ss][Ii][Uu][Tt][Ii][Ll][Ss].*/ OR data_win_eventdata_scriptBlockText:/.*-[Ee][Nn][Cc].*/ OR data_win_eventdata_scriptBlockText:/.*-[Ee][Nn][Cc][Oo][Dd][Ee][Dd][Cc][Oo][Mm][Mm][Aa][Nn][Dd].*/ OR data_win_eventdata_scriptBlockText:/.*[Rr][Ee][Ff][Ll][Ee][Cc][Tt][Ii][Oo][Nn]\.[Aa][Ss][Ss][Ee][Mm][Bb][Ll][Yy].*/)'
-      pivot_on: [host]
-      window: 1h
+  # Behaviour-targeted hunts the engine runs around the alert (not a sweep).
+  - name: Inbound WinRM connections (5985/5986) to this host
+    query: data_win_system_eventID:"3" AND data_win_eventdata_initiated:"false" AND (data_win_eventdata_destinationPort:"5985" OR data_win_eventdata_destinationPort:"5986")
+    pivot_on:
+    - host
+    window: 1h
+  - name: Processes spawned by WinRM host wsmprovhost
+    query: data_win_system_eventID:"1" AND data_win_eventdata_parentImage:/.*[Ww][Ss][Mm][Pp][Rr][Oo][Vv][Hh][Oo][Ss][Tt]\.[Ee][Xx][Ee]/
+    pivot_on:
+    - host
+    window: 2h
+  - name: Network logons (type 3) and explicit-credential logons to this host
+    query: (data_win_system_eventID:"4624" AND data_win_eventdata_logonType:"3" AND NOT data_win_eventdata_targetUserName:/.*\$/) OR data_win_system_eventID:"4648"
+    pivot_on:
+    - host
+    - user
+    window: 1h
+  - name: 'Remote operator script blocks: download, encoding, AMSI and credential access'
+    query: data_win_system_eventID:"4104" AND (data_win_eventdata_scriptBlockText:*DownloadString* OR data_win_eventdata_scriptBlockText:*Invoke\-WebRequest* OR data_win_eventdata_scriptBlockText:*FromBase64String* OR data_win_eventdata_scriptBlockText:*AmsiUtils* OR data_win_eventdata_scriptBlockText:*Get\-Credential* OR data_win_eventdata_scriptBlockText:*Invoke\-Mimikatz* OR data_win_eventdata_scriptBlockText:*sekurlsa*)
+    pivot_on:
+    - host
+    window: 1h
+  - name: Staging, persistence and tooling dropped after remote session
+    query: (data_win_system_eventID:"11" AND (data_win_eventdata_targetFilename:/.*\\(Temp|ProgramData|Users\\Public)\\.*\.(exe|dll|ps1|bat|zip)/)) OR (data_win_system_eventID:"1" AND (data_win_eventdata_commandLine:*schtasks* OR data_win_eventdata_commandLine:*sc.exe* OR data_win_eventdata_commandLine:*"net user"* OR data_win_eventdata_commandLine:*"net localgroup"*))
+    pivot_on:
+    - host
+    window: 2h

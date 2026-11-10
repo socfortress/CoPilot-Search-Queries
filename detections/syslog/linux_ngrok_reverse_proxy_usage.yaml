@@ -126,25 +126,47 @@ graylog:
   query: (full_log:/.*ngrok.*/ OR message:/.*ngrok.*/) AND NOT _exists_:data_win_system_eventID AND NOT rule_groups:/.*windows.*/
 
 correlation:
-  # Authored by the correlation engine for review. Related CoPilot Searches to run
-  # around an alert from this rule, scoped to the same host/user/IP within the window.
+  # Authored per-rule (behaviour-researched) for the correlation engine. Related CoPilot
+  # Searches + telemetry pivots to run around an alert, scoped to its host/user/ip/domain.
   related_rules:
-    - id: 0a23a62d-c5b3-468b-a072-25064a9a8c87
-      name: "Axios NPM Compromise Indicators - Linux"
-      reason: "next kill-chain tactic: Command and Control"
-  window: 1h
+  - id: linux-proxy-socks-curl-001
+    name: Linux Proxy Socks Curl
+    reason: Curl through a SOCKS proxy is another tunneling/C2 channel often paired with ngrok exposure
+  - id: a2d9e2f3-0f43-4c7a-bcd9-9acfc0d723aa
+    name: Suspicious Download and Execute Pattern via Curl/Wget
+    reason: The ngrok binary is usually fetched with curl/wget and executed; this catches the download-and-execute stage
+  - id: cf610c15-ed71-46e1-bdf8-2bd1a99de6c4
+    name: Download File To Potentially Suspicious Directory Via Wget
+    reason: Wget download of tooling into suspicious directories is how the ngrok binary lands on the host
+  - id: 7f734ed0-4f47-46c0-837f-6ee62505abd9
+    name: Potential Netcat Reverse Shell Execution
+    reason: A netcat reverse shell exposed through a tunnel is a common ngrok use case
+  - id: 32e62bc7-3de0-4bb1-90af-532978fe42c0
+    name: Python Reverse Shell Execution Via PTY And Socket Modules
+    reason: A Python PTY reverse shell is often relayed through a tunnel
+  - id: 6b14bac8-3e3a-4324-8109-42f0546a347f
+    name: Scheduled Cron Task/Job - Linux
+    reason: Cron jobs keep the tunnel running across reboots
+  window: 4h
   enrichment_searches:
-  # Rule-specific telemetry pivots the engine runs around an alert from this rule,
-  # scoped to the alert's host/user/IP within the window (behaviour-targeted, not a sweep).
-    - name: "Protocol-tunnelling tooling on this host"
-      query: '((data_process_exec_process_binary:/.*(\/[Ss][Ss][Hh]|\/[Ss][Oo][Cc][Aa][Tt]|\/[Nn][Gg][Rr][Oo][Kk]|\/[Cc][Hh][Ii][Ss][Ee][Ll])/) OR (data_process_exec_process_arguments:/.*-[Rr] .*/))'
-      pivot_on: [host]
-      window: 1h
-    - name: "Shell / interpreter execution on this host"
-      query: '((data_process_exec_process_binary:/.*(\/[Bb][Aa][Ss][Hh]|\/[Ss][Hh]|\/[Dd][Aa][Ss][Hh]|\/[Zz][Ss][Hh]|\/[Kk][Ss][Hh]|\/[Aa][Ss][Hh]|\/[Bb][Uu][Ss][Yy][Bb][Oo][Xx])/) OR (data_process_exec_process_binary:/.*(\/[Pp][Yy][Tt][Hh][Oo][Nn]|\/[Pp][Yy][Tt][Hh][Oo][Nn]3|\/[Pp][Ee][Rr][Ll]|\/[Rr][Uu][Bb][Yy]|\/[Pp][Hh][Pp]|\/[Nn][Oo][Dd][Ee]|\/[Ll][Uu][Aa]|\/[Aa][Ww][Kk])/))'
-      pivot_on: [host]
-      window: 1h
-    - name: "Reconnaissance commands on this host"
-      query: 'data_process_exec_process_binary:/.*(\/[Ww][Hh][Oo][Aa][Mm][Ii]|\/[Ii][Dd]|\/[Uu][Nn][Aa][Mm][Ee]|\/[Hh][Oo][Ss][Tt][Nn][Aa][Mm][Ee]|\/[Hh][Oo][Ss][Tt][Nn][Aa][Mm][Ee][Cc][Tt][Ll]|\/[Ss][Ss]|\/[Nn][Ee][Tt][Ss][Tt][Aa][Tt]|\/[Ii][Ff][Cc][Oo][Nn][Ff][Ii][Gg]|\/[Aa][Rr][Pp]|\/[Ww]|\/[Ww][Hh][Oo]|\/[Ll][Aa][Ss][Tt]|\/[Ll][Ss][Oo][Ff]|\/[Nn][Mm][Aa][Pp]|\/[Dd][Ii][Gg]|\/[Ff][Ii][Nn][Dd])/'
-      pivot_on: [host]
-      window: 1h
+  # Behaviour-targeted hunts the engine runs around the alert (not a sweep).
+  - name: ngrok execution or token configuration
+    query: (data_process_exec_process_binary:/.*\/(ngrok)/ OR data_process_exec_process_arguments:/.*(ngrok|authtoken).*/)
+    pivot_on: host
+    window: 4h
+  - name: ngrok download
+    query: (data_process_exec_process_binary:/.*\/(curl|wget)/ AND data_process_exec_process_arguments:/.*(ngrok|equinox\.io).*/)
+    pivot_on: host
+    window: 4h
+  - name: Other tunneling tools
+    query: data_process_exec_process_binary:/.*\/(chisel|frpc|frps|socat|cloudflared|ssh|bore|inlets)/
+    pivot_on: host
+    window: 4h
+  - name: Tunnel persistence via cron, systemd or background runners
+    query: data_process_exec_process_binary:/.*\/(crontab|systemctl|nohup|screen|tmux)/
+    pivot_on: host
+    window: 4h
+  - name: Local service started for exposure
+    query: (data_process_exec_process_binary:/.*\/(python|python3|php|nc|ncat)/ AND data_process_exec_process_arguments:/.*(http\.server|SimpleHTTPServer|-S |-l |-lvp|-lkp).*/)
+    pivot_on: host
+    window: 2h

@@ -177,32 +177,58 @@ graylog:
   query: data_win_system_eventID:"4662" AND data_win_eventdata_objectType:/.*[Bb][Ff]967[Aa][Bb][Aa]-0[Dd][Ee]6-11[Dd]0-[Aa]285-00[Aa][Aa]003049[Ee]2.*/ AND (data_win_eventdata_accessMask:/.*1./ OR data_win_eventdata_accessMask:/.*3./ OR data_win_eventdata_accessMask:/.*4./ OR data_win_eventdata_accessMask:/.*7./ OR data_win_eventdata_accessMask:/.*9./ OR data_win_eventdata_accessMask:/.*[Bb]./ OR data_win_eventdata_accessMask:/.*[Dd]./ OR data_win_eventdata_accessMask:/.*[Ff]./) AND _exists_:data_win_eventdata_subjectUserName AND NOT (data_win_eventdata_subjectUserName:/.*\$/ OR data_win_eventdata_subjectUserName:/[Mm][Ss][Oo][Ll]_.*/)
 
 correlation:
-  # Authored by the correlation engine for review. Related CoPilot Searches to run
-  # around an alert from this rule, scoped to the same host/user/IP within the window.
+  # Authored per-rule (behaviour-researched) for the correlation engine. Related CoPilot
+  # Searches + telemetry pivots to run around an alert, scoped to its host/user/ip/domain.
   related_rules:
-    - id: 35ba1d85-724d-42a3-889f-2e2362bcaf23
-      name: "AD Privileged Users or Groups Reconnaissance"
-      reason: "next kill-chain tactic: Discovery"
-    - id: 87261fb2-69d0-42fe-b9de-88c6b5f65a43
-      name: "Atera Agent Installation"
-      reason: "next kill-chain tactic: Command and Control"
+  - id: f376c8a7-a2d0-4ddc-aa0c-16c17236d962
+    name: HackTool - Bloodhound/Sharphound Execution
+    reason: The 4662 burst of user-object reads (bf967aba) is the directory-side footprint of SharpHound's LDAP collection; this is the process-side proof of the same tool on the host.
+  - id: 02773bed-83bf-469f-b7ff-e676e7d78bab
+    name: BloodHound Collection Files
+    reason: After the LDAP sweep SharpHound writes its zip/JSON collection files to disk; confirms the enumeration completed and data is staged for exfiltration.
+  - id: bf72941a-cba0-41ea-b18c-9aca3925690d
+    name: PowerShell ADRecon Execution
+    reason: ADRecon enumerates every user object over LDAP and would generate the same mass 4662 reads; a script-block hit names the tool behind the access.
+  - id: 455b9d50-15a1-4b99-853f-8d37655a4c1b
+    name: PUA - Suspicious ActiveDirectory Enumeration Via AdFind.EXE
+    reason: AdFind is a common non-BloodHound LDAP enumerator that reads user objects with the same access masks; command line shows which attributes were targeted.
+  - id: 39405650-c364-4e1e-a740-32a63ef042a6
+    name: Windows PowerView AD Access Control List Enumeration
+    reason: Attackers who enumerate users typically follow up with PowerView ACL queries to find abusable rights over those users (GenericAll/WriteDacl paths).
+  - id: 35ba1d85-724d-42a3-889f-2e2362bcaf23
+    name: AD Privileged Users or Groups Reconnaissance
+    reason: 'Next recon step: after listing all users, the actor narrows to privileged groups/accounts (Domain Admins) to choose targets.'
+  - id: 1eeed653-dbc8-4187-ad0c-eeebb20e6599
+    name: Potential SPN Enumeration Via Setspn.EXE
+    reason: User-object enumeration is commonly used to find accounts with servicePrincipalName set, the direct setup for Kerberoasting.
+  - id: d04ae2b8-ad54-4de0-bd87-4bc1da66aa59
+    name: Kerberoasting Activity - Initial Query
+    reason: 'Likely follow-on: SPN accounts identified through user enumeration are then targeted with TGS requests (4769) to crack offline.'
   window: 1h
   enrichment_searches:
-  # Rule-specific telemetry pivots the engine runs around an alert from this rule,
-  # scoped to the alert's host/user/IP within the window (behaviour-targeted, not a sweep).
-    - name: "Host / domain account-reconnaissance commands on this host"
-      query: 'data_win_system_eventID:"1" AND data_win_eventdata_image:/.*(\\[Ww][Hh][Oo][Aa][Mm][Ii]\.[Ee][Xx][Ee]|\\[Nn][Ee][Tt]\.[Ee][Xx][Ee]|\\[Nn][Ee][Tt]1\.[Ee][Xx][Ee]|\\[Nn][Ll][Tt][Ee][Ss][Tt]\.[Ee][Xx][Ee]|\\[Ss][Yy][Ss][Tt][Ee][Mm][Ii][Nn][Ff][Oo]\.[Ee][Xx][Ee]|\\[Ii][Pp][Cc][Oo][Nn][Ff][Ii][Gg]\.[Ee][Xx][Ee]|\\[Aa][Rr][Pp]\.[Ee][Xx][Ee]|\\[Rr][Oo][Uu][Tt][Ee]\.[Ee][Xx][Ee]|\\[Tt][Aa][Ss][Kk][Ll][Ii][Ss][Tt]\.[Ee][Xx][Ee]|\\[Qq][Uu][Ss][Ee][Rr]\.[Ee][Xx][Ee]|\\[Qq][Ww][Ii][Nn][Ss][Tt][Aa]\.[Ee][Xx][Ee]|\\[Dd][Ss][Qq][Uu][Ee][Rr][Yy]\.[Ee][Xx][Ee]|\\[Nn][Bb][Tt][Ss][Tt][Aa][Tt]\.[Ee][Xx][Ee]|\\[Hh][Oo][Ss][Tt][Nn][Aa][Mm][Ee]\.[Ee][Xx][Ee]|\\[Nn][Ee][Tt][Ss][Tt][Aa][Tt]\.[Ee][Xx][Ee]|\\[Rr][Ee][Gg]\.[Ee][Xx][Ee])/'
-      pivot_on: [host]
-      window: 1h
-    - name: "Remote-execution / lateral-movement tooling on this host"
-      query: '(data_win_system_eventID:"1" AND data_win_eventdata_image:/.*(\\[Pp][Ss][Ee][Xx][Ee][Cc]\.[Ee][Xx][Ee]|\\[Pp][Ss][Ee][Xx][Ee][Ss][Vv][Cc]\.[Ee][Xx][Ee]|\\[Pp][Aa][Ee][Xx][Ee][Cc]\.[Ee][Xx][Ee]|\\[Ww][Ii][Nn][Rr][Ss]\.[Ee][Xx][Ee]|\\[Mm][Ss][Tt][Ss][Cc]\.[Ee][Xx][Ee]|\\[Ww][Mm][Ii][Cc]\.[Ee][Xx][Ee])/) OR (data_win_system_eventID:"1" AND data_win_eventdata_image:/.*(\\[Pp][Oo][Ww][Ee][Rr][Ss][Hh][Ee][Ll][Ll]\.[Ee][Xx][Ee]|\\[Pp][Ww][Ss][Hh]\.[Ee][Xx][Ee])/ AND (data_win_eventdata_commandLine:/.*[Ii][Nn][Vv][Oo][Kk][Ee]-[Cc][Oo][Mm][Mm][Aa][Nn][Dd].*/ OR data_win_eventdata_commandLine:/.*[Nn][Ee][Ww]-[Pp][Ss][Ss][Ee][Ss][Ss][Ii][Oo][Nn].*/ OR data_win_eventdata_commandLine:/.*[Ee][Nn][Tt][Ee][Rr]-[Pp][Ss][Ss][Ee][Ss][Ss][Ii][Oo][Nn].*/ OR data_win_eventdata_commandLine:/.*-[Cc][Oo][Mm][Pp][Uu][Tt][Ee][Rr][Nn][Aa][Mm][Ee].*/))'
-      pivot_on: [host]
-      window: 2h
-    - name: "This account's logon activity across hosts"
-      query: '(data_win_system_eventID:"4624" OR data_win_system_eventID:"4625")'
-      pivot_on: [user]
-      window: 6h
-    - name: "Account / group / privilege changes involving this account"
-      query: '(data_win_system_eventID:"4720" OR data_win_system_eventID:"4722" OR data_win_system_eventID:"4724" OR data_win_system_eventID:"4728" OR data_win_system_eventID:"4732" OR data_win_system_eventID:"4756" OR data_win_system_eventID:"4672")'
-      pivot_on: [user]
-      window: 6h
+  # Behaviour-targeted hunts the engine runs around the alert (not a sweep).
+  - name: AD enumeration tooling process launches (SharpHound, AdFind, ADRecon, dsquery)
+    query: data_win_system_eventID:"1" AND (data_win_eventdata_image:/.*([Ss][Hh][Aa][Rr][Pp][Hh][Oo][Uu][Nn][Dd]|[Aa][Dd][Ff][Ii][Nn][Dd]|[Dd][Ss][Qq][Uu][Ee][Rr][Yy]|[Ll][Dd][Ii][Ff][Dd][Ee]|[Cc][Ss][Vv][Dd][Ee]).*/ OR data_win_eventdata_commandLine:/.*([Ss][Hh][Aa][Rr][Pp][Hh][Oo][Uu][Nn][Dd]|[Bb][Ll][Oo][Oo][Dd][Hh][Oo][Uu][Nn][Dd]|[Aa][Dd][Ff][Ii][Nn][Dd]|[Cc][Oo][Ll][Ll][Ee][Cc][Tt][Ii][Oo][Nn][Mm][Ee][Tt][Hh][Oo][Dd]|[Ss][Ee][Aa][Rr][Cc][Hh][Ff][Ii][Ll][Tt][Ee][Rr]|objectcategory=person|samAccountType=805306368).*/)
+    pivot_on:
+    - host
+    window: 1h
+  - name: PowerShell AD/LDAP enumeration script blocks (PowerView, AD module, DirectorySearcher)
+    query: data_win_system_eventID:"4104" AND data_win_eventdata_scriptBlockText:/.*([Gg]et-[Nn]et[Uu]ser|[Gg]et-[Dd]omain[Uu]ser|[Gg]et-[Aa][Dd][Uu]ser|[Dd]irectory[Ss]earcher|[Ss]ystem\.[Dd]irectory[Ss]ervices|[Ll][Dd][Aa][Pp]:\/\/|[Ii]nvoke-[Bb]lood[Hh]ound|[Aa][Dd][Rr]econ|[Ff]ind-[Ll]ocal[Aa]dmin[Aa]ccess).*/
+    pivot_on:
+    - host
+    window: 1h
+  - name: Staged BloodHound/AD collection output files
+    query: data_win_system_eventID:"11" AND data_win_eventdata_targetFilename:/.*([0-9]{14}_BloodHound\.zip|_(users|computers|groups|domains|gpos|ous|containers)\.json|[Aa][Dd][Rr]econ|[Bb]lood[Hh]ound).*/
+    pivot_on:
+    - host
+    window: 2h
+  - name: Account's logons after the enumeration (network/RDP/explicit credentials)
+    query: (data_win_system_eventID:"4624" AND (data_win_eventdata_logonType:"3" OR data_win_eventdata_logonType:"10")) OR data_win_system_eventID:"4648" OR data_win_system_eventID:"4625"
+    pivot_on:
+    - user
+    window: 6h
+  - name: Kerberos service-ticket and SPN follow-up (Kerberoasting) by this account
+    query: (data_win_system_eventID:"4769" AND data_win_eventdata_ticketEncryptionType:"0x17") OR data_win_system_eventID:"4768" OR data_win_system_eventID:"4776"
+    pivot_on:
+    - user
+    window: 6h

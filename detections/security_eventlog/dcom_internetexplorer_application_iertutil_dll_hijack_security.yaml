@@ -144,32 +144,55 @@ graylog:
   query: data_win_system_eventID:"5145" AND data_win_eventdata_relativeTargetName:/.*\\[Ii][Nn][Tt][Ee][Rr][Nn][Ee][Tt] [Ee][Xx][Pp][Ll][Oo][Rr][Ee][Rr]\\[Ii][Ee][Rr][Tt][Uu][Tt][Ii][Ll]\.[Dd][Ll][Ll]/ AND _exists_:data_win_eventdata_subjectUserName AND NOT (data_win_eventdata_subjectUserName:/.*\$/)
 
 correlation:
-  # Authored by the correlation engine for review. Related CoPilot Searches to run
-  # around an alert from this rule, scoped to the same host/user/IP within the window.
+  # Authored per-rule (behaviour-researched) for the correlation engine. Related CoPilot
+  # Searches + telemetry pivots to run around an alert, scoped to its host/user/ip/domain.
   related_rules:
-    - id: 87261fb2-69d0-42fe-b9de-88c6b5f65a43
-      name: "Atera Agent Installation"
-      reason: "next kill-chain tactic: Command and Control"
-    - id: 48d91a3a-2363-43ba-a456-ca71ac3da5c2
-      name: "Audit CVE Event"
-      reason: "next kill-chain tactic: Lateral Movement"
+  - id: 2f7979ae-f82b-45af-ac1d-2b10e93b0baa
+    name: Potential DCOM InternetExplorer.Application DLL Hijack
+    reason: 'Same hijack seen from the Sysmon file-create side: the iertutil.dll written over SMB (5145) lands on disk as an EID 11 in the Internet Explorer directory by the SMB server process.'
+  - id: f354eba5-623b-450f-b073-0b5b2773b6aa
+    name: Potential DCOM InternetExplorer.Application DLL Hijack - Image Load
+    reason: 'Direct follow-on: after the planted iertutil.dll is written, the attacker instantiates InternetExplorer.Application via DCOM and the rogue DLL is loaded by iexplore.exe, confirming execution.'
+  - id: 586a8d6b-6bfe-4ad9-9d78-888cd2fe50c3
+    name: Remote Service Activity via SVCCTL Named Pipe
+    reason: 'Co-occurring remote lateral movement over SMB admin shares: the same authenticated network session may also use the SVCCTL pipe for PsExec-style remote service execution as an alternative or fallback to DCOM.'
+  - id: fa1c3040-4680-11ec-a618-3e22fbd008af
+    name: Remote Process Instantiation via DCOM and PowerShell Script Block
+    reason: The attacker-side DCOM activation (New-Object -ComObject / GetTypeFromProgID with a remote computer name) that triggers the hijacked DLL load; seen on the source host of the movement.
+  - id: f1f3bf22-deb2-418d-8cce-e1a45e46a5bd
+    name: MMC20 Lateral Movement
+    reason: Sibling DCOM lateral-movement technique (MMC20.Application ExecuteShellCommand); an operator who plants a DLL for DCOM often tries other DCOM objects on the same target.
+  - id: 692f0bec-83ba-4d04-af7e-e884a96059b6
+    name: Potential WMI Lateral Movement WmiPrvSE Spawned PowerShell
+    reason: Alternative remote execution channel from the same authenticated account on the same target when DCOM hijack is blocked or after foothold is gained.
+  - id: 252902e3-5830-4cf6-bf21-c22083dfd5cf
+    name: Possible Impacket SecretDump Remote Activity
+    reason: 'Likely follow-on once remote code runs as the hijacked process: credential extraction over SMB/admin shares from the compromised host with the same account.'
   window: 1h
   enrichment_searches:
-  # Rule-specific telemetry pivots the engine runs around an alert from this rule,
-  # scoped to the alert's host/user/IP within the window (behaviour-targeted, not a sweep).
-    - name: "Remote-execution / lateral-movement tooling on this host"
-      query: '(data_win_system_eventID:"1" AND data_win_eventdata_image:/.*(\\[Pp][Ss][Ee][Xx][Ee][Cc]\.[Ee][Xx][Ee]|\\[Pp][Ss][Ee][Xx][Ee][Ss][Vv][Cc]\.[Ee][Xx][Ee]|\\[Pp][Aa][Ee][Xx][Ee][Cc]\.[Ee][Xx][Ee]|\\[Ww][Ii][Nn][Rr][Ss]\.[Ee][Xx][Ee]|\\[Mm][Ss][Tt][Ss][Cc]\.[Ee][Xx][Ee]|\\[Ww][Mm][Ii][Cc]\.[Ee][Xx][Ee])/) OR (data_win_system_eventID:"1" AND data_win_eventdata_image:/.*(\\[Pp][Oo][Ww][Ee][Rr][Ss][Hh][Ee][Ll][Ll]\.[Ee][Xx][Ee]|\\[Pp][Ww][Ss][Hh]\.[Ee][Xx][Ee])/ AND (data_win_eventdata_commandLine:/.*[Ii][Nn][Vv][Oo][Kk][Ee]-[Cc][Oo][Mm][Mm][Aa][Nn][Dd].*/ OR data_win_eventdata_commandLine:/.*[Nn][Ee][Ww]-[Pp][Ss][Ss][Ee][Ss][Ss][Ii][Oo][Nn].*/ OR data_win_eventdata_commandLine:/.*[Ee][Nn][Tt][Ee][Rr]-[Pp][Ss][Ss][Ee][Ss][Ss][Ii][Oo][Nn].*/ OR data_win_eventdata_commandLine:/.*-[Cc][Oo][Mm][Pp][Uu][Tt][Ee][Rr][Nn][Aa][Mm][Ee].*/))'
-      pivot_on: [host]
-      window: 2h
-    - name: "Memory/credential-dump creation & LSASS access on this host"
-      query: '((data_win_system_eventID:"1" AND data_win_eventdata_image:/.*(\\[Pp][Rr][Oo][Cc][Dd][Uu][Mm][Pp]\.[Ee][Xx][Ee]|\\[Pp][Rr][Oo][Cc][Dd][Uu][Mm][Pp]64\.[Ee][Xx][Ee]|\\[Ss][Qq][Ll][Dd][Uu][Mm][Pp][Ee][Rr]\.[Ee][Xx][Ee]|\\[Cc][Rr][Ee][Aa][Tt][Ee][Dd][Uu][Mm][Pp]\.[Ee][Xx][Ee]|\\[Rr][Dd][Rr][Ll][Ee][Aa][Kk][Dd][Ii][Aa][Gg]\.[Ee][Xx][Ee]|\\[Dd][Uu][Mm][Pp][Ee][Rr][Tt]\.[Ee][Xx][Ee]|\\[Nn][Aa][Nn][Oo][Dd][Uu][Mm][Pp]\.[Ee][Xx][Ee]|\\[Aa][Vv][Dd][Uu][Mm][Pp]\.[Ee][Xx][Ee])/) OR (data_win_system_eventID:"1" AND (data_win_eventdata_commandLine:/.*[Cc][Oo][Mm][Ss][Vv][Cc][Ss]\.[Dd][Ll][Ll].*/ OR data_win_eventdata_commandLine:/.*[Mm][Ii][Nn][Ii][Dd][Uu][Mm][Pp].*/ OR data_win_eventdata_commandLine:/.*[Dd][Uu][Mm][Pp][Ee][Rr][Tt].*/ OR data_win_eventdata_commandLine:/.*[Nn][Aa][Nn][Oo][Dd][Uu][Mm][Pp].*/ OR data_win_eventdata_commandLine:/.*[Ll][Ss][Aa][Ss][Ss].*/ OR data_win_eventdata_commandLine:/.*[Ss][Ee][Kk][Uu][Rr][Ll][Ss][Aa].*/ OR data_win_eventdata_commandLine:/.*[Nn][Tt][Dd][Ss]\.[Dd][Ii][Tt].*/ OR data_win_eventdata_commandLine:/.*[Nn][Tt][Dd][Ss][Uu][Tt][Ii][Ll].*/)) OR (data_win_system_eventID:"10" AND data_win_eventdata_targetImage:/.*(\\[Ll][Ss][Aa][Ss][Ss]\.[Ee][Xx][Ee])/))'
-      pivot_on: [host]
-      window: 1h
-    - name: "This account's logon activity across hosts"
-      query: '(data_win_system_eventID:"4624" OR data_win_system_eventID:"4625")'
-      pivot_on: [user]
-      window: 6h
-    - name: "Account / group / privilege changes involving this account"
-      query: '(data_win_system_eventID:"4720" OR data_win_system_eventID:"4722" OR data_win_system_eventID:"4724" OR data_win_system_eventID:"4728" OR data_win_system_eventID:"4732" OR data_win_system_eventID:"4756" OR data_win_system_eventID:"4672")'
-      pivot_on: [user]
-      window: 6h
+  # Behaviour-targeted hunts the engine runs around the alert (not a sweep).
+  - name: Other remote file writes via SMB shares by this account
+    query: data_win_system_eventID:"5145" AND (data_win_eventdata_shareName:*ADMIN$* OR data_win_eventdata_shareName:*C$* OR data_win_eventdata_shareName:*IPC$*) AND (data_win_eventdata_accessList:*WriteData* OR data_win_eventdata_accessList:*AppendData*)
+    pivot_on:
+    - user
+    window: 2h
+  - name: Internet Explorer / iexplore spawned or loading unsigned DLL on this host
+    query: (data_win_system_eventID:"7" AND data_win_eventdata_imageLoaded:/.*[Ii][Ee][Rr][Tt][Uu][Tt][Ii][Ll]\.[Dd][Ll][Ll]/) OR (data_win_system_eventID:"1" AND data_win_eventdata_parentImage:/.*[Ii][Ee][Xx][Pp][Ll][Oo][Rr][Ee]\.[Ee][Xx][Ee]/)
+    pivot_on:
+    - host
+    window: 1h
+  - name: DCOM-launched iexplore and child shells on this host
+    query: data_win_system_eventID:"1" AND (data_win_eventdata_image:/.*\\(cmd|powershell|pwsh|rundll32|regsvr32|mshta|wscript|cscript)\.exe/ ) AND (data_win_eventdata_parentImage:/.*[Ii][Ee][Xx][Pp][Ll][Oo][Rr][Ee]\.[Ee][Xx][Ee]/ OR data_win_eventdata_parentCommandLine:*-Embedding*)
+    pivot_on:
+    - host
+    window: 1h
+  - name: Network logons (type 3) by this account across hosts
+    query: data_win_system_eventID:"4624" AND data_win_eventdata_logonType:"3" AND NOT data_win_eventdata_ipAddress:"-"
+    pivot_on:
+    - user
+    window: 6h
+  - name: Inbound SMB/RPC connections to this host from non-server sources
+    query: data_win_system_eventID:"3" AND (data_win_eventdata_destinationPort:"445" OR data_win_eventdata_destinationPort:"135") AND data_win_eventdata_initiated:"false"
+    pivot_on:
+    - host
+    window: 2h

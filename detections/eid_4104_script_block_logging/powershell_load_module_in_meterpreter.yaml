@@ -127,58 +127,59 @@ graylog:
   query: data_win_system_eventID:"4104" AND (data_win_eventdata_scriptBlockText:/.*MSF\.Powershell.*/ OR data_win_eventdata_scriptBlockText:/.*MSF\.Powershell\.Meterpreter.*/ OR data_win_eventdata_scriptBlockText:/.*MSF\.Powershell\.Meterpreter\.Kiwi.*/ OR data_win_eventdata_scriptBlockText:/.*MSF\.Powershell\.Meterpreter\.Transport.*/)
 
 correlation:
-  # Authored by the correlation engine for review. Related CoPilot Searches to run
-  # around an alert from this rule, scoped to the same host/user/IP within the window.
+  # Authored per-rule (behaviour-researched) for the correlation engine. Related CoPilot
+  # Searches + telemetry pivots to run around an alert, scoped to its host/user/ip/domain.
   related_rules:
-    - id: 2452e632-9e0d-11eb-bacd-acde48001122
-      name: "DNS Exfiltration Using Nslookup App"
-      reason: "same analytic story: Compromised Windows Host"
-    - id: cc316032-924a-11eb-91a2-acde48001122
-      name: "DSQuery Domain Discovery"
-      reason: "same analytic story: Compromised Windows Host"
-    - id: bc1dc6b8-c954-11eb-bade-acde48001122
-      name: "Detect Empire with PowerShell Script Block Logging"
-      reason: "same analytic story: Post-Exploitation"
-    - id: 9b3af1e6-5b68-11eb-ae93-0242ac130002
-      name: "Detect MSHTA Url in Command Line"
-      reason: "same analytic story: Compromised Windows Host"
-    - id: 72170ec5-f7d2-42f5-aefb-2b8be6aad15f
-      name: "Detect Regasm Spawning a Process"
-      reason: "same analytic story: Compromised Windows Host"
-    - id: bc477b57-5c21-4ab6-9c33-668772e7f114
-      name: "Detect Regsvcs Spawning a Process"
-      reason: "same analytic story: Compromised Windows Host"
-    - id: 070e9b80-6252-11eb-ae93-0242ac130002
-      name: "Detect Regsvr32 Application Control Bypass"
-      reason: "same analytic story: Compromised Windows Host"
-    - id: a0873b32-5b68-11eb-ae93-0242ac130002
-      name: "Detect mshta inline hta execution"
-      reason: "same analytic story: Compromised Windows Host"
-    - id: 8943b567-f14d-4ee8-a0bb-2121d4ce3184
-      name: "Dump LSASS via comsvcs DLL"
-      reason: "same analytic story: Compromised Windows Host"
-    - id: 26f86252-1549-45e1-a212-eb26840e86bc
-      name: "File Download or Read to Pipe Execution"
-      reason: "same analytic story: Compromised Windows Host"
-    - id: 909f8fd8-7ac8-11eb-a1f3-acde48001122
-      name: "FodHelper UAC Bypass"
-      reason: "same analytic story: Compromised Windows Host"
-    - id: 6e5a3ae4-90a3-462d-9aa6-0119f638c0f1
-      name: "Hiding Files And Directories With Attrib exe"
-      reason: "same analytic story: Compromised Windows Host"
+  - id: 15619216-e993-4721-b590-4c520615a67d
+    name: Potential Meterpreter/CobaltStrike Activity
+    reason: 'Process-creation view of the same Meterpreter session: the staging/service-style process patterns that usually precede the PowerShell extension being loaded in-session.'
+  - id: 16b37b70-6fcf-4814-a092-c36bd3aafcbd
+    name: PowerShell ShellCode
+    reason: Meterpreter delivers its PowerShell module and payload via shellcode/VirtualAlloc loaders in script blocks; the loader is the likely precursor of the MSF.Powershell module load.
+  - id: windows-powershell-fileless-process-injection-via-getprocaddress-001
+    name: Powershell Fileless Process Injection via GetProcAddress
+    reason: Same 4104 telemetry; reflective GetProcAddress/injection primitives are how Metasploit PowerShell payloads migrate into or stage inside processes.
+  - id: 8148c29c-c952-11eb-9255-acde48001122
+    name: Detect Mimikatz With PowerShell Script Block Logging
+    reason: MSF.Powershell.Meterpreter.Kiwi is the Mimikatz/Kiwi wrapper; credential dumping is the most common follow-on action once the module is loaded.
+  - id: 189e3b02-82b2-4b90-9662-411eb64486d4
+    name: Potential Invoke-Mimikatz PowerShell Script
+    reason: 'Complements the Kiwi module hit: a Mimikatz script block on the same host confirms credential theft following Meterpreter post-exploitation.'
+  - id: 5ef9853e-4d0e-4a70-846f-a9ca37d876da
+    name: Potential Credential Dumping Activity Via LSASS
+    reason: Kiwi/Mimikatz run through Meterpreter opens lsass with dump-capable access rights; this is the process-access evidence of the credential dumping the module enables.
+  - id: fb656378-f909-47c1-8747-278bf09f4f4f
+    name: Potential Credential Dumping Attempt Via PowerShell Remote Thread
+    reason: PowerShell-originated remote thread creation into lsass matches in-memory credential theft from a Meterpreter PowerShell session.
+  - id: e0d6c087-2d1c-47fd-8799-3904103c5a98
+    name: AMSI Bypass Pattern Assembly GetType
+    reason: Attackers disable AMSI before loading Metasploit PowerShell modules so the script is not blocked; an AMSI bypass shortly before is a direct precursor.
   window: 1h
   enrichment_searches:
-  # Rule-specific telemetry pivots the engine runs around an alert from this rule,
-  # scoped to the alert's host/user/IP within the window (behaviour-targeted, not a sweep).
-    - name: "Outbound connections by script interpreters on this host"
-      query: 'data_win_system_eventID:"3" AND data_win_eventdata_image:/.*(\\[Pp][Oo][Ww][Ee][Rr][Ss][Hh][Ee][Ll][Ll]\.[Ee][Xx][Ee]|\\[Pp][Ww][Ss][Hh]\.[Ee][Xx][Ee]|\\[Pp][Oo][Ww][Ee][Rr][Ss][Hh][Ee][Ll][Ll]_[Ii][Ss][Ee]\.[Ee][Xx][Ee]|\\[Cc][Mm][Dd]\.[Ee][Xx][Ee]|\\[Ww][Ss][Cc][Rr][Ii][Pp][Tt]\.[Ee][Xx][Ee]|\\[Cc][Ss][Cc][Rr][Ii][Pp][Tt]\.[Ee][Xx][Ee]|\\[Mm][Ss][Hh][Tt][Aa]\.[Ee][Xx][Ee]|\\[Rr][Uu][Nn][Dd][Ll][Ll]32\.[Ee][Xx][Ee]|\\[Rr][Ee][Gg][Ss][Vv][Rr]32\.[Ee][Xx][Ee])/'
-      pivot_on: [host]
-      window: 1h
-    - name: "Download / AMSI-bypass / encoded script blocks on this host"
-      query: 'data_win_system_eventID:"4104" AND (data_win_eventdata_scriptBlockText:/.*[Dd][Oo][Ww][Nn][Ll][Oo][Aa][Dd][Ss][Tt][Rr][Ii][Nn][Gg].*/ OR data_win_eventdata_scriptBlockText:/.*[Dd][Oo][Ww][Nn][Ll][Oo][Aa][Dd][Ff][Ii][Ll][Ee].*/ OR data_win_eventdata_scriptBlockText:/.*[Ii][Nn][Vv][Oo][Kk][Ee]-[Ww][Ee][Bb][Rr][Ee][Qq][Uu][Ee][Ss][Tt].*/ OR data_win_eventdata_scriptBlockText:/.*[Nn][Ee][Tt]\.[Ww][Ee][Bb][Cc][Ll][Ii][Ee][Nn][Tt].*/ OR data_win_eventdata_scriptBlockText:/.*[Ff][Rr][Oo][Mm][Bb][Aa][Ss][Ee]64[Ss][Tt][Rr][Ii][Nn][Gg].*/ OR data_win_eventdata_scriptBlockText:/.*[Ii][Ee][Xx].*/ OR data_win_eventdata_scriptBlockText:/.*[Ii][Nn][Vv][Oo][Kk][Ee]-[Ee][Xx][Pp][Rr][Ee][Ss][Ss][Ii][Oo][Nn].*/ OR data_win_eventdata_scriptBlockText:/.*[Ss][Tt][Aa][Rr][Tt]-[Bb][Ii][Tt][Ss][Tt][Rr][Aa][Nn][Ss][Ff][Ee][Rr].*/ OR data_win_eventdata_scriptBlockText:/.*[Aa][Mm][Ss][Ii][Uu][Tt][Ii][Ll][Ss].*/ OR data_win_eventdata_scriptBlockText:/.*-[Ee][Nn][Cc].*/ OR data_win_eventdata_scriptBlockText:/.*-[Ee][Nn][Cc][Oo][Dd][Ee][Dd][Cc][Oo][Mm][Mm][Aa][Nn][Dd].*/ OR data_win_eventdata_scriptBlockText:/.*[Rr][Ee][Ff][Ll][Ee][Cc][Tt][Ii][Oo][Nn]\.[Aa][Ss][Ss][Ee][Mm][Bb][Ll][Yy].*/)'
-      pivot_on: [host]
-      window: 1h
-    - name: "Follow-on LOLBin / signed-binary-proxy execution on this host"
-      query: 'data_win_system_eventID:"1" AND data_win_eventdata_image:/.*(\\[Rr][Uu][Nn][Dd][Ll][Ll]32\.[Ee][Xx][Ee]|\\[Rr][Ee][Gg][Ss][Vv][Rr]32\.[Ee][Xx][Ee]|\\[Mm][Ss][Hh][Tt][Aa]\.[Ee][Xx][Ee]|\\[Ii][Nn][Ss][Tt][Aa][Ll][Ll][Uu][Tt][Ii][Ll]\.[Ee][Xx][Ee]|\\[Rr][Ee][Gg][Aa][Ss][Mm]\.[Ee][Xx][Ee]|\\[Rr][Ee][Gg][Ss][Vv][Cc][Ss]\.[Ee][Xx][Ee]|\\[Mm][Ss][Bb][Uu][Ii][Ll][Dd]\.[Ee][Xx][Ee]|\\[Cc][Ee][Rr][Tt][Uu][Tt][Ii][Ll]\.[Ee][Xx][Ee]|\\[Bb][Ii][Tt][Ss][Aa][Dd][Mm][Ii][Nn]\.[Ee][Xx][Ee]|\\[Ww][Mm][Ii][Cc]\.[Ee][Xx][Ee]|\\[Cc][Mm][Ss][Tt][Pp]\.[Ee][Xx][Ee]|\\[Oo][Dd][Bb][Cc][Cc][Oo][Nn][Ff]\.[Ee][Xx][Ee]|\\[Ff][Oo][Rr][Ff][Ii][Ll][Ee][Ss]\.[Ee][Xx][Ee]|\\[Pp][Cc][Aa][Ll][Uu][Aa]\.[Ee][Xx][Ee]|\\[Mm][Aa][Vv][Ii][Nn][Jj][Ee][Cc][Tt]\.[Ee][Xx][Ee]|\\[Ss][Cc][Rr][Ii][Pp][Tt][Rr][Uu][Nn][Nn][Ee][Rr]\.[Ee][Xx][Ee])/'
-      pivot_on: [host]
-      window: 1h
+  # Behaviour-targeted hunts the engine runs around the alert (not a sweep).
+  - name: LSASS process access from non-system processes (Kiwi credential dumping)
+    query: data_win_system_eventID:"10" AND data_win_eventdata_targetImage:/.*[Ll][Ss][Aa][Ss][Ss]\.[Ee][Xx][Ee]/
+    pivot_on:
+    - host
+    window: 1h
+  - name: Reflective loading, shellcode and Mimikatz primitives in script blocks
+    query: data_win_system_eventID:"4104" AND (data_win_eventdata_scriptBlockText:/.*[Vv]irtual[Aa]lloc.*/ OR data_win_eventdata_scriptBlockText:/.*[Gg]et[Pp]roc[Aa]ddress.*/ OR data_win_eventdata_scriptBlockText:/.*[Cc]reate[Tt]hread.*/ OR data_win_eventdata_scriptBlockText:/.*[Ii]nvoke-[Mm]imikatz.*/ OR data_win_eventdata_scriptBlockText:/.*[Ss]ekurlsa.*/ OR data_win_eventdata_scriptBlockText:/.*[Aa]msi[Ii]nit[Ff]ailed.*/)
+    pivot_on:
+    - host
+    window: 1h
+  - name: Remote thread injection into system or user processes (Meterpreter migrate)
+    query: data_win_system_eventID:"8" AND data_win_eventdata_targetImage:/.*\\([Ll][Ss][Aa][Ss][Ss]|[Ww][Ii][Nn][Ll][Oo][Gg][Oo][Nn]|[Ee][Xx][Pp][Ll][Oo][Rr][Ee][Rr]|[Ss][Vv][Cc][Hh][Oo][Ss][Tt]|[Ss][Pp][Oo][Oo][Ll][Ss][Vv])\.[Ee][Xx][Ee]/
+    pivot_on:
+    - host
+    window: 1h
+  - name: PowerShell outbound connections to common Metasploit handler ports
+    query: data_win_system_eventID:"3" AND data_win_eventdata_image:/.*[Pp][Oo][Ww][Ee][Rr][Ss][Hh][Ee][Ll][Ll].*/ AND data_win_eventdata_destinationPort:(4444 OR 4443 OR 8443 OR 1337 OR 31337 OR 5555)
+    pivot_on:
+    - host
+    window: 2h
+  - name: Persistence and privilege escalation commands after Meterpreter session
+    query: data_win_system_eventID:"1" AND (data_win_eventdata_commandLine:/.*[Ss][Cc][Hh][Tt][Aa][Ss][Kk][Ss].*\/[Cc][Rr][Ee][Aa][Tt][Ee].*/ OR data_win_eventdata_commandLine:/.*[Rr][Ee][Gg].*[Aa][Dd][Dd].*[Cc][Uu][Rr][Rr][Ee][Nn][Tt][Vv][Ee][Rr][Ss][Ii][Oo][Nn]\\[Rr][Uu][Nn].*/ OR data_win_eventdata_commandLine:/.*[Nn][Ee][Tt]1? +[Uu][Ss][Ee][Rr].*\/[Aa][Dd][Dd].*/ OR data_win_eventdata_commandLine:/.*[Nn][Ee][Tt]1? +[Ll][Oo][Cc][Aa][Ll][Gg][Rr][Oo][Uu][Pp] +[Aa][Dd][Mm][Ii][Nn].*/ OR data_win_eventdata_commandLine:/.*[Ss][Cc]\.[Ee][Xx][Ee].*[Cc][Rr][Ee][Aa][Tt][Ee].*/)
+    pivot_on:
+    - host
+    - user
+    window: 4h

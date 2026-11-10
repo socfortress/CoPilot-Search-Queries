@@ -127,25 +127,47 @@ graylog:
   query: full_log:/.*puppet.*/ AND full_log:/.*apply.*/ AND (full_log:/.*exec.*/ OR full_log:/.*-e.*/) AND NOT _exists_:data_win_system_eventID AND NOT rule_groups:/.*windows.*/
 
 correlation:
-  # Authored by the correlation engine for review. Related CoPilot Searches to run
-  # around an alert from this rule, scoped to the same host/user/IP within the window.
+  # Authored per-rule (behaviour-researched) for the correlation engine. Related CoPilot
+  # Searches + telemetry pivots to run around an alert, scoped to its host/user/ip/domain.
   related_rules:
-    - id: 26f86252-1549-45e1-a212-eb26840e86bc
-      name: "File Download or Read to Pipe Execution"
-      reason: "same analytic story: Linux Living Off The Land"
-  window: 1h
+  - id: linux-sudo-or-su-execution-001
+    name: Linux Sudo Or Su Execution
+    reason: Puppet apply -e escalation runs under sudo; shows surrounding sudo/su activity.
+  - id: linux-gem-privilege-escalation-001
+    name: Linux Gem Privilege Escalation
+    reason: Sibling GTFOBins sudo-interpreter escalation; actors try several binaries in sequence.
+  - id: linux-ruby-privilege-escalation-001
+    name: Linux Ruby Privilege Escalation
+    reason: Puppet is Ruby-based; same sudo-to-root GTFOBins pattern often attempted alongside.
+  - id: linux-sudoers-tmp-file-creation-001
+    name: Linux Sudoers Tmp File Creation
+    reason: Root exec often followed by sudoers edits to make access permanent.
+  - id: linux-auditd-add-user-001
+    name: Linux Auditd Add User
+    reason: Post-root persistence commonly creates a backdoor account.
+  - id: linux-auditd-chown-to-root-001
+    name: Linux Auditd Chown To Root
+    reason: Root shell via puppet exec is followed by chown/setuid staging of binaries.
+  window: 2h
   enrichment_searches:
-  # Rule-specific telemetry pivots the engine runs around an alert from this rule,
-  # scoped to the alert's host/user/IP within the window (behaviour-targeted, not a sweep).
-    - name: "Privilege-escalation tooling executed on this host"
-      query: 'data_process_exec_process_binary:/.*(\/[Ss][Uu][Dd][Oo]|\/[Ss][Uu]|\/[Pp][Kk][Ee][Xx][Ee][Cc]|\/[Dd][Oo][Aa][Ss]|\/[Ss][Ee][Tt][Cc][Aa][Pp]|\/[Cc][Hh][Ss][Hh]|\/[Nn][Ee][Ww][Gg][Rr][Pp])/'
-      pivot_on: [host]
-      window: 2h
-    - name: "Shell / interpreter execution on this host"
-      query: '((data_process_exec_process_binary:/.*(\/[Bb][Aa][Ss][Hh]|\/[Ss][Hh]|\/[Dd][Aa][Ss][Hh]|\/[Zz][Ss][Hh]|\/[Kk][Ss][Hh]|\/[Aa][Ss][Hh]|\/[Bb][Uu][Ss][Yy][Bb][Oo][Xx])/) OR (data_process_exec_process_binary:/.*(\/[Pp][Yy][Tt][Hh][Oo][Nn]|\/[Pp][Yy][Tt][Hh][Oo][Nn]3|\/[Pp][Ee][Rr][Ll]|\/[Rr][Uu][Bb][Yy]|\/[Pp][Hh][Pp]|\/[Nn][Oo][Dd][Ee]|\/[Ll][Uu][Aa]|\/[Aa][Ww][Kk])/))'
-      pivot_on: [host]
-      window: 1h
-    - name: "Reconnaissance commands on this host"
-      query: 'data_process_exec_process_binary:/.*(\/[Ww][Hh][Oo][Aa][Mm][Ii]|\/[Ii][Dd]|\/[Uu][Nn][Aa][Mm][Ee]|\/[Hh][Oo][Ss][Tt][Nn][Aa][Mm][Ee]|\/[Hh][Oo][Ss][Tt][Nn][Aa][Mm][Ee][Cc][Tt][Ll]|\/[Ss][Ss]|\/[Nn][Ee][Tt][Ss][Tt][Aa][Tt]|\/[Ii][Ff][Cc][Oo][Nn][Ff][Ii][Gg]|\/[Aa][Rr][Pp]|\/[Ww]|\/[Ww][Hh][Oo]|\/[Ll][Aa][Ss][Tt]|\/[Ll][Ss][Oo][Ff]|\/[Nn][Mm][Aa][Pp]|\/[Dd][Ii][Gg]|\/[Ff][Ii][Nn][Dd])/'
-      pivot_on: [host]
-      window: 1h
+  # Behaviour-targeted hunts the engine runs around the alert (not a sweep).
+  - name: Sudo invocations of interpreters/shells
+    query: full_log:/.*sudo.*(bash|sh|python|perl|ruby|gem|puppet|vim|awk|find|less).*/
+    pivot_on: host
+    window: 2h
+  - name: Account and sudoers tampering
+    query: full_log:/.*(useradd|adduser|usermod|visudo|\/etc\/sudoers|NOPASSWD|\/etc\/shadow).*/
+    pivot_on: host
+    window: 4h
+  - name: SUID or ownership changes
+    query: full_log:/.*(chmod [0-9]*[4267][0-7]{3}|chmod .*\+s|chown root).*/
+    pivot_on: host
+    window: 2h
+  - name: Puppet manifests and exec resources
+    query: full_log:/.*puppet.*(exec|command=).*/
+    pivot_on: host
+    window: 24h
+  - name: Reverse shell or download after root
+    query: full_log:/.*(\/dev\/tcp\/|nc -e|bash -i).*/
+    pivot_on: host
+    window: 2h

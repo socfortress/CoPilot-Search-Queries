@@ -157,44 +157,58 @@ graylog:
   query: data_win_system_eventID:"4104" AND data_win_eventdata_scriptBlockText:/.*[Ii][Oo]\.[Cc][Oo][Mm][Pp][Rr][Ee][Ss][Ss][Ii][Oo][Nn]\.[Dd][Ee][Ff][Ll][Aa][Tt][Ee][Ss][Tt][Rr][Ee][Aa][Mm].*/ AND data_win_eventdata_scriptBlockText:/.*[Ii][Oo]\.[Mm][Ee][Mm][Oo][Rr][Yy][Ss][Tt][Rr][Ee][Aa][Mm].*/ AND data_win_eventdata_scriptBlockText:/.*::[Ff][Rr][Oo][Mm][Bb][Aa][Ss][Ee]64[Ss][Tt][Rr][Ii][Nn][Gg].*/ AND data_win_eventdata_scriptBlockText:/.*[Gg][Ee][Tt][Dd][Ee][Ll][Ee][Gg][Aa][Tt][Ee][Ff][Oo][Rr][Ff][Uu][Nn][Cc][Tt][Ii][Oo][Nn][Pp][Oo][Ii][Nn][Tt][Ee][Rr].*/ AND data_win_eventdata_scriptBlockText:/.*\.[Ii][Nn][Vv][Oo][Kk][Ee]\(\).*/ AND data_win_eventdata_scriptBlockText:/.*[Gg][Ll][Oo][Bb][Aa][Ll][Aa][Ss][Ss][Ee][Mm][Bb][Ll][Yy][Cc][Aa][Cc][Hh][Ee].*/
 
 correlation:
-  # Authored by the correlation engine for review. Related CoPilot Searches to run
-  # around an alert from this rule, scoped to the same host/user/IP within the window.
+  # Authored per-rule (behaviour-researched) for the correlation engine. Related CoPilot
+  # Searches + telemetry pivots to run around an alert, scoped to its host/user/ip/domain.
   related_rules:
-    - id: ec570e53-4c76-45a9-804d-dc3f355ff7a7
-      name: "7Zip Compressing Dump Files"
-      reason: "next kill-chain tactic: Collection"
-    - id: 0a1255c5-d732-4b62-ac02-b5152d34fb83
-      name: "ADExplorer Writing Complete AD Snapshot Into .dat File"
-      reason: "next kill-chain tactic: Discovery"
-    - id: 1ea13e8c-03ea-409b-877d-ce5c3d2c1cb3
-      name: "ADFS Database Named Pipe Connection By Uncommon Tool"
-      reason: "next kill-chain tactic: Collection"
-    - id: 75bf09fa-1dd7-4d18-9af9-dd9e492562eb
-      name: "ADSI-Cache File Creation By Uncommon Tool"
-      reason: "next kill-chain tactic: Command and Control"
-    - id: 33a2d1dd-f3b0-40bd-8baf-7974468927cc
-      name: "APT PRIVATELOG Image Load Pattern"
-      reason: "next kill-chain tactic: Privilege Escalation"
-    - id: 9aa01d62-7667-4d3b-acb8-8cb5103e2014
-      name: "APT27 - Emissary Panda Activity"
-      reason: "next kill-chain tactic: Execution"
+  - id: 62b7ccc9-23b4-471e-aa15-6da3663c4d59
+    name: PowerShell Base64 Encoded Reflective Assembly Load
+    reason: 'Same in-memory loader tradecraft: base64-decoded .NET assembly reflectively loaded from PowerShell, as POWERTRASH does with FromBase64String + DeflateStream'
+  - id: d55b793d-f847-4eea-b59a-5ab09908ac90
+    name: Suspicious Child Process Of Veeam Dabatase
+    reason: POWERTRASH was used by FIN7 against Veeam servers; a shell spawned by the Veeam SQL service is the likely precursor/delivery path
+  - id: 696bfb54-227e-4602-ac5b-30d9d2053312
+    name: Veeam Backup Database Suspicious Query
+    reason: 'FIN7 Veeam-targeting chain: querying the Veeam DB for stored credentials around the time the loader runs'
+  - id: b57ba453-b384-4ab9-9f40-1038086b4e53
+    name: VeeamBackup Database Credentials Dump Via Sqlcmd.EXE
+    reason: Veeam credential dumping is the objective of the FIN7 activity that drops POWERTRASH loaders
+  - id: 17769c90-230e-488b-a463-e05c08e9d48f
+    name: Powershell Defender Exclusion
+    reason: Operators commonly add Defender exclusions before or after staging the in-memory payload the loader launches
+  - id: ea9bf0fa-edec-4fb8-8b78-b119f2528186
+    name: Windows Defender AMSI Trigger Detected
+    reason: AMSI scanning of the decompressed in-memory payload frequently surfaces a Defender detection alongside the script block
+  - id: 99b97608-3e21-4bfe-8217-2a127c396a0e
+    name: Remote Thread Creation Via PowerShell In Uncommon Target
+    reason: GetDelegateForFunctionPointer shellcode execution is often followed by PowerShell injecting a remote thread into another process
+  - id: 4508a70e-97ef-4300-b62b-ff27992990ea
+    name: DotNet CLR DLL Loaded By Scripting Applications
+    reason: The loader runs managed code in-process, so CLR image loads by the scripting host appear around the same time
   window: 1h
   enrichment_searches:
-  # Rule-specific telemetry pivots the engine runs around an alert from this rule,
-  # scoped to the alert's host/user/IP within the window (behaviour-targeted, not a sweep).
-    - name: "Outbound connections by script interpreters on this host"
-      query: 'data_win_system_eventID:"3" AND data_win_eventdata_image:/.*(\\[Pp][Oo][Ww][Ee][Rr][Ss][Hh][Ee][Ll][Ll]\.[Ee][Xx][Ee]|\\[Pp][Ww][Ss][Hh]\.[Ee][Xx][Ee]|\\[Pp][Oo][Ww][Ee][Rr][Ss][Hh][Ee][Ll][Ll]_[Ii][Ss][Ee]\.[Ee][Xx][Ee]|\\[Cc][Mm][Dd]\.[Ee][Xx][Ee]|\\[Ww][Ss][Cc][Rr][Ii][Pp][Tt]\.[Ee][Xx][Ee]|\\[Cc][Ss][Cc][Rr][Ii][Pp][Tt]\.[Ee][Xx][Ee]|\\[Mm][Ss][Hh][Tt][Aa]\.[Ee][Xx][Ee]|\\[Rr][Uu][Nn][Dd][Ll][Ll]32\.[Ee][Xx][Ee]|\\[Rr][Ee][Gg][Ss][Vv][Rr]32\.[Ee][Xx][Ee])/'
-      pivot_on: [host]
-      window: 1h
-    - name: "Autostart persistence written on this host (Run keys, services, IFEO)"
-      query: '(data_win_system_eventID:"12" OR data_win_system_eventID:"13") AND (data_win_eventdata_targetObject:/.*[Cc][Uu][Rr][Rr][Ee][Nn][Tt][Vv][Ee][Rr][Ss][Ii][Oo][Nn]\\[Rr][Uu][Nn].*/ OR data_win_eventdata_targetObject:/.*[Cc][Uu][Rr][Rr][Ee][Nn][Tt][Vv][Ee][Rr][Ss][Ii][Oo][Nn]\\[Rr][Uu][Nn][Oo][Nn][Cc][Ee].*/ OR data_win_eventdata_targetObject:/.*[Cc][Uu][Rr][Rr][Ee][Nn][Tt][Cc][Oo][Nn][Tt][Rr][Oo][Ll][Ss][Ee][Tt]\\[Ss][Ee][Rr][Vv][Ii][Cc][Ee][Ss]\\.*/ OR data_win_eventdata_targetObject:/.*[Ii][Mm][Aa][Gg][Ee] [Ff][Ii][Ll][Ee] [Ee][Xx][Ee][Cc][Uu][Tt][Ii][Oo][Nn] [Oo][Pp][Tt][Ii][Oo][Nn][Ss]\\.*/ OR data_win_eventdata_targetObject:/.*[Ww][Ii][Nn][Ll][Oo][Gg][Oo][Nn]\\[Ss][Hh][Ee][Ll][Ll].*/ OR data_win_eventdata_targetObject:/.*[Ww][Ii][Nn][Ll][Oo][Gg][Oo][Nn]\\[Uu][Ss][Ee][Rr][Ii][Nn][Ii][Tt].*/ OR data_win_eventdata_targetObject:/.*[Cc][Uu][Rr][Rr][Ee][Nn][Tt][Vv][Ee][Rr][Ss][Ii][Oo][Nn]\\[Ee][Xx][Pp][Ll][Oo][Rr][Ee][Rr]\\[Rr][Uu][Nn].*/ OR data_win_eventdata_targetObject:/.*[Pp][Oo][Ll][Ii][Cc][Ii][Ee][Ss]\\[Ee][Xx][Pp][Ll][Oo][Rr][Ee][Rr]\\[Rr][Uu][Nn].*/ OR data_win_eventdata_targetObject:/.*[Cc][Uu][Rr][Rr][Ee][Nn][Tt][Vv][Ee][Rr][Ss][Ii][Oo][Nn]\\[Ww][Ii][Nn][Dd][Oo][Ww][Ss]\\[Ll][Oo][Aa][Dd].*/)'
-      pivot_on: [host]
-      window: 4h
-    - name: "Download / AMSI-bypass / encoded script blocks on this host"
-      query: 'data_win_system_eventID:"4104" AND (data_win_eventdata_scriptBlockText:/.*[Dd][Oo][Ww][Nn][Ll][Oo][Aa][Dd][Ss][Tt][Rr][Ii][Nn][Gg].*/ OR data_win_eventdata_scriptBlockText:/.*[Dd][Oo][Ww][Nn][Ll][Oo][Aa][Dd][Ff][Ii][Ll][Ee].*/ OR data_win_eventdata_scriptBlockText:/.*[Ii][Nn][Vv][Oo][Kk][Ee]-[Ww][Ee][Bb][Rr][Ee][Qq][Uu][Ee][Ss][Tt].*/ OR data_win_eventdata_scriptBlockText:/.*[Nn][Ee][Tt]\.[Ww][Ee][Bb][Cc][Ll][Ii][Ee][Nn][Tt].*/ OR data_win_eventdata_scriptBlockText:/.*[Ff][Rr][Oo][Mm][Bb][Aa][Ss][Ee]64[Ss][Tt][Rr][Ii][Nn][Gg].*/ OR data_win_eventdata_scriptBlockText:/.*[Ii][Ee][Xx].*/ OR data_win_eventdata_scriptBlockText:/.*[Ii][Nn][Vv][Oo][Kk][Ee]-[Ee][Xx][Pp][Rr][Ee][Ss][Ss][Ii][Oo][Nn].*/ OR data_win_eventdata_scriptBlockText:/.*[Ss][Tt][Aa][Rr][Tt]-[Bb][Ii][Tt][Ss][Tt][Rr][Aa][Nn][Ss][Ff][Ee][Rr].*/ OR data_win_eventdata_scriptBlockText:/.*[Aa][Mm][Ss][Ii][Uu][Tt][Ii][Ll][Ss].*/ OR data_win_eventdata_scriptBlockText:/.*-[Ee][Nn][Cc].*/ OR data_win_eventdata_scriptBlockText:/.*-[Ee][Nn][Cc][Oo][Dd][Ee][Dd][Cc][Oo][Mm][Mm][Aa][Nn][Dd].*/ OR data_win_eventdata_scriptBlockText:/.*[Rr][Ee][Ff][Ll][Ee][Cc][Tt][Ii][Oo][Nn]\.[Aa][Ss][Ss][Ee][Mm][Bb][Ll][Yy].*/)'
-      pivot_on: [host]
-      window: 1h
-    - name: "Follow-on LOLBin / signed-binary-proxy execution on this host"
-      query: 'data_win_system_eventID:"1" AND data_win_eventdata_image:/.*(\\[Rr][Uu][Nn][Dd][Ll][Ll]32\.[Ee][Xx][Ee]|\\[Rr][Ee][Gg][Ss][Vv][Rr]32\.[Ee][Xx][Ee]|\\[Mm][Ss][Hh][Tt][Aa]\.[Ee][Xx][Ee]|\\[Ii][Nn][Ss][Tt][Aa][Ll][Ll][Uu][Tt][Ii][Ll]\.[Ee][Xx][Ee]|\\[Rr][Ee][Gg][Aa][Ss][Mm]\.[Ee][Xx][Ee]|\\[Rr][Ee][Gg][Ss][Vv][Cc][Ss]\.[Ee][Xx][Ee]|\\[Mm][Ss][Bb][Uu][Ii][Ll][Dd]\.[Ee][Xx][Ee]|\\[Cc][Ee][Rr][Tt][Uu][Tt][Ii][Ll]\.[Ee][Xx][Ee]|\\[Bb][Ii][Tt][Ss][Aa][Dd][Mm][Ii][Nn]\.[Ee][Xx][Ee]|\\[Ww][Mm][Ii][Cc]\.[Ee][Xx][Ee]|\\[Cc][Mm][Ss][Tt][Pp]\.[Ee][Xx][Ee]|\\[Oo][Dd][Bb][Cc][Cc][Oo][Nn][Ff]\.[Ee][Xx][Ee]|\\[Ff][Oo][Rr][Ff][Ii][Ll][Ee][Ss]\.[Ee][Xx][Ee]|\\[Pp][Cc][Aa][Ll][Uu][Aa]\.[Ee][Xx][Ee]|\\[Mm][Aa][Vv][Ii][Nn][Jj][Ee][Cc][Tt]\.[Ee][Xx][Ee]|\\[Ss][Cc][Rr][Ii][Pp][Tt][Rr][Uu][Nn][Nn][Ee][Rr]\.[Ee][Xx][Ee])/'
-      pivot_on: [host]
-      window: 1h
+  # Behaviour-targeted hunts the engine runs around the alert (not a sweep).
+  - name: Reflective assembly load / unmanaged delegate in script blocks
+    query: data_win_system_eventID:"4104" AND (data_win_eventdata_scriptBlockText:/.*[Rr]eflection\.[Aa]ssembly.*/ OR data_win_eventdata_scriptBlockText:/.*[Aa]ssembly\]::[Ll]oad.*/ OR data_win_eventdata_scriptBlockText:/.*[Vv]irtual[Aa]lloc.*/ OR data_win_eventdata_scriptBlockText:/.*[Mm]arshal.*[Gg]et[Dd]elegate.*/ OR data_win_eventdata_scriptBlockText:/.*[Aa]dd-[Tt]ype.*/)
+    pivot_on:
+    - host
+    window: 1h
+  - name: PowerShell injecting into or accessing other processes
+    query: (data_win_system_eventID:"8" OR data_win_system_eventID:"10") AND (data_win_eventdata_sourceImage:/.*[Pp]ower[Ss]hell.*/ OR data_win_eventdata_sourceImage:/.*[Pp]wsh.*/)
+    pivot_on:
+    - host
+    window: 1h
+  - name: Shells spawned by Veeam / SQL Server services
+    query: data_win_system_eventID:"1" AND (data_win_eventdata_parentImage:/.*[Ss]ql[Ss]erv[Rr].*/ OR data_win_eventdata_parentImage:/.*[Vv]eeam.*/) AND (data_win_eventdata_image:/.*[Pp]ower[Ss]hell.*/ OR data_win_eventdata_image:/.*\[Cc][Mm][Dd]\.[Ee][Xx][Ee]/ OR data_win_eventdata_image:/.*[Ss]qlcmd.*/)
+    pivot_on:
+    - host
+    window: 2h
+  - name: PowerShell outbound network connections (payload staging / C2)
+    query: data_win_system_eventID:"3" AND (data_win_eventdata_image:/.*[Pp]ower[Ss]hell.*/ OR data_win_eventdata_image:/.*[Pp]wsh.*/) AND data_win_eventdata_initiated:"true"
+    pivot_on:
+    - host
+    window: 1h
+  - name: Defender tampering and credential tooling via PowerShell
+    query: data_win_system_eventID:"1" AND (data_win_eventdata_commandLine:/.*[Aa]dd-[Mm]p[Pp]reference.*/ OR data_win_eventdata_commandLine:/.*[Ss]et-[Mm]p[Pp]reference.*/ OR data_win_eventdata_commandLine:/.*[Vv]eeam.*[Cc]redential.*/ OR data_win_eventdata_commandLine:/.*[Ss]qlcmd.*[Vv]eeam.*/)
+    pivot_on:
+    - host
+    window: 4h

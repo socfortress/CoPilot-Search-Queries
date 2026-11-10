@@ -160,35 +160,58 @@ graylog:
   query: (data_win_system_eventID:"4656" OR data_win_system_eventID:"4663" OR data_win_system_eventID:"4658") AND (data_win_eventdata_objectName:/.*\.[Aa][Aa][Aa]/ OR data_win_eventdata_objectName:/.*\.[Zz][Zz][Zz]/)
 
 correlation:
-  # Authored by the correlation engine for review. Related CoPilot Searches to run
-  # around an alert from this rule, scoped to the same host/user/IP within the window.
+  # Authored per-rule (behaviour-researched) for the correlation engine. Related CoPilot
+  # Searches + telemetry pivots to run around an alert, scoped to its host/user/ip/domain.
   related_rules:
-    - id: 48d91a3a-2363-43ba-a456-ca71ac3da5c2
-      name: "Audit CVE Event"
-      reason: "next kill-chain tactic: Impact"
-    - id: eee8311f-a752-44f0-bf2f-6b007db16300
-      name: "BlueSky Ransomware Artefacts"
-      reason: "next kill-chain tactic: Impact"
-    - id: 3f2c93c7-7b2a-4d58-bb8d-6f39422d8148
-      name: "CVE-2024-49113 Exploitation Attempt - LDAP Nightmare"
-      reason: "next kill-chain tactic: Impact"
+  - id: a4824fca-976f-4964-b334-0621379e84c4
+    name: Potential File Overwrite Via Sysinternals SDelete
+    reason: 'Process-creation view of the same tool: the sdelete command line (-p/-s/-c/-z) that produces the .AAA/.ZZZ rename artifacts seen in the object-access audit; confirms the executing process and user.'
+  - id: c1d867fe-8d95-4487-aab4-e53f2d339f90
+    name: Renamed Sysinternals Sdelete Execution
+    reason: Attackers rename sdelete.exe to evade name-based detection; artifacts on disk still show .AAA/.ZZZ, so this identifies the renamed binary behind the wipe.
+  - id: 4b046706-5789-4673-b111-66f25fe99534
+    name: Deleted Data Overwritten Via Cipher.EXE
+    reason: Alternative built-in free-space wiper (cipher /w) used for the same anti-forensic purpose; co-occurs when the operator switches wipe tooling.
+  - id: fdb829a8-db84-4832-b64b-3e964cd44f01
+    name: Windows Eventlog Cleared Via Wevtutil
+    reason: Secure file deletion is usually paired with event log clearing to remove the remaining traces of the intrusion on the same host.
+  - id: cc36992a-4671-4f21-a91d-6c2b72a2edf5
+    name: Suspicious Eventlog Clearing or Configuration Change Activity
+    reason: Log clearing/reconfiguration via PowerShell or other utilities executed alongside the wipe as part of the same cleanup phase.
+  - id: 0a13e132-651d-11eb-ae93-0242ac130002
+    name: Audit Policy Tampering Via Auditpol
+    reason: Attackers disable object-access auditing before or after wiping so file deletions stop generating 4656/4663 evidence; causal link to the telemetry this rule relies on.
+  - id: c947b146-0abc-4c87-9c64-b17e9d7274a2
+    name: Shadow Copies Deletion Using Operating Systems Utilities
+    reason: Destroying shadow copies removes recoverable copies of files that SDelete has just overwritten; common companion step in destructive or cleanup operations.
+  - id: 639c9081-f482-47d3-a0bd-ddee3d4ecd76
+    name: All Backups Deleted Via Wbadmin.EXE
+    reason: Backup destruction following or accompanying secure wipe indicates impact-stage intent (ransomware/wiper) rather than routine privacy cleanup.
   window: 1h
   enrichment_searches:
-  # Rule-specific telemetry pivots the engine runs around an alert from this rule,
-  # scoped to the alert's host/user/IP within the window (behaviour-targeted, not a sweep).
-    - name: "Encoded / obfuscated script execution on this host"
-      query: 'data_win_system_eventID:"4104" AND (data_win_eventdata_scriptBlockText:/.*[Dd][Oo][Ww][Nn][Ll][Oo][Aa][Dd][Ss][Tt][Rr][Ii][Nn][Gg].*/ OR data_win_eventdata_scriptBlockText:/.*[Dd][Oo][Ww][Nn][Ll][Oo][Aa][Dd][Ff][Ii][Ll][Ee].*/ OR data_win_eventdata_scriptBlockText:/.*[Ii][Nn][Vv][Oo][Kk][Ee]-[Ww][Ee][Bb][Rr][Ee][Qq][Uu][Ee][Ss][Tt].*/ OR data_win_eventdata_scriptBlockText:/.*[Nn][Ee][Tt]\.[Ww][Ee][Bb][Cc][Ll][Ii][Ee][Nn][Tt].*/ OR data_win_eventdata_scriptBlockText:/.*[Ff][Rr][Oo][Mm][Bb][Aa][Ss][Ee]64[Ss][Tt][Rr][Ii][Nn][Gg].*/ OR data_win_eventdata_scriptBlockText:/.*[Ii][Ee][Xx].*/ OR data_win_eventdata_scriptBlockText:/.*[Ii][Nn][Vv][Oo][Kk][Ee]-[Ee][Xx][Pp][Rr][Ee][Ss][Ss][Ii][Oo][Nn].*/ OR data_win_eventdata_scriptBlockText:/.*[Ss][Tt][Aa][Rr][Tt]-[Bb][Ii][Tt][Ss][Tt][Rr][Aa][Nn][Ss][Ff][Ee][Rr].*/ OR data_win_eventdata_scriptBlockText:/.*[Aa][Mm][Ss][Ii][Uu][Tt][Ii][Ll][Ss].*/ OR data_win_eventdata_scriptBlockText:/.*-[Ee][Nn][Cc].*/ OR data_win_eventdata_scriptBlockText:/.*-[Ee][Nn][Cc][Oo][Dd][Ee][Dd][Cc][Oo][Mm][Mm][Aa][Nn][Dd].*/ OR data_win_eventdata_scriptBlockText:/.*[Rr][Ee][Ff][Ll][Ee][Cc][Tt][Ii][Oo][Nn]\.[Aa][Ss][Ss][Ee][Mm][Bb][Ll][Yy].*/)'
-      pivot_on: [host]
-      window: 1h
-    - name: "Log-clearing / anti-forensic activity on this host"
-      query: '(((data_win_eventdata_commandLine:/.*[Ww][Ee][Vv][Tt][Uu][Tt][Ii][Ll] [Cc][Ll].*/ OR data_win_eventdata_commandLine:/.*[Cc][Ll][Ee][Aa][Rr]-[Ee][Vv][Ee][Nn][Tt][Ll][Oo][Gg].*/ OR data_win_eventdata_commandLine:/.*[Ff][Ss][Uu][Tt][Ii][Ll] [Uu][Ss][Nn] [Dd][Ee][Ll][Ee][Tt][Ee][Jj][Oo][Uu][Rr][Nn][Aa][Ll].*/ OR data_win_eventdata_commandLine:/.*[Vv][Ss][Ss][Aa][Dd][Mm][Ii][Nn] [Dd][Ee][Ll][Ee][Tt][Ee].*/ OR data_win_eventdata_commandLine:/.*[Ww][Ee][Vv][Tt][Uu][Tt][Ii][Ll] [Cc][Ll][Ee][Aa][Rr]-[Ll][Oo][Gg].*/)) OR ((data_win_system_eventID:"1102" OR data_win_system_eventID:"104")))'
-      pivot_on: [host]
-      window: 2h
-    - name: "This account's logon activity across hosts"
-      query: '(data_win_system_eventID:"4624" OR data_win_system_eventID:"4625")'
-      pivot_on: [user]
-      window: 6h
-    - name: "Account / group / privilege changes involving this account"
-      query: '(data_win_system_eventID:"4720" OR data_win_system_eventID:"4722" OR data_win_system_eventID:"4724" OR data_win_system_eventID:"4728" OR data_win_system_eventID:"4732" OR data_win_system_eventID:"4756" OR data_win_system_eventID:"4672")'
-      pivot_on: [user]
-      window: 6h
+  # Behaviour-targeted hunts the engine runs around the alert (not a sweep).
+  - name: SDelete execution or wipe-style command lines on this host
+    query: data_win_system_eventID:"1" AND (data_win_eventdata_image:/.*[Ss][Dd][Ee][Ll][Ee][Tt][Ee].*/ OR data_win_eventdata_originalFileName:/.*[Ss][Dd][Ee][Ll][Ee][Tt][Ee].*/ OR data_win_eventdata_commandLine:/.*[Ss][Dd][Ee][Ll][Ee][Tt][Ee].*/ OR data_win_eventdata_commandLine:/.*[Cc][Ii][Pp][Hh][Ee][Rr].* /[Ww].*/)
+    pivot_on:
+    - host
+    window: 1h
+  - name: Sysmon file delete events (archived/overwritten files) on this host
+    query: (data_win_system_eventID:"23" OR data_win_system_eventID:"26") AND NOT data_win_eventdata_targetFilename:/.*[Tt]emp.*/
+    pivot_on:
+    - host
+    window: 1h
+  - name: Event log clearing and audit policy tampering
+    query: (data_win_system_eventID:"1102" OR data_win_system_eventID:"104" OR data_win_system_eventID:"4719" OR (data_win_system_eventID:"1" AND (data_win_eventdata_commandLine:/.*[Ww][Ee][Vv][Tt][Uu][Tt][Ii][Ll].*/ OR data_win_eventdata_commandLine:/.*[Aa][Uu][Dd][Ii][Tt][Pp][Oo][Ll].*/ OR data_win_eventdata_commandLine:/.*[Cc]lear-[Ee]vent[Ll]og.*/)))
+    pivot_on:
+    - host
+    window: 2h
+  - name: Shadow copy / backup destruction on this host
+    query: data_win_system_eventID:"1" AND (data_win_eventdata_commandLine:/.*[Vv][Ss][Ss][Aa][Dd][Mm][Ii][Nn].*[Dd][Ee][Ll][Ee][Tt][Ee].*/ OR data_win_eventdata_commandLine:/.*[Ww][Bb][Aa][Dd][Mm][Ii][Nn].*[Dd][Ee][Ll][Ee][Tt][Ee].*/ OR data_win_eventdata_commandLine:/.*[Bb][Cc][Dd][Ee][Dd][Ii][Tt].*[Rr][Ee][Cc][Oo][Vv][Ee][Rr][Yy][Ee][Nn][Aa][Bb][Ll][Ee][Dd].*/ OR data_win_eventdata_commandLine:/.*[Ss][Hh][Aa][Dd][Oo][Ww][Cc][Oo][Pp][Yy].*[Dd][Ee][Ll][Ee][Tt][Ee].*/)
+    pivot_on:
+    - host
+    window: 2h
+  - name: Other file-access audit activity by this account
+    query: (data_win_system_eventID:"4656" OR data_win_system_eventID:"4663" OR data_win_system_eventID:"4660") AND data_win_eventdata_accessMask:*
+    pivot_on:
+    - user
+    window: 4h

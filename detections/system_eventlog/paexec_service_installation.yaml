@@ -143,41 +143,58 @@ graylog:
   query: data_win_system_providerName:/[Ss][Ee][Rr][Vv][Ii][Cc][Ee] [Cc][Oo][Nn][Tt][Rr][Oo][Ll] [Mm][Aa][Nn][Aa][Gg][Ee][Rr]/ AND data_win_system_eventID:"7045" AND (data_win_eventdata_serviceName:/[Pp][Aa][Ee][Xx][Ee][Cc]-.*/ OR data_win_eventdata_imagePath:/[Cc]:\\[Ww][Ii][Nn][Dd][Oo][Ww][Ss]\\[Pp][Aa][Ee][Xx][Ee][Cc]-.*/)
 
 correlation:
-  # Authored by the correlation engine for review. Related CoPilot Searches to run
-  # around an alert from this rule, scoped to the same host/user/IP within the window.
+  # Authored per-rule (behaviour-researched) for the correlation engine. Related CoPilot
+  # Searches + telemetry pivots to run around an alert, scoped to its host/user/ip/domain.
   related_rules:
-    - id: 0255a820-e564-4e40-af2b-6ac61160335c
-      name: "A New Trust Was Created To A Domain"
-      reason: "next kill-chain tactic: Persistence"
-    - id: 35ba1d85-724d-42a3-889f-2e2362bcaf23
-      name: "AD Privileged Users or Groups Reconnaissance"
-      reason: "next kill-chain tactic: Discovery"
-    - id: 9eb99343-d336-4020-a3cd-67f3819e68ee
-      name: "Account Tampering - Suspicious Failed Logon Reasons"
-      reason: "next kill-chain tactic: Persistence"
-    - id: 17d619c1-e020-4347-957e-1d1207455c93
-      name: "Active Directory Replication from Non Machine Account"
-      reason: "next kill-chain tactic: Credential Access"
-    - id: 300bac00-e041-4ee2-9c36-e262656a6ecc
-      name: "Active Directory User Backdoors"
-      reason: "next kill-chain tactic: Persistence"
+  - id: f6451de4-df0a-41fa-8d72-b39f54a08db5
+    name: PUA - PAExec Default Named Pipe
+    reason: PAExec creates its default named pipe right after the PAExec-* service starts on the target; same tool, same remote execution session
+  - id: c4e49831-1496-40cf-8ce1-b53f942b02f9
+    name: Renamed PAExec Execution
+    reason: The PAExec-* service launches the PAExec binary on the host; a renamed copy confirms evasion and execution following installation
+  - id: 586a8d6b-6bfe-4ad9-9d78-888cd2fe50c3
+    name: Remote Service Activity via SVCCTL Named Pipe
+    reason: Remote service creation is done over the svcctl pipe via SMB; this is the network-side precursor of the 7045 event
+  - id: b210394c-ba12-4f89-9117-44a2464b9511
+    name: SMB Create Remote File Admin Share
+    reason: PAExec copies its executable to ADMIN$ (C:\Windows\PAExec-*) before the service is installed; the file drop precedes the 7045
+  - id: c4e92a97-a9ff-4392-9d2d-7a4c642768ca
+    name: Service Installed By Unusual Client - Security
+    reason: 'Same service installation seen from the logon side: identifies the remote client/account that installed the service'
+  - id: a27e5fa9-c35e-4e3d-b7e0-1ce2af66ad12
+    name: CSExec Service Installation
+    reason: Sibling PsExec-style tool; operators who use PAExec often also use CSExec or PsExec on other hosts in the same lateral movement sweep
+  - id: 6fb63b40-e02a-403e-9ffd-3bcc1d749442
+    name: Metasploit Or Impacket Service Installation Via SMB PsExec
+    reason: Alternative SMB PsExec-style service installation that co-occurs when the attacker tries multiple remote exec tools
+  - id: fdfcbd78-48f1-4a4b-90ac-d82241e368c5
+    name: PsExec Service Execution
+    reason: Related remote service execution behaviour; PAExec is a PsExec clone and the resulting service runs commands the same way
   window: 1h
   enrichment_searches:
-  # Rule-specific telemetry pivots the engine runs around an alert from this rule,
-  # scoped to the alert's host/user/IP within the window (behaviour-targeted, not a sweep).
-    - name: "Service execution on this host"
-      query: '((data_win_system_eventID:"7045") OR (data_win_system_eventID:"1" AND data_win_eventdata_image:/.*(\\[Ss][Cc]\.[Ee][Xx][Ee])/ AND (data_win_eventdata_commandLine:/.*[Cc][Rr][Ee][Aa][Tt][Ee].*/ OR data_win_eventdata_commandLine:/.*[Cc][Oo][Nn][Ff][Ii][Gg].*/ OR data_win_eventdata_commandLine:/.*[Bb][Ii][Nn][Pp][Aa][Tt][Hh].*/ OR data_win_eventdata_commandLine:/.*[Bb][Ii][Nn][Pp][Aa][Tt][Hh].*/)))'
-      pivot_on: [host]
-      window: 4h
-    - name: "Autostart persistence written on this host (Run keys, services, IFEO)"
-      query: '(data_win_system_eventID:"12" OR data_win_system_eventID:"13") AND (data_win_eventdata_targetObject:/.*[Cc][Uu][Rr][Rr][Ee][Nn][Tt][Vv][Ee][Rr][Ss][Ii][Oo][Nn]\\[Rr][Uu][Nn].*/ OR data_win_eventdata_targetObject:/.*[Cc][Uu][Rr][Rr][Ee][Nn][Tt][Vv][Ee][Rr][Ss][Ii][Oo][Nn]\\[Rr][Uu][Nn][Oo][Nn][Cc][Ee].*/ OR data_win_eventdata_targetObject:/.*[Cc][Uu][Rr][Rr][Ee][Nn][Tt][Cc][Oo][Nn][Tt][Rr][Oo][Ll][Ss][Ee][Tt]\\[Ss][Ee][Rr][Vv][Ii][Cc][Ee][Ss]\\.*/ OR data_win_eventdata_targetObject:/.*[Ii][Mm][Aa][Gg][Ee] [Ff][Ii][Ll][Ee] [Ee][Xx][Ee][Cc][Uu][Tt][Ii][Oo][Nn] [Oo][Pp][Tt][Ii][Oo][Nn][Ss]\\.*/ OR data_win_eventdata_targetObject:/.*[Ww][Ii][Nn][Ll][Oo][Gg][Oo][Nn]\\[Ss][Hh][Ee][Ll][Ll].*/ OR data_win_eventdata_targetObject:/.*[Ww][Ii][Nn][Ll][Oo][Gg][Oo][Nn]\\[Uu][Ss][Ee][Rr][Ii][Nn][Ii][Tt].*/ OR data_win_eventdata_targetObject:/.*[Cc][Uu][Rr][Rr][Ee][Nn][Tt][Vv][Ee][Rr][Ss][Ii][Oo][Nn]\\[Ee][Xx][Pp][Ll][Oo][Rr][Ee][Rr]\\[Rr][Uu][Nn].*/ OR data_win_eventdata_targetObject:/.*[Pp][Oo][Ll][Ii][Cc][Ii][Ee][Ss]\\[Ee][Xx][Pp][Ll][Oo][Rr][Ee][Rr]\\[Rr][Uu][Nn].*/ OR data_win_eventdata_targetObject:/.*[Cc][Uu][Rr][Rr][Ee][Nn][Tt][Vv][Ee][Rr][Ss][Ii][Oo][Nn]\\[Ww][Ii][Nn][Dd][Oo][Ww][Ss]\\[Ll][Oo][Aa][Dd].*/)'
-      pivot_on: [host]
-      window: 4h
-    - name: "Service installations on this host"
-      query: 'data_win_system_eventID:"7045"'
-      pivot_on: [host]
-      window: 6h
-    - name: "Follow-on LOLBin / signed-binary-proxy execution on this host"
-      query: 'data_win_system_eventID:"1" AND data_win_eventdata_image:/.*(\\[Rr][Uu][Nn][Dd][Ll][Ll]32\.[Ee][Xx][Ee]|\\[Rr][Ee][Gg][Ss][Vv][Rr]32\.[Ee][Xx][Ee]|\\[Mm][Ss][Hh][Tt][Aa]\.[Ee][Xx][Ee]|\\[Ii][Nn][Ss][Tt][Aa][Ll][Ll][Uu][Tt][Ii][Ll]\.[Ee][Xx][Ee]|\\[Rr][Ee][Gg][Aa][Ss][Mm]\.[Ee][Xx][Ee]|\\[Rr][Ee][Gg][Ss][Vv][Cc][Ss]\.[Ee][Xx][Ee]|\\[Mm][Ss][Bb][Uu][Ii][Ll][Dd]\.[Ee][Xx][Ee]|\\[Cc][Ee][Rr][Tt][Uu][Tt][Ii][Ll]\.[Ee][Xx][Ee]|\\[Bb][Ii][Tt][Ss][Aa][Dd][Mm][Ii][Nn]\.[Ee][Xx][Ee]|\\[Ww][Mm][Ii][Cc]\.[Ee][Xx][Ee]|\\[Cc][Mm][Ss][Tt][Pp]\.[Ee][Xx][Ee]|\\[Oo][Dd][Bb][Cc][Cc][Oo][Nn][Ff]\.[Ee][Xx][Ee]|\\[Ff][Oo][Rr][Ff][Ii][Ll][Ee][Ss]\.[Ee][Xx][Ee]|\\[Pp][Cc][Aa][Ll][Uu][Aa]\.[Ee][Xx][Ee]|\\[Mm][Aa][Vv][Ii][Nn][Jj][Ee][Cc][Tt]\.[Ee][Xx][Ee]|\\[Ss][Cc][Rr][Ii][Pp][Tt][Rr][Uu][Nn][Nn][Ee][Rr]\.[Ee][Xx][Ee])/'
-      pivot_on: [host]
-      window: 2h
+  # Behaviour-targeted hunts the engine runs around the alert (not a sweep).
+  - name: PAExec-spawned child processes (service parent or PAExec image)
+    query: data_win_system_eventID:"1" AND (data_win_eventdata_parentImage:/.*[Pp][Aa][Ee][Xx][Ee][Cc].*/ OR data_win_eventdata_image:/.*[Pp][Aa][Ee][Xx][Ee][Cc].*/)
+    pivot_on:
+    - host
+    window: 2h
+  - name: PAExec named pipe and file artefacts
+    query: (data_win_system_eventID:"17" OR data_win_system_eventID:"18") AND data_win_eventdata_pipeName:/.*[Pp][Aa][Ee][Xx][Ee][Cc].*/
+    pivot_on:
+    - host
+    window: 2h
+  - name: PAExec binary dropped to disk
+    query: data_win_system_eventID:"11" AND data_win_eventdata_targetFilename:/.*[Pp][Aa][Ee][Xx][Ee][Cc].*/
+    pivot_on:
+    - host
+    window: 2h
+  - name: Network (type 3) logons preceding remote service install
+    query: data_win_system_eventID:"4624" AND data_win_eventdata_logonType:"3" AND NOT data_win_eventdata_targetUserName:*$
+    pivot_on:
+    - host
+    window: 1h
+  - name: Admin share access (ADMIN$/C$/IPC$) from remote source
+    query: data_win_system_eventID:"5145" AND data_win_eventdata_shareName:/.*(ADMIN|C|IPC)\$.*/
+    pivot_on:
+    - host
+    window: 1h

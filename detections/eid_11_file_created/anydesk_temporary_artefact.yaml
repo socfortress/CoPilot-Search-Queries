@@ -148,44 +148,58 @@ graylog:
   query: data_win_system_eventID:"11" AND (data_win_eventdata_targetFilename:/.*\\[Aa][Pp][Pp][Dd][Aa][Tt][Aa]\\[Rr][Oo][Aa][Mm][Ii][Nn][Gg]\\[Aa][Nn][Yy][Dd][Ee][Ss][Kk]\\[Uu][Ss][Ee][Rr]\.[Cc][Oo][Nn][Ff].*/ OR data_win_eventdata_targetFilename:/.*\\[Aa][Pp][Pp][Dd][Aa][Tt][Aa]\\[Rr][Oo][Aa][Mm][Ii][Nn][Gg]\\[Aa][Nn][Yy][Dd][Ee][Ss][Kk]\\[Ss][Yy][Ss][Tt][Ee][Mm]\.[Cc][Oo][Nn][Ff].*/)
 
 correlation:
-  # Authored by the correlation engine for review. Related CoPilot Searches to run
-  # around an alert from this rule, scoped to the same host/user/IP within the window.
+  # Authored per-rule (behaviour-researched) for the correlation engine. Related CoPilot
+  # Searches + telemetry pivots to run around an alert, scoped to its host/user/ip/domain.
   related_rules:
-    - id: 75bf09fa-1dd7-4d18-9af9-dd9e492562eb
-      name: "ADSI-Cache File Creation By Uncommon Tool"
-      reason: "next kill-chain tactic: Command and Control"
-    - id: 639c9081-f482-47d3-a0bd-ddee3d4ecd76
-      name: "All Backups Deleted Via Wbadmin.EXE"
-      reason: "next kill-chain tactic: Impact"
-    - id: 7cff77e1-9663-46a3-8260-17f2e1aa9d0a
-      name: "AppX Package Installation Attempts Via AppInstaller.EXE"
-      reason: "next kill-chain tactic: Command and Control"
-    - id: 1f0f6176-6482-4027-b151-00071af39d7e
-      name: "Arbitrary File Download Via ConfigSecurityPolicy.EXE"
-      reason: "next kill-chain tactic: Exfiltration"
-    - id: eee00933-a761-4cd0-be70-c42fe91731e7
-      name: "Arbitrary File Download Via GfxDownloadWrapper.EXE"
-      reason: "next kill-chain tactic: Command and Control"
-    - id: f6c27ecc-d890-4452-80e6-2e274a10e097
-      name: "Axios NPM Compromise Indicators - Windows"
-      reason: "next kill-chain tactic: Command and Control"
-  window: 1h
+  - id: b52e84a3-029e-4529-b09b-71d19dd27e94
+    name: Remote Access Tool - AnyDesk Execution
+    reason: AnyDesk only writes user.conf/system.conf in AppData\Roaming after the client process has run, so process creation of AnyDesk.exe on the same host is the direct cause of this file artefact.
+  - id: 114e7f1c-f137-48c8-8f54-3088c24ce4b9
+    name: Remote Access Tool - AnyDesk Silent Installation
+    reason: Attackers deploy AnyDesk with --install --silent; the config files appear as a result, so silent install confirms scripted deployment rather than a user download.
+  - id: b1377339-fda6-477a-b455-ac0923f9ec2c
+    name: Remote Access Tool - AnyDesk Piped Password Via CLI
+    reason: Setting an unattended-access password via 'echo | anydesk --set-password' right after the config files are created is the step that gives the operator persistent hands-on access.
+  - id: 065b00ca-5d5c-4557-ac95-64a6d0b64d86
+    name: Remote Access Tool - Anydesk Execution From Suspicious Folder
+    reason: Portable AnyDesk run from Temp/Downloads/Public (the typical way it is dropped) is what generates the config artefacts, separating attacker use from sanctioned installs in Program Files.
+  - id: 530a6faa-ff3d-4022-b315-50828e77eef5
+    name: Anydesk Remote Access Software Service Installation
+    reason: AnyDesk installing as a Windows service after first config creation indicates it was set up for persistent unattended access that survives logoff and reboot.
+  - id: d58ba5c6-0ed7-4b9d-a433-6878379efda9
+    name: Remote Access Tool - AnyDesk Incoming Connection
+    reason: 'Follow-on: the remote operator actually connecting to the session on this host (port 7070 / relay) confirms the tool is in live use as a C2 channel.'
+  - id: 2d367498-5112-4ae5-a06a-96e7bc33a211
+    name: Suspicious Binary Writes Via AnyDesk
+    reason: Once connected, operators use AnyDesk file transfer to push tooling; executables written by the AnyDesk process on the same host show payload staging.
+  - id: 4d07b1f4-cb00-4470-b9f8-b0191d48ff52
+    name: DNS Query To Remote Access Software Domain From Non-Browser App
+    reason: AnyDesk resolving its relay/rendezvous domains from a non-browser process on the host corroborates an active client reaching the AnyDesk network.
+  window: 2h
   enrichment_searches:
-  # Rule-specific telemetry pivots the engine runs around an alert from this rule,
-  # scoped to the alert's host/user/IP within the window (behaviour-targeted, not a sweep).
-    - name: "Remote-access / RMM tooling on this host"
-      query: '((data_win_system_eventID:"1" AND data_win_eventdata_image:/.*(\\[Nn][Gg][Rr][Oo][Kk]\.[Ee][Xx][Ee]|\\[Pp][Ll][Ii][Nn][Kk]\.[Ee][Xx][Ee]|\\[Ss][Ss][Hh]\.[Ee][Xx][Ee]|\\[Ff][Rr][Pp][Cc]\.[Ee][Xx][Ee]|\\[Cc][Hh][Ii][Ss][Ee][Ll]\.[Ee][Xx][Ee]|\\[Cc][Ll][Oo][Uu][Dd][Ff][Ll][Aa][Rr][Ee][Dd]\.[Ee][Xx][Ee])/) OR (data_win_system_eventID:"3" AND data_win_eventdata_image:/.*(\\[Nn][Gg][Rr][Oo][Kk]\.[Ee][Xx][Ee]|\\[Pp][Ll][Ii][Nn][Kk]\.[Ee][Xx][Ee]|\\[Ss][Ss][Hh]\.[Ee][Xx][Ee]|\\[Ff][Rr][Pp][Cc]\.[Ee][Xx][Ee]|\\[Cc][Hh][Ii][Ss][Ee][Ll]\.[Ee][Xx][Ee]|\\[Cc][Ll][Oo][Uu][Dd][Ff][Ll][Aa][Rr][Ee][Dd]\.[Ee][Xx][Ee])/) OR ((data_win_eventdata_commandLine:/.*-[Rr] 127\.0\.0\.1.*/ OR data_win_eventdata_commandLine:/.*[Ss][Ss][Hh] -[Rr].*/ OR data_win_eventdata_commandLine:/.*[Pp][Oo][Rr][Tt][Ff][Ww][Dd].*/ OR data_win_eventdata_commandLine:/.*[Ss][Oo][Cc][Kk][Ss].*/)))'
-      pivot_on: [host]
-      window: 1h
-    - name: "Archive / staging & outbound-transfer tooling on this host"
-      query: '(((data_win_system_eventID:"1" AND data_win_eventdata_image:/.*(\\7[Zz]\.[Ee][Xx][Ee]|\\7[Zz][Aa]\.[Ee][Xx][Ee]|\\7[Zz][Rr]\.[Ee][Xx][Ee]|\\[Rr][Aa][Rr]\.[Ee][Xx][Ee]|\\[Ww][Ii][Nn][Rr][Aa][Rr]\.[Ee][Xx][Ee]|\\[Ww][Zz][Zz][Ii][Pp]\.[Ee][Xx][Ee]|\\[Mm][Aa][Kk][Ee][Cc][Aa][Bb]\.[Ee][Xx][Ee])/) OR (data_win_eventdata_commandLine:/.*[Cc][Oo][Mm][Pp][Rr][Ee][Ss][Ss]-[Aa][Rr][Cc][Hh][Ii][Vv][Ee].*/ OR data_win_eventdata_commandLine:/.*\.7[Zz].*/ OR data_win_eventdata_commandLine:/.*\.[Rr][Aa][Rr].*/ OR data_win_eventdata_commandLine:/.* -[Hh][Pp].*/)) OR (((data_win_system_eventID:"1" AND data_win_eventdata_image:/.*(\\[Rr][Cc][Ll][Oo][Nn][Ee]\.[Ee][Xx][Ee]|\\[Cc][Uu][Rr][Ll]\.[Ee][Xx][Ee]|\\[Ww][Gg][Ee][Tt]\.[Ee][Xx][Ee]|\\[Ww][Ii][Nn][Ss][Cc][Pp]\.[Ee][Xx][Ee]|\\[Pp][Ss][Cc][Pp]\.[Ee][Xx][Ee]|\\[Mm][Ee][Gg][Aa][Cc][Mm][Dd]\.[Ee][Xx][Ee]|\\[Mm][Ee][Gg][Aa][Ss][Yy][Nn][Cc]\.[Ee][Xx][Ee])/) OR ((data_win_eventdata_commandLine:/.*[Ii][Nn][Vv][Oo][Kk][Ee]-[Rr][Ee][Ss][Tt][Mm][Ee][Tt][Hh][Oo][Dd].*/ OR data_win_eventdata_commandLine:/.*[Ss][Tt][Aa][Rr][Tt]-[Bb][Ii][Tt][Ss][Tt][Rr][Aa][Nn][Ss][Ff][Ee][Rr].*/ OR data_win_eventdata_commandLine:/.*[Rr][Cc][Ll][Oo][Nn][Ee].*/ OR data_win_eventdata_commandLine:/.*[Tt][Rr][Aa][Nn][Ss][Ff][Ee][Rr]\.[Ss][Hh].*/ OR data_win_eventdata_commandLine:/.*[Aa][Nn][Oo][Nn][Ff][Ii][Ll][Ee][Ss].*/ OR data_win_eventdata_commandLine:/.*[Pp][Aa][Ss][Tt][Ee][Bb][Ii][Nn].*/ OR data_win_eventdata_commandLine:/.*[Mm][Ee][Gg][Aa]\.[Nn][Zz].*/ OR data_win_eventdata_commandLine:/.*-[Oo][Uu][Tt][Ff][Ii][Ll][Ee].*/ OR data_win_eventdata_commandLine:/.*[Uu][Pp][Ll][Oo][Aa][Dd][Ff][Ii][Ll][Ee].*/)))))'
-      pivot_on: [host]
-      window: 2h
-    - name: "Execution of programs from user-writable paths on this host"
-      query: 'data_win_system_eventID:"1" AND (data_win_eventdata_image:/.*\\[Uu][Ss][Ee][Rr][Ss]\\.*/ OR data_win_eventdata_image:/.*\\[Pp][Rr][Oo][Gg][Rr][Aa][Mm][Dd][Aa][Tt][Aa]\\.*/ OR data_win_eventdata_image:/.*\\[Ww][Ii][Nn][Dd][Oo][Ww][Ss]\\[Tt][Ee][Mm][Pp]\\.*/ OR data_win_eventdata_image:/.*\\[Aa][Pp][Pp][Dd][Aa][Tt][Aa]\\.*/ OR data_win_eventdata_image:/.*\\[Pp][Uu][Bb][Ll][Ii][Cc]\\.*/ OR data_win_eventdata_image:/.*\\\$[Rr][Ee][Cc][Yy][Cc][Ll][Ee].*/)'
-      pivot_on: [host]
-      window: 1h
-    - name: "Autostart persistence written on this host"
-      query: '(data_win_system_eventID:"12" OR data_win_system_eventID:"13") AND (data_win_eventdata_targetObject:/.*[Cc][Uu][Rr][Rr][Ee][Nn][Tt][Vv][Ee][Rr][Ss][Ii][Oo][Nn]\\[Rr][Uu][Nn].*/ OR data_win_eventdata_targetObject:/.*[Cc][Uu][Rr][Rr][Ee][Nn][Tt][Vv][Ee][Rr][Ss][Ii][Oo][Nn]\\[Rr][Uu][Nn][Oo][Nn][Cc][Ee].*/ OR data_win_eventdata_targetObject:/.*[Cc][Uu][Rr][Rr][Ee][Nn][Tt][Cc][Oo][Nn][Tt][Rr][Oo][Ll][Ss][Ee][Tt]\\[Ss][Ee][Rr][Vv][Ii][Cc][Ee][Ss]\\.*/ OR data_win_eventdata_targetObject:/.*[Ii][Mm][Aa][Gg][Ee] [Ff][Ii][Ll][Ee] [Ee][Xx][Ee][Cc][Uu][Tt][Ii][Oo][Nn] [Oo][Pp][Tt][Ii][Oo][Nn][Ss]\\.*/ OR data_win_eventdata_targetObject:/.*[Ww][Ii][Nn][Ll][Oo][Gg][Oo][Nn]\\[Ss][Hh][Ee][Ll][Ll].*/ OR data_win_eventdata_targetObject:/.*[Ww][Ii][Nn][Ll][Oo][Gg][Oo][Nn]\\[Uu][Ss][Ee][Rr][Ii][Nn][Ii][Tt].*/ OR data_win_eventdata_targetObject:/.*[Cc][Uu][Rr][Rr][Ee][Nn][Tt][Vv][Ee][Rr][Ss][Ii][Oo][Nn]\\[Ee][Xx][Pp][Ll][Oo][Rr][Ee][Rr]\\[Rr][Uu][Nn].*/ OR data_win_eventdata_targetObject:/.*[Pp][Oo][Ll][Ii][Cc][Ii][Ee][Ss]\\[Ee][Xx][Pp][Ll][Oo][Rr][Ee][Rr]\\[Rr][Uu][Nn].*/ OR data_win_eventdata_targetObject:/.*[Cc][Uu][Rr][Rr][Ee][Nn][Tt][Vv][Ee][Rr][Ss][Ii][Oo][Nn]\\[Ww][Ii][Nn][Dd][Oo][Ww][Ss]\\[Ll][Oo][Aa][Dd].*/)'
-      pivot_on: [host]
-      window: 2h
+  # Behaviour-targeted hunts the engine runs around the alert (not a sweep).
+  - name: AnyDesk process launched with install, password or unattended-access arguments
+    query: data_win_system_eventID:"1" AND data_win_eventdata_image:/.*\\[Aa][Nn][Yy][Dd][Ee][Ss][Kk].*/ AND (data_win_eventdata_commandLine:/.*--install.*/ OR data_win_eventdata_commandLine:/.*--silent.*/ OR data_win_eventdata_commandLine:/.*--set-password.*/ OR data_win_eventdata_commandLine:/.*--start-with-win.*/ OR data_win_eventdata_commandLine:/.*--remove-first.*/)
+    pivot_on:
+    - host
+    window: 2h
+  - name: AnyDesk network connections and relay DNS lookups
+    query: (data_win_system_eventID:"3" AND data_win_eventdata_image:/.*\\[Aa][Nn][Yy][Dd][Ee][Ss][Kk].*/) OR (data_win_system_eventID:"22" AND (data_win_eventdata_queryName:*anydesk.com* OR data_win_eventdata_queryName:*net.anydesk.com* OR data_win_eventdata_queryName:*anydesk.net*))
+    pivot_on:
+    - host
+    window: 2h
+  - name: Files dropped by AnyDesk process (file transfer staging)
+    query: data_win_system_eventID:"11" AND data_win_eventdata_image:/.*\\[Aa][Nn][Yy][Dd][Ee][Ss][Kk].*/ AND NOT data_win_eventdata_targetFilename:/.*\\[Aa][Nn][Yy][Dd][Ee][Ss][Kk]\\.*/
+    pivot_on:
+    - host
+    window: 4h
+  - name: AnyDesk persistence via service, Run key or scheduled task
+    query: ((data_win_system_eventID:"12" OR data_win_system_eventID:"13") AND data_win_eventdata_targetObject:/.*[Aa][Nn][Yy][Dd][Ee][Ss][Kk].*/) OR (data_win_system_eventID:"1" AND data_win_eventdata_commandLine:/.*[Aa][Nn][Yy][Dd][Ee][Ss][Kk].*/ AND (data_win_eventdata_commandLine:/.*[Ss][Cc][Hh][Tt][Aa][Ss][Kk][Ss].*/ OR data_win_eventdata_commandLine:/.*[Ss][Cc]\.[Ee][Xx][Ee].*/ OR data_win_eventdata_commandLine:/.*[Rr][Ee][Gg] [Aa][Dd][Dd].*/))
+    pivot_on:
+    - host
+    window: 4h
+  - name: Hands-on-keyboard discovery or account creation spawned under AnyDesk
+    query: data_win_system_eventID:"1" AND data_win_eventdata_parentImage:/.*\\[Aa][Nn][Yy][Dd][Ee][Ss][Kk].*/ AND (data_win_eventdata_image:/.*\\(cmd|powershell|pwsh|whoami|net|net1|nltest|ipconfig|systeminfo|reg|wmic)\.[Ee][Xx][Ee]/ OR data_win_eventdata_commandLine:/.*[Nn][Ee][Tt]1? [Uu][Ss][Ee][Rr].*/)
+    pivot_on:
+    - host
+    window: 4h

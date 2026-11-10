@@ -158,23 +158,55 @@ graylog:
   query: data_win_system_eventID:"11" AND (data_win_eventdata_targetFilename:/.*[Ww][Ss][Mm][Pp][Tt][Yy]\.[Xx][Ss][Ll]/ OR data_win_eventdata_targetFilename:/.*[Ww][Ss][Mm][Tt][Xx][Tt]\.[Xx][Ss][Ll]/) AND _exists_:data_win_eventdata_targetFilename AND NOT (data_win_eventdata_targetFilename:/[Cc]:\\[Ww][Ii][Nn][Dd][Oo][Ww][Ss]\\[Ss][Yy][Ss][Tt][Ee][Mm]32\\.*/ OR data_win_eventdata_targetFilename:/[Cc]:\\[Ww][Ii][Nn][Dd][Oo][Ww][Ss]\\[Ss][Yy][Ss][Ww][Oo][Ww]64\\.*/)
 
 correlation:
-  # Authored by the correlation engine for review.
+  # Authored per-rule (behaviour-researched) for the correlation engine. Related CoPilot
+  # Searches + telemetry pivots to run around an alert, scoped to its host/user/ip/domain.
+  related_rules:
+  - id: 074e0ded-6ced-4ebd-8b4d-53f55908119d
+    name: AWL Bypass with Winrm.vbs and Malicious WsmPty.xsl/WsmTxt.xsl
+    reason: 'Process-creation twin of this file-drop: the same attacker-controlled WsmPty/WsmTxt.xsl staging is followed by a copied cscript running winrm.vbs, which executes the XSL payload.'
+  - id: 9df0dd3a-1a5c-47e3-a2bc-30ed177646a0
+    name: Remote Code Execute via Winrm.vbs
+    reason: winrm.vbs with format:pretty/text is the execution trigger that loads the dropped XSL; it confirms the staged file was actually used for code execution.
+  - id: 5cc2cda8-f261-4d88-a2de-e9e193c86716
+    name: Suspicious Processes Spawned by WinRM
+    reason: If the malicious XSL payload ran, winrm/cscript spawns unexpected child processes; this shows the post-bypass payload.
+  - id: b6676963-0353-4f88-90f5-36c20d443c6a
+    name: Cscript/Wscript Potentially Suspicious Child Process
+    reason: The bypass relies on a (renamed) cscript.exe host; suspicious children of it reveal what the XSL/script launched.
+  - id: 05c36dd6-79d6-4a9a-97da-3db20298ab2d
+    name: XSL Script Execution Via WMIC.EXE
+    reason: 'Sibling XSL-based AWL bypass (T1220): an operator dropping malicious XSL for winrm.vbs often also tries wmic /format:XSL.'
+  - id: 9e50a8b3-dd05-4eb8-9153-bdb6b79d50b0
+    name: Msxsl.EXE Execution
+    reason: Alternative XSL script-execution LOLBin in the same family of stylesheet-based application-whitelisting bypasses.
+  - id: cea72823-df4d-4567-950c-0b579eaf0846
+    name: Potential Dropper Script Execution Via WScript/CScript/MSHTA
+    reason: The dropped XSL/script content originates from a dropper; script-host execution of staged files is the likely preceding or concurrent step.
+  window: 1h
   enrichment_searches:
-  # Rule-specific telemetry pivots the engine runs around an alert from this rule,
-  # scoped to the alert's host/user/IP within the window (behaviour-targeted, not a sweep).
-    - name: "Autostart persistence written on this host (Run keys, services, IFEO)"
-      query: '(data_win_system_eventID:"12" OR data_win_system_eventID:"13") AND (data_win_eventdata_targetObject:/.*[Cc][Uu][Rr][Rr][Ee][Nn][Tt][Vv][Ee][Rr][Ss][Ii][Oo][Nn]\\[Rr][Uu][Nn].*/ OR data_win_eventdata_targetObject:/.*[Cc][Uu][Rr][Rr][Ee][Nn][Tt][Vv][Ee][Rr][Ss][Ii][Oo][Nn]\\[Rr][Uu][Nn][Oo][Nn][Cc][Ee].*/ OR data_win_eventdata_targetObject:/.*[Cc][Uu][Rr][Rr][Ee][Nn][Tt][Cc][Oo][Nn][Tt][Rr][Oo][Ll][Ss][Ee][Tt]\\[Ss][Ee][Rr][Vv][Ii][Cc][Ee][Ss]\\.*/ OR data_win_eventdata_targetObject:/.*[Ii][Mm][Aa][Gg][Ee] [Ff][Ii][Ll][Ee] [Ee][Xx][Ee][Cc][Uu][Tt][Ii][Oo][Nn] [Oo][Pp][Tt][Ii][Oo][Nn][Ss]\\.*/ OR data_win_eventdata_targetObject:/.*[Ww][Ii][Nn][Ll][Oo][Gg][Oo][Nn]\\[Ss][Hh][Ee][Ll][Ll].*/ OR data_win_eventdata_targetObject:/.*[Ww][Ii][Nn][Ll][Oo][Gg][Oo][Nn]\\[Uu][Ss][Ee][Rr][Ii][Nn][Ii][Tt].*/ OR data_win_eventdata_targetObject:/.*[Cc][Uu][Rr][Rr][Ee][Nn][Tt][Vv][Ee][Rr][Ss][Ii][Oo][Nn]\\[Ee][Xx][Pp][Ll][Oo][Rr][Ee][Rr]\\[Rr][Uu][Nn].*/ OR data_win_eventdata_targetObject:/.*[Pp][Oo][Ll][Ii][Cc][Ii][Ee][Ss]\\[Ee][Xx][Pp][Ll][Oo][Rr][Ee][Rr]\\[Rr][Uu][Nn].*/ OR data_win_eventdata_targetObject:/.*[Cc][Uu][Rr][Rr][Ee][Nn][Tt][Vv][Ee][Rr][Ss][Ii][Oo][Nn]\\[Ww][Ii][Nn][Dd][Oo][Ww][Ss]\\[Ll][Oo][Aa][Dd].*/)'
-      pivot_on: [host]
-      window: 4h
-    - name: "Execution of programs from user-writable paths on this host"
-      query: 'data_win_system_eventID:"1" AND (data_win_eventdata_image:/.*\\[Uu][Ss][Ee][Rr][Ss]\\.*/ OR data_win_eventdata_image:/.*\\[Pp][Rr][Oo][Gg][Rr][Aa][Mm][Dd][Aa][Tt][Aa]\\.*/ OR data_win_eventdata_image:/.*\\[Ww][Ii][Nn][Dd][Oo][Ww][Ss]\\[Tt][Ee][Mm][Pp]\\.*/ OR data_win_eventdata_image:/.*\\[Aa][Pp][Pp][Dd][Aa][Tt][Aa]\\.*/ OR data_win_eventdata_image:/.*\\[Pp][Uu][Bb][Ll][Ii][Cc]\\.*/ OR data_win_eventdata_image:/.*\\\$[Rr][Ee][Cc][Yy][Cc][Ll][Ee].*/)'
-      pivot_on: [host]
-      window: 1h
-    - name: "Autostart persistence written on this host"
-      query: '(data_win_system_eventID:"12" OR data_win_system_eventID:"13") AND (data_win_eventdata_targetObject:/.*[Cc][Uu][Rr][Rr][Ee][Nn][Tt][Vv][Ee][Rr][Ss][Ii][Oo][Nn]\\[Rr][Uu][Nn].*/ OR data_win_eventdata_targetObject:/.*[Cc][Uu][Rr][Rr][Ee][Nn][Tt][Vv][Ee][Rr][Ss][Ii][Oo][Nn]\\[Rr][Uu][Nn][Oo][Nn][Cc][Ee].*/ OR data_win_eventdata_targetObject:/.*[Cc][Uu][Rr][Rr][Ee][Nn][Tt][Cc][Oo][Nn][Tt][Rr][Oo][Ll][Ss][Ee][Tt]\\[Ss][Ee][Rr][Vv][Ii][Cc][Ee][Ss]\\.*/ OR data_win_eventdata_targetObject:/.*[Ii][Mm][Aa][Gg][Ee] [Ff][Ii][Ll][Ee] [Ee][Xx][Ee][Cc][Uu][Tt][Ii][Oo][Nn] [Oo][Pp][Tt][Ii][Oo][Nn][Ss]\\.*/ OR data_win_eventdata_targetObject:/.*[Ww][Ii][Nn][Ll][Oo][Gg][Oo][Nn]\\[Ss][Hh][Ee][Ll][Ll].*/ OR data_win_eventdata_targetObject:/.*[Ww][Ii][Nn][Ll][Oo][Gg][Oo][Nn]\\[Uu][Ss][Ee][Rr][Ii][Nn][Ii][Tt].*/ OR data_win_eventdata_targetObject:/.*[Cc][Uu][Rr][Rr][Ee][Nn][Tt][Vv][Ee][Rr][Ss][Ii][Oo][Nn]\\[Ee][Xx][Pp][Ll][Oo][Rr][Ee][Rr]\\[Rr][Uu][Nn].*/ OR data_win_eventdata_targetObject:/.*[Pp][Oo][Ll][Ii][Cc][Ii][Ee][Ss]\\[Ee][Xx][Pp][Ll][Oo][Rr][Ee][Rr]\\[Rr][Uu][Nn].*/ OR data_win_eventdata_targetObject:/.*[Cc][Uu][Rr][Rr][Ee][Nn][Tt][Vv][Ee][Rr][Ss][Ii][Oo][Nn]\\[Ww][Ii][Nn][Dd][Oo][Ww][Ss]\\[Ll][Oo][Aa][Dd].*/)'
-      pivot_on: [host]
-      window: 2h
-    - name: "Follow-on LOLBin / signed-binary-proxy execution on this host"
-      query: 'data_win_system_eventID:"1" AND data_win_eventdata_image:/.*(\\[Rr][Uu][Nn][Dd][Ll][Ll]32\.[Ee][Xx][Ee]|\\[Rr][Ee][Gg][Ss][Vv][Rr]32\.[Ee][Xx][Ee]|\\[Mm][Ss][Hh][Tt][Aa]\.[Ee][Xx][Ee]|\\[Ii][Nn][Ss][Tt][Aa][Ll][Ll][Uu][Tt][Ii][Ll]\.[Ee][Xx][Ee]|\\[Rr][Ee][Gg][Aa][Ss][Mm]\.[Ee][Xx][Ee]|\\[Rr][Ee][Gg][Ss][Vv][Cc][Ss]\.[Ee][Xx][Ee]|\\[Mm][Ss][Bb][Uu][Ii][Ll][Dd]\.[Ee][Xx][Ee]|\\[Cc][Ee][Rr][Tt][Uu][Tt][Ii][Ll]\.[Ee][Xx][Ee]|\\[Bb][Ii][Tt][Ss][Aa][Dd][Mm][Ii][Nn]\.[Ee][Xx][Ee]|\\[Ww][Mm][Ii][Cc]\.[Ee][Xx][Ee]|\\[Cc][Mm][Ss][Tt][Pp]\.[Ee][Xx][Ee]|\\[Oo][Dd][Bb][Cc][Cc][Oo][Nn][Ff]\.[Ee][Xx][Ee]|\\[Ff][Oo][Rr][Ff][Ii][Ll][Ee][Ss]\.[Ee][Xx][Ee]|\\[Pp][Cc][Aa][Ll][Uu][Aa]\.[Ee][Xx][Ee]|\\[Mm][Aa][Vv][Ii][Nn][Jj][Ee][Cc][Tt]\.[Ee][Xx][Ee]|\\[Ss][Cc][Rr][Ii][Pp][Tt][Rr][Uu][Nn][Nn][Ee][Rr]\.[Ee][Xx][Ee])/'
-      pivot_on: [host]
-      window: 1h
+  # Behaviour-targeted hunts the engine runs around the alert (not a sweep).
+  - name: winrm.vbs run via cscript/wscript (incl. renamed copies) with format option
+    query: data_win_system_eventID:"1" AND data_win_eventdata_commandLine:/.*[Ww][Ii][Nn][Rr][Mm]\.[Vv][Bb][Ss].*/
+    pivot_on:
+    - host
+    window: 1h
+  - name: cscript.exe copied or executed from non-System32 location
+    query: data_win_system_eventID:"1" AND data_win_eventdata_originalFileName:"cscript.exe" AND NOT data_win_eventdata_image:/[Cc]:\\[Ww][Ii][Nn][Dd][Oo][Ww][Ss]\\(([Ss][Yy][Ss][Tt][Ee][Mm]32)|([Ss][Yy][Ss][Ww][Oo][Ww]64))\\.*/
+    pivot_on:
+    - host
+    window: 1h
+  - name: Other file drops in user-writable paths by the same dropper (scripts, XSL, copied binaries)
+    query: data_win_system_eventID:"11" AND (data_win_eventdata_targetFilename:/.*\.([Xx][Ss][Ll]|[Vv][Bb][Ss]|[Vv][Bb][Ee]|[Jj][Ss]|[Ww][Ss][Ff]|[Ee][Xx][Ee]|[Dd][Ll][Ll])/) AND (data_win_eventdata_targetFilename:/.*\\([Uu][Ss][Ee][Rr][Ss]|[Pp][Rr][Oo][Gg][Rr][Aa][Mm][Dd][Aa][Tt][Aa]|[Ww][Ii][Nn][Dd][Oo][Ww][Ss]\\[Tt][Ee][Mm][Pp])\\.*/)
+    pivot_on:
+    - host
+    window: 2h
+  - name: Network connections by script hosts or winrm-driven processes (C2 / payload fetch)
+    query: data_win_system_eventID:"3" AND (data_win_eventdata_image:/.*\\([Cc][Ss][Cc][Rr][Ii][Pp][Tt]|[Ww][Ss][Cc][Rr][Ii][Pp][Tt])\.[Ee][Xx][Ee]/ OR data_win_eventdata_image:/.*\\[Ww][Mm][Ii][Cc]\.[Ee][Xx][Ee]/)
+    pivot_on:
+    - host
+    window: 2h
+  - name: 'Suspicious children of script hosts: shells, LOLBins, download tools'
+    query: data_win_system_eventID:"1" AND data_win_eventdata_parentImage:/.*\\([Cc][Ss][Cc][Rr][Ii][Pp][Tt]|[Ww][Ss][Cc][Rr][Ii][Pp][Tt])\.[Ee][Xx][Ee]/ AND data_win_eventdata_image:/.*\\([Cc][Mm][Dd]|[Pp][Oo][Ww][Ee][Rr][Ss][Hh][Ee][Ll][Ll]|[Pp][Ww][Ss][Hh]|[Mm][Ss][Hh][Tt][Aa]|[Rr][Uu][Nn][Dd][Ll][Ll]32|[Rr][Ee][Gg][Ss][Vv][Rr]32|[Cc][Ee][Rr][Tt][Uu][Tt][Ii][Ll]|[Bb][Ii][Tt][Ss][Aa][Dd][Mm][Ii][Nn])\.[Ee][Xx][Ee]/
+    pivot_on:
+    - host
+    window: 1h

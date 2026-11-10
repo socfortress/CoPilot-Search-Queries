@@ -179,35 +179,58 @@ graylog:
   query: data_win_system_eventID:"5145" AND (data_win_eventdata_relativeTargetName:/.*\.[Bb][Aa][Kk]/ OR data_win_eventdata_relativeTargetName:/.*\.[Dd][Mm][Pp]/ OR data_win_eventdata_relativeTargetName:/.*\.[Ee][Dd][Bb]/ OR data_win_eventdata_relativeTargetName:/.*\.[Kk][Ii][Rr][Bb][Ii]/ OR data_win_eventdata_relativeTargetName:/.*\.[Mm][Ss][Gg]/ OR data_win_eventdata_relativeTargetName:/.*\.[Nn][Ss][Ff]/ OR data_win_eventdata_relativeTargetName:/.*\.[Nn][Ss][Tt]/ OR data_win_eventdata_relativeTargetName:/.*\.[Oo][Aa][Bb]/ OR data_win_eventdata_relativeTargetName:/.*\.[Oo][Ss][Tt]/ OR data_win_eventdata_relativeTargetName:/.*\.[Pp][Ss][Tt]/ OR data_win_eventdata_relativeTargetName:/.*\.[Rr][Dd][Pp]/)
 
 correlation:
-  # Authored by the correlation engine for review. Related CoPilot Searches to run
-  # around an alert from this rule, scoped to the same host/user/IP within the window.
+  # Authored per-rule (behaviour-researched) for the correlation engine. Related CoPilot
+  # Searches + telemetry pivots to run around an alert, scoped to its host/user/ip/domain.
   related_rules:
-    - id: 87261fb2-69d0-42fe-b9de-88c6b5f65a43
-      name: "Atera Agent Installation"
-      reason: "next kill-chain tactic: Command and Control"
-    - id: 48d91a3a-2363-43ba-a456-ca71ac3da5c2
-      name: "Audit CVE Event"
-      reason: "next kill-chain tactic: Impact"
-    - id: eee8311f-a752-44f0-bf2f-6b007db16300
-      name: "BlueSky Ransomware Artefacts"
-      reason: "next kill-chain tactic: Impact"
-  window: 1h
+  - id: 910ab938-668b-401b-b08c-b596e80fdca5
+    name: Transferring Files with Credential Data via Network Shares
+    reason: Same 5145 share-access telemetry, targeting SAM/NTDS/SYSTEM hive files; sensitive-extension pulls (.dmp/.edb/.kirbi) from a share often accompany credential file theft.
+  - id: b210394c-ba12-4f89-9117-44a2464b9511
+    name: SMB Create Remote File Admin Share
+    reason: Writes to ADMIN$/C$ by the same account indicate lateral tooling staged alongside the reading of sensitive files over SMB.
+  - id: 941e5c45-cda7-4864-8cea-bbb7458d194a
+    name: Suspicious Remote Logon with Explicit Credentials
+    reason: The remote share access needs a network logon; explicit-credential logons reveal the stolen/alternate identity used to reach the share.
+  - id: 044ba588-dff4-4918-9808-3f95e8160606
+    name: Copy .DMP/.DUMP Files From Remote Share Via Cmd.EXE
+    reason: 'Process-level view of the same .dmp collection from a share: the command that actually moved the memory dump.'
+  - id: 855bc8b5-2ae8-402e-a9ed-b889e6df1900
+    name: Copy From Or To Admin Share Or Sysvol Folder
+    reason: Command-line copy to/from admin shares is the usual mechanism behind the 5145 reads of .pst/.bak/.edb files.
+  - id: 889719ef-dd62-43df-86c3-768fb08dc7c0
+    name: Suspicious PowerShell Mailbox Export to Share
+    reason: Mailbox export to a share produces .pst files, the exact extension this rule flags; shows the staging step of email collection.
+  - id: 9fbf5927-5261-4284-a71d-f681029ea574
+    name: Compress Data and Lock With Password for Exfiltration With 7-ZIP
+    reason: Collected .pst/.bak/.dmp files are typically archived with a password before exfiltration; follow-on staging.
+  - id: 32e0baea-b3f1-11eb-a2ce-acde48001122
+    name: Detect RClone Command-Line Usage
+    reason: Rclone is the common exfiltration tool used after bulk collection of mail stores and backups from shares.
+  window: 2h
   enrichment_searches:
-  # Rule-specific telemetry pivots the engine runs around an alert from this rule,
-  # scoped to the alert's host/user/IP within the window (behaviour-targeted, not a sweep).
-    - name: "Archive / staging & outbound-transfer tooling on this host"
-      query: '(((data_win_system_eventID:"1" AND data_win_eventdata_image:/.*(\\7[Zz]\.[Ee][Xx][Ee]|\\7[Zz][Aa]\.[Ee][Xx][Ee]|\\7[Zz][Rr]\.[Ee][Xx][Ee]|\\[Rr][Aa][Rr]\.[Ee][Xx][Ee]|\\[Ww][Ii][Nn][Rr][Aa][Rr]\.[Ee][Xx][Ee]|\\[Ww][Zz][Zz][Ii][Pp]\.[Ee][Xx][Ee]|\\[Mm][Aa][Kk][Ee][Cc][Aa][Bb]\.[Ee][Xx][Ee])/) OR (data_win_eventdata_commandLine:/.*[Cc][Oo][Mm][Pp][Rr][Ee][Ss][Ss]-[Aa][Rr][Cc][Hh][Ii][Vv][Ee].*/ OR data_win_eventdata_commandLine:/.*\.7[Zz].*/ OR data_win_eventdata_commandLine:/.*\.[Rr][Aa][Rr].*/ OR data_win_eventdata_commandLine:/.* -[Hh][Pp].*/)) OR (((data_win_system_eventID:"1" AND data_win_eventdata_image:/.*(\\[Rr][Cc][Ll][Oo][Nn][Ee]\.[Ee][Xx][Ee]|\\[Cc][Uu][Rr][Ll]\.[Ee][Xx][Ee]|\\[Ww][Gg][Ee][Tt]\.[Ee][Xx][Ee]|\\[Ww][Ii][Nn][Ss][Cc][Pp]\.[Ee][Xx][Ee]|\\[Pp][Ss][Cc][Pp]\.[Ee][Xx][Ee]|\\[Mm][Ee][Gg][Aa][Cc][Mm][Dd]\.[Ee][Xx][Ee]|\\[Mm][Ee][Gg][Aa][Ss][Yy][Nn][Cc]\.[Ee][Xx][Ee])/) OR ((data_win_eventdata_commandLine:/.*[Ii][Nn][Vv][Oo][Kk][Ee]-[Rr][Ee][Ss][Tt][Mm][Ee][Tt][Hh][Oo][Dd].*/ OR data_win_eventdata_commandLine:/.*[Ss][Tt][Aa][Rr][Tt]-[Bb][Ii][Tt][Ss][Tt][Rr][Aa][Nn][Ss][Ff][Ee][Rr].*/ OR data_win_eventdata_commandLine:/.*[Rr][Cc][Ll][Oo][Nn][Ee].*/ OR data_win_eventdata_commandLine:/.*[Tt][Rr][Aa][Nn][Ss][Ff][Ee][Rr]\.[Ss][Hh].*/ OR data_win_eventdata_commandLine:/.*[Aa][Nn][Oo][Nn][Ff][Ii][Ll][Ee][Ss].*/ OR data_win_eventdata_commandLine:/.*[Pp][Aa][Ss][Tt][Ee][Bb][Ii][Nn].*/ OR data_win_eventdata_commandLine:/.*[Mm][Ee][Gg][Aa]\.[Nn][Zz].*/ OR data_win_eventdata_commandLine:/.*-[Oo][Uu][Tt][Ff][Ii][Ll][Ee].*/ OR data_win_eventdata_commandLine:/.*[Uu][Pp][Ll][Oo][Aa][Dd][Ff][Ii][Ll][Ee].*/)))))'
-      pivot_on: [host]
-      window: 2h
-    - name: "This account's logon activity across hosts"
-      query: '(data_win_system_eventID:"4624" OR data_win_system_eventID:"4625")'
-      pivot_on: [user]
-      window: 6h
-    - name: "Account / group / privilege changes involving this account"
-      query: '(data_win_system_eventID:"4720" OR data_win_system_eventID:"4722" OR data_win_system_eventID:"4724" OR data_win_system_eventID:"4728" OR data_win_system_eventID:"4732" OR data_win_system_eventID:"4756" OR data_win_system_eventID:"4672")'
-      pivot_on: [user]
-      window: 6h
-    - name: "Archive / staging tooling executed on this host"
-      query: '(data_win_system_eventID:"1" AND data_win_eventdata_image:/.*(\\7[Zz]\.[Ee][Xx][Ee]|\\7[Zz][Aa]\.[Ee][Xx][Ee]|\\7[Zz][Rr]\.[Ee][Xx][Ee]|\\[Rr][Aa][Rr]\.[Ee][Xx][Ee]|\\[Ww][Ii][Nn][Rr][Aa][Rr]\.[Ee][Xx][Ee]|\\[Ww][Zz][Zz][Ii][Pp]\.[Ee][Xx][Ee]|\\[Mm][Aa][Kk][Ee][Cc][Aa][Bb]\.[Ee][Xx][Ee])/) OR (data_win_eventdata_commandLine:/.*[Cc][Oo][Mm][Pp][Rr][Ee][Ss][Ss]-[Aa][Rr][Cc][Hh][Ii][Vv][Ee].*/ OR data_win_eventdata_commandLine:/.*\.7[Zz].*/ OR data_win_eventdata_commandLine:/.*\.[Rr][Aa][Rr].*/ OR data_win_eventdata_commandLine:/.* -[Hh][Pp].*/)'
-      pivot_on: [host]
-      window: 2h
+  # Behaviour-targeted hunts the engine runs around the alert (not a sweep).
+  - name: All SMB share file access by this account (5145)
+    query: data_win_system_eventID:"5145" AND NOT data_win_eventdata_shareName:/.*IPC.*/
+    pivot_on:
+    - user
+    window: 6h
+  - name: Network logons to this host (type 3) and failures
+    query: (data_win_system_eventID:"4624" AND data_win_eventdata_logonType:"3") OR data_win_system_eventID:"4625" OR data_win_system_eventID:"4648"
+    pivot_on:
+    - host
+    window: 2h
+  - name: Archive and compression tooling executed on this host
+    query: data_win_system_eventID:"1" AND (data_win_eventdata_image:/.*\\(7z|7za|rar|winrar|makecab)\.[Ee][Xx][Ee]/ OR data_win_eventdata_commandLine:/.*([Cc]ompress-[Aa]rchive|\.7z|\.rar|\.zip).*/)
+    pivot_on:
+    - host
+    window: 2h
+  - name: Exfil tools and uploads from this host
+    query: data_win_system_eventID:"1" AND (data_win_eventdata_image:/.*\\([Rr]clone|[Ww]inscp|[Mm]ega[Cc]md|[Cc]url)\.[Ee][Xx][Ee]/ OR data_win_eventdata_commandLine:/.*([Rr]clone|[Ii]nvoke-[Rr]est[Mm]ethod|[Ss]tart-[Bb]its[Tt]ransfer|[Mm]ega\.nz|[Aa]nonfiles).*/)
+    pivot_on:
+    - host
+    window: 4h
+  - name: Sensitive-extension files created or copied on this host
+    query: data_win_system_eventID:"11" AND data_win_eventdata_targetFilename:/.*\.([Pp][Ss][Tt]|[Oo][Ss][Tt]|[Dd][Mm][Pp]|[Ee][Dd][Bb]|[Kk][Ii][Rr][Bb][Ii]|[Bb][Aa][Kk])/
+    pivot_on:
+    - host
+    window: 2h

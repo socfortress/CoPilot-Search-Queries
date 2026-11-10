@@ -154,19 +154,40 @@ graylog:
   query: data_win_system_eventID:"1" AND (data_win_eventdata_originalFileName:/[Mm][Ss][Tt][Ee][Aa][Mm][Ss]\.[Ee][Xx][Ee]/ OR data_win_eventdata_originalFileName:/[Tt][Ee][Aa][Mm][Ss]\.[Ee][Xx][Ee]/) AND _exists_:data_win_eventdata_image AND NOT (data_win_eventdata_image:/.*\\[Mm][Ss][Tt][Ee][Aa][Mm][Ss]\.[Ee][Xx][Ee]/ OR data_win_eventdata_image:/.*\\[Tt][Ee][Aa][Mm][Ss]\.[Ee][Xx][Ee]/)
 
 correlation:
-  # Authored by the correlation engine for review.
+  # Authored per-rule (behaviour-researched) for the correlation engine. Related CoPilot
+  # Searches + telemetry pivots to run around an alert, scoped to its host/user/ip/domain.
+  related_rules:
+  - id: 0ba1da6d-b6ce-4366-828c-18826c9de23e
+    name: Potential Defense Evasion Via Rename Of Highly Relevant Binaries
+    reason: Same masquerade-by-rename tradecraft
+  - id: 36480ae1-a1cb-4eaa-a0d6-29801d7e9142
+    name: Potential Defense Evasion Via Binary Rename
+    reason: Generic rename mismatch seen on other binaries
+  - id: d2eb17db-1d39-41dc-b57f-301f6512fa75
+    name: Potentially Suspicious Command Targeting Teams Sensitive Files
+    reason: Teams token/cookie theft; a renamed Teams binary is a known cover for it
+  - id: 0b0cd537-fc77-4e6e-a973-e53495c1083d
+    name: Renamed Office Binary Execution
+    reason: Sibling trusted-app masquerade, likely same actor tooling
+  - id: b6e04788-29e1-4557-bb14-77f761848ab8
+    name: Potentially Suspicious File Download From File Sharing Domain Via PowerShell.EXE
+    reason: 'Precursor: delivery of the renamed Electron/Teams payload'
+  window: 4h
   enrichment_searches:
-  # Rule-specific telemetry pivots the engine runs around an alert from this rule,
-  # scoped to the alert's host/user/IP within the window (behaviour-targeted, not a sweep).
-    - name: "Other executions of this tool-set on this host (any arguments)"
-      query: 'data_win_system_eventID:"1" AND data_win_eventdata_image:/.*(\\[Mm][Ss][Tt][Ee][Aa][Mm][Ss]\.[Ee][Xx][Ee]|\\[Tt][Ee][Aa][Mm][Ss]\.[Ee][Xx][Ee])/'
-      pivot_on: [host]
-      window: 2h
-    - name: "Follow-on LOLBin / signed-binary-proxy execution on this host"
-      query: 'data_win_system_eventID:"1" AND data_win_eventdata_image:/.*(\\[Rr][Uu][Nn][Dd][Ll][Ll]32\.[Ee][Xx][Ee]|\\[Rr][Ee][Gg][Ss][Vv][Rr]32\.[Ee][Xx][Ee]|\\[Mm][Ss][Hh][Tt][Aa]\.[Ee][Xx][Ee]|\\[Ii][Nn][Ss][Tt][Aa][Ll][Ll][Uu][Tt][Ii][Ll]\.[Ee][Xx][Ee]|\\[Rr][Ee][Gg][Aa][Ss][Mm]\.[Ee][Xx][Ee]|\\[Rr][Ee][Gg][Ss][Vv][Cc][Ss]\.[Ee][Xx][Ee]|\\[Mm][Ss][Bb][Uu][Ii][Ll][Dd]\.[Ee][Xx][Ee]|\\[Cc][Ee][Rr][Tt][Uu][Tt][Ii][Ll]\.[Ee][Xx][Ee]|\\[Bb][Ii][Tt][Ss][Aa][Dd][Mm][Ii][Nn]\.[Ee][Xx][Ee]|\\[Ww][Mm][Ii][Cc]\.[Ee][Xx][Ee]|\\[Cc][Mm][Ss][Tt][Pp]\.[Ee][Xx][Ee]|\\[Oo][Dd][Bb][Cc][Cc][Oo][Nn][Ff]\.[Ee][Xx][Ee]|\\[Ff][Oo][Rr][Ff][Ii][Ll][Ee][Ss]\.[Ee][Xx][Ee]|\\[Pp][Cc][Aa][Ll][Uu][Aa]\.[Ee][Xx][Ee]|\\[Mm][Aa][Vv][Ii][Nn][Jj][Ee][Cc][Tt]\.[Ee][Xx][Ee]|\\[Ss][Cc][Rr][Ii][Pp][Tt][Rr][Uu][Nn][Nn][Ee][Rr]\.[Ee][Xx][Ee])/'
-      pivot_on: [host]
-      window: 1h
-    - name: "Outbound connections by script interpreters on this host"
-      query: 'data_win_system_eventID:"3" AND data_win_eventdata_image:/.*(\\[Pp][Oo][Ww][Ee][Rr][Ss][Hh][Ee][Ll][Ll]\.[Ee][Xx][Ee]|\\[Pp][Ww][Ss][Hh]\.[Ee][Xx][Ee]|\\[Pp][Oo][Ww][Ee][Rr][Ss][Hh][Ee][Ll][Ll]_[Ii][Ss][Ee]\.[Ee][Xx][Ee]|\\[Cc][Mm][Dd]\.[Ee][Xx][Ee]|\\[Ww][Ss][Cc][Rr][Ii][Pp][Tt]\.[Ee][Xx][Ee]|\\[Cc][Ss][Cc][Rr][Ii][Pp][Tt]\.[Ee][Xx][Ee]|\\[Mm][Ss][Hh][Tt][Aa]\.[Ee][Xx][Ee]|\\[Rr][Uu][Nn][Dd][Ll][Ll]32\.[Ee][Xx][Ee]|\\[Rr][Ee][Gg][Ss][Vv][Rr]32\.[Ee][Xx][Ee])/'
-      pivot_on: [host]
-      window: 1h
+  # Behaviour-targeted hunts the engine runs around the alert (not a sweep).
+  - name: Teams data and token file access
+    query: data_win_system_eventID:"1" AND data_win_eventdata_commandLine:/.*([Mm]icrosoft\\[Tt]eams|[Cc]ookies|[Ll]evel[Dd][Bb]).*/
+    pivot_on: host
+    window: 4h
+  - name: Outbound connections from user-writable paths
+    query: data_win_system_eventID:"3" AND data_win_eventdata_initiated:"true" AND data_win_eventdata_image:/.*(\\Users\\|\\ProgramData\\|\\Temp\\).*/
+    pivot_on: host
+    window: 2h
+  - name: Shells spawned from user-path parents
+    query: data_win_system_eventID:"1" AND data_win_eventdata_parentImage:/.*(\\Users\\|\\ProgramData\\|\\Temp\\).*/ AND data_win_eventdata_image:/.*(cmd|powershell|pwsh|wscript|cscript|mshta|rundll32)\.exe/
+    pivot_on: host
+    window: 2h
+  - name: Executables dropped in user-writable paths
+    query: data_win_system_eventID:"11" AND data_win_eventdata_targetFilename:/.*(\\AppData\\|\\ProgramData\\|\\Temp\\).*\.([Ee][Xx][Ee]|[Dd][Ll][Ll])/
+    pivot_on: host
+    window: 6h

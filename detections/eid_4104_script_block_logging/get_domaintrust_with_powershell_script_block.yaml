@@ -139,62 +139,53 @@ graylog:
   query: data_win_system_eventID:"4104" AND data_win_eventdata_scriptBlockText:/.*Get-DomainTrust.*/
 
 correlation:
-  # Authored by the correlation engine for review. Related CoPilot Searches to run
-  # around an alert from this rule, scoped to the same host/user/IP within the window.
+  # Authored per-rule (behaviour-researched) for the correlation engine. Related CoPilot
+  # Searches + telemetry pivots to run around an alert, scoped to its host/user/ip/domain.
   related_rules:
-    - id: de7fcadc-04f3-11ec-a241-acde48001122
-      name: "AdsiSearcher Account Discovery"
-      reason: "same analytic story: Active Directory Discovery"
-    - id: a5d85486-b89c-11eb-8267-acde48001122
-      name: "Allow Inbound Traffic In Firewall Rule"
-      reason: "same analytic story: Lateral Movement"
-    - id: cc316032-924a-11eb-91a2-acde48001122
-      name: "DSQuery Domain Discovery"
-      reason: "same analytic story: Active Directory Discovery"
-    - id: b1a8ce04-04c2-11ec-bea7-acde48001122
-      name: "Domain Account Discovery with Dsquery"
-      reason: "same analytic story: Active Directory Discovery"
-    - id: 383572e0-04c5-11ec-bdcc-acde48001122
-      name: "Domain Account Discovery with Wmic"
-      reason: "same analytic story: Active Directory Discovery"
-    - id: 41243735-89a7-4c83-bcdd-570aa78f00a1
-      name: "Domain Controller Discovery with Nltest"
-      reason: "same analytic story: Active Directory Discovery"
-    - id: 64c7adaa-48ee-483c-b0d6-7175bc65e6cc
-      name: "Domain Controller Discovery with Wmic"
-      reason: "same analytic story: Active Directory Discovery"
-    - id: f0c9d62f-a232-4edd-b17e-bc409fb133d4
-      name: "Domain Group Discovery With Dsquery"
-      reason: "same analytic story: Active Directory Discovery"
-    - id: a87736a6-95cd-4728-8689-3c64d5026b3e
-      name: "Domain Group Discovery With Wmic"
-      reason: "same analytic story: Active Directory Discovery"
-    - id: 089c862f-5f83-49b5-b1c8-7e4ff66560c7
-      name: "Domain Group Discovery with Adsisearcher"
-      reason: "same analytic story: Active Directory Discovery"
-    - id: 3f6bbf22-093e-4cb4-9641-83f47b8444b6
-      name: "Elevated Group Discovery With Wmic"
-      reason: "same analytic story: Active Directory Discovery"
-    - id: 10d62950-0de5-4199-a710-cff9ea79b413
-      name: "Elevated Group Discovery with PowerView"
-      reason: "same analytic story: Active Directory Discovery"
-  window: 1h
+  - id: 70fac80e-0bf1-11ec-9ba0-acde48001122
+    name: Get-ForestTrust with PowerShell Script Block
+    reason: Sibling PowerView trust enumeration (forest-level) in the same script block; operators typically run Get-DomainTrust and Get-ForestTrust together to map the whole trust topology.
+  - id: dcd74b95-3f36-4ed9-9598-0490951643aa
+    name: PowerView PowerShell Cmdlets - ScriptBlock
+    reason: Get-DomainTrust is a PowerView cmdlet; this fires on the same PowerView module being loaded or other cmdlets running in the same session.
+  - id: 10d62950-0de5-4199-a710-cff9ea79b413
+    name: Elevated Group Discovery with PowerView
+    reason: After mapping trusts, PowerView operators enumerate privileged groups (Domain/Enterprise Admins) to pick targets across the trust.
+  - id: a7093c28-796c-4ebb-9997-e2c18b870837
+    name: Windows PowerView SPN Discovery
+    reason: 'Follow-on PowerView step: SPN enumeration to find kerberoastable accounts in the domains discovered via trusts.'
+  - id: 970455a1-4ac2-47e1-a9a5-9e75443ddcb9
+    name: Windows PowerView Kerberos Service Ticket Request
+    reason: 'Escalation of the same toolkit session: requesting service tickets (Kerberoasting) after trust and SPN reconnaissance.'
+  - id: 3bad990e-4848-4a78-9530-b427d854aac0
+    name: Domain Trust Discovery Via Dsquery
+    reason: Same objective (domain trust enumeration) through a different tool; actors fall back to dsquery when PowerShell is constrained, or run both.
+  - id: c3e05466-5f22-11eb-ae93-0242ac130002
+    name: NLTest Domain Trust Discovery
+    reason: nltest /domain_trusts is the native-binary equivalent of Get-DomainTrust and commonly appears in the same recon burst.
+  - id: dd04b29a-beed-11eb-87bc-acde48001122
+    name: Detect SharpHound Usage
+    reason: SharpHound collection is the typical heavier AD mapping step that includes trusts; co-occurs with PowerView trust recon on the same host.
+  window: 2h
   enrichment_searches:
-  # Rule-specific telemetry pivots the engine runs around an alert from this rule,
-  # scoped to the alert's host/user/IP within the window (behaviour-targeted, not a sweep).
-    - name: "Memory/credential-dump creation & LSASS access on this host"
-      query: '((data_win_system_eventID:"1" AND data_win_eventdata_image:/.*(\\[Pp][Rr][Oo][Cc][Dd][Uu][Mm][Pp]\.[Ee][Xx][Ee]|\\[Pp][Rr][Oo][Cc][Dd][Uu][Mm][Pp]64\.[Ee][Xx][Ee]|\\[Ss][Qq][Ll][Dd][Uu][Mm][Pp][Ee][Rr]\.[Ee][Xx][Ee]|\\[Cc][Rr][Ee][Aa][Tt][Ee][Dd][Uu][Mm][Pp]\.[Ee][Xx][Ee]|\\[Rr][Dd][Rr][Ll][Ee][Aa][Kk][Dd][Ii][Aa][Gg]\.[Ee][Xx][Ee]|\\[Dd][Uu][Mm][Pp][Ee][Rr][Tt]\.[Ee][Xx][Ee]|\\[Nn][Aa][Nn][Oo][Dd][Uu][Mm][Pp]\.[Ee][Xx][Ee]|\\[Aa][Vv][Dd][Uu][Mm][Pp]\.[Ee][Xx][Ee])/) OR (data_win_system_eventID:"1" AND (data_win_eventdata_commandLine:/.*[Cc][Oo][Mm][Ss][Vv][Cc][Ss]\.[Dd][Ll][Ll].*/ OR data_win_eventdata_commandLine:/.*[Mm][Ii][Nn][Ii][Dd][Uu][Mm][Pp].*/ OR data_win_eventdata_commandLine:/.*[Dd][Uu][Mm][Pp][Ee][Rr][Tt].*/ OR data_win_eventdata_commandLine:/.*[Nn][Aa][Nn][Oo][Dd][Uu][Mm][Pp].*/ OR data_win_eventdata_commandLine:/.*[Ll][Ss][Aa][Ss][Ss].*/ OR data_win_eventdata_commandLine:/.*[Ss][Ee][Kk][Uu][Rr][Ll][Ss][Aa].*/ OR data_win_eventdata_commandLine:/.*[Nn][Tt][Dd][Ss]\.[Dd][Ii][Tt].*/ OR data_win_eventdata_commandLine:/.*[Nn][Tt][Dd][Ss][Uu][Tt][Ii][Ll].*/)) OR (data_win_system_eventID:"10" AND data_win_eventdata_targetImage:/.*(\\[Ll][Ss][Aa][Ss][Ss]\.[Ee][Xx][Ee])/))'
-      pivot_on: [host]
-      window: 1h
-    - name: "Download / AMSI-bypass / encoded script blocks on this host"
-      query: 'data_win_system_eventID:"4104" AND (data_win_eventdata_scriptBlockText:/.*[Dd][Oo][Ww][Nn][Ll][Oo][Aa][Dd][Ss][Tt][Rr][Ii][Nn][Gg].*/ OR data_win_eventdata_scriptBlockText:/.*[Dd][Oo][Ww][Nn][Ll][Oo][Aa][Dd][Ff][Ii][Ll][Ee].*/ OR data_win_eventdata_scriptBlockText:/.*[Ii][Nn][Vv][Oo][Kk][Ee]-[Ww][Ee][Bb][Rr][Ee][Qq][Uu][Ee][Ss][Tt].*/ OR data_win_eventdata_scriptBlockText:/.*[Nn][Ee][Tt]\.[Ww][Ee][Bb][Cc][Ll][Ii][Ee][Nn][Tt].*/ OR data_win_eventdata_scriptBlockText:/.*[Ff][Rr][Oo][Mm][Bb][Aa][Ss][Ee]64[Ss][Tt][Rr][Ii][Nn][Gg].*/ OR data_win_eventdata_scriptBlockText:/.*[Ii][Ee][Xx].*/ OR data_win_eventdata_scriptBlockText:/.*[Ii][Nn][Vv][Oo][Kk][Ee]-[Ee][Xx][Pp][Rr][Ee][Ss][Ss][Ii][Oo][Nn].*/ OR data_win_eventdata_scriptBlockText:/.*[Ss][Tt][Aa][Rr][Tt]-[Bb][Ii][Tt][Ss][Tt][Rr][Aa][Nn][Ss][Ff][Ee][Rr].*/ OR data_win_eventdata_scriptBlockText:/.*[Aa][Mm][Ss][Ii][Uu][Tt][Ii][Ll][Ss].*/ OR data_win_eventdata_scriptBlockText:/.*-[Ee][Nn][Cc].*/ OR data_win_eventdata_scriptBlockText:/.*-[Ee][Nn][Cc][Oo][Dd][Ee][Dd][Cc][Oo][Mm][Mm][Aa][Nn][Dd].*/ OR data_win_eventdata_scriptBlockText:/.*[Rr][Ee][Ff][Ll][Ee][Cc][Tt][Ii][Oo][Nn]\.[Aa][Ss][Ss][Ee][Mm][Bb][Ll][Yy].*/)'
-      pivot_on: [host]
-      window: 1h
-    - name: "Follow-on LOLBin / signed-binary-proxy execution on this host"
-      query: 'data_win_system_eventID:"1" AND data_win_eventdata_image:/.*(\\[Rr][Uu][Nn][Dd][Ll][Ll]32\.[Ee][Xx][Ee]|\\[Rr][Ee][Gg][Ss][Vv][Rr]32\.[Ee][Xx][Ee]|\\[Mm][Ss][Hh][Tt][Aa]\.[Ee][Xx][Ee]|\\[Ii][Nn][Ss][Tt][Aa][Ll][Ll][Uu][Tt][Ii][Ll]\.[Ee][Xx][Ee]|\\[Rr][Ee][Gg][Aa][Ss][Mm]\.[Ee][Xx][Ee]|\\[Rr][Ee][Gg][Ss][Vv][Cc][Ss]\.[Ee][Xx][Ee]|\\[Mm][Ss][Bb][Uu][Ii][Ll][Dd]\.[Ee][Xx][Ee]|\\[Cc][Ee][Rr][Tt][Uu][Tt][Ii][Ll]\.[Ee][Xx][Ee]|\\[Bb][Ii][Tt][Ss][Aa][Dd][Mm][Ii][Nn]\.[Ee][Xx][Ee]|\\[Ww][Mm][Ii][Cc]\.[Ee][Xx][Ee]|\\[Cc][Mm][Ss][Tt][Pp]\.[Ee][Xx][Ee]|\\[Oo][Dd][Bb][Cc][Cc][Oo][Nn][Ff]\.[Ee][Xx][Ee]|\\[Ff][Oo][Rr][Ff][Ii][Ll][Ee][Ss]\.[Ee][Xx][Ee]|\\[Pp][Cc][Aa][Ll][Uu][Aa]\.[Ee][Xx][Ee]|\\[Mm][Aa][Vv][Ii][Nn][Jj][Ee][Cc][Tt]\.[Ee][Xx][Ee]|\\[Ss][Cc][Rr][Ii][Pp][Tt][Rr][Uu][Nn][Nn][Ee][Rr]\.[Ee][Xx][Ee])/'
-      pivot_on: [host]
-      window: 1h
-    - name: "Remote-execution / lateral-movement tooling on this host"
-      query: '(data_win_system_eventID:"1" AND data_win_eventdata_image:/.*(\\[Pp][Ss][Ee][Xx][Ee][Cc]\.[Ee][Xx][Ee]|\\[Pp][Ss][Ee][Xx][Ee][Ss][Vv][Cc]\.[Ee][Xx][Ee]|\\[Pp][Aa][Ee][Xx][Ee][Cc]\.[Ee][Xx][Ee]|\\[Ww][Ii][Nn][Rr][Ss]\.[Ee][Xx][Ee]|\\[Mm][Ss][Tt][Ss][Cc]\.[Ee][Xx][Ee]|\\[Ww][Mm][Ii][Cc]\.[Ee][Xx][Ee])/) OR (data_win_system_eventID:"1" AND data_win_eventdata_image:/.*(\\[Pp][Oo][Ww][Ee][Rr][Ss][Hh][Ee][Ll][Ll]\.[Ee][Xx][Ee]|\\[Pp][Ww][Ss][Hh]\.[Ee][Xx][Ee])/ AND (data_win_eventdata_commandLine:/.*[Ii][Nn][Vv][Oo][Kk][Ee]-[Cc][Oo][Mm][Mm][Aa][Nn][Dd].*/ OR data_win_eventdata_commandLine:/.*[Nn][Ee][Ww]-[Pp][Ss][Ss][Ee][Ss][Ss][Ii][Oo][Nn].*/ OR data_win_eventdata_commandLine:/.*[Ee][Nn][Tt][Ee][Rr]-[Pp][Ss][Ss][Ee][Ss][Ss][Ii][Oo][Nn].*/ OR data_win_eventdata_commandLine:/.*-[Cc][Oo][Mm][Pp][Uu][Tt][Ee][Rr][Nn][Aa][Mm][Ee].*/))'
-      pivot_on: [host]
-      window: 2h
+  # Behaviour-targeted hunts the engine runs around the alert (not a sweep).
+  - name: PowerView / AD recon cmdlets in script blocks (non-trust)
+    query: data_win_system_eventID:"4104" AND (data_win_eventdata_scriptBlockText:/.*(Get-Domain(User|Computer|Controller|Group|GPO|Policy|SID)|Get-NetDomain|Get-NetForest|Get-NetUser|Get-NetComputer|Get-ForestDomain|Find-DomainShare|Invoke-ShareFinder|Invoke-UserHunter|Get-DomainForeignGroupMember|Get-DomainForeignUser|Invoke-MapDomainTrust|Get-NetDomainTrust).*/ OR data_win_eventdata_scriptBlockText:/.*(PowerView|Invoke-BloodHound|SharpHound).*/)
+    pivot_on:
+    - host
+    window: 2h
+  - name: Native trust/AD discovery tooling spawned on host (nltest, dsquery, adfind, SharpHound)
+    query: data_win_system_eventID:"1" AND (data_win_eventdata_commandLine:/.*([Nn][Ll][Tt][Ee][Ss][Tt].*(domain_trusts|dclist|trusted_domains)|[Dd][Ss][Qq][Uu][Ee][Rr][Yy].*trustedDomain|[Aa][Dd][Ff][Ii][Nn][Dd].*(trustdmp|objectclass=trusteddomain)|[Ss][Hh][Aa][Rr][Pp][Hh][Oo][Uu][Nn][Dd]|[Gg]et-[Aa][Dd][Tt]rust|[Gg]et-[Aa][Dd][Ff]orest).*/ OR data_win_eventdata_image:/.*(\\[Aa][Dd][Ff][Ii][Nn][Dd]|\\[Ss][Hh][Aa][Rr][Pp][Hh][Oo][Uu][Nn][Dd]|\\[Nn][Ll][Tt][Ee][Ss][Tt])\.[Ee][Xx][Ee]/)
+    pivot_on:
+    - host
+    window: 2h
+  - name: PowerShell launched with download cradle or encoded command (PowerView staging)
+    query: data_win_system_eventID:"1" AND data_win_eventdata_image:/.*\\([Pp]ower[Ss]hell|[Pp][Ww][Ss][Hh])\.[Ee][Xx][Ee]/ AND data_win_eventdata_commandLine:/.*(-[Ee]nc|-[Ee]ncodedcommand|[Dd]ownload[Ss]tring|[Ii][Ee][Xx]|[Ii]nvoke-[Ww]eb[Rr]equest|[Nn]et\.[Ww]eb[Cc]lient|[Ii]mport-[Mm]odule.*([Pp]ower[Vv]iew|\.ps1)).*/
+    pivot_on:
+    - host
+    window: 1h
+  - name: PowerView script dropped to disk or network to DC LDAP/Kerberos after trust recon
+    query: (data_win_system_eventID:"11" AND data_win_eventdata_targetFilename:/.*([Pp]ower[Vv]iew|[Pp]ower[Ss]ploit|[Ss]harp[Hh]ound|[Bb]lood[Hh]ound|[Aa]d[Rr]econ).*(\.ps1|\.psm1|\.zip|\.json)/) OR (data_win_system_eventID:"3" AND data_win_eventdata_image:/.*\\([Pp]ower[Ss]hell|[Pp][Ww][Ss][Hh])\.[Ee][Xx][Ee]/ AND (data_win_eventdata_destinationPort:"389" OR data_win_eventdata_destinationPort:"636" OR data_win_eventdata_destinationPort:"3268" OR data_win_eventdata_destinationPort:"88"))
+    pivot_on:
+    - host
+    window: 2h

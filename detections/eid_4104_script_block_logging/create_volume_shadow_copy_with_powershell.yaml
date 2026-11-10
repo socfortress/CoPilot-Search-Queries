@@ -147,44 +147,58 @@ graylog:
   query: data_win_system_eventID:"4104" AND data_win_eventdata_scriptBlockText:/.*[Ww][Ii][Nn]32_[Ss][Hh][Aa][Dd][Oo][Ww][Cc][Oo][Pp][Yy].*/ AND data_win_eventdata_scriptBlockText:/.*\)\.[Cc][Rr][Ee][Aa][Tt][Ee]\(.*/ AND data_win_eventdata_scriptBlockText:/.*[Cc][Ll][Ii][Ee][Nn][Tt][Aa][Cc][Cc][Ee][Ss][Ss][Ii][Bb][Ll][Ee].*/
 
 correlation:
-  # Authored by the correlation engine for review. Related CoPilot Searches to run
-  # around an alert from this rule, scoped to the same host/user/IP within the window.
+  # Authored per-rule (behaviour-researched) for the correlation engine. Related CoPilot
+  # Searches + telemetry pivots to run around an alert, scoped to its host/user/ip/domain.
   related_rules:
-    - id: ec570e53-4c76-45a9-804d-dc3f355ff7a7
-      name: "7Zip Compressing Dump Files"
-      reason: "next kill-chain tactic: Collection"
-    - id: 0a1255c5-d732-4b62-ac02-b5152d34fb83
-      name: "ADExplorer Writing Complete AD Snapshot Into .dat File"
-      reason: "next kill-chain tactic: Discovery"
-    - id: 1ea13e8c-03ea-409b-877d-ce5c3d2c1cb3
-      name: "ADFS Database Named Pipe Connection By Uncommon Tool"
-      reason: "next kill-chain tactic: Collection"
-    - id: 75bf09fa-1dd7-4d18-9af9-dd9e492562eb
-      name: "ADSI-Cache File Creation By Uncommon Tool"
-      reason: "next kill-chain tactic: Command and Control"
-    - id: 03e2746e-2b31-42f1-ab7a-eb39365b2422
-      name: "APT31 Judgement Panda Activity"
-      reason: "next kill-chain tactic: Credential Access"
-    - id: fc028194-969d-4122-8abe-0470d5b8f12f
-      name: "Access to Browser Login Data"
-      reason: "next kill-chain tactic: Credential Access"
+  - id: 9251299c-ea5b-11eb-a8de-acde48001122
+    name: Detect Copy of ShadowCopy with Script Block Logging
+    reason: 'Direct follow-on: after Win32_ShadowCopy.Create the attacker copies locked files (NTDS.dit, SAM, SYSTEM) out of the new HarddiskVolumeShadowCopy path in PowerShell.'
+  - id: c73124a7-3e89-44a3-bdc1-25fe4df754b1
+    name: Copy From VolumeShadowCopy Via Cmd.EXE
+    reason: Same snapshot-then-copy chain executed via cmd copy from \\?\GLOBALROOT\Device\HarddiskVolumeShadowCopyN, the usual way the new shadow is read.
+  - id: f57f8d16-1f39-4dcb-a604-6c73d9b54b3d
+    name: Sensitive File Access Via Volume Shadow Copy Backup
+    reason: The shadow copy is created to read locked credential stores (ntds.dit, SAM, SYSTEM hives); this fires when the shadow path is used to reach them.
+  - id: b17ea6f7-6e90-447e-a799-e6c0a493d6ce
+    name: Shadow Copies Creation Using Operating Systems Utilities
+    reason: 'Co-occurring: the same snapshot may be created or repeated via vssadmin/wmic/diskshadow, showing deliberate shadow-copy staging on this host.'
+  - id: 40b19fa6-d835-400c-b301-41f3a2baacaf
+    name: VolumeShadowCopy Symlink Creation Via Mklink
+    reason: 'Alternative access to the freshly created shadow: mklink /d to the shadow device path to browse and copy its contents.'
+  - id: 11b1ed55-154d-4e82-8ad7-83739298f720
+    name: NTDS.DIT Creation By Uncommon Process
+    reason: 'Outcome: ntds.dit copied from the shadow lands on disk, written by a non-standard process.'
+  - id: 4e87b8e2-2ee9-4b2a-a715-4727d297ece0
+    name: Potential SAM Database Dump
+    reason: 'Outcome on non-DC hosts: SAM/SYSTEM/SECURITY hive copies extracted from the shadow copy for offline hash cracking.'
+  - id: 3a8da4e0-36c1-40d2-8b29-b3e890d5172a
+    name: NTDS Exfiltration Filename Patterns
+    reason: 'Staging step: extracted ntds.dit/SYSTEM hive is renamed or archived before exfiltration.'
   window: 1h
   enrichment_searches:
-  # Rule-specific telemetry pivots the engine runs around an alert from this rule,
-  # scoped to the alert's host/user/IP within the window (behaviour-targeted, not a sweep).
-    - name: "Memory/credential-dump creation & LSASS access on this host"
-      query: '((data_win_system_eventID:"1" AND data_win_eventdata_image:/.*(\\[Pp][Rr][Oo][Cc][Dd][Uu][Mm][Pp]\.[Ee][Xx][Ee]|\\[Pp][Rr][Oo][Cc][Dd][Uu][Mm][Pp]64\.[Ee][Xx][Ee]|\\[Ss][Qq][Ll][Dd][Uu][Mm][Pp][Ee][Rr]\.[Ee][Xx][Ee]|\\[Cc][Rr][Ee][Aa][Tt][Ee][Dd][Uu][Mm][Pp]\.[Ee][Xx][Ee]|\\[Rr][Dd][Rr][Ll][Ee][Aa][Kk][Dd][Ii][Aa][Gg]\.[Ee][Xx][Ee]|\\[Dd][Uu][Mm][Pp][Ee][Rr][Tt]\.[Ee][Xx][Ee]|\\[Nn][Aa][Nn][Oo][Dd][Uu][Mm][Pp]\.[Ee][Xx][Ee]|\\[Aa][Vv][Dd][Uu][Mm][Pp]\.[Ee][Xx][Ee])/) OR (data_win_system_eventID:"1" AND (data_win_eventdata_commandLine:/.*[Cc][Oo][Mm][Ss][Vv][Cc][Ss]\.[Dd][Ll][Ll].*/ OR data_win_eventdata_commandLine:/.*[Mm][Ii][Nn][Ii][Dd][Uu][Mm][Pp].*/ OR data_win_eventdata_commandLine:/.*[Dd][Uu][Mm][Pp][Ee][Rr][Tt].*/ OR data_win_eventdata_commandLine:/.*[Nn][Aa][Nn][Oo][Dd][Uu][Mm][Pp].*/ OR data_win_eventdata_commandLine:/.*[Ll][Ss][Aa][Ss][Ss].*/ OR data_win_eventdata_commandLine:/.*[Ss][Ee][Kk][Uu][Rr][Ll][Ss][Aa].*/ OR data_win_eventdata_commandLine:/.*[Nn][Tt][Dd][Ss]\.[Dd][Ii][Tt].*/ OR data_win_eventdata_commandLine:/.*[Nn][Tt][Dd][Ss][Uu][Tt][Ii][Ll].*/)) OR (data_win_system_eventID:"10" AND data_win_eventdata_targetImage:/.*(\\[Ll][Ss][Aa][Ss][Ss]\.[Ee][Xx][Ee])/))'
-      pivot_on: [host]
-      window: 1h
-    - name: "This account's logon activity across hosts (harvested-credential use)"
-      query: '(data_win_system_eventID:"4624" OR data_win_system_eventID:"4625")'
-      pivot_on: [user]
-      window: 6h
-    - name: "Remote-execution / lateral-movement tooling on this host"
-      query: '(data_win_system_eventID:"1" AND data_win_eventdata_image:/.*(\\[Pp][Ss][Ee][Xx][Ee][Cc]\.[Ee][Xx][Ee]|\\[Pp][Ss][Ee][Xx][Ee][Ss][Vv][Cc]\.[Ee][Xx][Ee]|\\[Pp][Aa][Ee][Xx][Ee][Cc]\.[Ee][Xx][Ee]|\\[Ww][Ii][Nn][Rr][Ss]\.[Ee][Xx][Ee]|\\[Mm][Ss][Tt][Ss][Cc]\.[Ee][Xx][Ee]|\\[Ww][Mm][Ii][Cc]\.[Ee][Xx][Ee])/) OR (data_win_system_eventID:"1" AND data_win_eventdata_image:/.*(\\[Pp][Oo][Ww][Ee][Rr][Ss][Hh][Ee][Ll][Ll]\.[Ee][Xx][Ee]|\\[Pp][Ww][Ss][Hh]\.[Ee][Xx][Ee])/ AND (data_win_eventdata_commandLine:/.*[Ii][Nn][Vv][Oo][Kk][Ee]-[Cc][Oo][Mm][Mm][Aa][Nn][Dd].*/ OR data_win_eventdata_commandLine:/.*[Nn][Ee][Ww]-[Pp][Ss][Ss][Ee][Ss][Ss][Ii][Oo][Nn].*/ OR data_win_eventdata_commandLine:/.*[Ee][Nn][Tt][Ee][Rr]-[Pp][Ss][Ss][Ee][Ss][Ss][Ii][Oo][Nn].*/ OR data_win_eventdata_commandLine:/.*-[Cc][Oo][Mm][Pp][Uu][Tt][Ee][Rr][Nn][Aa][Mm][Ee].*/))'
-      pivot_on: [host]
-      window: 2h
-    - name: "Download / AMSI-bypass / encoded script blocks on this host"
-      query: 'data_win_system_eventID:"4104" AND (data_win_eventdata_scriptBlockText:/.*[Dd][Oo][Ww][Nn][Ll][Oo][Aa][Dd][Ss][Tt][Rr][Ii][Nn][Gg].*/ OR data_win_eventdata_scriptBlockText:/.*[Dd][Oo][Ww][Nn][Ll][Oo][Aa][Dd][Ff][Ii][Ll][Ee].*/ OR data_win_eventdata_scriptBlockText:/.*[Ii][Nn][Vv][Oo][Kk][Ee]-[Ww][Ee][Bb][Rr][Ee][Qq][Uu][Ee][Ss][Tt].*/ OR data_win_eventdata_scriptBlockText:/.*[Nn][Ee][Tt]\.[Ww][Ee][Bb][Cc][Ll][Ii][Ee][Nn][Tt].*/ OR data_win_eventdata_scriptBlockText:/.*[Ff][Rr][Oo][Mm][Bb][Aa][Ss][Ee]64[Ss][Tt][Rr][Ii][Nn][Gg].*/ OR data_win_eventdata_scriptBlockText:/.*[Ii][Ee][Xx].*/ OR data_win_eventdata_scriptBlockText:/.*[Ii][Nn][Vv][Oo][Kk][Ee]-[Ee][Xx][Pp][Rr][Ee][Ss][Ss][Ii][Oo][Nn].*/ OR data_win_eventdata_scriptBlockText:/.*[Ss][Tt][Aa][Rr][Tt]-[Bb][Ii][Tt][Ss][Tt][Rr][Aa][Nn][Ss][Ff][Ee][Rr].*/ OR data_win_eventdata_scriptBlockText:/.*[Aa][Mm][Ss][Ii][Uu][Tt][Ii][Ll][Ss].*/ OR data_win_eventdata_scriptBlockText:/.*-[Ee][Nn][Cc].*/ OR data_win_eventdata_scriptBlockText:/.*-[Ee][Nn][Cc][Oo][Dd][Ee][Dd][Cc][Oo][Mm][Mm][Aa][Nn][Dd].*/ OR data_win_eventdata_scriptBlockText:/.*[Rr][Ee][Ff][Ll][Ee][Cc][Tt][Ii][Oo][Nn]\.[Aa][Ss][Ss][Ee][Mm][Bb][Ll][Yy].*/)'
-      pivot_on: [host]
-      window: 1h
+  # Behaviour-targeted hunts the engine runs around the alert (not a sweep).
+  - name: Files copied out of a HarddiskVolumeShadowCopy path (process creation)
+    query: data_win_system_eventID:"1" AND data_win_eventdata_commandLine:/.*[Hh][Aa][Rr][Dd][Dd][Ii][Ss][Kk][Vv][Oo][Ll][Uu][Mm][Ee][Ss][Hh][Aa][Dd][Oo][Ww][Cc][Oo][Pp][Yy].*/
+    pivot_on:
+    - host
+    window: 1h
+  - name: NTDS.dit / SAM / SYSTEM hive files written to disk
+    query: data_win_system_eventID:"11" AND (data_win_eventdata_targetFilename:*ntds.dit* OR data_win_eventdata_targetFilename:*\\config\\SAM* OR data_win_eventdata_targetFilename:*\\config\\SYSTEM* OR data_win_eventdata_targetFilename:*\\config\\SECURITY* OR data_win_eventdata_targetFilename:*.hiv)
+    pivot_on:
+    - host
+    window: 2h
+  - name: Other shadow-copy / ntdsutil / reg save tooling (vssadmin, diskshadow, wmic, ntdsutil)
+    query: data_win_system_eventID:"1" AND (data_win_eventdata_image:/.*\\([Vv][Ss][Ss][Aa][Dd][Mm][Ii][Nn]|[Dd][Ii][Ss][Kk][Ss][Hh][Aa][Dd][Oo][Ww]|[Nn][Tt][Dd][Ss][Uu][Tt][Ii][Ll]|[Ww][Mm][Ii][Cc]|[Rr][Ee][Gg])\.[Ee][Xx][Ee]/ AND (data_win_eventdata_commandLine:*shadow* OR data_win_eventdata_commandLine:*ntds* OR data_win_eventdata_commandLine:*"save"* OR data_win_eventdata_commandLine:*hklm\\sam* OR data_win_eventdata_commandLine:*hklm\\system*))
+    pivot_on:
+    - host
+    window: 2h
+  - name: Archive / staging / exfil-style tooling after credential-store copy
+    query: data_win_system_eventID:"1" AND (data_win_eventdata_image:/.*\\([Rr][Aa][Rr]|7[Zz]|7[Zz][Aa]|[Cc][Uu][Rr][Ll]|[Rr][Cc][Ll][Oo][Nn][Ee]|[Ww][Ii][Nn][Ss][Cc][Pp])\.[Ee][Xx][Ee]/ OR data_win_eventdata_commandLine:*Compress-Archive*)
+    pivot_on:
+    - host
+    window: 4h
+  - name: Outbound network connections by PowerShell on this host
+    query: data_win_system_eventID:"3" AND data_win_eventdata_image:/.*\\([Pp][Oo][Ww][Ee][Rr][Ss][Hh][Ee][Ll][Ll]|[Pp][Ww][Ss][Hh])\.[Ee][Xx][Ee]/ AND data_win_eventdata_initiated:"true"
+    pivot_on:
+    - host
+    window: 2h

@@ -122,40 +122,53 @@ graylog:
   query: (full_log:/.*\/usr\/bin\/curl.*/ OR full_log:/.*\/usr\/bin\/wget.*/) AND NOT _exists_:data_win_system_eventID AND NOT rule_groups:/.*windows.*/
 
 correlation:
-  # Authored by the correlation engine for review. Related CoPilot Searches to run
-  # around an alert from this rule, scoped to the same host/user/IP within the window.
+  # Authored per-rule (behaviour-researched) for the correlation engine. Related CoPilot
+  # Searches + telemetry pivots to run around an alert, scoped to its host/user/ip/domain.
   related_rules:
-    - id: 26f86252-1549-45e1-a212-eb26840e86bc
-      name: "File Download or Read to Pipe Execution"
-      reason: "same analytic story: Ingress Tool Transfer"
-    - id: windows-curl-upload-remote-destination-001
-      name: "Windows Curl Upload to Remote Destination"
-      reason: "same analytic story: Ingress Tool Transfer"
-    - id: Windows_DNS_Query_Request_To_TinyUrl
-      name: "Windows DNS Query Request To TinyUrl"
-      reason: "same analytic story: Ingress Tool Transfer"
-    - id: windows-file-download-certutil-001
-      name: "Windows File Download Via Certutil"
-      reason: "same analytic story: Ingress Tool Transfer"
-    - id: 76753bab-f116-4ea3-8fb9-89b638be58a9
-      name: "Windows Ingress Tool Transfer Using Explorer"
-      reason: "same analytic story: Ingress Tool Transfer"
-    - id: 0a23a62d-c5b3-468b-a072-25064a9a8c87
-      name: "Axios NPM Compromise Indicators - Linux"
-      reason: "next kill-chain tactic: Command and Control"
-  window: 1h
+  - id: a2d9e2f3-0f43-4c7a-bcd9-9acfc0d723aa
+    name: Suspicious Download and Execute Pattern via Curl/Wget
+    reason: 'Narrower form: download chained straight into execution.'
+  - id: cf610c15-ed71-46e1-bdf8-2bd1a99de6c4
+    name: Download File To Potentially Suspicious Directory Via Wget
+    reason: Downloads landing in /tmp or similar are the high-risk subset of generic curl/wget use.
+  - id: 26f86252-1549-45e1-a212-eb26840e86bc
+    name: File Download or Read to Pipe Execution
+    reason: Download-to-shell pipe is the execution step after the transfer.
+  - id: a39d7fa7-3fbd-4dc2-97e1-d87f546b1bbc
+    name: Program Executions in Suspicious Folders
+    reason: Downloaded tool is then run from a staging folder.
+  - id: 5cd16c8f-44a6-4654-81e7-a84d6db507d4
+    name: Process Execution From Shared Memory Directory
+    reason: Staging and running in /dev/shm after download.
+  - id: e2f3g4h5-6789-1011-1213-141516171819
+    name: Linux File Permission Modification Detection
+    reason: chmod +x on the downloaded file is the standard next step.
+  - id: b86d356d-6093-443d-971c-9b07db583c68
+    name: Suspicious Curl Change User Agents - Linux
+    reason: Spoofed curl user agents indicate evasive, malicious transfers.
+  - id: f7158a64-6204-4d6d-868a-6e6378b467e0
+    name: Suspicious C2 Activities
+    reason: If the tool is an implant, C2 beaconing follows.
+  window: 4h
   enrichment_searches:
-  # Rule-specific telemetry pivots the engine runs around an alert from this rule,
-  # scoped to the alert's host/user/IP within the window (behaviour-targeted, not a sweep).
-    - name: "Downloader / ingress-tool-transfer on this host"
-      query: 'data_process_exec_process_binary:/.*(\/[Cc][Uu][Rr][Ll]|\/[Ww][Gg][Ee][Tt]|\/[Tt][Ff][Tt][Pp])/'
-      pivot_on: [host]
-      window: 1h
-    - name: "Shell / interpreter execution on this host"
-      query: '((data_process_exec_process_binary:/.*(\/[Bb][Aa][Ss][Hh]|\/[Ss][Hh]|\/[Dd][Aa][Ss][Hh]|\/[Zz][Ss][Hh]|\/[Kk][Ss][Hh]|\/[Aa][Ss][Hh]|\/[Bb][Uu][Ss][Yy][Bb][Oo][Xx])/) OR (data_process_exec_process_binary:/.*(\/[Pp][Yy][Tt][Hh][Oo][Nn]|\/[Pp][Yy][Tt][Hh][Oo][Nn]3|\/[Pp][Ee][Rr][Ll]|\/[Rr][Uu][Bb][Yy]|\/[Pp][Hh][Pp]|\/[Nn][Oo][Dd][Ee]|\/[Ll][Uu][Aa]|\/[Aa][Ww][Kk])/))'
-      pivot_on: [host]
-      window: 1h
-    - name: "Reconnaissance commands on this host"
-      query: 'data_process_exec_process_binary:/.*(\/[Ww][Hh][Oo][Aa][Mm][Ii]|\/[Ii][Dd]|\/[Uu][Nn][Aa][Mm][Ee]|\/[Hh][Oo][Ss][Tt][Nn][Aa][Mm][Ee]|\/[Hh][Oo][Ss][Tt][Nn][Aa][Mm][Ee][Cc][Tt][Ll]|\/[Ss][Ss]|\/[Nn][Ee][Tt][Ss][Tt][Aa][Tt]|\/[Ii][Ff][Cc][Oo][Nn][Ff][Ii][Gg]|\/[Aa][Rr][Pp]|\/[Ww]|\/[Ww][Hh][Oo]|\/[Ll][Aa][Ss][Tt]|\/[Ll][Ss][Oo][Ff]|\/[Nn][Mm][Aa][Pp]|\/[Dd][Ii][Gg]|\/[Ff][Ii][Nn][Dd])/'
-      pivot_on: [host]
-      window: 1h
+  # Behaviour-targeted hunts the engine runs around the alert (not a sweep).
+  - name: chmod +x on staged files
+    query: (full_log:/.*chmod.*/ AND (full_log:/.*\+x.*/ OR full_log:/.*7[0-7][0-7].*/) AND (full_log:/.*\/tmp\/.*/ OR full_log:/.*\/dev\/shm\/.*/ OR full_log:/.*\/var\/tmp\/.*/)) AND NOT _exists_:data_win_system_eventID AND NOT rule_groups:/.*windows.*/
+    pivot_on: host
+    window: 4h
+  - name: Execution from staging directories
+    query: ((full_log:/.*execve.*/ OR full_log:/.*exec.*/) AND (full_log:/.*\/tmp\/.*/ OR full_log:/.*\/dev\/shm\/.*/ OR full_log:/.*\/var\/tmp\/.*/)) AND NOT _exists_:data_win_system_eventID AND NOT rule_groups:/.*windows.*/
+    pivot_on: host
+    window: 4h
+  - name: Download piped to shell
+    query: ((full_log:/.*curl.*/ OR full_log:/.*wget.*/) AND (full_log:/.*\|.*sh.*/ OR full_log:/.*\|.*bash.*/ OR full_log:/.*-O- .*/ OR full_log:/.*-o \/tmp.*/)) AND NOT _exists_:data_win_system_eventID AND NOT rule_groups:/.*windows.*/
+    pivot_on: host
+    window: 4h
+  - name: Raw-IP or paste-site download targets
+    query: ((full_log:/.*curl.*/ OR full_log:/.*wget.*/) AND (full_log:/.*https?:\/\/[0-9]{1,3}\.[0-9]{1,3}\.[0-9]{1,3}\.[0-9]{1,3}.*/ OR full_log:/.*pastebin.*/ OR full_log:/.*transfer\.sh.*/ OR full_log:/.*raw\.githubusercontent.*/)) AND NOT _exists_:data_win_system_eventID AND NOT rule_groups:/.*windows.*/
+    pivot_on: host
+    window: 24h
+  - name: Persistence after transfer
+    query: (full_log:/.*crontab.*/ OR full_log:/.*systemctl.*enable.*/ OR full_log:/.*\.bashrc.*/ OR full_log:/.*authorized_keys.*/) AND NOT _exists_:data_win_system_eventID AND NOT rule_groups:/.*windows.*/
+    pivot_on: host
+    window: 6h

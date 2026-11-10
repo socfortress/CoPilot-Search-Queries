@@ -153,19 +153,58 @@ graylog:
   query: data_win_system_eventID:"4104" AND data_win_eventdata_scriptBlockText:/.*[Ii][Nn][Vv][Oo][Kk][Ee]-[Cc][Ii][Mm][Mm][Ee][Tt][Hh][Oo][Dd] .*/ AND data_win_eventdata_scriptBlockText:/.*-[Cc][Ll][Aa][Ss][Ss][Nn][Aa][Mm][Ee] .*/ AND data_win_eventdata_scriptBlockText:/.*[Ww][Ii][Nn]32_[Pp][Rr][Oo][Dd][Uu][Cc][Tt] .*/ AND data_win_eventdata_scriptBlockText:/.*-[Mm][Ee][Tt][Hh][Oo][Dd][Nn][Aa][Mm][Ee] .*/ AND data_win_eventdata_scriptBlockText:/.*\.[Mm][Ss][Ii].*/
 
 correlation:
-  # Authored by the correlation engine for review.
+  # Authored per-rule (behaviour-researched) for the correlation engine. Related CoPilot
+  # Searches + telemetry pivots to run around an alert, scoped to its host/user/ip/domain.
+  related_rules:
+  - id: 222720a7-047f-4054-baa5-bab9be757db0
+    name: PowerShell MSI Install via WindowsInstaller COM From Remote Location
+    reason: Sibling PowerShell MSI-install technique (WindowsInstaller COM instead of Win32_Product); same operator intent, and a remote-location MSI confirms staged payload delivery.
+  - id: 7b6a7418-3afc-11f0-aff4-000d3abf478c
+    name: Obfuscated PowerShell MSI Install via WindowsInstaller COM
+    reason: Alternate PowerShell MSI install path on the same host, obfuscated; shows an attacker iterating on MSI-based execution after or before the CIM method call.
+  - id: 8150732a-0c9d-4a99-82b9-9efb9b90c40c
+    name: Suspicious Msiexec Quiet Install From Remote Location
+    reason: The Win32_Product Install method makes msiexec run the package; a quiet install from a URL/UNC path is the usual form of the delivered payload.
+  - id: b0fd38c7-f71a-43a2-870e-f3ca06bcdd99
+    name: Windows HTTP Network Communication From MSIExec
+    reason: If the .msi in the script block is remote, msiexec fetches it over HTTP; this is the network-side confirmation of the same install.
+  - id: 5594e67a-7f92-4a04-b65d-1a42fd824a60
+    name: MSI Installation From Web
+    reason: Windows Installer application log records the install source; a web source on this host confirms the MSI came from the internet rather than local software deployment.
+  - id: c7c8aa1c-5aff-408e-828b-998e3620b341
+    name: MSI Installation From Suspicious Locations
+    reason: Installer log entry showing the MSI sat in Temp/Downloads/Public, the staging path a script would drop it to before calling Win32_Product Install.
+  - id: 3c7d1587-3b13-439f-9941-7d14313dbdfe
+    name: Potential COM Objects Download Cradles Usage - PS Script
+    reason: 'Precursor: the same PowerShell session often downloads the MSI with a COM/WebClient cradle before invoking the install.'
+  - id: 1e53dd56-8d83-4eb4-a43e-b790a05510aa
+    name: Always Install Elevated MSI Spawned Cmd And Powershell
+    reason: 'Follow-on: a malicious MSI executed via Windows Installer often launches cmd/powershell children, especially if run with elevation.'
+  window: 1h
   enrichment_searches:
-  # Rule-specific telemetry pivots the engine runs around an alert from this rule,
-  # scoped to the alert's host/user/IP within the window (behaviour-targeted, not a sweep).
-    - name: "Follow-on LOLBin / signed-binary-proxy execution on this host"
-      query: 'data_win_system_eventID:"1" AND data_win_eventdata_image:/.*(\\[Rr][Uu][Nn][Dd][Ll][Ll]32\.[Ee][Xx][Ee]|\\[Rr][Ee][Gg][Ss][Vv][Rr]32\.[Ee][Xx][Ee]|\\[Mm][Ss][Hh][Tt][Aa]\.[Ee][Xx][Ee]|\\[Ii][Nn][Ss][Tt][Aa][Ll][Ll][Uu][Tt][Ii][Ll]\.[Ee][Xx][Ee]|\\[Rr][Ee][Gg][Aa][Ss][Mm]\.[Ee][Xx][Ee]|\\[Rr][Ee][Gg][Ss][Vv][Cc][Ss]\.[Ee][Xx][Ee]|\\[Mm][Ss][Bb][Uu][Ii][Ll][Dd]\.[Ee][Xx][Ee]|\\[Cc][Ee][Rr][Tt][Uu][Tt][Ii][Ll]\.[Ee][Xx][Ee]|\\[Bb][Ii][Tt][Ss][Aa][Dd][Mm][Ii][Nn]\.[Ee][Xx][Ee]|\\[Ww][Mm][Ii][Cc]\.[Ee][Xx][Ee]|\\[Cc][Mm][Ss][Tt][Pp]\.[Ee][Xx][Ee]|\\[Oo][Dd][Bb][Cc][Cc][Oo][Nn][Ff]\.[Ee][Xx][Ee]|\\[Ff][Oo][Rr][Ff][Ii][Ll][Ee][Ss]\.[Ee][Xx][Ee]|\\[Pp][Cc][Aa][Ll][Uu][Aa]\.[Ee][Xx][Ee]|\\[Mm][Aa][Vv][Ii][Nn][Jj][Ee][Cc][Tt]\.[Ee][Xx][Ee]|\\[Ss][Cc][Rr][Ii][Pp][Tt][Rr][Uu][Nn][Nn][Ee][Rr]\.[Ee][Xx][Ee])/'
-      pivot_on: [host]
-      window: 1h
-    - name: "Download / AMSI-bypass / encoded script blocks on this host"
-      query: 'data_win_system_eventID:"4104" AND (data_win_eventdata_scriptBlockText:/.*[Dd][Oo][Ww][Nn][Ll][Oo][Aa][Dd][Ss][Tt][Rr][Ii][Nn][Gg].*/ OR data_win_eventdata_scriptBlockText:/.*[Dd][Oo][Ww][Nn][Ll][Oo][Aa][Dd][Ff][Ii][Ll][Ee].*/ OR data_win_eventdata_scriptBlockText:/.*[Ii][Nn][Vv][Oo][Kk][Ee]-[Ww][Ee][Bb][Rr][Ee][Qq][Uu][Ee][Ss][Tt].*/ OR data_win_eventdata_scriptBlockText:/.*[Nn][Ee][Tt]\.[Ww][Ee][Bb][Cc][Ll][Ii][Ee][Nn][Tt].*/ OR data_win_eventdata_scriptBlockText:/.*[Ff][Rr][Oo][Mm][Bb][Aa][Ss][Ee]64[Ss][Tt][Rr][Ii][Nn][Gg].*/ OR data_win_eventdata_scriptBlockText:/.*[Ii][Ee][Xx].*/ OR data_win_eventdata_scriptBlockText:/.*[Ii][Nn][Vv][Oo][Kk][Ee]-[Ee][Xx][Pp][Rr][Ee][Ss][Ss][Ii][Oo][Nn].*/ OR data_win_eventdata_scriptBlockText:/.*[Ss][Tt][Aa][Rr][Tt]-[Bb][Ii][Tt][Ss][Tt][Rr][Aa][Nn][Ss][Ff][Ee][Rr].*/ OR data_win_eventdata_scriptBlockText:/.*[Aa][Mm][Ss][Ii][Uu][Tt][Ii][Ll][Ss].*/ OR data_win_eventdata_scriptBlockText:/.*-[Ee][Nn][Cc].*/ OR data_win_eventdata_scriptBlockText:/.*-[Ee][Nn][Cc][Oo][Dd][Ee][Dd][Cc][Oo][Mm][Mm][Aa][Nn][Dd].*/ OR data_win_eventdata_scriptBlockText:/.*[Rr][Ee][Ff][Ll][Ee][Cc][Tt][Ii][Oo][Nn]\.[Aa][Ss][Ss][Ee][Mm][Bb][Ll][Yy].*/)'
-      pivot_on: [host]
-      window: 1h
-    - name: "Memory/credential-dump creation & LSASS access on this host"
-      query: '((data_win_system_eventID:"1" AND data_win_eventdata_image:/.*(\\[Pp][Rr][Oo][Cc][Dd][Uu][Mm][Pp]\.[Ee][Xx][Ee]|\\[Pp][Rr][Oo][Cc][Dd][Uu][Mm][Pp]64\.[Ee][Xx][Ee]|\\[Ss][Qq][Ll][Dd][Uu][Mm][Pp][Ee][Rr]\.[Ee][Xx][Ee]|\\[Cc][Rr][Ee][Aa][Tt][Ee][Dd][Uu][Mm][Pp]\.[Ee][Xx][Ee]|\\[Rr][Dd][Rr][Ll][Ee][Aa][Kk][Dd][Ii][Aa][Gg]\.[Ee][Xx][Ee]|\\[Dd][Uu][Mm][Pp][Ee][Rr][Tt]\.[Ee][Xx][Ee]|\\[Nn][Aa][Nn][Oo][Dd][Uu][Mm][Pp]\.[Ee][Xx][Ee]|\\[Aa][Vv][Dd][Uu][Mm][Pp]\.[Ee][Xx][Ee])/) OR (data_win_system_eventID:"1" AND (data_win_eventdata_commandLine:/.*[Cc][Oo][Mm][Ss][Vv][Cc][Ss]\.[Dd][Ll][Ll].*/ OR data_win_eventdata_commandLine:/.*[Mm][Ii][Nn][Ii][Dd][Uu][Mm][Pp].*/ OR data_win_eventdata_commandLine:/.*[Dd][Uu][Mm][Pp][Ee][Rr][Tt].*/ OR data_win_eventdata_commandLine:/.*[Nn][Aa][Nn][Oo][Dd][Uu][Mm][Pp].*/ OR data_win_eventdata_commandLine:/.*[Ll][Ss][Aa][Ss][Ss].*/ OR data_win_eventdata_commandLine:/.*[Ss][Ee][Kk][Uu][Rr][Ll][Ss][Aa].*/ OR data_win_eventdata_commandLine:/.*[Nn][Tt][Dd][Ss]\.[Dd][Ii][Tt].*/ OR data_win_eventdata_commandLine:/.*[Nn][Tt][Dd][Ss][Uu][Tt][Ii][Ll].*/)) OR (data_win_system_eventID:"10" AND data_win_eventdata_targetImage:/.*(\\[Ll][Ss][Aa][Ss][Ss]\.[Ee][Xx][Ee])/))'
-      pivot_on: [host]
-      window: 1h
+  # Behaviour-targeted hunts the engine runs around the alert (not a sweep).
+  - name: MSI file written to disk on this host
+    query: data_win_system_eventID:"11" AND data_win_eventdata_targetFilename:/.*\.[Mm][Ss][Ii]/
+    pivot_on:
+    - host
+    window: 1h
+  - name: msiexec execution and spawned children (WMI-driven install)
+    query: data_win_system_eventID:"1" AND (data_win_eventdata_image:/.*\\[Mm][Ss][Ii][Ee][Xx][Ee][Cc]\.[Ee][Xx][Ee]/ OR data_win_eventdata_parentImage:/.*\\[Mm][Ss][Ii][Ee][Xx][Ee][Cc]\.[Ee][Xx][Ee]/ OR data_win_eventdata_parentImage:/.*\\[Ww][Mm][Ii][Pp][Rr][Vv][Ss][Ee]\.[Ee][Xx][Ee]/)
+    pivot_on:
+    - host
+    window: 1h
+  - name: Network connections by msiexec or PowerShell (remote MSI fetch)
+    query: data_win_system_eventID:"3" AND data_win_eventdata_image:/.*\\([Mm][Ss][Ii][Ee][Xx][Ee][Cc]|[Pp][Oo][Ww][Ee][Rr][Ss][Hh][Ee][Ll][Ll]|[Pp][Ww][Ss][Hh])\.[Ee][Xx][Ee]/
+    pivot_on:
+    - host
+    window: 1h
+  - name: PowerShell script blocks fetching or staging installer payloads
+    query: data_win_system_eventID:"4104" AND (data_win_eventdata_scriptBlockText:*Invoke-WebRequest* OR data_win_eventdata_scriptBlockText:*DownloadFile* OR data_win_eventdata_scriptBlockText:*Start-BitsTransfer* OR data_win_eventdata_scriptBlockText:*WindowsInstaller.Installer* OR data_win_eventdata_scriptBlockText:*msiexec*)
+    pivot_on:
+    - host
+    window: 2h
+  - name: Persistence or shell activity after MSI install
+    query: data_win_system_eventID:"1" AND data_win_eventdata_parentImage:/.*\\[Mm][Ss][Ii][Ee][Xx][Ee][Cc]\.[Ee][Xx][Ee]/ AND data_win_eventdata_image:/.*\\([Cc][Mm][Dd]|[Pp][Oo][Ww][Ee][Rr][Ss][Hh][Ee][Ll][Ll]|[Ww][Ss][Cc][Rr][Ii][Pp][Tt]|[Cc][Ss][Cc][Rr][Ii][Pp][Tt]|[Rr][Uu][Nn][Dd][Ll][Ll]32|[Ss][Cc][Hh][Tt][Aa][Ss][Kk][Ss])\.[Ee][Xx][Ee]/
+    pivot_on:
+    - host
+    window: 2h

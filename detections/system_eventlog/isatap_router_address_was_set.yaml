@@ -166,35 +166,58 @@ graylog:
   query: data_win_system_eventID:"4100" AND data_win_system_providerName:/[Mm][Ii][Cc][Rr][Oo][Ss][Oo][Ff][Tt]-[Ww][Ii][Nn][Dd][Oo][Ww][Ss]-[Ii][Pp][Hh][Ll][Pp][Ss][Vv][Cc]/ AND _exists_:data_win_eventdata_isatapRouter AND NOT (data_win_eventdata_isatapRouter:"127.0.0.1" OR data_win_eventdata_isatapRouter:"::1") AND NOT (NOT _exists_:data_win_eventdata_isatapRouter)
 
 correlation:
-  # Authored by the correlation engine for review. Related CoPilot Searches to run
-  # around an alert from this rule, scoped to the same host/user/IP within the window.
+  # Authored per-rule (behaviour-researched) for the correlation engine. Related CoPilot
+  # Searches + telemetry pivots to run around an alert, scoped to its host/user/ip/domain.
   related_rules:
-    - id: 35ba1d85-724d-42a3-889f-2e2362bcaf23
-      name: "AD Privileged Users or Groups Reconnaissance"
-      reason: "next kill-chain tactic: Discovery"
-    - id: 17d619c1-e020-4347-957e-1d1207455c93
-      name: "Active Directory Replication from Non Machine Account"
-      reason: "next kill-chain tactic: Credential Access"
-    - id: 87261fb2-69d0-42fe-b9de-88c6b5f65a43
-      name: "Atera Agent Installation"
-      reason: "next kill-chain tactic: Command and Control"
+  - id: 5589ab4f-a767-433c-961d-c91f3f704db1
+    name: Potential SMB Relay Attack Tool Execution
+    reason: mitm6 poisoning exists to feed NTLM relay (ntlmrelayx/Inveigh); relay tooling on or near this host is the direct follow-on of a rogue ISATAP/DHCPv6 takeover
+  - id: d67572a0-e2ec-45d6-b8db-c100d14b8ef2
+    name: NetNTLM Downgrade Attack - Registry
+    reason: Attackers capturing authentication via IPv6/WPAD poisoning also weaken NTLM settings to make captured hashes relayable or crackable
+  - id: bb76d96b-821c-47cf-944b-7ce377864492
+    name: Suspicious NTLM Authentication on the Printer Spooler Service
+    reason: Coerced machine authentication (spooler) is paired with a mitm6 relay to land NTLM auth on the attacker-controlled IPv6 host
+  - id: 0ed99dda-6a35-11ef-8c99-0242ac120002
+    name: Attempts of Kerberos Coercion Via DNS SPN Spoofing
+    reason: DNS-based coercion/spoofing is the sibling of mitm6 DNS takeover and uses the same attacker-controlled name resolution to redirect auth
+  - id: e7a21b5f-d8c4-4ae5-b8d9-93c5d3f28e1c
+    name: Suspicious DNS Query Indicating Kerberos Coercion via DNS Object SPN Spoofing
+    reason: Marshalled-SPN DNS names resolving through a poisoned resolver show the DNS takeover being used to redirect Kerberos/NTLM auth
+  - id: 12827a56-61a4-476a-a9cb-f3068f191073
+    name: HackTool - KrbRelayUp Execution
+    reason: A relayed machine-account authentication from mitm6 is commonly escalated to local SYSTEM via KrbRelayUp (RBCD/shadow credentials)
+  - id: e96253b8-6b3b-4f90-9e59-3b24b99cf9b4
+    name: HackTool - KrbRelay Execution
+    reason: Authentication captured via IPv6 takeover is relayed to LDAP/Kerberos with KrbRelay-style tooling
+  - id: 1eeed653-dbc8-4187-ad0c-eeebb20e6599
+    name: Potential SPN Enumeration Via Setspn.EXE
+    reason: After a relay to LDAP succeeds, attackers enumerate SPNs/domain objects to pick Kerberoast or delegation targets
   window: 1h
   enrichment_searches:
-  # Rule-specific telemetry pivots the engine runs around an alert from this rule,
-  # scoped to the alert's host/user/IP within the window (behaviour-targeted, not a sweep).
-    - name: "Remote-execution / lateral-movement tooling on this host"
-      query: '(data_win_system_eventID:"1" AND data_win_eventdata_image:/.*(\\[Pp][Ss][Ee][Xx][Ee][Cc]\.[Ee][Xx][Ee]|\\[Pp][Ss][Ee][Xx][Ee][Ss][Vv][Cc]\.[Ee][Xx][Ee]|\\[Pp][Aa][Ee][Xx][Ee][Cc]\.[Ee][Xx][Ee]|\\[Ww][Ii][Nn][Rr][Ss]\.[Ee][Xx][Ee]|\\[Mm][Ss][Tt][Ss][Cc]\.[Ee][Xx][Ee]|\\[Ww][Mm][Ii][Cc]\.[Ee][Xx][Ee])/) OR (data_win_system_eventID:"1" AND data_win_eventdata_image:/.*(\\[Pp][Oo][Ww][Ee][Rr][Ss][Hh][Ee][Ll][Ll]\.[Ee][Xx][Ee]|\\[Pp][Ww][Ss][Hh]\.[Ee][Xx][Ee])/ AND (data_win_eventdata_commandLine:/.*[Ii][Nn][Vv][Oo][Kk][Ee]-[Cc][Oo][Mm][Mm][Aa][Nn][Dd].*/ OR data_win_eventdata_commandLine:/.*[Nn][Ee][Ww]-[Pp][Ss][Ss][Ee][Ss][Ss][Ii][Oo][Nn].*/ OR data_win_eventdata_commandLine:/.*[Ee][Nn][Tt][Ee][Rr]-[Pp][Ss][Ss][Ee][Ss][Ss][Ii][Oo][Nn].*/ OR data_win_eventdata_commandLine:/.*-[Cc][Oo][Mm][Pp][Uu][Tt][Ee][Rr][Nn][Aa][Mm][Ee].*/))'
-      pivot_on: [host]
-      window: 2h
-    - name: "Service installations on this host"
-      query: 'data_win_system_eventID:"7045"'
-      pivot_on: [host]
-      window: 6h
-    - name: "Follow-on LOLBin / signed-binary-proxy execution on this host"
-      query: 'data_win_system_eventID:"1" AND data_win_eventdata_image:/.*(\\[Rr][Uu][Nn][Dd][Ll][Ll]32\.[Ee][Xx][Ee]|\\[Rr][Ee][Gg][Ss][Vv][Rr]32\.[Ee][Xx][Ee]|\\[Mm][Ss][Hh][Tt][Aa]\.[Ee][Xx][Ee]|\\[Ii][Nn][Ss][Tt][Aa][Ll][Ll][Uu][Tt][Ii][Ll]\.[Ee][Xx][Ee]|\\[Rr][Ee][Gg][Aa][Ss][Mm]\.[Ee][Xx][Ee]|\\[Rr][Ee][Gg][Ss][Vv][Cc][Ss]\.[Ee][Xx][Ee]|\\[Mm][Ss][Bb][Uu][Ii][Ll][Dd]\.[Ee][Xx][Ee]|\\[Cc][Ee][Rr][Tt][Uu][Tt][Ii][Ll]\.[Ee][Xx][Ee]|\\[Bb][Ii][Tt][Ss][Aa][Dd][Mm][Ii][Nn]\.[Ee][Xx][Ee]|\\[Ww][Mm][Ii][Cc]\.[Ee][Xx][Ee]|\\[Cc][Mm][Ss][Tt][Pp]\.[Ee][Xx][Ee]|\\[Oo][Dd][Bb][Cc][Cc][Oo][Nn][Ff]\.[Ee][Xx][Ee]|\\[Ff][Oo][Rr][Ff][Ii][Ll][Ee][Ss]\.[Ee][Xx][Ee]|\\[Pp][Cc][Aa][Ll][Uu][Aa]\.[Ee][Xx][Ee]|\\[Mm][Aa][Vv][Ii][Nn][Jj][Ee][Cc][Tt]\.[Ee][Xx][Ee]|\\[Ss][Cc][Rr][Ii][Pp][Tt][Rr][Uu][Nn][Nn][Ee][Rr]\.[Ee][Xx][Ee])/'
-      pivot_on: [host]
-      window: 2h
-    - name: "Memory/credential-dump creation & LSASS access on this host"
-      query: '((data_win_system_eventID:"1" AND data_win_eventdata_image:/.*(\\[Pp][Rr][Oo][Cc][Dd][Uu][Mm][Pp]\.[Ee][Xx][Ee]|\\[Pp][Rr][Oo][Cc][Dd][Uu][Mm][Pp]64\.[Ee][Xx][Ee]|\\[Ss][Qq][Ll][Dd][Uu][Mm][Pp][Ee][Rr]\.[Ee][Xx][Ee]|\\[Cc][Rr][Ee][Aa][Tt][Ee][Dd][Uu][Mm][Pp]\.[Ee][Xx][Ee]|\\[Rr][Dd][Rr][Ll][Ee][Aa][Kk][Dd][Ii][Aa][Gg]\.[Ee][Xx][Ee]|\\[Dd][Uu][Mm][Pp][Ee][Rr][Tt]\.[Ee][Xx][Ee]|\\[Nn][Aa][Nn][Oo][Dd][Uu][Mm][Pp]\.[Ee][Xx][Ee]|\\[Aa][Vv][Dd][Uu][Mm][Pp]\.[Ee][Xx][Ee])/) OR (data_win_system_eventID:"1" AND (data_win_eventdata_commandLine:/.*[Cc][Oo][Mm][Ss][Vv][Cc][Ss]\.[Dd][Ll][Ll].*/ OR data_win_eventdata_commandLine:/.*[Mm][Ii][Nn][Ii][Dd][Uu][Mm][Pp].*/ OR data_win_eventdata_commandLine:/.*[Dd][Uu][Mm][Pp][Ee][Rr][Tt].*/ OR data_win_eventdata_commandLine:/.*[Nn][Aa][Nn][Oo][Dd][Uu][Mm][Pp].*/ OR data_win_eventdata_commandLine:/.*[Ll][Ss][Aa][Ss][Ss].*/ OR data_win_eventdata_commandLine:/.*[Ss][Ee][Kk][Uu][Rr][Ll][Ss][Aa].*/ OR data_win_eventdata_commandLine:/.*[Nn][Tt][Dd][Ss]\.[Dd][Ii][Tt].*/ OR data_win_eventdata_commandLine:/.*[Nn][Tt][Dd][Ss][Uu][Tt][Ii][Ll].*/)) OR (data_win_system_eventID:"10" AND data_win_eventdata_targetImage:/.*(\\[Ll][Ss][Aa][Ss][Ss]\.[Ee][Xx][Ee])/))'
-      pivot_on: [host]
-      window: 1h
+  # Behaviour-targeted hunts the engine runs around the alert (not a sweep).
+  - name: IPv6 transition / ISATAP configuration changes via netsh or PowerShell
+    query: (data_win_system_eventID:"1" AND data_win_eventdata_commandLine:/.*[Ii][Ss][Aa][Tt][Aa][Pp].*/) OR (data_win_system_eventID:"1" AND data_win_eventdata_image:/.*\\[Nn][Ee][Tt][Ss][Hh]\.[Ee][Xx][Ee]/ AND data_win_eventdata_commandLine:/.*([Ii][Pp][Vv]6|[Tt][Ee][Rr][Ee][Dd][Oo]|6[Tt][Oo]4).*/) OR (data_win_system_eventID:"4104" AND data_win_eventdata_scriptBlockText:/.*(Set-NetIsatapConfiguration|Set-Net6to4Configuration|Set-NetTeredoConfiguration).*/)
+    pivot_on:
+    - host
+    window: 2h
+  - name: NTLM relay / mitm6 / LLMNR poisoning tooling executed
+    query: data_win_system_eventID:"1" AND (data_win_eventdata_image:/.*\\([Mm][Ii][Tt][Mm]6|[Nn][Tt][Ll][Mm][Rr][Ee][Ll][Aa][Yy][Xx]|[Ii][Nn][Vv][Ee][Aa][Hh]|[Rr][Ee][Ss][Pp][Oo][Nn][Dd][Ee][Rr]|[Ss][Mm][Bb][Rr][Ee][Ll][Aa][Yy])[^\\]*/ OR data_win_eventdata_commandLine:/.*([Nn][Tt][Ll][Mm][Rr][Ee][Ll][Aa][Yy][Xx]|[Mm][Ii][Tt][Mm]6|[Ii][Nn][Vv][Ee][Aa][Hh]|[Ss][Mm][Bb][Rr][Ee][Ll][Aa][Yy]).*/)
+    pivot_on:
+    - host
+    window: 2h
+  - name: DNS lookups for WPAD / ISATAP names (poisoned resolver targets)
+    query: data_win_system_eventID:"22" AND (data_win_eventdata_queryName:/[Ww][Pp][Aa][Dd].*/ OR data_win_eventdata_queryName:/[Ii][Ss][Aa][Tt][Aa][Pp].*/ OR data_win_eventdata_queryName:*UWhRCAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA*)
+    pivot_on:
+    - host
+    window: 2h
+  - name: Outbound LDAP/LDAPS/SMB connections by non-system processes (relay targets)
+    query: data_win_system_eventID:"3" AND data_win_eventdata_destinationPort:("389" OR "636" OR "3268" OR "445") AND NOT data_win_eventdata_image:/.*\([Ll][Ss][Aa][Ss][Ss]|[Ss][Vv][Cc][Hh][Oo][Ss][Tt])\.[Ee][Xx][Ee]/ AND NOT data_win_eventdata_image:"System"
+    pivot_on:
+    - host
+    window: 1h
+  - name: Machine account creation or RBCD delegation attribute changes
+    query: data_win_system_eventID:"4741" OR (data_win_system_eventID:"5136" AND data_win_eventdata_attributeLDAPDisplayName:"msDS-AllowedToActOnBehalfOfOtherIdentity")
+    pivot_on:
+    - host
+    window: 6h

@@ -135,31 +135,46 @@ graylog:
   query: full_log:/.*\/etc\/ssl\/certs\/.*/ AND (full_log:/.*\.pem.*/ OR full_log:/.*\.crt.*/) AND (full_log:/.*\/usr\/bin\/rm.*/ OR full_log:/.*rm -f.*/ OR full_log:/.*rm -rf.*/) AND NOT _exists_:data_win_system_eventID AND NOT rule_groups:/.*windows.*/
 
 correlation:
-  # Authored by the correlation engine for review. Related CoPilot Searches to run
-  # around an alert from this rule, scoped to the same host/user/IP within the window.
+  # Authored per-rule (behaviour-researched) for the correlation engine. Related CoPilot
+  # Searches + telemetry pivots to run around an alert, scoped to its host/user/ip/domain.
   related_rules:
-    - id: de25eeb8-3655-4643-ac3a-b662d3f26b6b
-      name: "Disable Or Stop Services"
-      reason: "next kill-chain tactic: Impact"
-    - id: 2992ac4d-31e9-4325-99f2-b18a73221bb2
-      name: "ESXi VM Kill Via ESXCLI"
-      reason: "next kill-chain tactic: Impact"
-    - id: 8a46f16c-8c4c-82d1-b121-0fdd3ba70a84
-      name: "Group Has Been Deleted Via Groupdel"
-      reason: "next kill-chain tactic: Impact"
+  - id: linux-private-keys-certificate-enumeration-001
+    name: Linux Private Keys and Certificate Enumeration
+    reason: Cert/key enumeration before deletion suggests theft or targeted tampering of trust material
+  - id: a3b7c9d2-4f5e-4b6d-8c1a-2d3f4e5b6c7a
+    name: Linux Critical Directory Deletion
+    reason: Broader critical directory deletion could encompass the certificate store
+  - id: linux-auditd-data-destruction-command-001
+    name: Linux Auditd Data Destruction Command
+    reason: Certificate removal may be part of data destruction
+  - id: linux-auditd-ssh-config-keys-deletion-001
+    name: Linux Auditd SSH Config Keys Deletion
+    reason: Parallel deletion of SSH keys indicates wiping of trust and authentication material
+  - id: de25eeb8-3655-4643-ac3a-b662d3f26b6b
+    name: Disable Or Stop Services
+    reason: TLS-dependent services are often stopped or disabled around certificate removal
+  - id: linux-ingress-tool-transfer-hunting-001
+    name: Linux Ingress Tool Transfer Hunting
+    reason: Rogue CA install usually follows removal; tool download may supply replacement certs
+  - id: 80915f59-9b56-4616-9de0-fd0dea6c12fe
+    name: Linux Logs Clearing Attempts
+    reason: Log clearing frequently accompanies trust-store tampering
   window: 1h
   enrichment_searches:
-  # Rule-specific telemetry pivots the engine runs around an alert from this rule,
-  # scoped to the alert's host/user/IP within the window (behaviour-targeted, not a sweep).
-    - name: "Destructive / data-wipe tooling on this host"
-      query: '((data_process_exec_process_binary:/.*(\/[Dd][Dd]|\/[Mm][Kk][Ff][Ss]|\/[Ww][Ii][Pp][Ee][Ff][Ss]|\/[Ss][Hh][Rr][Ee][Dd]|\/[Cc][Rr][Yy][Pp][Tt][Ss][Ee][Tt][Uu][Pp])/) OR (data_process_exec_process_arguments:/.*[Rr][Mm] -[Rr][Ff].*/) OR (data_process_exec_process_arguments:/.*--[Nn][Oo]-[Pp][Rr][Ee][Ss][Ee][Rr][Vv][Ee]-[Rr][Oo][Oo][Tt].*/))'
-      pivot_on: [host]
-      window: 2h
-    - name: "Shell / interpreter execution on this host"
-      query: '((data_process_exec_process_binary:/.*(\/[Bb][Aa][Ss][Hh]|\/[Ss][Hh]|\/[Dd][Aa][Ss][Hh]|\/[Zz][Ss][Hh]|\/[Kk][Ss][Hh]|\/[Aa][Ss][Hh]|\/[Bb][Uu][Ss][Yy][Bb][Oo][Xx])/) OR (data_process_exec_process_binary:/.*(\/[Pp][Yy][Tt][Hh][Oo][Nn]|\/[Pp][Yy][Tt][Hh][Oo][Nn]3|\/[Pp][Ee][Rr][Ll]|\/[Rr][Uu][Bb][Yy]|\/[Pp][Hh][Pp]|\/[Nn][Oo][Dd][Ee]|\/[Ll][Uu][Aa]|\/[Aa][Ww][Kk])/))'
-      pivot_on: [host]
-      window: 1h
-    - name: "Reconnaissance commands on this host"
-      query: 'data_process_exec_process_binary:/.*(\/[Ww][Hh][Oo][Aa][Mm][Ii]|\/[Ii][Dd]|\/[Uu][Nn][Aa][Mm][Ee]|\/[Hh][Oo][Ss][Tt][Nn][Aa][Mm][Ee]|\/[Hh][Oo][Ss][Tt][Nn][Aa][Mm][Ee][Cc][Tt][Ll]|\/[Ss][Ss]|\/[Nn][Ee][Tt][Ss][Tt][Aa][Tt]|\/[Ii][Ff][Cc][Oo][Nn][Ff][Ii][Gg]|\/[Aa][Rr][Pp]|\/[Ww]|\/[Ww][Hh][Oo]|\/[Ll][Aa][Ss][Tt]|\/[Ll][Ss][Oo][Ff]|\/[Nn][Mm][Aa][Pp]|\/[Dd][Ii][Gg]|\/[Ff][Ii][Nn][Dd])/'
-      pivot_on: [host]
-      window: 1h
+  # Behaviour-targeted hunts the engine runs around the alert (not a sweep).
+  - name: Certificate store modifications and CA updates
+    query: data_process_exec_process_binary:/.*(\\/[Uu][Pp][Dd][Aa][Tt][Ee]\-[Cc][Aa]\-[Cc][Ee][Rr][Tt][Ii][Ff][Ii][Cc][Aa][Tt][Ee][Ss]|\\/[Uu][Pp][Dd][Aa][Tt][Ee]\-[Cc][Aa]\-[Tt][Rr][Uu][Ss][Tt]|\\/[Cc][Pp]|\\/[Mm][Vv]|\\/[Oo][Pp][Ee][Nn][Ss][Ss][Ll]|\\/[Tt][Rr][Uu][Ss][Tt])/ AND data_process_exec_process_arguments:/.*(\/[Ee][Tt][Cc]\/[Ss][Ss][Ll]|\/[Uu][Ss][Rr]\/[Ll][Oo][Cc][Aa][Ll]\/[Ss][Hh][Aa][Rr][Ee]\/[Cc][Aa]\-[Cc][Ee][Rr][Tt][Ii][Ff][Ii][Cc][Aa][Tt][Ee][Ss]|\/[Ee][Tt][Cc]\/[Pp][Kk][Ii]|\.[Cc][Rr][Tt]|\.[Pp][Ee][Mm]|[Uu][Pp][Dd][Aa][Tt][Ee]\-[Cc][Aa]).*/
+    pivot_on: host
+    window: 2h
+  - name: Certificate or private key enumeration
+    query: data_process_exec_process_binary:/.*(\\/[Ff][Ii][Nn][Dd]|\\/[Ll][Oo][Cc][Aa][Tt][Ee]|\\/[Ll][Ss]|\\/[Cc][Aa][Tt]|\\/[Gg][Rr][Ee][Pp])/ AND data_process_exec_process_arguments:/.*(\.[Pp][Ee][Mm]|\.[Cc][Rr][Tt]|\.[Kk][Ee][Yy]|[Ii][Dd]_[Rr][Ss][Aa]|\/[Ee][Tt][Cc]\/[Ss][Ss][Ll]\/[Pp][Rr][Ii][Vv][Aa][Tt][Ee]).*/
+    pivot_on: host
+    window: 2h
+  - name: TLS verification bypass in downloads
+    query: data_process_exec_process_binary:/.*(\\/[Cc][Uu][Rr][Ll]|\\/[Ww][Gg][Ee][Tt])/ AND data_process_exec_process_arguments:/.*(\-[Kk]|\-\-[Ii][Nn][Ss][Ee][Cc][Uu][Rr][Ee]|\-\-[Nn][Oo]\-[Cc][Hh][Ee][Cc][Kk]\-[Cc][Ee][Rr][Tt][Ii][Ff][Ii][Cc][Aa][Tt][Ee]).*/
+    pivot_on: host
+    window: 1h
+  - name: Recursive deletion or wipe tooling
+    query: (data_process_exec_process_binary:/.*(\\/[Ss][Hh][Rr][Ee][Dd]|\\/[Ww][Ii][Pp][Ee][Ff][Ss])/ OR (data_process_exec_process_binary:/.*(\\/[Rr][Mm])/ AND data_process_exec_process_arguments:/.*(\-[Rr][Ff]|\-[Ff][Rr]|\-\-[Nn][Oo]\-[Pp][Rr][Ee][Ss][Ee][Rr][Vv][Ee]\-[Rr][Oo][Oo][Tt]).*/))
+    pivot_on: host
+    window: 2h

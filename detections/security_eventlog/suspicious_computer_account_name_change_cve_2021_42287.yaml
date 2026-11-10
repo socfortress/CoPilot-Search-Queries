@@ -145,44 +145,58 @@ graylog:
   query: data_win_system_eventID:"4781" AND data_win_eventdata_oldTargetUserName:/.*\$.*/ AND _exists_:data_win_eventdata_newTargetUserName AND NOT (data_win_eventdata_newTargetUserName:/.*\$.*/)
 
 correlation:
-  # Authored by the correlation engine for review. Related CoPilot Searches to run
-  # around an alert from this rule, scoped to the same host/user/IP within the window.
+  # Authored per-rule (behaviour-researched) for the correlation engine. Related CoPilot
+  # Searches + telemetry pivots to run around an alert, scoped to its host/user/ip/domain.
   related_rules:
-    - id: 0255a820-e564-4e40-af2b-6ac61160335c
-      name: "A New Trust Was Created To A Domain"
-      reason: "next kill-chain tactic: Persistence"
-    - id: 35ba1d85-724d-42a3-889f-2e2362bcaf23
-      name: "AD Privileged Users or Groups Reconnaissance"
-      reason: "next kill-chain tactic: Discovery"
-    - id: 9eb99343-d336-4020-a3cd-67f3819e68ee
-      name: "Account Tampering - Suspicious Failed Logon Reasons"
-      reason: "next kill-chain tactic: Persistence"
-    - id: 17d619c1-e020-4347-957e-1d1207455c93
-      name: "Active Directory Replication from Non Machine Account"
-      reason: "next kill-chain tactic: Credential Access"
-    - id: 300bac00-e041-4ee2-9c36-e262656a6ecc
-      name: "Active Directory User Backdoors"
-      reason: "next kill-chain tactic: Persistence"
-    - id: 2632954e-db1c-49cb-9936-67d1ef1d17d2
-      name: "Addition of SID History to Active Directory Object"
-      reason: "next kill-chain tactic: Privilege Escalation"
-  window: 1h
+  - id: d00a9a72-2c09-4459-ad03-5e0a23351e36
+    name: Suspicious LDAP-Attributes Used
+    reason: noPac setup edits computer-object attributes (sAMAccountName/SPN) over LDAP; this is the same directory-attribute tampering seen just before the rename
+  - id: f7644214-0eb0-4ace-9455-331ec4c09253
+    name: Kerberos Manipulation
+    reason: After the machine account is renamed to a DC name, the attacker requests a TGT/S4U2self ticket; Kerberos failures and anomalies cluster around the rename
+  - id: 496a0e47-0a33-4dca-b009-9e6ca3591f39
+    name: Suspicious Kerberos RC4 Ticket Encryption
+    reason: Forged or S4U-derived service tickets obtained with the spoofed DC name are often requested with downgraded RC4 encryption
+  - id: 749c9f5e-b353-4b90-a9c1-05243357ca4b
+    name: Potential Privilege Escalation via Local Kerberos Relay over LDAP
+    reason: Alternative machine-account-based escalation path to SYSTEM/domain rights an attacker tries alongside or instead of noPac
+  - id: 17d619c1-e020-4347-957e-1d1207455c93
+    name: Active Directory Replication from Non Machine Account
+    reason: 'The usual end goal of noPac: impersonated DC/admin ticket is used to DCSync krbtgt and other hashes'
+  - id: 2c99737c-585d-4431-b61a-c911d86ff32f
+    name: Powerview Add-DomainObjectAcl DCSync AD Extend Right
+    reason: Attacker who gains domain admin via the spoofed DC account may grant themselves DCSync rights for persistence
+  - id: 2632954e-db1c-49cb-9936-67d1ef1d17d2
+    name: Addition of SID History to Active Directory Object
+    reason: 'Post-escalation persistence: SID history injection to keep domain-admin equivalence'
+  - id: 32d56ea1-417f-44ff-822b-882873f5f43b
+    name: Impacket PsExec Execution
+    reason: With the impersonated DC ticket noPac tooling (Impacket) typically executes commands on the DC via psexec-style service install
+  window: 2h
   enrichment_searches:
-  # Rule-specific telemetry pivots the engine runs around an alert from this rule,
-  # scoped to the alert's host/user/IP within the window (behaviour-targeted, not a sweep).
-    - name: "Execution from user-writable / masquerading paths on this host"
-      query: 'data_win_system_eventID:"1" AND (data_win_eventdata_image:/.*\\[Uu][Ss][Ee][Rr][Ss]\\.*/ OR data_win_eventdata_image:/.*\\[Pp][Rr][Oo][Gg][Rr][Aa][Mm][Dd][Aa][Tt][Aa]\\.*/ OR data_win_eventdata_image:/.*\\[Ww][Ii][Nn][Dd][Oo][Ww][Ss]\\[Tt][Ee][Mm][Pp]\\.*/ OR data_win_eventdata_image:/.*\\[Aa][Pp][Pp][Dd][Aa][Tt][Aa]\\.*/ OR data_win_eventdata_image:/.*\\[Pp][Uu][Bb][Ll][Ii][Cc]\\.*/ OR data_win_eventdata_image:/.*\\\$[Rr][Ee][Cc][Yy][Cc][Ll][Ee].*/)'
-      pivot_on: [host]
-      window: 1h
-    - name: "Account / group / privilege changes on this host"
-      query: '(((data_win_system_eventID:"4720" OR data_win_system_eventID:"4728" OR data_win_system_eventID:"4732" OR data_win_system_eventID:"4756")) OR (data_win_system_eventID:"1" AND data_win_eventdata_image:/.*(\\[Nn][Ee][Tt]\.[Ee][Xx][Ee]|\\[Nn][Ee][Tt]1\.[Ee][Xx][Ee])/ AND (data_win_eventdata_commandLine:/.*[Uu][Ss][Ee][Rr] .*/ OR data_win_eventdata_commandLine:/.*[Ll][Oo][Cc][Aa][Ll][Gg][Rr][Oo][Uu][Pp].*/ OR data_win_eventdata_commandLine:/.*[Gg][Rr][Oo][Uu][Pp] .*/)))'
-      pivot_on: [host]
-      window: 6h
-    - name: "Memory/credential-dump creation & LSASS access on this host"
-      query: '((data_win_system_eventID:"1" AND data_win_eventdata_image:/.*(\\[Pp][Rr][Oo][Cc][Dd][Uu][Mm][Pp]\.[Ee][Xx][Ee]|\\[Pp][Rr][Oo][Cc][Dd][Uu][Mm][Pp]64\.[Ee][Xx][Ee]|\\[Ss][Qq][Ll][Dd][Uu][Mm][Pp][Ee][Rr]\.[Ee][Xx][Ee]|\\[Cc][Rr][Ee][Aa][Tt][Ee][Dd][Uu][Mm][Pp]\.[Ee][Xx][Ee]|\\[Rr][Dd][Rr][Ll][Ee][Aa][Kk][Dd][Ii][Aa][Gg]\.[Ee][Xx][Ee]|\\[Dd][Uu][Mm][Pp][Ee][Rr][Tt]\.[Ee][Xx][Ee]|\\[Nn][Aa][Nn][Oo][Dd][Uu][Mm][Pp]\.[Ee][Xx][Ee]|\\[Aa][Vv][Dd][Uu][Mm][Pp]\.[Ee][Xx][Ee])/) OR (data_win_system_eventID:"1" AND (data_win_eventdata_commandLine:/.*[Cc][Oo][Mm][Ss][Vv][Cc][Ss]\.[Dd][Ll][Ll].*/ OR data_win_eventdata_commandLine:/.*[Mm][Ii][Nn][Ii][Dd][Uu][Mm][Pp].*/ OR data_win_eventdata_commandLine:/.*[Dd][Uu][Mm][Pp][Ee][Rr][Tt].*/ OR data_win_eventdata_commandLine:/.*[Nn][Aa][Nn][Oo][Dd][Uu][Mm][Pp].*/ OR data_win_eventdata_commandLine:/.*[Ll][Ss][Aa][Ss][Ss].*/ OR data_win_eventdata_commandLine:/.*[Ss][Ee][Kk][Uu][Rr][Ll][Ss][Aa].*/ OR data_win_eventdata_commandLine:/.*[Nn][Tt][Dd][Ss]\.[Dd][Ii][Tt].*/ OR data_win_eventdata_commandLine:/.*[Nn][Tt][Dd][Ss][Uu][Tt][Ii][Ll].*/)) OR (data_win_system_eventID:"10" AND data_win_eventdata_targetImage:/.*(\\[Ll][Ss][Aa][Ss][Ss]\.[Ee][Xx][Ee])/))'
-      pivot_on: [host]
-      window: 1h
-    - name: "This account's logon activity across hosts"
-      query: '(data_win_system_eventID:"4624" OR data_win_system_eventID:"4625")'
-      pivot_on: [user]
-      window: 6h
+  # Behaviour-targeted hunts the engine runs around the alert (not a sweep).
+  - name: Machine account creation/attribute changes (MAQ abuse setup)
+    query: (data_win_system_eventID:"4741" OR data_win_system_eventID:"4742" OR data_win_system_eventID:"4781")
+    pivot_on:
+    - host
+    window: 6h
+  - name: Kerberos TGT/service tickets for LDAP/CIFS/host services (DC impersonation)
+    query: (data_win_system_eventID:"4768" OR data_win_system_eventID:"4769") AND (data_win_eventdata_serviceName:ldap* OR data_win_eventdata_serviceName:cifs* OR data_win_eventdata_serviceName:host* OR data_win_eventdata_serviceName:krbtgt*)
+    pivot_on:
+    - host
+    window: 2h
+  - name: DCSync replication rights used (directory replication GUIDs)
+    query: data_win_system_eventID:"4662" AND (data_win_eventdata_properties:*1131f6aa-9c07-11d1-f79f-00c04fc2dcd2* OR data_win_eventdata_properties:*1131f6ad-9c07-11d1-f79f-00c04fc2dcd2* OR data_win_eventdata_properties:*89e95b76-444d-4c62-991a-0facbeda640c*)
+    pivot_on:
+    - host
+    window: 4h
+  - name: Network logons by this account to other systems after rename
+    query: data_win_system_eventID:"4624" AND data_win_eventdata_logonType:"3"
+    pivot_on:
+    - user
+    window: 4h
+  - name: Remote service installation / privileged group changes on the DC
+    query: (data_win_system_eventID:"7045" OR data_win_system_eventID:"4697" OR data_win_system_eventID:"4728" OR data_win_system_eventID:"4732" OR data_win_system_eventID:"4756")
+    pivot_on:
+    - host
+    window: 4h

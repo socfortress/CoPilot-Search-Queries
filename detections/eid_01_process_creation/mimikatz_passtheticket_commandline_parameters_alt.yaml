@@ -126,58 +126,50 @@ graylog:
   query: data_win_system_eventID:"1" AND (data_win_eventdata_commandLine:/.*sekurlsa::tickets.*/ OR data_win_eventdata_commandLine:/.*kerberos::ptt.*/)
 
 correlation:
-  # Authored by the correlation engine for review. Related CoPilot Searches to run
-  # around an alert from this rule, scoped to the same host/user/IP within the window.
+  # Authored per-rule (behaviour-researched) for the correlation engine. Related CoPilot
+  # Searches + telemetry pivots to run around an alert, scoped to its host/user/ip/domain.
   related_rules:
-    - id: de7fcadc-04f3-11ec-a241-acde48001122
-      name: "AdsiSearcher Account Discovery"
-      reason: "same analytic story: Scattered Lapsus$ Hunters"
-    - id: 2452e632-9e0d-11eb-bacd-acde48001122
-      name: "DNS Exfiltration Using Nslookup App"
-      reason: "same analytic story: Compromised Windows Host"
-    - id: cc316032-924a-11eb-91a2-acde48001122
-      name: "DSQuery Domain Discovery"
-      reason: "same analytic story: Compromised Windows Host"
-    - id: 9b3af1e6-5b68-11eb-ae93-0242ac130002
-      name: "Detect MSHTA Url in Command Line"
-      reason: "same analytic story: Compromised Windows Host"
-    - id: 8148c29c-c952-11eb-9255-acde48001122
-      name: "Detect Mimikatz With PowerShell Script Block Logging"
-      reason: "same analytic story: Sandworm Tools"
-    - id: 27c3a83d-cada-47c6-9042-67baf19d2574
-      name: "Detect PsExec With accepteula Flag"
-      reason: "same analytic story: Sandworm Tools"
-    - id: 72170ec5-f7d2-42f5-aefb-2b8be6aad15f
-      name: "Detect Regasm Spawning a Process"
-      reason: "same analytic story: Compromised Windows Host"
-    - id: bc477b57-5c21-4ab6-9c33-668772e7f114
-      name: "Detect Regsvcs Spawning a Process"
-      reason: "same analytic story: Compromised Windows Host"
-    - id: 070e9b80-6252-11eb-ae93-0242ac130002
-      name: "Detect Regsvr32 Application Control Bypass"
-      reason: "same analytic story: Compromised Windows Host"
-    - id: ccad96d7-a48c-4f13-8b9c-9f6a31cba454
-      name: "Detect Remote Access Software Usage FileInfo"
-      reason: "same analytic story: Scattered Lapsus$ Hunters"
-    - id: 683e6196-b8e8-11eb-9a79-acde48001122
-      name: "Detect Renamed PSExec"
-      reason: "same analytic story: Sandworm Tools"
-    - id: a0873b32-5b68-11eb-ae93-0242ac130002
-      name: "Detect mshta inline hta execution"
-      reason: "same analytic story: Compromised Windows Host"
-  window: 1h
+  - id: windows-mimikatz-binary-execution-001
+    name: Windows Mimikatz Binary Execution
+    reason: Mimikatz itself ran on this host; the sekurlsa::tickets /export or kerberos::ptt command is its payload, so the binary execution corroborates and dates the tooling.
+  - id: a642964e-bead-4bed-8910-1bb4d63e3b4d
+    name: HackTool - Mimikatz Execution
+    reason: Broader Mimikatz command-line module coverage (sekurlsa/lsadump) usually surrounds ticket export in the same session.
+  - id: 5ef9853e-4d0e-4a70-846f-a9ca37d876da
+    name: Potential Credential Dumping Activity Via LSASS
+    reason: sekurlsa::tickets reads Kerberos tickets from LSASS memory, producing a process-access event on lsass.exe just before the export.
+  - id: 9e099d99-44c2-42b6-a6d8-54c3545cab29
+    name: HackTool - Mimikatz Kirbi File Creation
+    reason: /export writes .kirbi ticket files to disk; their creation confirms tickets were actually harvested.
+  - id: 7ec2c172-dceb-4c10-92c9-87c1881b7e18
+    name: HackTool - Rubeus Execution
+    reason: Rubeus is the common alternative/companion for ptt, tgtdeleg and ticket renewal in the same intrusion.
+  - id: caa9a802-8bd8-4b9e-a5cd-4d6221670219
+    name: Suspicious Kerberos Ticket Request via CLI
+    reason: Attackers request/forge tickets from the CLI before or after injecting them with kerberos::ptt.
+  - id: e54979bd-c5f9-4d6c-967b-a04b19ac4c74
+    name: Uncommon Outbound Kerberos Connection
+    reason: Injected tickets are then used against DCs/services; a non-standard process talking Kerberos (port 88) follows the pass-the-ticket.
+  window: 4h
   enrichment_searches:
-  # Rule-specific telemetry pivots the engine runs around an alert from this rule,
-  # scoped to the alert's host/user/IP within the window (behaviour-targeted, not a sweep).
-    - name: "Kerberos ticket / logon activity for this account"
-      query: '(((data_win_system_eventID:"4768" OR data_win_system_eventID:"4769" OR data_win_system_eventID:"4771")) OR ((data_win_system_eventID:"4624" OR data_win_system_eventID:"4625")))'
-      pivot_on: [user]
-      window: 6h
-    - name: "Follow-on LOLBin / signed-binary-proxy execution on this host"
-      query: 'data_win_system_eventID:"1" AND data_win_eventdata_image:/.*(\\[Rr][Uu][Nn][Dd][Ll][Ll]32\.[Ee][Xx][Ee]|\\[Rr][Ee][Gg][Ss][Vv][Rr]32\.[Ee][Xx][Ee]|\\[Mm][Ss][Hh][Tt][Aa]\.[Ee][Xx][Ee]|\\[Ii][Nn][Ss][Tt][Aa][Ll][Ll][Uu][Tt][Ii][Ll]\.[Ee][Xx][Ee]|\\[Rr][Ee][Gg][Aa][Ss][Mm]\.[Ee][Xx][Ee]|\\[Rr][Ee][Gg][Ss][Vv][Cc][Ss]\.[Ee][Xx][Ee]|\\[Mm][Ss][Bb][Uu][Ii][Ll][Dd]\.[Ee][Xx][Ee]|\\[Cc][Ee][Rr][Tt][Uu][Tt][Ii][Ll]\.[Ee][Xx][Ee]|\\[Bb][Ii][Tt][Ss][Aa][Dd][Mm][Ii][Nn]\.[Ee][Xx][Ee]|\\[Ww][Mm][Ii][Cc]\.[Ee][Xx][Ee]|\\[Cc][Mm][Ss][Tt][Pp]\.[Ee][Xx][Ee]|\\[Oo][Dd][Bb][Cc][Cc][Oo][Nn][Ff]\.[Ee][Xx][Ee]|\\[Ff][Oo][Rr][Ff][Ii][Ll][Ee][Ss]\.[Ee][Xx][Ee]|\\[Pp][Cc][Aa][Ll][Uu][Aa]\.[Ee][Xx][Ee]|\\[Mm][Aa][Vv][Ii][Nn][Jj][Ee][Cc][Tt]\.[Ee][Xx][Ee]|\\[Ss][Cc][Rr][Ii][Pp][Tt][Rr][Uu][Nn][Nn][Ee][Rr]\.[Ee][Xx][Ee])/'
-      pivot_on: [host]
-      window: 1h
-    - name: "Outbound connections by script interpreters on this host"
-      query: 'data_win_system_eventID:"3" AND data_win_eventdata_image:/.*(\\[Pp][Oo][Ww][Ee][Rr][Ss][Hh][Ee][Ll][Ll]\.[Ee][Xx][Ee]|\\[Pp][Ww][Ss][Hh]\.[Ee][Xx][Ee]|\\[Pp][Oo][Ww][Ee][Rr][Ss][Hh][Ee][Ll][Ll]_[Ii][Ss][Ee]\.[Ee][Xx][Ee]|\\[Cc][Mm][Dd]\.[Ee][Xx][Ee]|\\[Ww][Ss][Cc][Rr][Ii][Pp][Tt]\.[Ee][Xx][Ee]|\\[Cc][Ss][Cc][Rr][Ii][Pp][Tt]\.[Ee][Xx][Ee]|\\[Mm][Ss][Hh][Tt][Aa]\.[Ee][Xx][Ee]|\\[Rr][Uu][Nn][Dd][Ll][Ll]32\.[Ee][Xx][Ee]|\\[Rr][Ee][Gg][Ss][Vv][Rr]32\.[Ee][Xx][Ee])/'
-      pivot_on: [host]
-      window: 1h
+  # Behaviour-targeted hunts the engine runs around the alert (not a sweep).
+  - name: LSASS access by non-system process
+    query: data_win_system_eventID:"10" AND data_win_eventdata_targetImage:/.*[Ll][Ss][Aa][Ss][Ss]\.[Ee][Xx][Ee]/
+    pivot_on: host
+    window: 2h
+  - name: Kirbi / ticket file creation
+    query: data_win_system_eventID:"11" AND data_win_eventdata_targetFilename:/.*([Kk][Ii][Rr][Bb][Ii]|[Kk][Rr][Bb]5[Cc][Cc]).*/
+    pivot_on: host
+    window: 4h
+  - name: Other Mimikatz / Rubeus modules on host
+    query: data_win_system_eventID:"1" AND data_win_eventdata_commandLine:/.*(sekurlsa::|lsadump::|kerberos::|[Rr]ubeus|[Mm]imikatz|privilege::debug).*/
+    pivot_on: host
+    window: 6h
+  - name: Kerberos traffic from non-system processes
+    query: data_win_system_eventID:"3" AND data_win_eventdata_destinationPort:"88"
+    pivot_on: host
+    window: 2h
+  - name: Remote exec tooling after ticket use
+    query: data_win_system_eventID:"1" AND data_win_eventdata_commandLine:/.*([Pp][Ss][Ee][Xx][Ee][Cc]|[Ww][Mm][Ii][Cc].*\/node|[Ss][Cc]\.[Ee][Xx][Ee] +\\\\).*/
+    pivot_on: user
+    window: 4h

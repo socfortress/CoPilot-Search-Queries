@@ -142,44 +142,58 @@ graylog:
   query: data_win_system_eventID:"4103" AND data_win_eventdata_payload:/.*[Gg][Ee][Tt]-[Aa][Dd][Dd][Bb][Aa][Cc][Cc][Oo][Uu][Nn][Tt].*/ AND data_win_eventdata_payload:/.*[Bb][Oo][Oo][Tt][Kk][Ee][Yy] .*/ AND data_win_eventdata_payload:/.*[Dd][Aa][Tt][Aa][Bb][Aa][Ss][Ee][Pp][Aa][Tt][Hh] .*/
 
 correlation:
-  # Authored by the correlation engine for review. Related CoPilot Searches to run
-  # around an alert from this rule, scoped to the same host/user/IP within the window.
+  # Authored per-rule (behaviour-researched) for the correlation engine. Related CoPilot
+  # Searches + telemetry pivots to run around an alert, scoped to its host/user/ip/domain.
   related_rules:
-    - id: ec570e53-4c76-45a9-804d-dc3f355ff7a7
-      name: "7Zip Compressing Dump Files"
-      reason: "next kill-chain tactic: Collection"
-    - id: 0a1255c5-d732-4b62-ac02-b5152d34fb83
-      name: "ADExplorer Writing Complete AD Snapshot Into .dat File"
-      reason: "next kill-chain tactic: Discovery"
-    - id: 1ea13e8c-03ea-409b-877d-ce5c3d2c1cb3
-      name: "ADFS Database Named Pipe Connection By Uncommon Tool"
-      reason: "next kill-chain tactic: Collection"
-    - id: 75bf09fa-1dd7-4d18-9af9-dd9e492562eb
-      name: "ADSI-Cache File Creation By Uncommon Tool"
-      reason: "next kill-chain tactic: Command and Control"
-    - id: 03e2746e-2b31-42f1-ab7a-eb39365b2422
-      name: "APT31 Judgement Panda Activity"
-      reason: "next kill-chain tactic: Credential Access"
-    - id: fc028194-969d-4122-8abe-0470d5b8f12f
-      name: "Access to Browser Login Data"
-      reason: "next kill-chain tactic: Credential Access"
-  window: 1h
+  - id: da63bc76-61ae-11eb-ae93-0242ac130002
+    name: Ntdsutil Export NTDS
+    reason: Common alternative way to obtain the same ntds.dit + SYSTEM hive that Get-ADDBAccount -DatabasePath/-BootKey needs offline
+  - id: f57f8d16-1f39-4dcb-a604-6c73d9b54b3d
+    name: Sensitive File Access Via Volume Shadow Copy Backup
+    reason: ntds.dit is locked online; attacker typically copies it from a shadow copy before parsing it with DSInternals
+  - id: c73124a7-3e89-44a3-bdc1-25fe4df754b1
+    name: Copy From VolumeShadowCopy Via Cmd.EXE
+    reason: Precursor staging of ntds.dit/SYSTEM hive from a VSS snapshot into the DatabasePath read by Get-ADDBAccount
+  - id: fd877b94-9bb5-4191-bb25-d79cbd93c167
+    name: Dumping of Sensitive Hives Via Reg.EXE
+    reason: reg save of SYSTEM hive supplies the BootKey that Get-ADDBAccount requires to decrypt hashes
+  - id: 43d91656-a9b2-4541-b7e2-6a9bd3a13f4e
+    name: DSInternals Suspicious PowerShell Cmdlets
+    reason: Same DSInternals module; process-creation view of Get-ADDBAccount/Get-BootKey/Get-ADReplAccount used in the same session
+  - id: 846c7a87-8e14-4569-9d49-ecfd4276a01c
+    name: DSInternals Suspicious PowerShell Cmdlets - ScriptBlock
+    reason: 4104 script-block view of the same DSInternals cmdlets; confirms the full pipeline (Get-BootKey, Get-ADDBAccount, Set-ADDBAccountPassword)
+  - id: 4e7050dd-e548-483f-b7d6-527ab4fa784d
+    name: NTDS.DIT Creation By Uncommon Parent Process
+    reason: Creation of the ntds.dit copy on disk that Get-ADDBAccount then reads
+  - id: 3a8da4e0-36c1-40d2-8b29-b3e890d5172a
+    name: NTDS Exfiltration Filename Patterns
+    reason: 'Follow-on: dumped ntds.dit / extracted hashes staged under known exfil filenames'
+  window: 2h
   enrichment_searches:
-  # Rule-specific telemetry pivots the engine runs around an alert from this rule,
-  # scoped to the alert's host/user/IP within the window (behaviour-targeted, not a sweep).
-    - name: "Memory/credential-dump creation & LSASS access on this host"
-      query: '((data_win_system_eventID:"1" AND data_win_eventdata_image:/.*(\\[Pp][Rr][Oo][Cc][Dd][Uu][Mm][Pp]\.[Ee][Xx][Ee]|\\[Pp][Rr][Oo][Cc][Dd][Uu][Mm][Pp]64\.[Ee][Xx][Ee]|\\[Ss][Qq][Ll][Dd][Uu][Mm][Pp][Ee][Rr]\.[Ee][Xx][Ee]|\\[Cc][Rr][Ee][Aa][Tt][Ee][Dd][Uu][Mm][Pp]\.[Ee][Xx][Ee]|\\[Rr][Dd][Rr][Ll][Ee][Aa][Kk][Dd][Ii][Aa][Gg]\.[Ee][Xx][Ee]|\\[Dd][Uu][Mm][Pp][Ee][Rr][Tt]\.[Ee][Xx][Ee]|\\[Nn][Aa][Nn][Oo][Dd][Uu][Mm][Pp]\.[Ee][Xx][Ee]|\\[Aa][Vv][Dd][Uu][Mm][Pp]\.[Ee][Xx][Ee])/) OR (data_win_system_eventID:"1" AND (data_win_eventdata_commandLine:/.*[Cc][Oo][Mm][Ss][Vv][Cc][Ss]\.[Dd][Ll][Ll].*/ OR data_win_eventdata_commandLine:/.*[Mm][Ii][Nn][Ii][Dd][Uu][Mm][Pp].*/ OR data_win_eventdata_commandLine:/.*[Dd][Uu][Mm][Pp][Ee][Rr][Tt].*/ OR data_win_eventdata_commandLine:/.*[Nn][Aa][Nn][Oo][Dd][Uu][Mm][Pp].*/ OR data_win_eventdata_commandLine:/.*[Ll][Ss][Aa][Ss][Ss].*/ OR data_win_eventdata_commandLine:/.*[Ss][Ee][Kk][Uu][Rr][Ll][Ss][Aa].*/ OR data_win_eventdata_commandLine:/.*[Nn][Tt][Dd][Ss]\.[Dd][Ii][Tt].*/ OR data_win_eventdata_commandLine:/.*[Nn][Tt][Dd][Ss][Uu][Tt][Ii][Ll].*/)) OR (data_win_system_eventID:"10" AND data_win_eventdata_targetImage:/.*(\\[Ll][Ss][Aa][Ss][Ss]\.[Ee][Xx][Ee])/))'
-      pivot_on: [host]
-      window: 1h
-    - name: "This account's logon activity across hosts (harvested-credential use)"
-      query: '(data_win_system_eventID:"4624" OR data_win_system_eventID:"4625")'
-      pivot_on: [user]
-      window: 6h
-    - name: "Remote-execution / lateral-movement tooling on this host"
-      query: '(data_win_system_eventID:"1" AND data_win_eventdata_image:/.*(\\[Pp][Ss][Ee][Xx][Ee][Cc]\.[Ee][Xx][Ee]|\\[Pp][Ss][Ee][Xx][Ee][Ss][Vv][Cc]\.[Ee][Xx][Ee]|\\[Pp][Aa][Ee][Xx][Ee][Cc]\.[Ee][Xx][Ee]|\\[Ww][Ii][Nn][Rr][Ss]\.[Ee][Xx][Ee]|\\[Mm][Ss][Tt][Ss][Cc]\.[Ee][Xx][Ee]|\\[Ww][Mm][Ii][Cc]\.[Ee][Xx][Ee])/) OR (data_win_system_eventID:"1" AND data_win_eventdata_image:/.*(\\[Pp][Oo][Ww][Ee][Rr][Ss][Hh][Ee][Ll][Ll]\.[Ee][Xx][Ee]|\\[Pp][Ww][Ss][Hh]\.[Ee][Xx][Ee])/ AND (data_win_eventdata_commandLine:/.*[Ii][Nn][Vv][Oo][Kk][Ee]-[Cc][Oo][Mm][Mm][Aa][Nn][Dd].*/ OR data_win_eventdata_commandLine:/.*[Nn][Ee][Ww]-[Pp][Ss][Ss][Ee][Ss][Ss][Ii][Oo][Nn].*/ OR data_win_eventdata_commandLine:/.*[Ee][Nn][Tt][Ee][Rr]-[Pp][Ss][Ss][Ee][Ss][Ss][Ii][Oo][Nn].*/ OR data_win_eventdata_commandLine:/.*-[Cc][Oo][Mm][Pp][Uu][Tt][Ee][Rr][Nn][Aa][Mm][Ee].*/))'
-      pivot_on: [host]
-      window: 2h
-    - name: "Download / AMSI-bypass / encoded script blocks on this host"
-      query: 'data_win_system_eventID:"4104" AND (data_win_eventdata_scriptBlockText:/.*[Dd][Oo][Ww][Nn][Ll][Oo][Aa][Dd][Ss][Tt][Rr][Ii][Nn][Gg].*/ OR data_win_eventdata_scriptBlockText:/.*[Dd][Oo][Ww][Nn][Ll][Oo][Aa][Dd][Ff][Ii][Ll][Ee].*/ OR data_win_eventdata_scriptBlockText:/.*[Ii][Nn][Vv][Oo][Kk][Ee]-[Ww][Ee][Bb][Rr][Ee][Qq][Uu][Ee][Ss][Tt].*/ OR data_win_eventdata_scriptBlockText:/.*[Nn][Ee][Tt]\.[Ww][Ee][Bb][Cc][Ll][Ii][Ee][Nn][Tt].*/ OR data_win_eventdata_scriptBlockText:/.*[Ff][Rr][Oo][Mm][Bb][Aa][Ss][Ee]64[Ss][Tt][Rr][Ii][Nn][Gg].*/ OR data_win_eventdata_scriptBlockText:/.*[Ii][Ee][Xx].*/ OR data_win_eventdata_scriptBlockText:/.*[Ii][Nn][Vv][Oo][Kk][Ee]-[Ee][Xx][Pp][Rr][Ee][Ss][Ss][Ii][Oo][Nn].*/ OR data_win_eventdata_scriptBlockText:/.*[Ss][Tt][Aa][Rr][Tt]-[Bb][Ii][Tt][Ss][Tt][Rr][Aa][Nn][Ss][Ff][Ee][Rr].*/ OR data_win_eventdata_scriptBlockText:/.*[Aa][Mm][Ss][Ii][Uu][Tt][Ii][Ll][Ss].*/ OR data_win_eventdata_scriptBlockText:/.*-[Ee][Nn][Cc].*/ OR data_win_eventdata_scriptBlockText:/.*-[Ee][Nn][Cc][Oo][Dd][Ee][Dd][Cc][Oo][Mm][Mm][Aa][Nn][Dd].*/ OR data_win_eventdata_scriptBlockText:/.*[Rr][Ee][Ff][Ll][Ee][Cc][Tt][Ii][Oo][Nn]\.[Aa][Ss][Ss][Ee][Mm][Bb][Ll][Yy].*/)'
-      pivot_on: [host]
-      window: 1h
+  # Behaviour-targeted hunts the engine runs around the alert (not a sweep).
+  - name: ntds.dit / SYSTEM hive staging via ntdsutil, VSS, reg save or esentutl
+    query: data_win_system_eventID:"1" AND (data_win_eventdata_commandLine:/.*[Nn][Tt][Dd][Ss]\.[Dd][Ii][Tt].*/ OR (data_win_eventdata_commandLine:/.*[Rr][Ee][Gg].*[Ss][Aa][Vv][Ee].*/ AND data_win_eventdata_commandLine:/.*[Hh][Kk][Ll][Mm]\\[Ss][Yy][Ss][Tt][Ee][Mm].*/) OR data_win_eventdata_commandLine:/.*[Vv][Ss][Ss][Aa][Dd][Mm][Ii][Nn].*[Ss][Hh][Aa][Dd][Oo][Ww].*/ OR data_win_eventdata_commandLine:/.*[Ss][Hh][Aa][Dd][Oo][Ww][Cc][Oo][Pp][Yy].*/ OR data_win_eventdata_commandLine:/.*[Nn][Tt][Dd][Ss][Uu][Tt][Ii][Ll].*/)
+    pivot_on:
+    - host
+    window: 2h
+  - name: ntds.dit or SYSTEM/SAM hive file created on disk
+    query: data_win_system_eventID:"11" AND (data_win_eventdata_targetFilename:/.*[Nn][Tt][Dd][Ss]\.[Dd][Ii][Tt].*/ OR data_win_eventdata_targetFilename:/.*[Ss][Yy][Ss][Tt][Ee][Mm]\.([Ss][Aa][Vv][Ee]|[Hh][Ii][Vv][Ee]).*/ OR data_win_eventdata_targetFilename:/.*[Ss][Aa][Mm]\.[Ss][Aa][Vv][Ee].*/ OR data_win_eventdata_targetFilename:/.*[Nn][Tt][Dd][Ss]_?[Ee][Xx][Pp][Oo][Rr][Tt].*/)
+    pivot_on:
+    - host
+    window: 2h
+  - name: DSInternals module import and AD offline-database cmdlets in script blocks
+    query: data_win_system_eventID:"4104" AND (data_win_eventdata_scriptBlockText:/.*[Dd][Ss][Ii][Nn][Tt][Ee][Rr][Nn][Aa][Ll][Ss].*/ OR data_win_eventdata_scriptBlockText:/.*[Gg][Ee][Tt]-[Bb][Oo][Oo][Tt][Kk][Ee][Yy].*/ OR data_win_eventdata_scriptBlockText:/.*[Gg][Ee][Tt]-[Aa][Dd][Rr][Ee][Pp][Ll][Aa][Cc][Cc][Oo][Uu][Nn][Tt].*/ OR data_win_eventdata_scriptBlockText:/.*[Ss][Ee][Tt]-[Aa][Dd][Dd][Bb][Aa][Cc][Cc][Oo][Uu][Nn][Tt][Pp][Aa][Ss][Ss][Ww][Oo][Rr][Dd].*/ OR data_win_eventdata_scriptBlockText:/.*[Ii][Nn][Ss][Tt][Aa][Ll][Ll]-[Mm][Oo][Dd][Uu][Ll][Ee].*[Dd][Ss][Ii][Nn][Tt][Ee][Rr][Nn][Aa][Ll][Ss].*/)
+    pivot_on:
+    - host
+    window: 2h
+  - name: Archiving or exfiltration of dumped hash output after Get-ADDBAccount
+    query: (data_win_system_eventID:"1" AND (data_win_eventdata_image:/.*\\([Rr][Cc][Ll][Oo][Nn][Ee]|[Ww][Ii][Nn][Rr][Aa][Rr]|7[Zz]|7[Zz][Gg]|[Cc][Uu][Rr][Ll]|[Ww][Gg][Ee][Tt])\.[Ee][Xx][Ee]/ OR data_win_eventdata_commandLine:/.*[Cc][Oo][Mm][Pp][Rr][Ee][Ss][Ss]-[Aa][Rr][Cc][Hh][Ii][Vv][Ee].*/)) OR (data_win_system_eventID:"3" AND data_win_eventdata_initiated:"true" AND data_win_eventdata_image:/.*\\([Pp][Oo][Ww][Ee][Rr][Ss][Hh][Ee][Ll][Ll]|[Pp][Ww][Ss][Hh])\.[Ee][Xx][Ee]/)
+    pivot_on:
+    - host
+    window: 4h
+  - name: Pass-the-hash style logons with NTLM from this account after hash theft
+    query: data_win_system_eventID:"4624" AND data_win_eventdata_logonType:("3" OR "9") AND data_win_eventdata_authenticationPackageName:"NTLM"
+    pivot_on:
+    - user
+    window: 6h

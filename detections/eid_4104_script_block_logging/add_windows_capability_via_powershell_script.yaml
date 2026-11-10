@@ -136,19 +136,58 @@ graylog:
   query: data_win_system_eventID:"4104" AND data_win_eventdata_scriptBlockText:/.*[Aa][Dd][Dd]-[Ww][Ii][Nn][Dd][Oo][Ww][Ss][Cc][Aa][Pp][Aa][Bb][Ii][Ll][Ii][Tt][Yy] .*/ AND data_win_eventdata_scriptBlockText:/.*-[Nn][Aa][Mm][Ee] [Oo][Pp][Ee][Nn][Ss][Ss][Hh]\..*/
 
 correlation:
-  # Authored by the correlation engine for review.
+  # Authored per-rule (behaviour-researched) for the correlation engine. Related CoPilot
+  # Searches + telemetry pivots to run around an alert, scoped to its host/user/ip/domain.
+  related_rules:
+  - id: b36d01a3-ddaf-4804-be18-18a6247adfcd
+    name: Add Windows Capability Via PowerShell Cmdlet
+    reason: Same Add-WindowsCapability OpenSSH install seen from process creation (command line) instead of script block; confirms the 4104 block actually launched from a powershell process.
+  - id: cd5cfd80-aa5f-44c0-9c20-108c4ae12e3c
+    name: New Firewall Rule Added Via Netsh.EXE
+    reason: After installing OpenSSH server an attacker opens inbound TCP/22 on the host firewall so sshd is reachable.
+  - id: 57c4bf16-227f-4394-8ec7-1b745ee061c3
+    name: Firewall Disabled via Netsh.EXE
+    reason: 'Alternative to a targeted rule: disabling the firewall entirely to expose the newly installed sshd.'
+  - id: 322ed9ec-fcab-4f67-9a34-e7c6aef43614
+    name: New Port Forwarding Rule Added Via Netsh.EXE
+    reason: Attackers pair a new SSH service with netsh portproxy to pivot traffic through the host.
+  - id: 2daa93a0-a5fb-41c5-8cd8-3c11294bfd1f
+    name: Potential SSH Tunnel Persistence Install Using A Scheduled Task
+    reason: 'Persistence follow-on: scheduled task launching ssh.exe reverse tunnels once OpenSSH is present.'
+  - id: 327f48c1-a6db-4eb8-875a-f6981f1b0183
+    name: Port Forwarding Activity Via SSH.EXE
+    reason: Newly available ssh.exe used for -L/-R/-D forwarding, the typical purpose of installing OpenSSH on a compromised box.
+  - id: 7d6d30b8-5b91-4b90-a891-46cccaf29598
+    name: Program Executed Using Proxy/Local Command Via SSH.EXE
+    reason: ssh.exe abused for ProxyCommand/LocalCommand execution after the OpenSSH capability is added.
+  - id: f7d7ebd5-a016-46e2-9c54-f9932f2d386d
+    name: Potential RDP Tunneling Via SSH
+    reason: Installed OpenSSH client used to tunnel RDP, bypassing network controls.
+  window: 4h
   enrichment_searches:
-  # Rule-specific telemetry pivots the engine runs around an alert from this rule,
-  # scoped to the alert's host/user/IP within the window (behaviour-targeted, not a sweep).
-    - name: "Autostart persistence written on this host (Run keys, services, IFEO)"
-      query: '(data_win_system_eventID:"12" OR data_win_system_eventID:"13") AND (data_win_eventdata_targetObject:/.*[Cc][Uu][Rr][Rr][Ee][Nn][Tt][Vv][Ee][Rr][Ss][Ii][Oo][Nn]\\[Rr][Uu][Nn].*/ OR data_win_eventdata_targetObject:/.*[Cc][Uu][Rr][Rr][Ee][Nn][Tt][Vv][Ee][Rr][Ss][Ii][Oo][Nn]\\[Rr][Uu][Nn][Oo][Nn][Cc][Ee].*/ OR data_win_eventdata_targetObject:/.*[Cc][Uu][Rr][Rr][Ee][Nn][Tt][Cc][Oo][Nn][Tt][Rr][Oo][Ll][Ss][Ee][Tt]\\[Ss][Ee][Rr][Vv][Ii][Cc][Ee][Ss]\\.*/ OR data_win_eventdata_targetObject:/.*[Ii][Mm][Aa][Gg][Ee] [Ff][Ii][Ll][Ee] [Ee][Xx][Ee][Cc][Uu][Tt][Ii][Oo][Nn] [Oo][Pp][Tt][Ii][Oo][Nn][Ss]\\.*/ OR data_win_eventdata_targetObject:/.*[Ww][Ii][Nn][Ll][Oo][Gg][Oo][Nn]\\[Ss][Hh][Ee][Ll][Ll].*/ OR data_win_eventdata_targetObject:/.*[Ww][Ii][Nn][Ll][Oo][Gg][Oo][Nn]\\[Uu][Ss][Ee][Rr][Ii][Nn][Ii][Tt].*/ OR data_win_eventdata_targetObject:/.*[Cc][Uu][Rr][Rr][Ee][Nn][Tt][Vv][Ee][Rr][Ss][Ii][Oo][Nn]\\[Ee][Xx][Pp][Ll][Oo][Rr][Ee][Rr]\\[Rr][Uu][Nn].*/ OR data_win_eventdata_targetObject:/.*[Pp][Oo][Ll][Ii][Cc][Ii][Ee][Ss]\\[Ee][Xx][Pp][Ll][Oo][Rr][Ee][Rr]\\[Rr][Uu][Nn].*/ OR data_win_eventdata_targetObject:/.*[Cc][Uu][Rr][Rr][Ee][Nn][Tt][Vv][Ee][Rr][Ss][Ii][Oo][Nn]\\[Ww][Ii][Nn][Dd][Oo][Ww][Ss]\\[Ll][Oo][Aa][Dd].*/)'
-      pivot_on: [host]
-      window: 4h
-    - name: "Download / AMSI-bypass / encoded script blocks on this host"
-      query: 'data_win_system_eventID:"4104" AND (data_win_eventdata_scriptBlockText:/.*[Dd][Oo][Ww][Nn][Ll][Oo][Aa][Dd][Ss][Tt][Rr][Ii][Nn][Gg].*/ OR data_win_eventdata_scriptBlockText:/.*[Dd][Oo][Ww][Nn][Ll][Oo][Aa][Dd][Ff][Ii][Ll][Ee].*/ OR data_win_eventdata_scriptBlockText:/.*[Ii][Nn][Vv][Oo][Kk][Ee]-[Ww][Ee][Bb][Rr][Ee][Qq][Uu][Ee][Ss][Tt].*/ OR data_win_eventdata_scriptBlockText:/.*[Nn][Ee][Tt]\.[Ww][Ee][Bb][Cc][Ll][Ii][Ee][Nn][Tt].*/ OR data_win_eventdata_scriptBlockText:/.*[Ff][Rr][Oo][Mm][Bb][Aa][Ss][Ee]64[Ss][Tt][Rr][Ii][Nn][Gg].*/ OR data_win_eventdata_scriptBlockText:/.*[Ii][Ee][Xx].*/ OR data_win_eventdata_scriptBlockText:/.*[Ii][Nn][Vv][Oo][Kk][Ee]-[Ee][Xx][Pp][Rr][Ee][Ss][Ss][Ii][Oo][Nn].*/ OR data_win_eventdata_scriptBlockText:/.*[Ss][Tt][Aa][Rr][Tt]-[Bb][Ii][Tt][Ss][Tt][Rr][Aa][Nn][Ss][Ff][Ee][Rr].*/ OR data_win_eventdata_scriptBlockText:/.*[Aa][Mm][Ss][Ii][Uu][Tt][Ii][Ll][Ss].*/ OR data_win_eventdata_scriptBlockText:/.*-[Ee][Nn][Cc].*/ OR data_win_eventdata_scriptBlockText:/.*-[Ee][Nn][Cc][Oo][Dd][Ee][Dd][Cc][Oo][Mm][Mm][Aa][Nn][Dd].*/ OR data_win_eventdata_scriptBlockText:/.*[Rr][Ee][Ff][Ll][Ee][Cc][Tt][Ii][Oo][Nn]\.[Aa][Ss][Ss][Ee][Mm][Bb][Ll][Yy].*/)'
-      pivot_on: [host]
-      window: 1h
-    - name: "Follow-on LOLBin / signed-binary-proxy execution on this host"
-      query: 'data_win_system_eventID:"1" AND data_win_eventdata_image:/.*(\\[Rr][Uu][Nn][Dd][Ll][Ll]32\.[Ee][Xx][Ee]|\\[Rr][Ee][Gg][Ss][Vv][Rr]32\.[Ee][Xx][Ee]|\\[Mm][Ss][Hh][Tt][Aa]\.[Ee][Xx][Ee]|\\[Ii][Nn][Ss][Tt][Aa][Ll][Ll][Uu][Tt][Ii][Ll]\.[Ee][Xx][Ee]|\\[Rr][Ee][Gg][Aa][Ss][Mm]\.[Ee][Xx][Ee]|\\[Rr][Ee][Gg][Ss][Vv][Cc][Ss]\.[Ee][Xx][Ee]|\\[Mm][Ss][Bb][Uu][Ii][Ll][Dd]\.[Ee][Xx][Ee]|\\[Cc][Ee][Rr][Tt][Uu][Tt][Ii][Ll]\.[Ee][Xx][Ee]|\\[Bb][Ii][Tt][Ss][Aa][Dd][Mm][Ii][Nn]\.[Ee][Xx][Ee]|\\[Ww][Mm][Ii][Cc]\.[Ee][Xx][Ee]|\\[Cc][Mm][Ss][Tt][Pp]\.[Ee][Xx][Ee]|\\[Oo][Dd][Bb][Cc][Cc][Oo][Nn][Ff]\.[Ee][Xx][Ee]|\\[Ff][Oo][Rr][Ff][Ii][Ll][Ee][Ss]\.[Ee][Xx][Ee]|\\[Pp][Cc][Aa][Ll][Uu][Aa]\.[Ee][Xx][Ee]|\\[Mm][Aa][Vv][Ii][Nn][Jj][Ee][Cc][Tt]\.[Ee][Xx][Ee]|\\[Ss][Cc][Rr][Ii][Pp][Tt][Rr][Uu][Nn][Nn][Ee][Rr]\.[Ee][Xx][Ee])/'
-      pivot_on: [host]
-      window: 1h
+  # Behaviour-targeted hunts the engine runs around the alert (not a sweep).
+  - name: sshd service/server components started or SSH inbound on this host
+    query: data_win_system_eventID:"1" AND (data_win_eventdata_image:/.*\\[Ss][Ss][Hh][Dd]\.[Ee][Xx][Ee]/ OR data_win_eventdata_image:/.*\\[Ss][Ss][Hh]-[Aa][Gg][Ee][Nn][Tt]\.[Ee][Xx][Ee]/ OR data_win_eventdata_commandLine:/.*([Ss][Tt][Aa][Rr][Tt]-[Ss][Ee][Rr][Vv][Ii][Cc][Ee]|[Ss][Ee][Tt]-[Ss][Ee][Rr][Vv][Ii][Cc][Ee]).*[Ss][Ss][Hh][Dd].*/)
+    pivot_on:
+    - host
+    window: 4h
+  - name: Firewall rule opening port 22 or disabling firewall after OpenSSH install
+    query: data_win_system_eventID:"1" AND data_win_eventdata_commandLine:/.*([Nn][Ee][Tt][Ss][Hh]|[Nn][Ee][Ww]-[Nn][Ee][Tt][Ff][Ii][Rr][Ee][Ww][Aa][Ll][Ll][Rr][Uu][Ll][Ee]|[Ss][Ee][Tt]-[Nn][Ee][Tt][Ff][Ii][Rr][Ee][Ww][Aa][Ll][Ll]).*([Ll][Oo][Cc][Aa][Ll][Pp][Oo][Rr][Tt][ =:]*22|[Pp][Oo][Rr][Tt][Pp][Rr][Oo][Xx][Yy]|[Ss][Tt][Aa][Tt][Ee]=[Oo][Ff][Ff]|[Ss][Ss][Hh]).*/
+    pivot_on:
+    - host
+    window: 4h
+  - name: Network connections by ssh.exe or sshd.exe on this host
+    query: data_win_system_eventID:"3" AND (data_win_eventdata_image:/.*\\[Ss][Ss][Hh]\.[Ee][Xx][Ee]/ OR data_win_eventdata_image:/.*\\[Ss][Ss][Hh][Dd]\.[Ee][Xx][Ee]/)
+    pivot_on:
+    - host
+    window: 6h
+  - name: Account creation or authorized_keys / sshd_config writes following SSH enablement
+    query: (data_win_system_eventID:"1" AND (data_win_eventdata_commandLine:/.*[Nn][Ee][Tt]1? [Uu][Ss][Ee][Rr].*[/][Aa][Dd][Dd].*/ OR data_win_eventdata_commandLine:/.*[Nn][Ee][Ww]-[Ll][Oo][Cc][Aa][Ll][Uu][Ss][Ee][Rr].*/ OR data_win_eventdata_commandLine:/.*[Aa][Dd][Dd]-[Ll][Oo][Cc][Aa][Ll][Gg][Rr][Oo][Uu][Pp][Mm][Ee][Mm][Bb][Ee][Rr].*/)) OR (data_win_system_eventID:"11" AND (data_win_eventdata_targetFilename:/.*[Aa][Uu][Tt][Hh][Oo][Rr][Ii][Zz][Ee][Dd]_[Kk][Ee][Yy][Ss].*/ OR data_win_eventdata_targetFilename:/.*[Ss][Ss][Hh][Dd]_[Cc][Oo][Nn][Ff][Ii][Gg].*/))
+    pivot_on:
+    - host
+    window: 6h
+  - name: Remote download or encoded PowerShell script blocks alongside the capability install
+    query: data_win_system_eventID:"4104" AND (data_win_eventdata_scriptBlockText:/.*[Ii][Nn][Vv][Oo][Kk][Ee]-[Ww][Ee][Bb][Rr][Ee][Qq][Uu][Ee][Ss][Tt].*/ OR data_win_eventdata_scriptBlockText:/.*[Dd][Oo][Ww][Nn][Ll][Oo][Aa][Dd][Ss][Tt][Rr][Ii][Nn][Gg].*/ OR data_win_eventdata_scriptBlockText:/.*[Ff][Rr][Oo][Mm][Bb][Aa][Ss][Ee]64[Ss][Tt][Rr][Ii][Nn][Gg].*/ OR data_win_eventdata_scriptBlockText:/.*[Ss][Ee][Tt]-[Ss][Ee][Rr][Vv][Ii][Cc][Ee].*[Ss][Ss][Hh][Dd].*/)
+    pivot_on:
+    - host
+    window: 2h

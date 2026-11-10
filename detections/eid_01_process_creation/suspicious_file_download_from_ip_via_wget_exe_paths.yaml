@@ -224,23 +224,53 @@ graylog:
   query: data_win_system_eventID:"1" AND (data_win_eventdata_image:/.*\\[Ww][Gg][Ee][Tt]\.[Ee][Xx][Ee]/ OR data_win_eventdata_originalFileName:/[Ww][Gg][Ee][Tt]\.[Ee][Xx][Ee]/) AND data_win_eventdata_commandLine:/.*(:\/\/[0-9]{1,3}\.[0-9]{1,3}\.[0-9]{1,3}\.[0-9]{1,3}).*/ AND data_win_eventdata_commandLine:/.*[Hh][Tt][Tt][Pp].*/ AND (data_win_eventdata_commandLine:/.*([ ]-O[ ]).*/ OR data_win_eventdata_commandLine:/.*--[Oo][Uu][Tt][Pp][Uu][Tt]-[Dd][Oo][Cc][Uu][Mm][Ee][Nn][Tt].*/) AND (data_win_eventdata_commandLine:/.*:\\[Pp][Ee][Rr][Ff][Ll][Oo][Gg][Ss]\\.*/ OR data_win_eventdata_commandLine:/.*:\\[Tt][Ee][Mm][Pp]\\.*/ OR data_win_eventdata_commandLine:/.*:\\[Uu][Ss][Ee][Rr][Ss]\\[Pp][Uu][Bb][Ll][Ii][Cc]\\.*/ OR data_win_eventdata_commandLine:/.*:\\[Ww][Ii][Nn][Dd][Oo][Ww][Ss]\\[Hh][Ee][Ll][Pp]\\.*/ OR data_win_eventdata_commandLine:/.*:\\[Ww][Ii][Nn][Dd][Oo][Ww][Ss]\\[Tt][Ee][Mm][Pp]\\.*/ OR data_win_eventdata_commandLine:/.*\\[Tt][Ee][Mm][Pp][Oo][Rr][Aa][Rr][Yy] [Ii][Nn][Tt][Ee][Rr][Nn][Ee][Tt].*/ OR (data_win_eventdata_commandLine:/.*:\\[Uu][Ss][Ee][Rr][Ss]\\.*/ AND data_win_eventdata_commandLine:/.*\\[Ff][Aa][Vv][Oo][Rr][Ii][Tt][Ee][Ss]\\.*/) OR (data_win_eventdata_commandLine:/.*:\\[Uu][Ss][Ee][Rr][Ss]\\.*/ AND data_win_eventdata_commandLine:/.*\\[Ff][Aa][Vv][Oo][Uu][Rr][Ii][Tt][Ee][Ss]\\.*/) OR (data_win_eventdata_commandLine:/.*:\\[Uu][Ss][Ee][Rr][Ss]\\.*/ AND data_win_eventdata_commandLine:/.*\\[Cc][Oo][Nn][Tt][Aa][Cc][Tt][Ss]\\.*/) OR (data_win_eventdata_commandLine:/.*:\\[Uu][Ss][Ee][Rr][Ss]\\.*/ AND data_win_eventdata_commandLine:/.*\\[Pp][Ii][Cc][Tt][Uu][Rr][Ee][Ss]\\.*/))
 
 correlation:
-  # Authored by the correlation engine for review.
+  # Authored per-rule (behaviour-researched) for the correlation engine. Related CoPilot
+  # Searches + telemetry pivots to run around an alert, scoped to its host/user/ip/domain.
+  related_rules:
+  - id: 17f0c0a8-8bd5-4ee0-8c5f-a342c0199f35
+    name: Suspicious File Download From IP Via Wget.EXE
+    reason: Same wget-from-raw-IP behaviour without the path restriction; firing together shows repeated or multi-stage payload pulls.
+  - id: a0d7e4d2-bede-4141-8896-bc6e237e977c
+    name: Suspicious File Download From File Sharing Domain Via Wget.EXE
+    reason: Attacker may mix raw-IP and file-sharing hosting for later stages with the same wget binary.
+  - id: 9cc85849-3b02-4cb5-b371-3a1ff54f2218
+    name: File Download From IP URL Via Curl.EXE
+    reason: Operators fall back to curl when wget is blocked; same IP-based tool transfer.
+  - id: 025bd229-fd1f-4fdb-97ab-20006e1a5368
+    name: Unusual File Download from Direct IP Address
+    reason: Stream-hash event for a file fetched from a direct IP confirms the file landed on disk.
+  - id: bbb7e38c-0b41-4a11-b306-d2a457b7ac2b
+    name: Suspicious File Created In PerfLogs
+    reason: PerfLogs is one of this rule's staging paths; a file written there is the downloaded payload.
+  - id: b447f7de-1e53-4cbf-bfb4-f1f6d0b04e4e
+    name: Suspicious Binaries and Scripts in Public Folder
+    reason: Downloaded payload landing in Users\Public, another staging path this rule matches.
+  - id: 69bd9b97-2be2-41b6-9816-fb08757a4d1a
+    name: Potentially Suspicious Execution From Parent Process In Public Folder
+    reason: 'Follow-on: the downloaded binary executing from the Public folder.'
+  - id: 8a8379b8-780b-4dbf-b1e9-31c8d112fefb
+    name: Schtasks From Suspicious Folders
+    reason: Persistence step often pointing at the staged payload in the same folders.
+  window: 2h
   enrichment_searches:
-  # Rule-specific telemetry pivots the engine runs around an alert from this rule,
-  # scoped to the alert's host/user/IP within the window (behaviour-targeted, not a sweep).
-    - name: "Other executions of this tool-set on this host (any arguments)"
-      query: 'data_win_system_eventID:"1" AND data_win_eventdata_image:/.*(\\[Ww][Gg][Ee][Tt]\.[Ee][Xx][Ee])/'
-      pivot_on: [host]
-      window: 2h
-    - name: "Autostart persistence written on this host (Run keys, services, IFEO)"
-      query: '(data_win_system_eventID:"12" OR data_win_system_eventID:"13") AND (data_win_eventdata_targetObject:/.*[Cc][Uu][Rr][Rr][Ee][Nn][Tt][Vv][Ee][Rr][Ss][Ii][Oo][Nn]\\[Rr][Uu][Nn].*/ OR data_win_eventdata_targetObject:/.*[Cc][Uu][Rr][Rr][Ee][Nn][Tt][Vv][Ee][Rr][Ss][Ii][Oo][Nn]\\[Rr][Uu][Nn][Oo][Nn][Cc][Ee].*/ OR data_win_eventdata_targetObject:/.*[Cc][Uu][Rr][Rr][Ee][Nn][Tt][Cc][Oo][Nn][Tt][Rr][Oo][Ll][Ss][Ee][Tt]\\[Ss][Ee][Rr][Vv][Ii][Cc][Ee][Ss]\\.*/ OR data_win_eventdata_targetObject:/.*[Ii][Mm][Aa][Gg][Ee] [Ff][Ii][Ll][Ee] [Ee][Xx][Ee][Cc][Uu][Tt][Ii][Oo][Nn] [Oo][Pp][Tt][Ii][Oo][Nn][Ss]\\.*/ OR data_win_eventdata_targetObject:/.*[Ww][Ii][Nn][Ll][Oo][Gg][Oo][Nn]\\[Ss][Hh][Ee][Ll][Ll].*/ OR data_win_eventdata_targetObject:/.*[Ww][Ii][Nn][Ll][Oo][Gg][Oo][Nn]\\[Uu][Ss][Ee][Rr][Ii][Nn][Ii][Tt].*/ OR data_win_eventdata_targetObject:/.*[Cc][Uu][Rr][Rr][Ee][Nn][Tt][Vv][Ee][Rr][Ss][Ii][Oo][Nn]\\[Ee][Xx][Pp][Ll][Oo][Rr][Ee][Rr]\\[Rr][Uu][Nn].*/ OR data_win_eventdata_targetObject:/.*[Pp][Oo][Ll][Ii][Cc][Ii][Ee][Ss]\\[Ee][Xx][Pp][Ll][Oo][Rr][Ee][Rr]\\[Rr][Uu][Nn].*/ OR data_win_eventdata_targetObject:/.*[Cc][Uu][Rr][Rr][Ee][Nn][Tt][Vv][Ee][Rr][Ss][Ii][Oo][Nn]\\[Ww][Ii][Nn][Dd][Oo][Ww][Ss]\\[Ll][Oo][Aa][Dd].*/)'
-      pivot_on: [host]
-      window: 4h
-    - name: "Follow-on LOLBin / signed-binary-proxy execution on this host"
-      query: 'data_win_system_eventID:"1" AND data_win_eventdata_image:/.*(\\[Rr][Uu][Nn][Dd][Ll][Ll]32\.[Ee][Xx][Ee]|\\[Rr][Ee][Gg][Ss][Vv][Rr]32\.[Ee][Xx][Ee]|\\[Mm][Ss][Hh][Tt][Aa]\.[Ee][Xx][Ee]|\\[Ii][Nn][Ss][Tt][Aa][Ll][Ll][Uu][Tt][Ii][Ll]\.[Ee][Xx][Ee]|\\[Rr][Ee][Gg][Aa][Ss][Mm]\.[Ee][Xx][Ee]|\\[Rr][Ee][Gg][Ss][Vv][Cc][Ss]\.[Ee][Xx][Ee]|\\[Mm][Ss][Bb][Uu][Ii][Ll][Dd]\.[Ee][Xx][Ee]|\\[Cc][Ee][Rr][Tt][Uu][Tt][Ii][Ll]\.[Ee][Xx][Ee]|\\[Bb][Ii][Tt][Ss][Aa][Dd][Mm][Ii][Nn]\.[Ee][Xx][Ee]|\\[Ww][Mm][Ii][Cc]\.[Ee][Xx][Ee]|\\[Cc][Mm][Ss][Tt][Pp]\.[Ee][Xx][Ee]|\\[Oo][Dd][Bb][Cc][Cc][Oo][Nn][Ff]\.[Ee][Xx][Ee]|\\[Ff][Oo][Rr][Ff][Ii][Ll][Ee][Ss]\.[Ee][Xx][Ee]|\\[Pp][Cc][Aa][Ll][Uu][Aa]\.[Ee][Xx][Ee]|\\[Mm][Aa][Vv][Ii][Nn][Jj][Ee][Cc][Tt]\.[Ee][Xx][Ee]|\\[Ss][Cc][Rr][Ii][Pp][Tt][Rr][Uu][Nn][Nn][Ee][Rr]\.[Ee][Xx][Ee])/'
-      pivot_on: [host]
-      window: 1h
-    - name: "Outbound connections by script interpreters on this host"
-      query: 'data_win_system_eventID:"3" AND data_win_eventdata_image:/.*(\\[Pp][Oo][Ww][Ee][Rr][Ss][Hh][Ee][Ll][Ll]\.[Ee][Xx][Ee]|\\[Pp][Ww][Ss][Hh]\.[Ee][Xx][Ee]|\\[Pp][Oo][Ww][Ee][Rr][Ss][Hh][Ee][Ll][Ll]_[Ii][Ss][Ee]\.[Ee][Xx][Ee]|\\[Cc][Mm][Dd]\.[Ee][Xx][Ee]|\\[Ww][Ss][Cc][Rr][Ii][Pp][Tt]\.[Ee][Xx][Ee]|\\[Cc][Ss][Cc][Rr][Ii][Pp][Tt]\.[Ee][Xx][Ee]|\\[Mm][Ss][Hh][Tt][Aa]\.[Ee][Xx][Ee]|\\[Rr][Uu][Nn][Dd][Ll][Ll]32\.[Ee][Xx][Ee]|\\[Rr][Ee][Gg][Ss][Vv][Rr]32\.[Ee][Xx][Ee])/'
-      pivot_on: [host]
-      window: 1h
+  # Behaviour-targeted hunts the engine runs around the alert (not a sweep).
+  - name: Wget network connections
+    query: data_win_system_eventID:"3" AND data_win_eventdata_image:/.*(\\[Ww][Gg][Ee][Tt]\.[Ee][Xx][Ee])/
+    pivot_on: host
+    window: 2h
+  - name: Executable or script files written to staging folders
+    query: data_win_system_eventID:"11" AND (data_win_eventdata_targetFilename:/.*\\[Uu][Ss][Ee][Rr][Ss]\\[Pp][Uu][Bb][Ll][Ii][Cc]\\.*\.([Ee][Xx][Ee]|[Dd][Ll][Ll]|[Bb][Aa][Tt]|[Pp][Ss]1|[Vv][Bb][Ss]|[Jj][Ss]|[Hh][Tt][Aa]|[Ss][Cc][Rr])/ OR data_win_eventdata_targetFilename:/.*\\[Pp][Ee][Rr][Ff][Ll][Oo][Gg][Ss]\\.*\.([Ee][Xx][Ee]|[Dd][Ll][Ll]|[Bb][Aa][Tt]|[Pp][Ss]1|[Vv][Bb][Ss]|[Jj][Ss]|[Hh][Tt][Aa]|[Ss][Cc][Rr])/ OR data_win_eventdata_targetFilename:/.*\\[Ww][Ii][Nn][Dd][Oo][Ww][Ss]\\[Tt][Ee][Mm][Pp]\\.*\.([Ee][Xx][Ee]|[Dd][Ll][Ll]|[Bb][Aa][Tt]|[Pp][Ss]1|[Vv][Bb][Ss]|[Jj][Ss]|[Hh][Tt][Aa]|[Ss][Cc][Rr])/ OR data_win_eventdata_targetFilename:/.*\\[Aa][Pp][Pp][Dd][Aa][Tt][Aa]\\.*\.([Ee][Xx][Ee]|[Dd][Ll][Ll]|[Bb][Aa][Tt]|[Pp][Ss]1|[Vv][Bb][Ss]|[Jj][Ss]|[Hh][Tt][Aa]|[Ss][Cc][Rr])/)
+    pivot_on: host
+    window: 2h
+  - name: Processes executed from staging folders (payload launch)
+    query: data_win_system_eventID:"1" AND (data_win_eventdata_image:/.*\\[Uu][Ss][Ee][Rr][Ss]\\[Pp][Uu][Bb][Ll][Ii][Cc]\\.*/ OR data_win_eventdata_image:/.*\\[Pp][Ee][Rr][Ff][Ll][Oo][Gg][Ss]\\.*/ OR data_win_eventdata_image:/.*\\[Ww][Ii][Nn][Dd][Oo][Ww][Ss]\\[Tt][Ee][Mm][Pp]\\.*/ OR data_win_eventdata_image:/.*\\[Aa][Pp][Pp][Dd][Aa][Tt][Aa]\\.*/)
+    pivot_on: host
+    window: 2h
+  - name: Other download tools used with URLs
+    query: data_win_system_eventID:"1" AND (data_win_eventdata_image:/.*(\\[Cc][Ee][Rr][Tt][Uu][Tt][Ii][Ll]\.[Ee][Xx][Ee]|\\[Bb][Ii][Tt][Ss][Aa][Dd][Mm][Ii][Nn]\.[Ee][Xx][Ee]|\\[Cc][Uu][Rr][Ll]\.[Ee][Xx][Ee]|\\[Ww][Gg][Ee][Tt]\.[Ee][Xx][Ee]|\\[Mm][Ss][Hh][Tt][Aa]\.[Ee][Xx][Ee])/) AND (data_win_eventdata_commandLine:/.*[Hh][Tt][Tt][Pp]:\/\/.*/ OR data_win_eventdata_commandLine:/.*[Hh][Tt][Tt][Pp][Ss]:\/\/.*/ OR data_win_eventdata_commandLine:/.*[Ff][Tt][Pp]:\/\/.*/)
+    pivot_on: host
+    window: 4h
+  - name: Persistence created via schtasks or Run key
+    query: data_win_system_eventID:"1" AND ((data_win_eventdata_image:/.*(\\[Ss][Cc][Hh][Tt][Aa][Ss][Kk][Ss]\.[Ee][Xx][Ee])/ AND (data_win_eventdata_commandLine:/.*\/[Cc][Rr][Ee][Aa][Tt][Ee].*/)) OR (data_win_eventdata_image:/.*(\\[Rr][Ee][Gg]\.[Ee][Xx][Ee])/ AND (data_win_eventdata_commandLine:/.*[Cc][Uu][Rr][Rr][Ee][Nn][Tt][Vv][Ee][Rr][Ss][Ii][Oo][Nn]\\[Rr][Uu][Nn].*/)))
+    pivot_on: host
+    window: 4h

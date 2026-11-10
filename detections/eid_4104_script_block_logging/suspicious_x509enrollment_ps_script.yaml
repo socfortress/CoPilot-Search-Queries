@@ -143,19 +143,53 @@ graylog:
   query: data_win_system_eventID:"4104" AND (data_win_eventdata_scriptBlockText:/.*[Xx]509[Ee][Nn][Rr][Oo][Ll][Ll][Mm][Ee][Nn][Tt]\.[Cc][Bb][Ii][Nn][Aa][Rr][Yy][Cc][Oo][Nn][Vv][Ee][Rr][Tt][Ee][Rr].*/ OR data_win_eventdata_scriptBlockText:/.*884[Ee]2002-217[Dd]-11[Dd][Aa]-[Bb]2[Aa]4-000[Ee]7[Bb][Bb][Bb]2[Bb]09.*/)
 
 correlation:
-  # Authored by the correlation engine for review.
+  # Authored per-rule (behaviour-researched) for the correlation engine. Related CoPilot
+  # Searches + telemetry pivots to run around an alert, scoped to its host/user/ip/domain.
+  related_rules:
+  - id: aa7a3fce-bef5-4311-9cc1-5f04bb8c308c
+    name: Certificate Exported Via PowerShell - ScriptBlock
+    reason: X509Enrollment COM objects are used to build/export certificates; the same script block logging catches the export of the cert/private key that the enrollment produced or targeted.
+  - id: ed06725f-6da6-439f-9dcc-ab30e891297c
+    name: Windows PowerShell Export PfxCertificate
+    reason: 'Follow-on step: after enrolling or locating a cert, the actor exports it with its private key as a PFX for reuse off-host.'
+  - id: 5e38ded4-c964-41f4-8cb6-4a1a53c6929f
+    name: Windows PowerShell Export Certificate
+    reason: Co-occurring cert-handling script activity; export of certificate material in the same session as the X509Enrollment call.
+  - id: 42821614-9264-4761-acfc-5772c3286f76
+    name: Root Certificate Installed - PowerShell
+    reason: X509Enrollment CBinaryConverter is commonly used to decode a base64 blob into a certificate that is then installed in a trusted root store (T1553.004 subversion of trust).
+  - id: d223b46b-5621-4037-88fe-fda32eead684
+    name: New Root or CA or AuthRoot Certificate to Store
+    reason: Registry-level confirmation that the script actually wrote a new certificate into the Root/CA/AuthRoot store on the host.
+  - id: f533ca6c-9440-4686-80cb-7f294c07812a
+    name: Detect Certify With PowerShell Script Block Logging
+    reason: Certificate enrollment via COM is the same primitive used by ADCS abuse tooling (Certify/Certipy-style requests); co-firing indicates AD CS abuse for credential or persistence.
+  - id: f8b482f4-6d62-49fa-a905-dfa15698317b
+    name: Windows PowerShell Cryptography Namespace
+    reason: Scripts using System.Security.Cryptography alongside X509Enrollment indicate certificate/key generation or decoding in the same script.
+  - id: 7892ec59-c5bb-496d-8968-e5d210ca3ac4
+    name: DPAPI Backup Keys And Certificate Export Activity IOC
+    reason: File-level evidence of certificate or key material (pfx/p12/pvk) being written, the likely output of enrollment/export scripting.
+  window: 1h
   enrichment_searches:
-  # Rule-specific telemetry pivots the engine runs around an alert from this rule,
-  # scoped to the alert's host/user/IP within the window (behaviour-targeted, not a sweep).
-    - name: "Download / AMSI-bypass / encoded script blocks on this host"
-      query: 'data_win_system_eventID:"4104" AND (data_win_eventdata_scriptBlockText:/.*[Dd][Oo][Ww][Nn][Ll][Oo][Aa][Dd][Ss][Tt][Rr][Ii][Nn][Gg].*/ OR data_win_eventdata_scriptBlockText:/.*[Dd][Oo][Ww][Nn][Ll][Oo][Aa][Dd][Ff][Ii][Ll][Ee].*/ OR data_win_eventdata_scriptBlockText:/.*[Ii][Nn][Vv][Oo][Kk][Ee]-[Ww][Ee][Bb][Rr][Ee][Qq][Uu][Ee][Ss][Tt].*/ OR data_win_eventdata_scriptBlockText:/.*[Nn][Ee][Tt]\.[Ww][Ee][Bb][Cc][Ll][Ii][Ee][Nn][Tt].*/ OR data_win_eventdata_scriptBlockText:/.*[Ff][Rr][Oo][Mm][Bb][Aa][Ss][Ee]64[Ss][Tt][Rr][Ii][Nn][Gg].*/ OR data_win_eventdata_scriptBlockText:/.*[Ii][Ee][Xx].*/ OR data_win_eventdata_scriptBlockText:/.*[Ii][Nn][Vv][Oo][Kk][Ee]-[Ee][Xx][Pp][Rr][Ee][Ss][Ss][Ii][Oo][Nn].*/ OR data_win_eventdata_scriptBlockText:/.*[Ss][Tt][Aa][Rr][Tt]-[Bb][Ii][Tt][Ss][Tt][Rr][Aa][Nn][Ss][Ff][Ee][Rr].*/ OR data_win_eventdata_scriptBlockText:/.*[Aa][Mm][Ss][Ii][Uu][Tt][Ii][Ll][Ss].*/ OR data_win_eventdata_scriptBlockText:/.*-[Ee][Nn][Cc].*/ OR data_win_eventdata_scriptBlockText:/.*-[Ee][Nn][Cc][Oo][Dd][Ee][Dd][Cc][Oo][Mm][Mm][Aa][Nn][Dd].*/ OR data_win_eventdata_scriptBlockText:/.*[Rr][Ee][Ff][Ll][Ee][Cc][Tt][Ii][Oo][Nn]\.[Aa][Ss][Ss][Ee][Mm][Bb][Ll][Yy].*/)'
-      pivot_on: [host]
-      window: 1h
-    - name: "Follow-on LOLBin / signed-binary-proxy execution on this host"
-      query: 'data_win_system_eventID:"1" AND data_win_eventdata_image:/.*(\\[Rr][Uu][Nn][Dd][Ll][Ll]32\.[Ee][Xx][Ee]|\\[Rr][Ee][Gg][Ss][Vv][Rr]32\.[Ee][Xx][Ee]|\\[Mm][Ss][Hh][Tt][Aa]\.[Ee][Xx][Ee]|\\[Ii][Nn][Ss][Tt][Aa][Ll][Ll][Uu][Tt][Ii][Ll]\.[Ee][Xx][Ee]|\\[Rr][Ee][Gg][Aa][Ss][Mm]\.[Ee][Xx][Ee]|\\[Rr][Ee][Gg][Ss][Vv][Cc][Ss]\.[Ee][Xx][Ee]|\\[Mm][Ss][Bb][Uu][Ii][Ll][Dd]\.[Ee][Xx][Ee]|\\[Cc][Ee][Rr][Tt][Uu][Tt][Ii][Ll]\.[Ee][Xx][Ee]|\\[Bb][Ii][Tt][Ss][Aa][Dd][Mm][Ii][Nn]\.[Ee][Xx][Ee]|\\[Ww][Mm][Ii][Cc]\.[Ee][Xx][Ee]|\\[Cc][Mm][Ss][Tt][Pp]\.[Ee][Xx][Ee]|\\[Oo][Dd][Bb][Cc][Cc][Oo][Nn][Ff]\.[Ee][Xx][Ee]|\\[Ff][Oo][Rr][Ff][Ii][Ll][Ee][Ss]\.[Ee][Xx][Ee]|\\[Pp][Cc][Aa][Ll][Uu][Aa]\.[Ee][Xx][Ee]|\\[Mm][Aa][Vv][Ii][Nn][Jj][Ee][Cc][Tt]\.[Ee][Xx][Ee]|\\[Ss][Cc][Rr][Ii][Pp][Tt][Rr][Uu][Nn][Nn][Ee][Rr]\.[Ee][Xx][Ee])/'
-      pivot_on: [host]
-      window: 1h
-    - name: "Memory/credential-dump creation & LSASS access on this host"
-      query: '((data_win_system_eventID:"1" AND data_win_eventdata_image:/.*(\\[Pp][Rr][Oo][Cc][Dd][Uu][Mm][Pp]\.[Ee][Xx][Ee]|\\[Pp][Rr][Oo][Cc][Dd][Uu][Mm][Pp]64\.[Ee][Xx][Ee]|\\[Ss][Qq][Ll][Dd][Uu][Mm][Pp][Ee][Rr]\.[Ee][Xx][Ee]|\\[Cc][Rr][Ee][Aa][Tt][Ee][Dd][Uu][Mm][Pp]\.[Ee][Xx][Ee]|\\[Rr][Dd][Rr][Ll][Ee][Aa][Kk][Dd][Ii][Aa][Gg]\.[Ee][Xx][Ee]|\\[Dd][Uu][Mm][Pp][Ee][Rr][Tt]\.[Ee][Xx][Ee]|\\[Nn][Aa][Nn][Oo][Dd][Uu][Mm][Pp]\.[Ee][Xx][Ee]|\\[Aa][Vv][Dd][Uu][Mm][Pp]\.[Ee][Xx][Ee])/) OR (data_win_system_eventID:"1" AND (data_win_eventdata_commandLine:/.*[Cc][Oo][Mm][Ss][Vv][Cc][Ss]\.[Dd][Ll][Ll].*/ OR data_win_eventdata_commandLine:/.*[Mm][Ii][Nn][Ii][Dd][Uu][Mm][Pp].*/ OR data_win_eventdata_commandLine:/.*[Dd][Uu][Mm][Pp][Ee][Rr][Tt].*/ OR data_win_eventdata_commandLine:/.*[Nn][Aa][Nn][Oo][Dd][Uu][Mm][Pp].*/ OR data_win_eventdata_commandLine:/.*[Ll][Ss][Aa][Ss][Ss].*/ OR data_win_eventdata_commandLine:/.*[Ss][Ee][Kk][Uu][Rr][Ll][Ss][Aa].*/ OR data_win_eventdata_commandLine:/.*[Nn][Tt][Dd][Ss]\.[Dd][Ii][Tt].*/ OR data_win_eventdata_commandLine:/.*[Nn][Tt][Dd][Ss][Uu][Tt][Ii][Ll].*/)) OR (data_win_system_eventID:"10" AND data_win_eventdata_targetImage:/.*(\\[Ll][Ss][Aa][Ss][Ss]\.[Ee][Xx][Ee])/))'
-      pivot_on: [host]
-      window: 1h
+  # Behaviour-targeted hunts the engine runs around the alert (not a sweep).
+  - name: Certificate export / PFX / root-store install in script blocks
+    query: data_win_system_eventID:"4104" AND (data_win_eventdata_scriptBlockText:/.*[Ee]xport-[Pp]fx[Cc]ertificate.*/ OR data_win_eventdata_scriptBlockText:/.*[Ee]xport-[Cc]ertificate.*/ OR data_win_eventdata_scriptBlockText:/.*[Cc]ert:.*[Rr]oot.*/ OR data_win_eventdata_scriptBlockText:/.*[Xx]509[Ss]tore.*/ OR data_win_eventdata_scriptBlockText:/.*[Ii]mport-[Pp]fx[Cc]ertificate.*/ OR data_win_eventdata_scriptBlockText:/.*[Ee]xport[Pp]rivate[Kk]ey.*/)
+    pivot_on:
+    - host
+    window: 1h
+  - name: Certificate / key files written to disk
+    query: data_win_system_eventID:"11" AND (data_win_eventdata_targetFilename:/.*\.([Pp][Ff][Xx]|[Pp]12|[Pp][Vv][Kk]|[Cc][Ee][Rr]|[Cc][Rr][Tt]|[Pp][Ee][Mm]|[Kk][Ee][Yy])/)
+    pivot_on:
+    - host
+    window: 1h
+  - name: Root/CA/AuthRoot certificate store registry modification
+    query: (data_win_system_eventID:"12" OR data_win_system_eventID:"13") AND data_win_eventdata_targetObject:/.*[Ss][Oo][Ff][Tt][Ww][Aa][Rr][Ee]\\[Mm][Ii][Cc][Rr][Oo][Ss][Oo][Ff][Tt]\\[Ss][Ys][Ss][Tt][Ee][Mm][Cc][Ee][Rr][Tt][Ii][Ff][Ii][Cc][Aa][Tt][Ee][Ss]\\([Rr][Oo][Oo][Tt]|[Cc][Aa]|[Aa][Uu][Tt][Hh][Rr][Oo][Oo][Tt]).*/
+    pivot_on:
+    - host
+    window: 2h
+  - name: certutil / certmgr / certreq / Certify process activity
+    query: data_win_system_eventID:"1" AND (data_win_eventdata_image:/.*\\([Cc][Ee][Rr][Tt][Uu][Tt][Ii][Ll]|[Cc][Ee][Rr][Tt][Mm][Gg][Rr]|[Cc][Ee][Rr][Tt][Rr][Ee][Qq]|[Cc][Ee][Rr][Tt][Ii][Ff][Yy])\.[Ee][Xx][Ee]/ OR data_win_eventdata_commandLine:/.*([Aa]dd[Ss]tore|-[Ee]xport[Pp][Ff][Xx]|-[Dd]ecode|-[Uu]rl[Cc]ache|[Cc]ertify).*/)
+    pivot_on:
+    - host
+    window: 2h

@@ -179,44 +179,58 @@ graylog:
   query: ((data_win_system_eventID:"4657" AND data_win_eventdata_objectName:/.*\\[Ss][Oo][Ff][Tt][Ww][Aa][Rr][Ee]\\[Mm][Ii][Cc][Rr][Oo][Ss][Oo][Ff][Tt]\\\.[Nn][Ee][Tt][Ff][Rr][Aa][Mm][Ee][Ww][Oo][Rr][Kk]/ AND data_win_eventdata_objectValueName:/[Ee][Tt][Ww][Ee][Nn][Aa][Bb][Ll][Ee][Dd]/ AND data_win_eventdata_newValue:"0") OR (data_win_system_eventID:"4657" AND data_win_eventdata_objectName:/.*\\[Ee][Nn][Vv][Ii][Rr][Oo][Nn][Mm][Ee][Nn][Tt].*/ AND (data_win_eventdata_objectValueName:/[Cc][Oo][Mm][Pp][Ll][Uu][Ss]_[Ee][Tt][Ww][Ee][Nn][Aa][Bb][Ll][Ee][Dd]/ OR data_win_eventdata_objectValueName:/[Cc][Oo][Mm][Pp][Ll][Uu][Ss]_[Ee][Tt][Ww][Ff][Ll][Aa][Gg][Ss]/) AND data_win_eventdata_newValue:"0"))
 
 correlation:
-  # Authored by the correlation engine for review. Related CoPilot Searches to run
-  # around an alert from this rule, scoped to the same host/user/IP within the window.
+  # Authored per-rule (behaviour-researched) for the correlation engine. Related CoPilot
+  # Searches + telemetry pivots to run around an alert, scoped to its host/user/ip/domain.
   related_rules:
-    - id: 0255a820-e564-4e40-af2b-6ac61160335c
-      name: "A New Trust Was Created To A Domain"
-      reason: "next kill-chain tactic: Persistence"
-    - id: 35ba1d85-724d-42a3-889f-2e2362bcaf23
-      name: "AD Privileged Users or Groups Reconnaissance"
-      reason: "next kill-chain tactic: Discovery"
-    - id: 9eb99343-d336-4020-a3cd-67f3819e68ee
-      name: "Account Tampering - Suspicious Failed Logon Reasons"
-      reason: "next kill-chain tactic: Persistence"
-    - id: 17d619c1-e020-4347-957e-1d1207455c93
-      name: "Active Directory Replication from Non Machine Account"
-      reason: "next kill-chain tactic: Credential Access"
-    - id: 300bac00-e041-4ee2-9c36-e262656a6ecc
-      name: "Active Directory User Backdoors"
-      reason: "next kill-chain tactic: Persistence"
-    - id: 2632954e-db1c-49cb-9936-67d1ef1d17d2
-      name: "Addition of SID History to Active Directory Object"
-      reason: "next kill-chain tactic: Privilege Escalation"
-  window: 1h
+  - id: bf4fc428-dcc3-4bbd-99fe-2422aeee2544
+    name: ETW Logging Disabled In .NET Processes - Sysmon Registry
+    reason: Same ETWEnabled/COMPlus_ETW* zeroing seen through Sysmon EID 13; confirms the registry write independently and may name the writing process the Security 4657 event lacks
+  - id: 41421f44-58f9-455d-838a-c398859841d4
+    name: ETW Logging Tamper In .NET Processes Via CommandLine
+    reason: The same .NET ETW disable done via set/setx/reg.exe commands; shows the command-line that produced the registry change
+  - id: a238b5d0-ce2d-4414-a676-7a531b3d13d6
+    name: ETW Trace Evasion Activity
+    reason: Co-occurring ETW evasion (logman/wevtutil/trace-session tampering) used alongside .NET ETW disabling to blind EDR telemetry
+  - id: ad89044a-8f49-4673-9a55-cbd88a1b374f
+    name: Enabling COR Profiler Environment Variables
+    reason: COR_PROFILER/COR_ENABLE_PROFILING are set in the same Environment registry key and are used to hijack the CLR for persistence or hooking, often alongside COMPlus_ETW changes
+  - id: 966315ef-c5e1-4767-ba25-fce9c8de3660
+    name: Suspicious Environment Variable Has Been Registered
+    reason: Attackers who set COMPlus_ETWEnabled persistently via Environment registry often register other malicious environment variables in the same step
+  - id: aa37cbb0-da36-42cb-a90f-fdf216fc7467
+    name: AMSI Disabled via Registry Modification
+    reason: 'Companion defense-impairment step: tooling that blinds .NET ETW typically also disables AMSI before running in-memory .NET payloads'
+  - id: 2f78da12-f7c7-430b-8b19-a28f269b77a3
+    name: Disable Windows Event Logging Via Registry
+    reason: Broader log-suppression registry tampering by the same actor on the same host after ETW is blinded
+  - id: 62b7ccc9-23b4-471e-aa15-6da3663c4d59
+    name: PowerShell Base64 Encoded Reflective Assembly Load
+    reason: 'The usual payoff: ETW assembly-load telemetry is disabled so that reflectively loaded .NET assemblies run unseen'
+  window: 2h
   enrichment_searches:
-  # Rule-specific telemetry pivots the engine runs around an alert from this rule,
-  # scoped to the alert's host/user/IP within the window (behaviour-targeted, not a sweep).
-    - name: "Autostart / security-setting registry changes on this host"
-      query: '(((data_win_system_eventID:"12" OR data_win_system_eventID:"13") AND (data_win_eventdata_targetObject:/.*[Cc][Uu][Rr][Rr][Ee][Nn][Tt][Vv][Ee][Rr][Ss][Ii][Oo][Nn]\\[Rr][Uu][Nn].*/ OR data_win_eventdata_targetObject:/.*[Cc][Uu][Rr][Rr][Ee][Nn][Tt][Vv][Ee][Rr][Ss][Ii][Oo][Nn]\\[Rr][Uu][Nn][Oo][Nn][Cc][Ee].*/ OR data_win_eventdata_targetObject:/.*[Cc][Uu][Rr][Rr][Ee][Nn][Tt][Cc][Oo][Nn][Tt][Rr][Oo][Ll][Ss][Ee][Tt]\\[Ss][Ee][Rr][Vv][Ii][Cc][Ee][Ss]\\.*/ OR data_win_eventdata_targetObject:/.*[Ii][Mm][Aa][Gg][Ee] [Ff][Ii][Ll][Ee] [Ee][Xx][Ee][Cc][Uu][Tt][Ii][Oo][Nn] [Oo][Pp][Tt][Ii][Oo][Nn][Ss]\\.*/ OR data_win_eventdata_targetObject:/.*[Ww][Ii][Nn][Ll][Oo][Gg][Oo][Nn]\\[Ss][Hh][Ee][Ll][Ll].*/ OR data_win_eventdata_targetObject:/.*[Ww][Ii][Nn][Ll][Oo][Gg][Oo][Nn]\\[Uu][Ss][Ee][Rr][Ii][Nn][Ii][Tt].*/ OR data_win_eventdata_targetObject:/.*[Cc][Uu][Rr][Rr][Ee][Nn][Tt][Vv][Ee][Rr][Ss][Ii][Oo][Nn]\\[Ee][Xx][Pp][Ll][Oo][Rr][Ee][Rr]\\[Rr][Uu][Nn].*/ OR data_win_eventdata_targetObject:/.*[Pp][Oo][Ll][Ii][Cc][Ii][Ee][Ss]\\[Ee][Xx][Pp][Ll][Oo][Rr][Ee][Rr]\\[Rr][Uu][Nn].*/ OR data_win_eventdata_targetObject:/.*[Cc][Uu][Rr][Rr][Ee][Nn][Tt][Vv][Ee][Rr][Ss][Ii][Oo][Nn]\\[Ww][Ii][Nn][Dd][Oo][Ww][Ss]\\[Ll][Oo][Aa][Dd].*/)) OR (data_win_system_eventID:"1" AND (data_win_eventdata_commandLine:/.*[Ss][Ee][Tt]-[Mm][Pp][Pp][Rr][Ee][Ff][Ee][Rr][Ee][Nn][Cc][Ee].*/ OR data_win_eventdata_commandLine:/.*[Dd][Ii][Ss][Aa][Bb][Ll][Ee][Rr][Ee][Aa][Ll][Tt][Ii][Mm][Ee][Mm][Oo][Nn][Ii][Tt][Oo][Rr][Ii][Nn][Gg].*/ OR data_win_eventdata_commandLine:/.*[Dd][Ii][Ss][Aa][Bb][Ll][Ee][Aa][Nn][Tt][Ii][Ss][Pp][Yy][Ww][Aa][Rr][Ee].*/ OR data_win_eventdata_commandLine:/.*[Aa][Dd][Dd]-[Mm][Pp][Pp][Rr][Ee][Ff][Ee][Rr][Ee][Nn][Cc][Ee] -[Ee][Xx][Cc][Ll][Uu][Ss][Ii][Oo][Nn][Pp][Aa][Tt][Hh].*/ OR data_win_eventdata_commandLine:/.*[Ww][Ee][Vv][Tt][Uu][Tt][Ii][Ll].*/ OR data_win_eventdata_commandLine:/.*[Cc][Ll][Ee][Aa][Rr]-[Ee][Vv][Ee][Nn][Tt][Ll][Oo][Gg].*/ OR data_win_eventdata_commandLine:/.*[Ff][Ss][Uu][Tt][Ii][Ll] [Uu][Ss][Nn] [Dd][Ee][Ll][Ee][Tt][Ee][Jj][Oo][Uu][Rr][Nn][Aa][Ll].*/ OR data_win_eventdata_commandLine:/.*[Vv][Ss][Ss][Aa][Dd][Mm][Ii][Nn].*/ OR data_win_eventdata_commandLine:/.*[Ss][Tt][Oo][Pp]-[Ss][Ee][Rr][Vv][Ii][Cc][Ee].*/ OR data_win_eventdata_commandLine:/.*[Ss][Cc] [Ss][Tt][Oo][Pp].*/ OR data_win_eventdata_commandLine:/.*[Ss][Cc] [Cc][Oo][Nn][Ff][Ii][Gg].*/)))'
-      pivot_on: [host]
-      window: 2h
-    - name: "Follow-on LOLBin / signed-binary-proxy execution on this host"
-      query: 'data_win_system_eventID:"1" AND data_win_eventdata_image:/.*(\\[Rr][Uu][Nn][Dd][Ll][Ll]32\.[Ee][Xx][Ee]|\\[Rr][Ee][Gg][Ss][Vv][Rr]32\.[Ee][Xx][Ee]|\\[Mm][Ss][Hh][Tt][Aa]\.[Ee][Xx][Ee]|\\[Ii][Nn][Ss][Tt][Aa][Ll][Ll][Uu][Tt][Ii][Ll]\.[Ee][Xx][Ee]|\\[Rr][Ee][Gg][Aa][Ss][Mm]\.[Ee][Xx][Ee]|\\[Rr][Ee][Gg][Ss][Vv][Cc][Ss]\.[Ee][Xx][Ee]|\\[Mm][Ss][Bb][Uu][Ii][Ll][Dd]\.[Ee][Xx][Ee]|\\[Cc][Ee][Rr][Tt][Uu][Tt][Ii][Ll]\.[Ee][Xx][Ee]|\\[Bb][Ii][Tt][Ss][Aa][Dd][Mm][Ii][Nn]\.[Ee][Xx][Ee]|\\[Ww][Mm][Ii][Cc]\.[Ee][Xx][Ee]|\\[Cc][Mm][Ss][Tt][Pp]\.[Ee][Xx][Ee]|\\[Oo][Dd][Bb][Cc][Cc][Oo][Nn][Ff]\.[Ee][Xx][Ee]|\\[Ff][Oo][Rr][Ff][Ii][Ll][Ee][Ss]\.[Ee][Xx][Ee]|\\[Pp][Cc][Aa][Ll][Uu][Aa]\.[Ee][Xx][Ee]|\\[Mm][Aa][Vv][Ii][Nn][Jj][Ee][Cc][Tt]\.[Ee][Xx][Ee]|\\[Ss][Cc][Rr][Ii][Pp][Tt][Rr][Uu][Nn][Nn][Ee][Rr]\.[Ee][Xx][Ee])/'
-      pivot_on: [host]
-      window: 1h
-    - name: "This account's logon activity across hosts"
-      query: '(data_win_system_eventID:"4624" OR data_win_system_eventID:"4625")'
-      pivot_on: [user]
-      window: 6h
-    - name: "Account / group / privilege changes involving this account"
-      query: '(data_win_system_eventID:"4720" OR data_win_system_eventID:"4722" OR data_win_system_eventID:"4724" OR data_win_system_eventID:"4728" OR data_win_system_eventID:"4732" OR data_win_system_eventID:"4756" OR data_win_system_eventID:"4672")'
-      pivot_on: [user]
-      window: 6h
+  # Behaviour-targeted hunts the engine runs around the alert (not a sweep).
+  - name: Sysmon registry writes zeroing .NET ETW settings
+    query: data_win_system_eventID:"13" AND data_win_eventdata_targetObject:/.*([Cc][Oo][Mm][Pp][Ll][Uu][Ss]_[Ee][Tt][Ww]|[Ss][Oo][Ff][Tt][Ww][Aa][Rr][Ee]\\[Mm][Ii][Cc][Rr][Oo][Ss][Oo][Ff][Tt]\\\.[Nn][Ee][Tt][Ff][Rr][Aa][Mm][Ee][Ww][Oo][Rr][Kk]\\[Ee][Tt][Ww][Ee][Nn][Aa][Bb][Ll][Ee][Dd]).*/
+    pivot_on:
+    - host
+    window: 2h
+  - name: Commands setting COMPlus_ETW or COR profiler variables
+    query: data_win_system_eventID:"1" AND data_win_eventdata_commandLine:/.*([Cc][Oo][Mm][Pp][Ll][Uu][Ss]_[Ee][Tt][Ww]|[Cc][Oo][Rr]_[Pp][Rr][Oo][Ff][Ii][Ll][Ee][Rr]|[Cc][Oo][Rr]_[Ee][Nn][Aa][Bb][Ll][Ee]_[Pp][Rr][Oo][Ff][Ii][Ll][Ii][Nn][Gg]|[Ee][Tt][Ww][Ee][Nn][Aa][Bb][Ll][Ee][Dd]).*/
+    pivot_on:
+    - host
+    window: 2h
+  - name: In-memory .NET assembly loading in PowerShell script blocks
+    query: data_win_system_eventID:"4104" AND (data_win_eventdata_scriptBlockText:/.*[Rr]eflection\.[Aa]ssembly.*/ OR data_win_eventdata_scriptBlockText:/.*\[[Aa]ssembly\]::[Ll]oad.*/ OR data_win_eventdata_scriptBlockText:/.*[Ee]xecute-[Aa]ssembly.*/ OR data_win_eventdata_scriptBlockText:/.*[Aa]m, *[Ss]i[Uu]tils.*/ OR data_win_eventdata_scriptBlockText:/.*[Ff]rom[Bb]ase64[Ss]tring.*/)
+    pivot_on:
+    - host
+    window: 2h
+  - name: CLR loaded into non-.NET processes from user-writable paths
+    query: data_win_system_eventID:"7" AND data_win_eventdata_imageLoaded:/.*\\([Cc][Ll][Rr]|[Mm][Ss][Cc][Oo][Rr][Ee][Ee]|[Cc][Ll][Rr][Jj][Ii][Tt])\.[Dd][Ll][Ll]/ AND data_win_eventdata_image:/.*\\([Uu][Ss][Ee][Rr][Ss]|[Pp][Rr][Oo][Gg][Rr][Aa][Mm][Dd][Aa][Tt][Aa]|[Tt][Ee][Mm][Pp]|[Pp][Uu][Bb][Ll][Ii][Cc])\\.*/
+    pivot_on:
+    - host
+    window: 2h
+  - name: Other logging and audit tampering commands
+    query: data_win_system_eventID:"1" AND (data_win_eventdata_commandLine:/.*[Ww][Ee][Vv][Tt][Uu][Tt][Ii][Ll].* ([Cc][Ll]|[Cc][Ll][Ee][Aa][Rr]-[Ll][Oo][Gg]|[Ss][Ll]).*/ OR data_win_eventdata_commandLine:/.*[Aa][Uu][Dd][Ii][Tt][Pp][Oo][Ll].*([Cc][Ll][Ee][Aa][Rr]|[Rr][Ee][Mm][Oo][Vv][Ee]|[Nn][Oo] [Ll][Oo][Gg][Gg][Ii][Nn][Gg]).*/ OR data_win_eventdata_commandLine:/.*[Ll][Oo][Gg][Mm][Aa][Nn] +(stop|delete|update).*/ OR data_win_eventdata_commandLine:/.*[Cc][Ll][Ee][Aa][Rr]-[Ee][Vv][Ee][Nn][Tt][Ll][Oo][Gg].*/)
+    pivot_on:
+    - host
+    window: 4h

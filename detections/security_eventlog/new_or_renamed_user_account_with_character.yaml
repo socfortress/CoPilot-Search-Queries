@@ -160,19 +160,59 @@ graylog:
   query: ((data_win_system_eventID:"4720" AND data_win_eventdata_samAccountName:/.*\$.*/) OR (data_win_system_eventID:"4781" AND data_win_eventdata_newTargetUserName:/.*\$.*/)) AND _exists_:data_win_system_eventID AND _exists_:data_win_eventdata_targetUserName AND NOT (data_win_system_eventID:"4720" AND data_win_eventdata_targetUserName:/[Hh][Oo][Mm][Ee][Gg][Rr][Oo][Uu][Pp][Uu][Ss][Ee][Rr]\$/)
 
 correlation:
-  # Authored by the correlation engine for review.
+  # Authored per-rule (behaviour-researched) for the correlation engine. Related CoPilot
+  # Searches + telemetry pivots to run around an alert, scoped to its host/user/ip/domain.
+  related_rules:
+  - id: cd219ff3-fa99-45d4-8380-a7d15116c6dc
+    name: New User Created Via Net.EXE
+    reason: The usual command-line mechanism that produces the 4720 event with a trailing $; confirms a net user /add created the fake machine-style account.
+  - id: 7b449a5e-1db5-4dd0-a2dc-4e3a67282538
+    name: Hidden Local User Creation
+    reason: 'Same hide-the-account intent: a local user ending in $ is hidden from net user and logon UI, often paired with this rule.'
+  - id: 9ec9fb1b-e059-4489-9642-f270c207923d
+    name: Hiding User Account Via SpecialAccounts Registry Key - CommandLine
+    reason: 'Follow-on hiding step: after creating the account the attacker hides it from the logon screen via SpecialAccounts\UserList.'
+  - id: f8aebc67-a56d-4ec9-9fbe-7b0e8b7b4efd
+    name: Hiding User Account Via SpecialAccounts Registry Key
+    reason: Registry-level evidence of the same hiding persistence on the host that created the $ account.
+  - id: 460479f3-80b7-42da-9c43-2cc1d54dbccd
+    name: Creation of a Local Hidden User Account by Registry
+    reason: Hidden accounts created by direct SAM registry writes bypass 4720; co-occurs with the $ naming trick.
+  - id: c265cf08-3f99-46c1-8d59-328247057d57
+    name: User Added to Local Administrator Group
+    reason: 'Typical next step: the stealth account is added to local Administrators to give the backdoor privileges.'
+  - id: 45eb2ae2-9aa2-4c3a-99a5-6e5077655466
+    name: Suspicious Computer Account Name Change CVE-2021-42287
+    reason: Same 4781 rename-to-machine-style-name behaviour on the domain side (sAMAccountName spoofing with $).
+  - id: 1bbf25b9-8038-4154-a50b-118f2a32be27
+    name: Suspicious Windows ANONYMOUS LOGON Local Account Created
+    reason: Sibling account-name masquerade technique used to make a persistence account look like a system principal.
+  window: 1h
   enrichment_searches:
-  # Rule-specific telemetry pivots the engine runs around an alert from this rule,
-  # scoped to the alert's host/user/IP within the window (behaviour-targeted, not a sweep).
-    - name: "Execution from user-writable / masquerading paths on this host"
-      query: 'data_win_system_eventID:"1" AND (data_win_eventdata_image:/.*\\[Uu][Ss][Ee][Rr][Ss]\\.*/ OR data_win_eventdata_image:/.*\\[Pp][Rr][Oo][Gg][Rr][Aa][Mm][Dd][Aa][Tt][Aa]\\.*/ OR data_win_eventdata_image:/.*\\[Ww][Ii][Nn][Dd][Oo][Ww][Ss]\\[Tt][Ee][Mm][Pp]\\.*/ OR data_win_eventdata_image:/.*\\[Aa][Pp][Pp][Dd][Aa][Tt][Aa]\\.*/ OR data_win_eventdata_image:/.*\\[Pp][Uu][Bb][Ll][Ii][Cc]\\.*/ OR data_win_eventdata_image:/.*\\\$[Rr][Ee][Cc][Yy][Cc][Ll][Ee].*/)'
-      pivot_on: [host]
-      window: 1h
-    - name: "This account's logon activity across hosts"
-      query: '(data_win_system_eventID:"4624" OR data_win_system_eventID:"4625")'
-      pivot_on: [user]
-      window: 6h
-    - name: "Account / group / privilege changes involving this account"
-      query: '(data_win_system_eventID:"4720" OR data_win_system_eventID:"4722" OR data_win_system_eventID:"4724" OR data_win_system_eventID:"4728" OR data_win_system_eventID:"4732" OR data_win_system_eventID:"4756" OR data_win_system_eventID:"4672")'
-      pivot_on: [user]
-      window: 6h
+  # Behaviour-targeted hunts the engine runs around the alert (not a sweep).
+  - name: Account creation, rename and enablement events on this host
+    query: (data_win_system_eventID:"4720" OR data_win_system_eventID:"4722" OR data_win_system_eventID:"4724" OR data_win_system_eventID:"4738" OR data_win_system_eventID:"4781")
+    pivot_on:
+    - host
+    window: 2h
+  - name: Privileged group membership additions on this host
+    query: (data_win_system_eventID:"4732" OR data_win_system_eventID:"4728" OR data_win_system_eventID:"4756") AND (data_win_eventdata_targetUserName:*dmin* OR data_win_eventdata_targetUserName:*Remote* OR data_win_eventdata_targetUserName:*Domain*)
+    pivot_on:
+    - host
+    window: 2h
+  - name: net/wmic/PowerShell account-creation commands
+    query: data_win_system_eventID:"1" AND (data_win_eventdata_commandLine:*user*/add* OR data_win_eventdata_commandLine:*New-LocalUser* OR data_win_eventdata_commandLine:*localgroup*administrators* OR data_win_eventdata_commandLine:*net1*user*)
+    pivot_on:
+    - host
+    window: 2h
+  - name: SAM / SpecialAccounts registry writes hiding a user
+    query: data_win_system_eventID:"13" AND (data_win_eventdata_targetObject:*SpecialAccounts* OR data_win_eventdata_targetObject:*\\SAM\\SAM\\Domains\\Account\\Users*)
+    pivot_on:
+    - host
+    window: 2h
+  - name: Logons by the new $ account
+    query: (data_win_system_eventID:"4624" OR data_win_system_eventID:"4625" OR data_win_system_eventID:"4672") AND data_win_eventdata_targetUserName:*$
+    pivot_on:
+    - host
+    - user
+    window: 24h

@@ -202,44 +202,50 @@ graylog:
   query: data_win_system_eventID:"11" AND data_win_eventdata_targetFilename:/[Cc]:\\[Pp][Ee][Rr][Ff][Ll][Oo][Gg][Ss]\\.*/ AND (data_win_eventdata_targetFilename:/.*\.7[Zz]/ OR data_win_eventdata_targetFilename:/.*\.[Bb][Aa][Tt]/ OR data_win_eventdata_targetFilename:/.*\.[Bb][Ii][Nn]/ OR data_win_eventdata_targetFilename:/.*\.[Cc][Hh][Mm]/ OR data_win_eventdata_targetFilename:/.*\.[Dd][Ll][Ll]/ OR data_win_eventdata_targetFilename:/.*\.[Ee][Xx][Ee]/ OR data_win_eventdata_targetFilename:/.*\.[Hh][Tt][Aa]/ OR data_win_eventdata_targetFilename:/.*\.[Ll][Nn][Kk]/ OR data_win_eventdata_targetFilename:/.*\.[Pp][Ss]1/ OR data_win_eventdata_targetFilename:/.*\.[Pp][Ss][Mm]1/ OR data_win_eventdata_targetFilename:/.*\.[Pp][Yy]/ OR data_win_eventdata_targetFilename:/.*\.[Ss][Cc][Rr]/ OR data_win_eventdata_targetFilename:/.*\.[Ss][Yy][Ss]/ OR data_win_eventdata_targetFilename:/.*\.[Vv][Bb][Ee]/ OR data_win_eventdata_targetFilename:/.*\.[Vv][Bb][Ss]/ OR data_win_eventdata_targetFilename:/.*\.[Zz][Ii][Pp]/)
 
 correlation:
-  # Authored by the correlation engine for review. Related CoPilot Searches to run
-  # around an alert from this rule, scoped to the same host/user/IP within the window.
+  # Authored per-rule (behaviour-researched) for the correlation engine. Related CoPilot
+  # Searches + telemetry pivots to run around an alert, scoped to its host/user/ip/domain.
   related_rules:
-    - id: ec570e53-4c76-45a9-804d-dc3f355ff7a7
-      name: "7Zip Compressing Dump Files"
-      reason: "next kill-chain tactic: Collection"
-    - id: 0a1255c5-d732-4b62-ac02-b5152d34fb83
-      name: "ADExplorer Writing Complete AD Snapshot Into .dat File"
-      reason: "next kill-chain tactic: Discovery"
-    - id: 1ea13e8c-03ea-409b-877d-ce5c3d2c1cb3
-      name: "ADFS Database Named Pipe Connection By Uncommon Tool"
-      reason: "next kill-chain tactic: Collection"
-    - id: 75bf09fa-1dd7-4d18-9af9-dd9e492562eb
-      name: "ADSI-Cache File Creation By Uncommon Tool"
-      reason: "next kill-chain tactic: Command and Control"
-    - id: 33a2d1dd-f3b0-40bd-8baf-7974468927cc
-      name: "APT PRIVATELOG Image Load Pattern"
-      reason: "next kill-chain tactic: Privilege Escalation"
-    - id: 9aa01d62-7667-4d3b-acb8-8cb5103e2014
-      name: "APT27 - Emissary Panda Activity"
-      reason: "next kill-chain tactic: Execution"
-  window: 1h
+  - id: 3dfd06d2-eaf4-4532-9555-68aca59f57c4
+    name: Process Execution From A Potentially Suspicious Folder
+    reason: Execution of the dropped binary from an unusual folder like PerfLogs is the natural next step.
+  - id: 1228c958-e64e-4e71-92ad-7d429f4138ba
+    name: Script Interpreter Execution From Suspicious Folder
+    reason: Script files dropped in PerfLogs (ps1/vbs/bat) are run by interpreters from that folder.
+  - id: 7b434893-c57d-4f41-908d-6a17bf1ae98f
+    name: Network Connection Initiated From Process Located In Potentially Suspicious Or Uncommon Location
+    reason: A process running from the staging folder calling out confirms C2 or payload download.
+  - id: 13c02350-4177-4e45-ac17-cf7ca628ff5e
+    name: Files With System DLL Name In Unsuspected Locations
+    reason: PerfLogs is used to hide system-named DLLs; same masquerade-by-location tactic.
+  - id: df49c691-8026-48dd-94d3-4ba6a79102a8
+    name: DarkGate - Drop DarkGate Loader In C:\Temp Directory
+    reason: Sibling staging directory (C:\Temp) used by loaders; same hands-on staging habit.
+  - id: 327ff235-94eb-4f06-b9de-aaee571324be
+    name: Regsvr32 Execution From Highly Suspicious Location
+    reason: Regsvr32 executing a dropped DLL from a suspicious location is a typical PerfLogs DLL launch.
+  - id: f59c3faf-50f3-464b-9f4c-1b67ab512d99
+    name: Common Autorun Keys Modification
+    reason: Run-key modification pointing at the staged payload is the likely persistence step.
+  window: 6h
   enrichment_searches:
-  # Rule-specific telemetry pivots the engine runs around an alert from this rule,
-  # scoped to the alert's host/user/IP within the window (behaviour-targeted, not a sweep).
-    - name: "Outbound connections by script interpreters on this host"
-      query: 'data_win_system_eventID:"3" AND data_win_eventdata_image:/.*(\\[Pp][Oo][Ww][Ee][Rr][Ss][Hh][Ee][Ll][Ll]\.[Ee][Xx][Ee]|\\[Pp][Ww][Ss][Hh]\.[Ee][Xx][Ee]|\\[Pp][Oo][Ww][Ee][Rr][Ss][Hh][Ee][Ll][Ll]_[Ii][Ss][Ee]\.[Ee][Xx][Ee]|\\[Cc][Mm][Dd]\.[Ee][Xx][Ee]|\\[Ww][Ss][Cc][Rr][Ii][Pp][Tt]\.[Ee][Xx][Ee]|\\[Cc][Ss][Cc][Rr][Ii][Pp][Tt]\.[Ee][Xx][Ee]|\\[Mm][Ss][Hh][Tt][Aa]\.[Ee][Xx][Ee]|\\[Rr][Uu][Nn][Dd][Ll][Ll]32\.[Ee][Xx][Ee]|\\[Rr][Ee][Gg][Ss][Vv][Rr]32\.[Ee][Xx][Ee])/'
-      pivot_on: [host]
-      window: 1h
-    - name: "Autostart persistence written on this host (Run keys, services, IFEO)"
-      query: '(data_win_system_eventID:"12" OR data_win_system_eventID:"13") AND (data_win_eventdata_targetObject:/.*[Cc][Uu][Rr][Rr][Ee][Nn][Tt][Vv][Ee][Rr][Ss][Ii][Oo][Nn]\\[Rr][Uu][Nn].*/ OR data_win_eventdata_targetObject:/.*[Cc][Uu][Rr][Rr][Ee][Nn][Tt][Vv][Ee][Rr][Ss][Ii][Oo][Nn]\\[Rr][Uu][Nn][Oo][Nn][Cc][Ee].*/ OR data_win_eventdata_targetObject:/.*[Cc][Uu][Rr][Rr][Ee][Nn][Tt][Cc][Oo][Nn][Tt][Rr][Oo][Ll][Ss][Ee][Tt]\\[Ss][Ee][Rr][Vv][Ii][Cc][Ee][Ss]\\.*/ OR data_win_eventdata_targetObject:/.*[Ii][Mm][Aa][Gg][Ee] [Ff][Ii][Ll][Ee] [Ee][Xx][Ee][Cc][Uu][Tt][Ii][Oo][Nn] [Oo][Pp][Tt][Ii][Oo][Nn][Ss]\\.*/ OR data_win_eventdata_targetObject:/.*[Ww][Ii][Nn][Ll][Oo][Gg][Oo][Nn]\\[Ss][Hh][Ee][Ll][Ll].*/ OR data_win_eventdata_targetObject:/.*[Ww][Ii][Nn][Ll][Oo][Gg][Oo][Nn]\\[Uu][Ss][Ee][Rr][Ii][Nn][Ii][Tt].*/ OR data_win_eventdata_targetObject:/.*[Cc][Uu][Rr][Rr][Ee][Nn][Tt][Vv][Ee][Rr][Ss][Ii][Oo][Nn]\\[Ee][Xx][Pp][Ll][Oo][Rr][Ee][Rr]\\[Rr][Uu][Nn].*/ OR data_win_eventdata_targetObject:/.*[Pp][Oo][Ll][Ii][Cc][Ii][Ee][Ss]\\[Ee][Xx][Pp][Ll][Oo][Rr][Ee][Rr]\\[Rr][Uu][Nn].*/ OR data_win_eventdata_targetObject:/.*[Cc][Uu][Rr][Rr][Ee][Nn][Tt][Vv][Ee][Rr][Ss][Ii][Oo][Nn]\\[Ww][Ii][Nn][Dd][Oo][Ww][Ss]\\[Ll][Oo][Aa][Dd].*/)'
-      pivot_on: [host]
-      window: 4h
-    - name: "Execution of programs from user-writable paths on this host"
-      query: 'data_win_system_eventID:"1" AND (data_win_eventdata_image:/.*\\[Uu][Ss][Ee][Rr][Ss]\\.*/ OR data_win_eventdata_image:/.*\\[Pp][Rr][Oo][Gg][Rr][Aa][Mm][Dd][Aa][Tt][Aa]\\.*/ OR data_win_eventdata_image:/.*\\[Ww][Ii][Nn][Dd][Oo][Ww][Ss]\\[Tt][Ee][Mm][Pp]\\.*/ OR data_win_eventdata_image:/.*\\[Aa][Pp][Pp][Dd][Aa][Tt][Aa]\\.*/ OR data_win_eventdata_image:/.*\\[Pp][Uu][Bb][Ll][Ii][Cc]\\.*/ OR data_win_eventdata_image:/.*\\\$[Rr][Ee][Cc][Yy][Cc][Ll][Ee].*/)'
-      pivot_on: [host]
-      window: 1h
-    - name: "Autostart persistence written on this host"
-      query: '(data_win_system_eventID:"12" OR data_win_system_eventID:"13") AND (data_win_eventdata_targetObject:/.*[Cc][Uu][Rr][Rr][Ee][Nn][Tt][Vv][Ee][Rr][Ss][Ii][Oo][Nn]\\[Rr][Uu][Nn].*/ OR data_win_eventdata_targetObject:/.*[Cc][Uu][Rr][Rr][Ee][Nn][Tt][Vv][Ee][Rr][Ss][Ii][Oo][Nn]\\[Rr][Uu][Nn][Oo][Nn][Cc][Ee].*/ OR data_win_eventdata_targetObject:/.*[Cc][Uu][Rr][Rr][Ee][Nn][Tt][Cc][Oo][Nn][Tt][Rr][Oo][Ll][Ss][Ee][Tt]\\[Ss][Ee][Rr][Vv][Ii][Cc][Ee][Ss]\\.*/ OR data_win_eventdata_targetObject:/.*[Ii][Mm][Aa][Gg][Ee] [Ff][Ii][Ll][Ee] [Ee][Xx][Ee][Cc][Uu][Tt][Ii][Oo][Nn] [Oo][Pp][Tt][Ii][Oo][Nn][Ss]\\.*/ OR data_win_eventdata_targetObject:/.*[Ww][Ii][Nn][Ll][Oo][Gg][Oo][Nn]\\[Ss][Hh][Ee][Ll][Ll].*/ OR data_win_eventdata_targetObject:/.*[Ww][Ii][Nn][Ll][Oo][Gg][Oo][Nn]\\[Uu][Ss][Ee][Rr][Ii][Nn][Ii][Tt].*/ OR data_win_eventdata_targetObject:/.*[Cc][Uu][Rr][Rr][Ee][Nn][Tt][Vv][Ee][Rr][Ss][Ii][Oo][Nn]\\[Ee][Xx][Pp][Ll][Oo][Rr][Ee][Rr]\\[Rr][Uu][Nn].*/ OR data_win_eventdata_targetObject:/.*[Pp][Oo][Ll][Ii][Cc][Ii][Ee][Ss]\\[Ee][Xx][Pp][Ll][Oo][Rr][Ee][Rr]\\[Rr][Uu][Nn].*/ OR data_win_eventdata_targetObject:/.*[Cc][Uu][Rr][Rr][Ee][Nn][Tt][Vv][Ee][Rr][Ss][Ii][Oo][Nn]\\[Ww][Ii][Nn][Dd][Oo][Ww][Ss]\\[Ll][Oo][Aa][Dd].*/)'
-      pivot_on: [host]
-      window: 2h
+  # Behaviour-targeted hunts the engine runs around the alert (not a sweep).
+  - name: Processes executed from PerfLogs
+    query: data_win_system_eventID:"1" AND (data_win_eventdata_image:/[Cc]:\\[Pp][Ee][Rr][Ff][Ll][Oo][Gg][Ss]\\.*/ OR data_win_eventdata_commandLine:/.*[Pp][Ee][Rr][Ff][Ll][Oo][Gg][Ss]\\.*/)
+    pivot_on: host
+    window: 4h
+  - name: Network connections from PerfLogs binaries
+    query: data_win_system_eventID:"3" AND data_win_eventdata_image:/[Cc]:\\[Pp][Ee][Rr][Ff][Ll][Oo][Gg][Ss]\\.*/
+    pivot_on: host
+    window: 6h
+  - name: DLL images loaded from PerfLogs
+    query: data_win_system_eventID:"7" AND data_win_eventdata_imageLoaded:/[Cc]:\\[Pp][Ee][Rr][Ff][Ll][Oo][Gg][Ss]\\.*/
+    pivot_on: host
+    window: 4h
+  - name: Registry persistence referencing PerfLogs
+    query: (data_win_system_eventID:"13" OR data_win_system_eventID:"12") AND (data_win_eventdata_details:/.*[Pp][Ee][Rr][Ff][Ll][Oo][Gg][Ss].*/ OR data_win_eventdata_targetObject:/.*[Pp][Ee][Rr][Ff][Ll][Oo][Gg][Ss].*/)
+    pivot_on: host
+    window: 6h
+  - name: Scheduled tasks or services pointing to PerfLogs
+    query: data_win_system_eventID:"1" AND data_win_eventdata_commandLine:/.*([Ss][Cc][Hh][Tt][Aa][Ss][Kk][Ss]|[Ss][Cc]\.[Ee][Xx][Ee]).*[Pp][Ee][Rr][Ff][Ll][Oo][Gg][Ss].*/
+    pivot_on: host
+    window: 24h

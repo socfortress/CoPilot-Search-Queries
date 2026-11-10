@@ -127,66 +127,53 @@ graylog:
   query: data_win_system_eventID:"1" AND data_win_eventdata_image:/.*wevtutil\.exe/ AND (data_win_eventdata_commandLine:/.* cl .*/ OR data_win_eventdata_commandLine:/.*clear-log.*/)
 
 correlation:
-  # Authored by the correlation engine for review. Related CoPilot Searches to run
-  # around an alert from this rule, scoped to the same host/user/IP within the window.
+  # Authored per-rule (behaviour-researched) for the correlation engine. Related CoPilot
+  # Searches + telemetry pivots to run around an alert, scoped to its host/user/ip/domain.
   related_rules:
-    - id: de7fcadc-04f3-11ec-a241-acde48001122
-      name: "AdsiSearcher Account Discovery"
-      reason: "same analytic story: CISA AA23-347A"
-    - id: 5ee2bcd0-b2ff-11eb-bb34-acde48001122
-      name: "Delete ShadowCopy With PowerShell"
-      reason: "same analytic story: Ransomware"
-    - id: 8148c29c-c952-11eb-9255-acde48001122
-      name: "Detect Mimikatz With PowerShell Script Block Logging"
-      reason: "same analytic story: CISA AA23-347A"
-    - id: 27c3a83d-cada-47c6-9042-67baf19d2574
-      name: "Detect PsExec With accepteula Flag"
-      reason: "same analytic story: Rhysida Ransomware"
-    - id: 32e0baea-b3f1-11eb-a2ce-acde48001122
-      name: "Detect RClone Command-Line Usage"
-      reason: "same analytic story: Ransomware"
-    - id: ccad96d7-a48c-4f13-8b9c-9f6a31cba454
-      name: "Detect Remote Access Software Usage FileInfo"
-      reason: "same analytic story: Ransomware"
-    - id: 683e6196-b8e8-11eb-9a79-acde48001122
-      name: "Detect Renamed PSExec"
-      reason: "same analytic story: Rhysida Ransomware"
-    - id: 6dca1124-b3ec-11eb-9328-acde48001122
-      name: "Detect Renamed RClone"
-      reason: "same analytic story: Ransomware"
-    - id: a0bdd2f6-c2ff-11eb-b918-acde48001122
-      name: "Detect SharpHound Command-Line Arguments"
-      reason: "same analytic story: Ransomware"
-    - id: dd04b29a-beed-11eb-87bc-acde48001122
-      name: "Detect SharpHound Usage"
-      reason: "same analytic story: Ransomware"
-    - id: 236e7c8e-c9d9-11eb-a824-acde48001122
-      name: "Disable Logs Using WevtUtil"
-      reason: "same analytic story: Ransomware"
-    - id: 114c6bfe-9406-11ec-bcce-acde48001122
-      name: "Disabled Kerberos Pre-Authentication Discovery With Get-ADUser"
-      reason: "same analytic story: CISA AA23-347A"
-  window: 1h
+  - id: cc36992a-4671-4f21-a91d-6c2b72a2edf5
+    name: Suspicious Eventlog Clearing or Configuration Change Activity
+    reason: Same anti-forensic intent via other tooling (PowerShell Clear-EventLog, wevtutil sl/cl variants); co-occurs when an operator tries several ways to blind the logs.
+  - id: 236e7c8e-c9d9-11eb-a824-acde48001122
+    name: Disable Logs Using WevtUtil
+    reason: Operators often disable a log channel (wevtutil sl /e:false) before or right after clearing it, so future activity is never recorded.
+  - id: 63c779ba-f638-40a0-a593-ddd45e8b1ddc
+    name: EventLog EVTX File Deleted
+    reason: 'Fallback to clearing: deleting .evtx files directly when wevtutil is monitored or blocked.'
+  - id: 0a13e132-651d-11eb-ae93-0242ac130002
+    name: Audit Policy Tampering Via Auditpol
+    reason: Audit policy is disabled just before the logs are wiped so the cleanup itself and later actions leave no trail.
+  - id: caf201a9-c2ce-4a26-9c3a-2b9525413711
+    name: Potentially Suspicious Call To Win32_NTEventlogFile Class
+    reason: WMI ClearEventLog/BackupEventLog is the alternate route to clear logs on the same host.
+  - id: cd1f961e-0b96-436b-b7c6-38da4583ec00
+    name: Suspicious Windows Trace ETW Session Tamper Via Logman.EXE
+    reason: ETW session stop/delete is paired with log clearing to remove telemetry sources.
+  - id: c947b146-0abc-4c87-9c64-b17e9d7274a2
+    name: Shadow Copies Deletion Using Operating Systems Utilities
+    reason: Ransomware playbooks (Rhysida, Clop, ShrinkLocker) clear logs next to shadow-copy deletion before encryption.
+  - id: c9fbe8e9-119d-40a6-9b59-dd58a5d84429
+    name: Potential Ransomware or Unauthorized MBR Tampering Via Bcdedit.EXE
+    reason: Recovery inhibition via bcdedit is a typical impact-stage companion of log clearing.
+  window: 2h
   enrichment_searches:
-  # Rule-specific telemetry pivots the engine runs around an alert from this rule,
-  # scoped to the alert's host/user/IP within the window (behaviour-targeted, not a sweep).
-    - name: "Log-clearing / anti-forensic activity on this host"
-      query: '(((data_win_eventdata_commandLine:/.*[Ww][Ee][Vv][Tt][Uu][Tt][Ii][Ll] [Cc][Ll].*/ OR data_win_eventdata_commandLine:/.*[Cc][Ll][Ee][Aa][Rr]-[Ee][Vv][Ee][Nn][Tt][Ll][Oo][Gg].*/ OR data_win_eventdata_commandLine:/.*[Ff][Ss][Uu][Tt][Ii][Ll] [Uu][Ss][Nn] [Dd][Ee][Ll][Ee][Tt][Ee][Jj][Oo][Uu][Rr][Nn][Aa][Ll].*/ OR data_win_eventdata_commandLine:/.*[Vv][Ss][Ss][Aa][Dd][Mm][Ii][Nn] [Dd][Ee][Ll][Ee][Tt][Ee].*/ OR data_win_eventdata_commandLine:/.*[Ww][Ee][Vv][Tt][Uu][Tt][Ii][Ll] [Cc][Ll][Ee][Aa][Rr]-[Ll][Oo][Gg].*/)) OR ((data_win_system_eventID:"1102" OR data_win_system_eventID:"104")))'
-      pivot_on: [host]
-      window: 2h
-    - name: "Downloader / C2 tooling executed on this host"
-      query: '(data_win_system_eventID:"1" AND data_win_eventdata_image:/.*(\\[Cc][Ee][Rr][Tt][Uu][Tt][Ii][Ll]\.[Ee][Xx][Ee]|\\[Bb][Ii][Tt][Ss][Aa][Dd][Mm][Ii][Nn]\.[Ee][Xx][Ee]|\\[Cc][Uu][Rr][Ll]\.[Ee][Xx][Ee]|\\[Ww][Gg][Ee][Tt]\.[Ee][Xx][Ee])/) OR (data_win_eventdata_commandLine:/.*[Dd][Oo][Ww][Nn][Ll][Oo][Aa][Dd][Ss][Tt][Rr][Ii][Nn][Gg].*/ OR data_win_eventdata_commandLine:/.*[Dd][Oo][Ww][Nn][Ll][Oo][Aa][Dd][Ff][Ii][Ll][Ee].*/ OR data_win_eventdata_commandLine:/.*[Ii][Nn][Vv][Oo][Kk][Ee]-[Ww][Ee][Bb][Rr][Ee][Qq][Uu][Ee][Ss][Tt].*/ OR data_win_eventdata_commandLine:/.*[Nn][Ee][Tt]\.[Ww][Ee][Bb][Cc][Ll][Ii][Ee][Nn][Tt].*/ OR data_win_eventdata_commandLine:/.*[Ss][Tt][Aa][Rr][Tt]-[Bb][Ii][Tt][Ss][Tt][Rr][Aa][Nn][Ss][Ff][Ee][Rr].*/ OR data_win_eventdata_commandLine:/.*[Ii][Ww][Rr] .*/ OR data_win_eventdata_commandLine:/.*[Cc][Uu][Rr][Ll] .*/ OR data_win_eventdata_commandLine:/.*[Ww][Gg][Ee][Tt] .*/)'
-      pivot_on: [host]
-      window: 1h
-    - name: "Follow-on LOLBin / signed-binary-proxy execution on this host"
-      query: 'data_win_system_eventID:"1" AND data_win_eventdata_image:/.*(\\[Rr][Uu][Nn][Dd][Ll][Ll]32\.[Ee][Xx][Ee]|\\[Rr][Ee][Gg][Ss][Vv][Rr]32\.[Ee][Xx][Ee]|\\[Mm][Ss][Hh][Tt][Aa]\.[Ee][Xx][Ee]|\\[Ii][Nn][Ss][Tt][Aa][Ll][Ll][Uu][Tt][Ii][Ll]\.[Ee][Xx][Ee]|\\[Rr][Ee][Gg][Aa][Ss][Mm]\.[Ee][Xx][Ee]|\\[Rr][Ee][Gg][Ss][Vv][Cc][Ss]\.[Ee][Xx][Ee]|\\[Mm][Ss][Bb][Uu][Ii][Ll][Dd]\.[Ee][Xx][Ee]|\\[Cc][Ee][Rr][Tt][Uu][Tt][Ii][Ll]\.[Ee][Xx][Ee]|\\[Bb][Ii][Tt][Ss][Aa][Dd][Mm][Ii][Nn]\.[Ee][Xx][Ee]|\\[Ww][Mm][Ii][Cc]\.[Ee][Xx][Ee]|\\[Cc][Mm][Ss][Tt][Pp]\.[Ee][Xx][Ee]|\\[Oo][Dd][Bb][Cc][Cc][Oo][Nn][Ff]\.[Ee][Xx][Ee]|\\[Ff][Oo][Rr][Ff][Ii][Ll][Ee][Ss]\.[Ee][Xx][Ee]|\\[Pp][Cc][Aa][Ll][Uu][Aa]\.[Ee][Xx][Ee]|\\[Mm][Aa][Vv][Ii][Nn][Jj][Ee][Cc][Tt]\.[Ee][Xx][Ee]|\\[Ss][Cc][Rr][Ii][Pp][Tt][Rr][Uu][Nn][Nn][Ee][Rr]\.[Ee][Xx][Ee])/'
-      pivot_on: [host]
-      window: 1h
-    - name: "Outbound connections by script interpreters on this host"
-      query: 'data_win_system_eventID:"3" AND data_win_eventdata_image:/.*(\\[Pp][Oo][Ww][Ee][Rr][Ss][Hh][Ee][Ll][Ll]\.[Ee][Xx][Ee]|\\[Pp][Ww][Ss][Hh]\.[Ee][Xx][Ee]|\\[Pp][Oo][Ww][Ee][Rr][Ss][Hh][Ee][Ll][Ll]_[Ii][Ss][Ee]\.[Ee][Xx][Ee]|\\[Cc][Mm][Dd]\.[Ee][Xx][Ee]|\\[Ww][Ss][Cc][Rr][Ii][Pp][Tt]\.[Ee][Xx][Ee]|\\[Cc][Ss][Cc][Rr][Ii][Pp][Tt]\.[Ee][Xx][Ee]|\\[Mm][Ss][Hh][Tt][Aa]\.[Ee][Xx][Ee]|\\[Rr][Uu][Nn][Dd][Ll][Ll]32\.[Ee][Xx][Ee]|\\[Rr][Ee][Gg][Ss][Vv][Rr]32\.[Ee][Xx][Ee])/'
-      pivot_on: [host]
-      window: 1h
-    - name: "Security-tool / Defender tampering on this host"
-      query: 'data_win_system_eventID:"1" AND (data_win_eventdata_commandLine:/.*[Ss][Ee][Tt]-[Mm][Pp][Pp][Rr][Ee][Ff][Ee][Rr][Ee][Nn][Cc][Ee].*/ OR data_win_eventdata_commandLine:/.*[Dd][Ii][Ss][Aa][Bb][Ll][Ee][Rr][Ee][Aa][Ll][Tt][Ii][Mm][Ee][Mm][Oo][Nn][Ii][Tt][Oo][Rr][Ii][Nn][Gg].*/ OR data_win_eventdata_commandLine:/.*[Dd][Ii][Ss][Aa][Bb][Ll][Ee][Aa][Nn][Tt][Ii][Ss][Pp][Yy][Ww][Aa][Rr][Ee].*/ OR data_win_eventdata_commandLine:/.*[Aa][Dd][Dd]-[Mm][Pp][Pp][Rr][Ee][Ff][Ee][Rr][Ee][Nn][Cc][Ee] -[Ee][Xx][Cc][Ll][Uu][Ss][Ii][Oo][Nn][Pp][Aa][Tt][Hh].*/ OR data_win_eventdata_commandLine:/.*[Ww][Ee][Vv][Tt][Uu][Tt][Ii][Ll].*/ OR data_win_eventdata_commandLine:/.*[Cc][Ll][Ee][Aa][Rr]-[Ee][Vv][Ee][Nn][Tt][Ll][Oo][Gg].*/ OR data_win_eventdata_commandLine:/.*[Ff][Ss][Uu][Tt][Ii][Ll] [Uu][Ss][Nn] [Dd][Ee][Ll][Ee][Tt][Ee][Jj][Oo][Uu][Rr][Nn][Aa][Ll].*/ OR data_win_eventdata_commandLine:/.*[Vv][Ss][Ss][Aa][Dd][Mm][Ii][Nn].*/ OR data_win_eventdata_commandLine:/.*[Ss][Tt][Oo][Pp]-[Ss][Ee][Rr][Vv][Ii][Cc][Ee].*/ OR data_win_eventdata_commandLine:/.*[Ss][Cc] [Ss][Tt][Oo][Pp].*/ OR data_win_eventdata_commandLine:/.*[Ss][Cc] [Cc][Oo][Nn][Ff][Ii][Gg].*/)'
-      pivot_on: [host]
-      window: 2h
+  # Behaviour-targeted hunts the engine runs around the alert (not a sweep).
+  - name: Other log clearing / disabling methods on this host
+    query: (data_win_system_eventID:"1" AND data_win_eventdata_commandLine:/.*([Cc][Ll][Ee][Aa][Rr]-[Ee][Vv][Ee][Nn][Tt][Ll][Oo][Gg]|[Rr][Ee][Mm][Oo][Vv][Ee]-[Ee][Vv][Ee][Nn][Tt][Ll][Oo][Gg]|[Ll][Ii][Mm][Ii][Tt]-[Ee][Vv][Ee][Nn][Tt][Ll][Oo][Gg]|[Cc][Ll][Ee][Aa][Rr][Ee][Vv][Ee][Nn][Tt][Ll][Oo][Gg]).*/) OR (data_win_system_eventID:"1" AND data_win_eventdata_image:/.*\\([Ww][Ee][Vv][Tt][Uu][Tt][Ii][Ll]\.[Ee][Xx][Ee])/ AND data_win_eventdata_commandLine:/.*(\ [Ss][Ll]\ |[Ss][Ee][Tt]-[Ll][Oo][Gg]|\/[Ee]:[Ff][Aa][Ll][Ss][Ee]).*/) OR data_win_system_eventID:"1102"
+    pivot_on: host
+    window: 2h
+  - name: Audit policy / ETW tampering around the clear
+    query: data_win_system_eventID:"1" AND ((data_win_eventdata_image:/.*\\([Aa][Uu][Dd][Ii][Tt][Pp][Oo][Ll]\.[Ee][Xx][Ee])/ AND data_win_eventdata_commandLine:/.*(\/[Cc][Ll][Ee][Aa][Rr]|\/[Rr][Ee][Mm][Oo][Vv][Ee]|\/[Ss][Ee][Tt]).*/) OR (data_win_eventdata_image:/.*\\([Ll][Oo][Gg][Mm][Aa][Nn]\.[Ee][Xx][Ee])/ AND data_win_eventdata_commandLine:/.*(\ [Ss][Tt][Oo][Pp]\ |\ [Dd][Ee][Ll][Ee][Tt][Ee]\ |[Uu][Pp][Dd][Aa][Tt][Ee]\ [Tt][Rr][Aa][Cc][Ee]).*/) OR data_win_eventdata_commandLine:/.*([Mm][Ii][Nn][Ii][Nn][Tt]).*/)
+    pivot_on: host
+    window: 2h
+  - name: Impact-stage inhibit-recovery commands
+    query: data_win_system_eventID:"1" AND ((data_win_eventdata_image:/.*\\([Vv][Ss][Ss][Aa][Dd][Mm][Ii][Nn]\.[Ee][Xx][Ee]|[Ww][Bb][Aa][Dd][Mm][Ii][Nn]\.[Ee][Xx][Ee])/ AND data_win_eventdata_commandLine:/.*([Dd][Ee][Ll][Ee][Tt][Ee]).*/) OR (data_win_eventdata_image:/.*\\([Bb][Cc][Dd][Ee][Dd][Ii][Tt]\.[Ee][Xx][Ee])/ AND data_win_eventdata_commandLine:/.*([Rr][Ee][Cc][Oo][Vv][Ee][Rr][Yy][Ee][Nn][Aa][Bb][Ll][Ee][Dd]|[Bb][Oo][Oo][Tt][Ss][Tt][Aa][Tt][Uu][Ss][Pp][Oo][Ll][Ii][Cc][Yy]).*/) OR (data_win_eventdata_image:/.*\\([Ww][Mm][Ii][Cc]\.[Ee][Xx][Ee])/ AND data_win_eventdata_commandLine:/.*([Ss][Hh][Aa][Dd][Oo][Ww][Cc][Oo][Pp][Yy]).*/))
+    pivot_on: host
+    window: 4h
+  - name: Suspicious parents that launched the clear (remote exec, script hosts)
+    query: data_win_system_eventID:"1" AND data_win_eventdata_parentImage:/.*\\([Pp][Ss][Ee][Xx][Ee][Ss][Vv][Cc]\.[Ee][Xx][Ee]|[Ww][Mm][Ii][Pp][Rr][Vv][Ss][Ee]\.[Ee][Xx][Ee]|[Ww][Ii][Nn][Rr][Ss][Hh][Oo][Ss][Tt]\.[Ee][Xx][Ee]|[Mm][Ss][Hh][Tt][Aa]\.[Ee][Xx][Ee]|[Ww][Ss][Cc][Rr][Ii][Pp][Tt]\.[Ee][Xx][Ee]|[Cc][Ss][Cc][Rr][Ii][Pp][Tt]\.[Ee][Xx][Ee])/
+    pivot_on: host
+    window: 1h
+  - name: Evtx file deletion on this host
+    query: data_win_system_eventID:/(23|26)/ AND data_win_eventdata_targetFilename:/.*\.[Ee][Vv][Tt][Xx]/
+    pivot_on: host
+    window: 2h

@@ -136,19 +136,58 @@ graylog:
   query: data_win_system_eventID:"4657" AND data_win_eventdata_objectName:/.*\\[Mm][Ii][Cc][Rr][Oo][Ss][Oo][Ff][Tt]\\[Ww][Ii][Nn][Dd][Oo][Ww][Ss] [Dd][Ee][Ff][Ee][Nn][Dd][Ee][Rr]\\[Ee][Xx][Cc][Ll][Uu][Ss][Ii][Oo][Nn][Ss]\\.*/
 
 correlation:
-  # Authored by the correlation engine for review.
+  # Authored per-rule (behaviour-researched) for the correlation engine. Related CoPilot
+  # Searches + telemetry pivots to run around an alert, scoped to its host/user/ip/domain.
+  related_rules:
+  - id: a982fc9c-6333-4ffb-a51d-addb04e8b529
+    name: Windows Defender Exclusions Added - Registry
+    reason: Sysmon registry-value-set view of the same Exclusions key write; confirms the 4657 audit event with the exact path/extension/process added and the writing image.
+  - id: e9c8808f-4cfb-4ba9-97d4-e5f3beaa244d
+    name: Windows Defender Exclusion Registry Key - Write Access Requested
+    reason: 4656/4663 handle request on the same Exclusions key; the precursor access request by the same process/logon that then performed the modification.
+  - id: 1321dc4e-a1fe-481d-a016-52c45f0c8b4f
+    name: Windows Defender Exclusions Added
+    reason: Defender Operational event 5007 records the resulting exclusion value, proving Defender accepted the new path/process/extension.
+  - id: 17769c90-230e-488b-a463-e05c08e9d48f
+    name: Powershell Defender Exclusion
+    reason: Add-MpPreference -ExclusionPath/Extension is the most common way the registry key gets modified; identifies the parent command line responsible.
+  - id: c1344fa2-323b-4d2e-9176-84b4d4821c88
+    name: Windows Defender Exclusions Added - PowerShell
+    reason: Script block (4104) evidence of Add-MpPreference exclusions, revealing the staging script that created the exclusion.
+  - id: b28e58e4-2a72-4fae-bdee-0fbe904db642
+    name: Windows Defender Real-time Protection Disabled
+    reason: Attackers who add exclusions frequently escalate to disabling real-time protection when the exclusion alone is insufficient.
+  - id: 801bd44f-ceed-4eb6-887c-11544633c0aa
+    name: Windows Defender Configuration Changes
+    reason: Companion Defender config change (5004/5007) events from the same impairment sequence, e.g. other settings altered alongside the exclusion.
+  - id: d99b79d2-0a6f-4f46-ad8b-260b6e17f982
+    name: Security Eventlog Cleared
+    reason: 'Defense-impairment follow-on: after blinding Defender the actor often clears the Security log (1102) to hide the 4657 audit trail.'
+  window: 1h
   enrichment_searches:
-  # Rule-specific telemetry pivots the engine runs around an alert from this rule,
-  # scoped to the alert's host/user/IP within the window (behaviour-targeted, not a sweep).
-    - name: "This account's logon activity across hosts"
-      query: '(data_win_system_eventID:"4624" OR data_win_system_eventID:"4625")'
-      pivot_on: [user]
-      window: 6h
-    - name: "Account / group / privilege changes involving this account"
-      query: '(data_win_system_eventID:"4720" OR data_win_system_eventID:"4722" OR data_win_system_eventID:"4724" OR data_win_system_eventID:"4728" OR data_win_system_eventID:"4732" OR data_win_system_eventID:"4756" OR data_win_system_eventID:"4672")'
-      pivot_on: [user]
-      window: 6h
-    - name: "Memory/credential-dump creation & LSASS access on this host"
-      query: '((data_win_system_eventID:"1" AND data_win_eventdata_image:/.*(\\[Pp][Rr][Oo][Cc][Dd][Uu][Mm][Pp]\.[Ee][Xx][Ee]|\\[Pp][Rr][Oo][Cc][Dd][Uu][Mm][Pp]64\.[Ee][Xx][Ee]|\\[Ss][Qq][Ll][Dd][Uu][Mm][Pp][Ee][Rr]\.[Ee][Xx][Ee]|\\[Cc][Rr][Ee][Aa][Tt][Ee][Dd][Uu][Mm][Pp]\.[Ee][Xx][Ee]|\\[Rr][Dd][Rr][Ll][Ee][Aa][Kk][Dd][Ii][Aa][Gg]\.[Ee][Xx][Ee]|\\[Dd][Uu][Mm][Pp][Ee][Rr][Tt]\.[Ee][Xx][Ee]|\\[Nn][Aa][Nn][Oo][Dd][Uu][Mm][Pp]\.[Ee][Xx][Ee]|\\[Aa][Vv][Dd][Uu][Mm][Pp]\.[Ee][Xx][Ee])/) OR (data_win_system_eventID:"1" AND (data_win_eventdata_commandLine:/.*[Cc][Oo][Mm][Ss][Vv][Cc][Ss]\.[Dd][Ll][Ll].*/ OR data_win_eventdata_commandLine:/.*[Mm][Ii][Nn][Ii][Dd][Uu][Mm][Pp].*/ OR data_win_eventdata_commandLine:/.*[Dd][Uu][Mm][Pp][Ee][Rr][Tt].*/ OR data_win_eventdata_commandLine:/.*[Nn][Aa][Nn][Oo][Dd][Uu][Mm][Pp].*/ OR data_win_eventdata_commandLine:/.*[Ll][Ss][Aa][Ss][Ss].*/ OR data_win_eventdata_commandLine:/.*[Ss][Ee][Kk][Uu][Rr][Ll][Ss][Aa].*/ OR data_win_eventdata_commandLine:/.*[Nn][Tt][Dd][Ss]\.[Dd][Ii][Tt].*/ OR data_win_eventdata_commandLine:/.*[Nn][Tt][Dd][Ss][Uu][Tt][Ii][Ll].*/)) OR (data_win_system_eventID:"10" AND data_win_eventdata_targetImage:/.*(\\[Ll][Ss][Aa][Ss][Ss]\.[Ee][Xx][Ee])/))'
-      pivot_on: [host]
-      window: 1h
+  # Behaviour-targeted hunts the engine runs around the alert (not a sweep).
+  - name: Defender exclusion / disable commands run on this host
+    query: data_win_system_eventID:"1" AND (data_win_eventdata_commandLine:/.*[Aa][Dd][Dd]-[Mm][Pp][Pp][Rr][Ee][Ff][Ee][Rr][Ee][Nn][Cc][Ee].*/ OR data_win_eventdata_commandLine:/.*[Ss][Ee][Tt]-[Mm][Pp][Pp][Rr][Ee][Ff][Ee][Rr][Ee][Nn][Cc][Ee].*/ OR data_win_eventdata_commandLine:/.*[Ee][Xx][Cc][Ll][Uu][Ss][Ii][Oo][Nn].*/ OR data_win_eventdata_commandLine:/.*[Dd][Ii][Ss][Aa][Bb][Ll][Ee][Rr][Ee][Aa][Ll][Tt][Ii][Mm][Ee].*/ OR data_win_eventdata_commandLine:/.*[Ww][Ii][Nn][Dd][Ee][Ff][Ee][Nn][Dd].*[Dd][Ii][Ss][Aa][Bb][Ll][Ee].*/)
+    pivot_on:
+    - host
+    window: 1h
+  - name: Registry writes to Defender policy and exclusion keys
+    query: (data_win_system_eventID:"13" OR data_win_system_eventID:"12" OR data_win_system_eventID:"14") AND data_win_eventdata_targetObject:/.*[Mm]icrosoft\\[Ww]indows [Dd]efender.*/
+    pivot_on:
+    - host
+    window: 2h
+  - name: Payload staging in the newly excluded locations (file creation)
+    query: data_win_system_eventID:"11" AND (data_win_eventdata_targetFilename:/.*\\[Pp]rogram[Dd]ata\\.*\.(exe|dll|ps1|bat|vbs|js|scr)/ OR data_win_eventdata_targetFilename:/.*\\[Aa]pp[Dd]ata\\.*\.(exe|dll|ps1|bat|vbs|js|scr)/ OR data_win_eventdata_targetFilename:/.*\\[Tt]emp\\.*\.(exe|dll|ps1|bat|vbs|js|scr)/ OR data_win_eventdata_targetFilename:/.*\\[Uu]sers\\[Pp]ublic\\.*\.(exe|dll|ps1|bat)/)
+    pivot_on:
+    - host
+    window: 2h
+  - name: Download or script-launched execution that preceded the exclusion
+    query: data_win_system_eventID:"1" AND (data_win_eventdata_commandLine:/.*([Ii][Nn][Vv][Oo][Kk][Ee]-[Ww][Ee][Bb][Rr][Ee][Qq][Uu][Ee][Ss][Tt]|[Dd][Oo][Ww][Nn][Ll][Oo][Aa][Dd][Ss][Tt][Rr][Ii][Nn][Gg]|[Dd][Oo][Ww][Nn][Ll][Oo][Aa][Dd][Ff][Ii][Ll][Ee]|[Ee][Nn][Cc][Oo][Dd][Ee][Dd][Cc][Oo][Mm][Mm][Aa][Nn][Dd]|[Cc][Ee][Rr][Tt][Uu][Tt][Ii][Ll].*[Uu][Rr][Ll][Cc][Aa][Cc][Hh][Ee]|[Bb][Ii][Tt][Ss][Aa][Dd][Mm][Ii][Nn]|[Mm][Ss][Hh][Tt][Aa]).*/ OR data_win_eventdata_parentImage:/.*\\([Ww][Ii][Nn][Ww][Oo][Rr][Dd]|[Ee][Xx][Cc][Ee][Ll]|[Ww][Ss][Cc][Rr][Ii][Pp][Tt]|[Cc][Ss][Cc][Rr][Ii][Pp][Tt])\.[Ee][Xx][Ee]/)
+    pivot_on:
+    - host
+    window: 2h
+  - name: Outbound network connections by user-writable processes after exclusion
+    query: data_win_system_eventID:"3" AND (data_win_eventdata_image:/.*\\[Pp]rogram[Dd]ata\\.*/ OR data_win_eventdata_image:/.*\\[Aa]pp[Dd]ata\\.*/ OR data_win_eventdata_image:/.*\\[Tt]emp\\.*/ OR data_win_eventdata_image:/.*\\[Uu]sers\\[Pp]ublic\\.*/)
+    pivot_on:
+    - host
+    window: 4h

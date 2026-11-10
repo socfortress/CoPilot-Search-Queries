@@ -113,25 +113,40 @@ graylog:
   query: full_log:/.*SERVICE_STOP.*/ AND (full_log:/.*osqueryd.*/ OR full_log:/.*osquery.*/) AND NOT _exists_:data_win_system_eventID AND NOT rule_groups:/.*windows.*/
 
 correlation:
-  # Authored by the correlation engine for review. Related CoPilot Searches to run
-  # around an alert from this rule, scoped to the same host/user/IP within the window.
+  # Authored per-rule (behaviour-researched) for the correlation engine. Related CoPilot
+  # Searches + telemetry pivots to run around an alert, scoped to its host/user/ip/domain.
   related_rules:
-    - id: 26f86252-1549-45e1-a212-eb26840e86bc
-      name: "File Download or Read to Pipe Execution"
-      reason: "same analytic story: Linux Living Off The Land"
-  window: 1h
+  - id: linux-security-monitoring-service-stop-001
+    name: Linux Security Monitoring Service Stop
+    reason: Osquery is one of several security agents; adversaries stop the whole set (EDR, auditd, wazuh) together.
+  - id: linux-stop-services-001
+    name: Linux Stop Services
+    reason: Generic systemctl/service stop commands are the mechanism behind the osquery SERVICE_STOP.
+  - id: linux-auditd-daemon-shutdown-001
+    name: Linux Auditd Daemon Shutdown
+    reason: Attackers blind auditd near the osquery stop to remove remaining host telemetry.
+  - id: linux-sudo-or-su-execution-001
+    name: Linux Sudo Or Su Execution
+    reason: Stopping a root service needs privilege; shows the sudo/su that preceded the stop.
+  - id: linux-service-started-or-enabled-001
+    name: Linux Service Started Or Enabled
+    reason: A stop may be followed by starting a replacement or malicious service.
+  window: 4h
   enrichment_searches:
-  # Rule-specific telemetry pivots the engine runs around an alert from this rule,
-  # scoped to the alert's host/user/IP within the window (behaviour-targeted, not a sweep).
-    - name: "Shell / interpreter execution on this host"
-      query: '((data_process_exec_process_binary:/.*(\/[Bb][Aa][Ss][Hh]|\/[Ss][Hh]|\/[Dd][Aa][Ss][Hh]|\/[Zz][Ss][Hh]|\/[Kk][Ss][Hh]|\/[Aa][Ss][Hh]|\/[Bb][Uu][Ss][Yy][Bb][Oo][Xx])/) OR (data_process_exec_process_binary:/.*(\/[Pp][Yy][Tt][Hh][Oo][Nn]|\/[Pp][Yy][Tt][Hh][Oo][Nn]3|\/[Pp][Ee][Rr][Ll]|\/[Rr][Uu][Bb][Yy]|\/[Pp][Hh][Pp]|\/[Nn][Oo][Dd][Ee]|\/[Ll][Uu][Aa]|\/[Aa][Ww][Kk])/))'
-      pivot_on: [host]
-      window: 1h
-    - name: "Reconnaissance commands on this host"
-      query: 'data_process_exec_process_binary:/.*(\/[Ww][Hh][Oo][Aa][Mm][Ii]|\/[Ii][Dd]|\/[Uu][Nn][Aa][Mm][Ee]|\/[Hh][Oo][Ss][Tt][Nn][Aa][Mm][Ee]|\/[Hh][Oo][Ss][Tt][Nn][Aa][Mm][Ee][Cc][Tt][Ll]|\/[Ss][Ss]|\/[Nn][Ee][Tt][Ss][Tt][Aa][Tt]|\/[Ii][Ff][Cc][Oo][Nn][Ff][Ii][Gg]|\/[Aa][Rr][Pp]|\/[Ww]|\/[Ww][Hh][Oo]|\/[Ll][Aa][Ss][Tt]|\/[Ll][Ss][Oo][Ff]|\/[Nn][Mm][Aa][Pp]|\/[Dd][Ii][Gg]|\/[Ff][Ii][Nn][Dd])/'
-      pivot_on: [host]
-      window: 1h
-    - name: "Persistence via cron / systemd / shell profiles on this host"
-      query: '((data_process_exec_process_binary:/.*(\/[Cc][Rr][Oo][Nn][Tt][Aa][Bb]|\/[Ss][Yy][Ss][Tt][Ee][Mm][Cc][Tt][Ll]|\/[Aa][Tt]|\/[Uu][Pp][Dd][Aa][Tt][Ee]-[Rr][Cc]\.[Dd])/) OR (data_process_exec_process_arguments:/.*\/[Ee][Tt][Cc]\/[Cc][Rr][Oo][Nn].*/) OR (data_process_exec_process_arguments:/.*\/[Ee][Tt][Cc]\/[Ss][Yy][Ss][Tt][Ee][Mm][Dd].*/) OR (data_process_exec_process_arguments:/.*[Rr][Cc]\.[Ll][Oo][Cc][Aa][Ll].*/) OR (data_process_exec_process_arguments:/.*\.[Bb][Aa][Ss][Hh][Rr][Cc].*/) OR (data_process_exec_process_arguments:/.*\.[Bb][Aa][Ss][Hh]_[Pp][Rr][Oo][Ff][Ii][Ll][Ee].*/) OR (data_process_exec_process_arguments:/.*\/[Ee][Tt][Cc]\/[Pp][Rr][Oo][Ff][Ii][Ll][Ee].*/) OR (data_process_exec_process_arguments:/.*[Aa][Uu][Tt][Hh][Oo][Rr][Ii][Zz][Ee][Dd]_[Kk][Ee][Yy][Ss].*/) OR (data_process_exec_process_arguments:/.*\/[Ee][Tt][Cc]\/[Ii][Nn][Ii][Tt]\.[Dd].*/))'
-      pivot_on: [host]
-      window: 4h
+  # Behaviour-targeted hunts the engine runs around the alert (not a sweep).
+  - name: Other security agents stopped or disabled
+    query: full_log:/.*(SERVICE_STOP|systemctl.*(stop|disable|mask)|service .* stop).*(wazuh|auditd|falco|tetragon|osquery|crowdstrike|falcon|sentinel|clamav|ossec).*/
+    pivot_on: host
+    window: 2h
+  - name: Auditd rule tampering
+    query: full_log:/.*(auditctl.*(-D|-e 0)|CONFIG_CHANGE|DAEMON_END|DAEMON_ABORT).*/
+    pivot_on: host
+    window: 2h
+  - name: Privilege escalation via sudo/su
+    query: full_log:/.*(sudo|su -|COMMAND=).*/ AND NOT _exists_:data_win_system_eventID
+    pivot_on: user
+    window: 1h
+  - name: Log clearing or history tampering
+    query: full_log:/.*(truncate|shred|rm .*\/var\/log|history -c|unset HISTFILE).*/
+    pivot_on: host
+    window: 4h

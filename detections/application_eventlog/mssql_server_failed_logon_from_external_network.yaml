@@ -224,35 +224,60 @@ graylog:
   query: "data_win_system_providerName:/.*[Mm][Ss][Ss][Qq][Ll].*/ AND data_win_system_eventID:\"18456\" AND _exists_:data_win_eventdata_data AND NOT (data_win_eventdata_data:/.*[Cc][Ll][Ii][Ee][Nn][Tt]: 10\\..*/ OR data_win_eventdata_data:/.*[Cc][Ll][Ii][Ee][Nn][Tt]: 172\\.16\\..*/ OR data_win_eventdata_data:/.*[Cc][Ll][Ii][Ee][Nn][Tt]: 172\\.17\\..*/ OR data_win_eventdata_data:/.*[Cc][Ll][Ii][Ee][Nn][Tt]: 172\\.18\\..*/ OR data_win_eventdata_data:/.*[Cc][Ll][Ii][Ee][Nn][Tt]: 172\\.19\\..*/ OR data_win_eventdata_data:/.*[Cc][Ll][Ii][Ee][Nn][Tt]: 172\\.20\\..*/ OR data_win_eventdata_data:/.*[Cc][Ll][Ii][Ee][Nn][Tt]: 172\\.21\\..*/ OR data_win_eventdata_data:/.*[Cc][Ll][Ii][Ee][Nn][Tt]: 172\\.22\\..*/ OR data_win_eventdata_data:/.*[Cc][Ll][Ii][Ee][Nn][Tt]: 172\\.23\\..*/ OR data_win_eventdata_data:/.*[Cc][Ll][Ii][Ee][Nn][Tt]: 172\\.24\\..*/ OR data_win_eventdata_data:/.*[Cc][Ll][Ii][Ee][Nn][Tt]: 172\\.25\\..*/ OR data_win_eventdata_data:/.*[Cc][Ll][Ii][Ee][Nn][Tt]: 172\\.26\\..*/ OR data_win_eventdata_data:/.*[Cc][Ll][Ii][Ee][Nn][Tt]: 172\\.27\\..*/ OR data_win_eventdata_data:/.*[Cc][Ll][Ii][Ee][Nn][Tt]: 172\\.28\\..*/ OR data_win_eventdata_data:/.*[Cc][Ll][Ii][Ee][Nn][Tt]: 172\\.29\\..*/ OR data_win_eventdata_data:/.*[Cc][Ll][Ii][Ee][Nn][Tt]: 172\\.30\\..*/ OR data_win_eventdata_data:/.*[Cc][Ll][Ii][Ee][Nn][Tt]: 172\\.31\\..*/ OR data_win_eventdata_data:/.*[Cc][Ll][Ii][Ee][Nn][Tt]: 192\\.168\\..*/ OR data_win_eventdata_data:/.*[Cc][Ll][Ii][Ee][Nn][Tt]: 127\\..*/ OR data_win_eventdata_data:/.*[Cc][Ll][Ii][Ee][Nn][Tt]: 169\\.254\\..*/ OR data_win_eventdata_data:/.*[Cc][Ll][Ii][Ee][Nn][Tt]: \\<[Ll][Oo][Cc][Aa][Ll] [Mm][Aa][Cc][Hh][Ii][Nn][Ee]\\>.*/)"
 
 correlation:
-  # Authored by the correlation engine for review. Related CoPilot Searches to run
-  # around an alert from this rule, scoped to the same host/user/IP within the window.
+  # Authored per-rule (behaviour-researched) for the correlation engine. Related CoPilot
+  # Searches + telemetry pivots to run around an alert, scoped to its host/user/ip/domain.
   related_rules:
-    - id: 35ba1d85-724d-42a3-889f-2e2362bcaf23
-      name: "AD Privileged Users or Groups Reconnaissance"
-      reason: "next kill-chain tactic: Discovery"
-    - id: 17d619c1-e020-4347-957e-1d1207455c93
-      name: "Active Directory Replication from Non Machine Account"
-      reason: "next kill-chain tactic: Credential Access"
-    - id: 87261fb2-69d0-42fe-b9de-88c6b5f65a43
-      name: "Atera Agent Installation"
-      reason: "next kill-chain tactic: Command and Control"
+  - id: d08dd86f-681e-4a00-a92c-1db218754417
+    name: MSSQL XPCmdshell Option Change
+    reason: If the external brute force succeeds (often as sa), the attacker's first step is enabling xp_cmdshell via sp_configure to get OS command execution
+  - id: 7f103213-a04e-4d59-8261-213dddf22314
+    name: MSSQL XPCmdshell Suspicious Execution
+    reason: 'Direct follow-on to a successful SQL login guess: xp_cmdshell used to run recon or payload commands on the SQL host'
+  - id: 869b9ca7-9ea2-4a5a-8325-e80e62f75445
+    name: Suspicious Child Process Of SQL Server
+    reason: sqlservr.exe spawning cmd/powershell/certutil is the process-level evidence that a compromised SQL login reached the OS
+  - id: 08200f85-2678-463e-9c32-88dce2f073d1
+    name: MSSQL Add Account To Sysadmin Role
+    reason: After gaining a low-privilege login via brute force, attackers escalate or plant persistence by adding a login to sysadmin
+  - id: 350dfb37-3706-4cdc-9e2e-5e24bc3a46df
+    name: MSSQL Disable Audit Settings
+    reason: Attackers with a valid SQL login disable auditing to hide subsequent activity on the same instance
+  - id: 711ab2fe-c9ba-4746-8840-5228a58c3cb8
+    name: MSSQL Extended Stored Procedure Backdoor Maggie
+    reason: Post-compromise persistence on SQL Server via a malicious extended stored procedure after authentication succeeds
+  - id: c615d676-f655-46b9-b913-78729021e5d7
+    name: Data Export From MSSQL Table Via BCP.EXE
+    reason: 'Data theft step: once logged in, attackers dump tables with bcp.exe on the same server'
+  - id: 00321fee-ca72-4cce-b011-5415af3b9960
+    name: MSSQL Destructive Query
+    reason: Impact stage on the same instance (DROP/TRUNCATE/DELETE) following unauthorized database access, e.g. ransomware-style wiping
   window: 1h
   enrichment_searches:
-  # Rule-specific telemetry pivots the engine runs around an alert from this rule,
-  # scoped to the alert's host/user/IP within the window (behaviour-targeted, not a sweep).
-    - name: "Remote-execution / lateral-movement tooling on this host"
-      query: '(data_win_system_eventID:"1" AND data_win_eventdata_image:/.*(\\[Pp][Ss][Ee][Xx][Ee][Cc]\.[Ee][Xx][Ee]|\\[Pp][Ss][Ee][Xx][Ee][Ss][Vv][Cc]\.[Ee][Xx][Ee]|\\[Pp][Aa][Ee][Xx][Ee][Cc]\.[Ee][Xx][Ee]|\\[Ww][Ii][Nn][Rr][Ss]\.[Ee][Xx][Ee]|\\[Mm][Ss][Tt][Ss][Cc]\.[Ee][Xx][Ee]|\\[Ww][Mm][Ii][Cc]\.[Ee][Xx][Ee])/) OR (data_win_system_eventID:"1" AND data_win_eventdata_image:/.*(\\[Pp][Oo][Ww][Ee][Rr][Ss][Hh][Ee][Ll][Ll]\.[Ee][Xx][Ee]|\\[Pp][Ww][Ss][Hh]\.[Ee][Xx][Ee])/ AND (data_win_eventdata_commandLine:/.*[Ii][Nn][Vv][Oo][Kk][Ee]-[Cc][Oo][Mm][Mm][Aa][Nn][Dd].*/ OR data_win_eventdata_commandLine:/.*[Nn][Ee][Ww]-[Pp][Ss][Ss][Ee][Ss][Ss][Ii][Oo][Nn].*/ OR data_win_eventdata_commandLine:/.*[Ee][Nn][Tt][Ee][Rr]-[Pp][Ss][Ss][Ee][Ss][Ss][Ii][Oo][Nn].*/ OR data_win_eventdata_commandLine:/.*-[Cc][Oo][Mm][Pp][Uu][Tt][Ee][Rr][Nn][Aa][Mm][Ee].*/))'
-      pivot_on: [host]
-      window: 2h
-    - name: "Follow-on LOLBin / signed-binary-proxy execution on this host"
-      query: 'data_win_system_eventID:"1" AND data_win_eventdata_image:/.*(\\[Rr][Uu][Nn][Dd][Ll][Ll]32\.[Ee][Xx][Ee]|\\[Rr][Ee][Gg][Ss][Vv][Rr]32\.[Ee][Xx][Ee]|\\[Mm][Ss][Hh][Tt][Aa]\.[Ee][Xx][Ee]|\\[Ii][Nn][Ss][Tt][Aa][Ll][Ll][Uu][Tt][Ii][Ll]\.[Ee][Xx][Ee]|\\[Rr][Ee][Gg][Aa][Ss][Mm]\.[Ee][Xx][Ee]|\\[Rr][Ee][Gg][Ss][Vv][Cc][Ss]\.[Ee][Xx][Ee]|\\[Mm][Ss][Bb][Uu][Ii][Ll][Dd]\.[Ee][Xx][Ee]|\\[Cc][Ee][Rr][Tt][Uu][Tt][Ii][Ll]\.[Ee][Xx][Ee]|\\[Bb][Ii][Tt][Ss][Aa][Dd][Mm][Ii][Nn]\.[Ee][Xx][Ee]|\\[Ww][Mm][Ii][Cc]\.[Ee][Xx][Ee]|\\[Cc][Mm][Ss][Tt][Pp]\.[Ee][Xx][Ee]|\\[Oo][Dd][Bb][Cc][Cc][Oo][Nn][Ff]\.[Ee][Xx][Ee]|\\[Ff][Oo][Rr][Ff][Ii][Ll][Ee][Ss]\.[Ee][Xx][Ee]|\\[Pp][Cc][Aa][Ll][Uu][Aa]\.[Ee][Xx][Ee]|\\[Mm][Aa][Vv][Ii][Nn][Jj][Ee][Cc][Tt]\.[Ee][Xx][Ee]|\\[Ss][Cc][Rr][Ii][Pp][Tt][Rr][Uu][Nn][Nn][Ee][Rr]\.[Ee][Xx][Ee])/'
-      pivot_on: [host]
-      window: 1h
-    - name: "Outbound connections by script interpreters on this host"
-      query: 'data_win_system_eventID:"3" AND data_win_eventdata_image:/.*(\\[Pp][Oo][Ww][Ee][Rr][Ss][Hh][Ee][Ll][Ll]\.[Ee][Xx][Ee]|\\[Pp][Ww][Ss][Hh]\.[Ee][Xx][Ee]|\\[Pp][Oo][Ww][Ee][Rr][Ss][Hh][Ee][Ll][Ll]_[Ii][Ss][Ee]\.[Ee][Xx][Ee]|\\[Cc][Mm][Dd]\.[Ee][Xx][Ee]|\\[Ww][Ss][Cc][Rr][Ii][Pp][Tt]\.[Ee][Xx][Ee]|\\[Cc][Ss][Cc][Rr][Ii][Pp][Tt]\.[Ee][Xx][Ee]|\\[Mm][Ss][Hh][Tt][Aa]\.[Ee][Xx][Ee]|\\[Rr][Uu][Nn][Dd][Ll][Ll]32\.[Ee][Xx][Ee]|\\[Rr][Ee][Gg][Ss][Vv][Rr]32\.[Ee][Xx][Ee])/'
-      pivot_on: [host]
-      window: 1h
-    - name: "Memory/credential-dump creation & LSASS access on this host"
-      query: '((data_win_system_eventID:"1" AND data_win_eventdata_image:/.*(\\[Pp][Rr][Oo][Cc][Dd][Uu][Mm][Pp]\.[Ee][Xx][Ee]|\\[Pp][Rr][Oo][Cc][Dd][Uu][Mm][Pp]64\.[Ee][Xx][Ee]|\\[Ss][Qq][Ll][Dd][Uu][Mm][Pp][Ee][Rr]\.[Ee][Xx][Ee]|\\[Cc][Rr][Ee][Aa][Tt][Ee][Dd][Uu][Mm][Pp]\.[Ee][Xx][Ee]|\\[Rr][Dd][Rr][Ll][Ee][Aa][Kk][Dd][Ii][Aa][Gg]\.[Ee][Xx][Ee]|\\[Dd][Uu][Mm][Pp][Ee][Rr][Tt]\.[Ee][Xx][Ee]|\\[Nn][Aa][Nn][Oo][Dd][Uu][Mm][Pp]\.[Ee][Xx][Ee]|\\[Aa][Vv][Dd][Uu][Mm][Pp]\.[Ee][Xx][Ee])/) OR (data_win_system_eventID:"1" AND (data_win_eventdata_commandLine:/.*[Cc][Oo][Mm][Ss][Vv][Cc][Ss]\.[Dd][Ll][Ll].*/ OR data_win_eventdata_commandLine:/.*[Mm][Ii][Nn][Ii][Dd][Uu][Mm][Pp].*/ OR data_win_eventdata_commandLine:/.*[Dd][Uu][Mm][Pp][Ee][Rr][Tt].*/ OR data_win_eventdata_commandLine:/.*[Nn][Aa][Nn][Oo][Dd][Uu][Mm][Pp].*/ OR data_win_eventdata_commandLine:/.*[Ll][Ss][Aa][Ss][Ss].*/ OR data_win_eventdata_commandLine:/.*[Ss][Ee][Kk][Uu][Rr][Ll][Ss][Aa].*/ OR data_win_eventdata_commandLine:/.*[Nn][Tt][Dd][Ss]\.[Dd][Ii][Tt].*/ OR data_win_eventdata_commandLine:/.*[Nn][Tt][Dd][Ss][Uu][Tt][Ii][Ll].*/)) OR (data_win_system_eventID:"10" AND data_win_eventdata_targetImage:/.*(\\[Ll][Ss][Aa][Ss][Ss]\.[Ee][Xx][Ee])/))'
-      pivot_on: [host]
-      window: 1h
+  # Behaviour-targeted hunts the engine runs around the alert (not a sweep).
+  - name: MSSQL successful logins on same instance (brute force success)
+    query: data_win_system_providerName:/.*[Mm][Ss][Ss][Qq][Ll].*/ AND data_win_system_eventID:"18454"
+    pivot_on:
+    - host
+    window: 2h
+  - name: MSSQL configuration, audit and privilege changes
+    query: data_win_system_providerName:/.*[Mm][Ss][Ss][Qq][Ll].*/ AND (data_win_system_eventID:"15457" OR data_win_system_eventID:"33205" OR data_win_eventdata_data:/.*[Xx][Pp]_[Cc][Mm][Dd][Ss][Hh][Ee][Ll][Ll].*/ OR data_win_eventdata_data:/.*[Ss][Yy][Ss][Aa][Dd][Mm][Ii][Nn].*/ OR data_win_eventdata_data:/.*[Ss][Pp]_[Cc][Oo][Nn][Ff][Ii][Gg][Uu][Rr][Ee].*/)
+    pivot_on:
+    - host
+    window: 4h
+  - name: Processes spawned by sqlservr.exe
+    query: data_win_system_eventID:"1" AND data_win_eventdata_parentImage:/.*[Ss][Qq][Ll][Ss][Ee][Rr][Vv][Rr]\.[Ee][Xx][Ee]/ AND data_win_eventdata_image:/.*(\\[Cc][Mm][Dd]|\\[Pp][Oo][Ww][Ee][Rr][Ss][Hh][Ee][Ll][Ll]|\\[Pp][Ww][Ss][Hh]|\\[Cc][Ee][Rr][Tt][Uu][Tt][Ii][Ll]|\\[Bb][Ii][Tt][Ss][Aa][Dd][Mm][Ii][Nn]|\\[Ww][Hh][Oo][Aa][Mm][Ii]|\\[Nn][Ee][Tt]1?|\\[Cc][Uu][Rr][Ll])\.[Ee][Xx][Ee]/
+    pivot_on:
+    - host
+    window: 4h
+  - name: Inbound SQL Server connections on port 1433
+    query: data_win_system_eventID:"3" AND data_win_eventdata_destinationPort:"1433" AND data_win_eventdata_image:/.*[Ss][Qq][Ll][Ss][Ee][Rr][Vv][Rr]\.[Ee][Xx][Ee]/
+    pivot_on:
+    - host
+    - ip
+    window: 2h
+  - name: Failed Windows logons on host from same source (spray across services)
+    query: data_win_system_eventID:"4625"
+    pivot_on:
+    - host
+    - ip
+    window: 2h

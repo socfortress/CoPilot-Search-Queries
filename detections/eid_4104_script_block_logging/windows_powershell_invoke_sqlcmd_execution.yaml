@@ -151,55 +151,59 @@ graylog:
   query: data_win_system_eventID:"4104" AND data_win_eventdata_scriptBlockText:/.*Invoke-Sqlcmd.*/ AND (data_win_eventdata_scriptBlockText:/.*xp_cmdshell.*/ OR data_win_eventdata_scriptBlockText:/.*sys\.server_principals.*/ OR data_win_eventdata_scriptBlockText:/.*TrustServerCertificate.*/ OR data_win_eventdata_scriptBlockText:/.*DedicatedAdministratorConnection.*/ OR data_win_eventdata_scriptBlockText:/.*inputfile.*https?:\/\/.*/ OR data_win_eventdata_scriptBlockText:/.*sp_configure.*/)
 
 correlation:
-  # Authored by the correlation engine for review. Related CoPilot Searches to run
-  # around an alert from this rule, scoped to the same host/user/IP within the window.
+  # Authored per-rule (behaviour-researched) for the correlation engine. Related CoPilot
+  # Searches + telemetry pivots to run around an alert, scoped to its host/user/ip/domain.
   related_rules:
-    - id: 94fc85a1-e55b-4265-95e1-4b66730e05c0
-      name: "Headless Browser Mockbin or Mocky Request"
-      reason: "same analytic story: GhostRedirector IIS Module and Rungan Backdoor"
-    - id: c4db14d9-7909-48b4-a054-aa14d89dbb19
-      name: "Malicious PowerShell Process - Encoded Command"
-      reason: "same analytic story: GhostRedirector IIS Module and Rungan Backdoor"
-    - id: windows-iis-components-add-new-module-001
-      name: "Windows IIS Components Add New Module"
-      reason: "same analytic story: GhostRedirector IIS Module and Rungan Backdoor"
-    - id: windows-modify-registry-disable-restricted-admin-001
-      name: "Windows Modify Registry Disable Restricted Admin"
-      reason: "same analytic story: GhostRedirector IIS Module and Rungan Backdoor"
-    - id: 33fc9f6f-0ce7-4696-924e-a69ec61a3d57
-      name: "Windows PowerShell IIS Components WebGlobalModule Usage"
-      reason: "same analytic story: GhostRedirector IIS Module and Rungan Backdoor"
-    - id: ec570e53-4c76-45a9-804d-dc3f355ff7a7
-      name: "7Zip Compressing Dump Files"
-      reason: "next kill-chain tactic: Collection"
-    - id: 0a1255c5-d732-4b62-ac02-b5152d34fb83
-      name: "ADExplorer Writing Complete AD Snapshot Into .dat File"
-      reason: "next kill-chain tactic: Discovery"
-    - id: 1ea13e8c-03ea-409b-877d-ce5c3d2c1cb3
-      name: "ADFS Database Named Pipe Connection By Uncommon Tool"
-      reason: "next kill-chain tactic: Collection"
-    - id: 75bf09fa-1dd7-4d18-9af9-dd9e492562eb
-      name: "ADSI-Cache File Creation By Uncommon Tool"
-      reason: "next kill-chain tactic: Command and Control"
-    - id: 33a2d1dd-f3b0-40bd-8baf-7974468927cc
-      name: "APT PRIVATELOG Image Load Pattern"
-      reason: "next kill-chain tactic: Privilege Escalation"
-    - id: 9aa01d62-7667-4d3b-acb8-8cb5103e2014
-      name: "APT27 - Emissary Panda Activity"
-      reason: "next kill-chain tactic: Execution"
+  - id: 7f103213-a04e-4d59-8261-213dddf22314
+    name: MSSQL XPCmdshell Suspicious Execution
+    reason: 'Server-side half of the same xp_cmdshell abuse: the Invoke-Sqlcmd script block is the client, this fires in the MSSQL application log when the command actually runs on the server.'
+  - id: d08dd86f-681e-4a00-a92c-1db218754417
+    name: MSSQL XPCmdshell Option Change
+    reason: Invoke-Sqlcmd with sp_configure is how xp_cmdshell gets enabled; this confirms the option was actually flipped on the SQL instance.
+  - id: 869b9ca7-9ea2-4a5a-8325-e80e62f75445
+    name: Suspicious Child Process Of SQL Server
+    reason: 'Direct follow-on of xp_cmdshell/sp_oacreate: sqlservr.exe spawning cmd/powershell/certutil is the OS-command result of the SQL abuse.'
+  - id: 08200f85-2678-463e-9c32-88dce2f073d1
+    name: MSSQL Add Account To Sysadmin Role
+    reason: sp_addsrvrolemember and sys.server_principals enumeration in the script block precede privilege escalation to sysadmin; this confirms it succeeded.
+  - id: a746c9b8-a2fb-4ee5-a428-92bee9e99060
+    name: SQL Client Tools PowerShell Session Detection
+    reason: Process-level view of the same PowerShell session using SQL client modules/tools, tying the script block to the spawning process and parent.
+  - id: c615d676-f655-46b9-b913-78729021e5d7
+    name: Data Export From MSSQL Table Via BCP.EXE
+    reason: Alternative bulk-export tooling attackers use alongside Invoke-Sqlcmd to stage database contents for theft.
+  - id: 2f47f1fd-0901-466e-a770-3b7092834a1b
+    name: Potential Conti Ransomware Database Dumping Activity Via SQLCmd
+    reason: Same database-dump-via-SQL-client behaviour via sqlcmd.exe; ransomware operators swap tools to evade, so co-occurrence indicates data theft before encryption.
+  - id: c4db14d9-7909-48b4-a054-aa14d89dbb19
+    name: Malicious PowerShell Process - Encoded Command
+    reason: Invoke-Sqlcmd abuse is usually launched from a staged encoded PowerShell loader; this identifies the parent execution.
   window: 1h
   enrichment_searches:
-  # Rule-specific telemetry pivots the engine runs around an alert from this rule,
-  # scoped to the alert's host/user/IP within the window (behaviour-targeted, not a sweep).
-    - name: "Outbound connections by script interpreters on this host"
-      query: 'data_win_system_eventID:"3" AND data_win_eventdata_image:/.*(\\[Pp][Oo][Ww][Ee][Rr][Ss][Hh][Ee][Ll][Ll]\.[Ee][Xx][Ee]|\\[Pp][Ww][Ss][Hh]\.[Ee][Xx][Ee]|\\[Pp][Oo][Ww][Ee][Rr][Ss][Hh][Ee][Ll][Ll]_[Ii][Ss][Ee]\.[Ee][Xx][Ee]|\\[Cc][Mm][Dd]\.[Ee][Xx][Ee]|\\[Ww][Ss][Cc][Rr][Ii][Pp][Tt]\.[Ee][Xx][Ee]|\\[Cc][Ss][Cc][Rr][Ii][Pp][Tt]\.[Ee][Xx][Ee]|\\[Mm][Ss][Hh][Tt][Aa]\.[Ee][Xx][Ee]|\\[Rr][Uu][Nn][Dd][Ll][Ll]32\.[Ee][Xx][Ee]|\\[Rr][Ee][Gg][Ss][Vv][Rr]32\.[Ee][Xx][Ee])/'
-      pivot_on: [host]
-      window: 1h
-    - name: "Download / AMSI-bypass / encoded script blocks on this host"
-      query: 'data_win_system_eventID:"4104" AND (data_win_eventdata_scriptBlockText:/.*[Dd][Oo][Ww][Nn][Ll][Oo][Aa][Dd][Ss][Tt][Rr][Ii][Nn][Gg].*/ OR data_win_eventdata_scriptBlockText:/.*[Dd][Oo][Ww][Nn][Ll][Oo][Aa][Dd][Ff][Ii][Ll][Ee].*/ OR data_win_eventdata_scriptBlockText:/.*[Ii][Nn][Vv][Oo][Kk][Ee]-[Ww][Ee][Bb][Rr][Ee][Qq][Uu][Ee][Ss][Tt].*/ OR data_win_eventdata_scriptBlockText:/.*[Nn][Ee][Tt]\.[Ww][Ee][Bb][Cc][Ll][Ii][Ee][Nn][Tt].*/ OR data_win_eventdata_scriptBlockText:/.*[Ff][Rr][Oo][Mm][Bb][Aa][Ss][Ee]64[Ss][Tt][Rr][Ii][Nn][Gg].*/ OR data_win_eventdata_scriptBlockText:/.*[Ii][Ee][Xx].*/ OR data_win_eventdata_scriptBlockText:/.*[Ii][Nn][Vv][Oo][Kk][Ee]-[Ee][Xx][Pp][Rr][Ee][Ss][Ss][Ii][Oo][Nn].*/ OR data_win_eventdata_scriptBlockText:/.*[Ss][Tt][Aa][Rr][Tt]-[Bb][Ii][Tt][Ss][Tt][Rr][Aa][Nn][Ss][Ff][Ee][Rr].*/ OR data_win_eventdata_scriptBlockText:/.*[Aa][Mm][Ss][Ii][Uu][Tt][Ii][Ll][Ss].*/ OR data_win_eventdata_scriptBlockText:/.*-[Ee][Nn][Cc].*/ OR data_win_eventdata_scriptBlockText:/.*-[Ee][Nn][Cc][Oo][Dd][Ee][Dd][Cc][Oo][Mm][Mm][Aa][Nn][Dd].*/ OR data_win_eventdata_scriptBlockText:/.*[Rr][Ee][Ff][Ll][Ee][Cc][Tt][Ii][Oo][Nn]\.[Aa][Ss][Ss][Ee][Mm][Bb][Ll][Yy].*/)'
-      pivot_on: [host]
-      window: 1h
-    - name: "Follow-on LOLBin / signed-binary-proxy execution on this host"
-      query: 'data_win_system_eventID:"1" AND data_win_eventdata_image:/.*(\\[Rr][Uu][Nn][Dd][Ll][Ll]32\.[Ee][Xx][Ee]|\\[Rr][Ee][Gg][Ss][Vv][Rr]32\.[Ee][Xx][Ee]|\\[Mm][Ss][Hh][Tt][Aa]\.[Ee][Xx][Ee]|\\[Ii][Nn][Ss][Tt][Aa][Ll][Ll][Uu][Tt][Ii][Ll]\.[Ee][Xx][Ee]|\\[Rr][Ee][Gg][Aa][Ss][Mm]\.[Ee][Xx][Ee]|\\[Rr][Ee][Gg][Ss][Vv][Cc][Ss]\.[Ee][Xx][Ee]|\\[Mm][Ss][Bb][Uu][Ii][Ll][Dd]\.[Ee][Xx][Ee]|\\[Cc][Ee][Rr][Tt][Uu][Tt][Ii][Ll]\.[Ee][Xx][Ee]|\\[Bb][Ii][Tt][Ss][Aa][Dd][Mm][Ii][Nn]\.[Ee][Xx][Ee]|\\[Ww][Mm][Ii][Cc]\.[Ee][Xx][Ee]|\\[Cc][Mm][Ss][Tt][Pp]\.[Ee][Xx][Ee]|\\[Oo][Dd][Bb][Cc][Cc][Oo][Nn][Ff]\.[Ee][Xx][Ee]|\\[Ff][Oo][Rr][Ff][Ii][Ll][Ee][Ss]\.[Ee][Xx][Ee]|\\[Pp][Cc][Aa][Ll][Uu][Aa]\.[Ee][Xx][Ee]|\\[Mm][Aa][Vv][Ii][Nn][Jj][Ee][Cc][Tt]\.[Ee][Xx][Ee]|\\[Ss][Cc][Rr][Ii][Pp][Tt][Rr][Uu][Nn][Nn][Ee][Rr]\.[Ee][Xx][Ee])/'
-      pivot_on: [host]
-      window: 1h
+  # Behaviour-targeted hunts the engine runs around the alert (not a sweep).
+  - name: SQL Server spawning OS command interpreters (xp_cmdshell result)
+    query: data_win_system_eventID:"1" AND data_win_eventdata_parentImage:/.*[Ss][Qq][Ll][Ss][Ee][Rr][Vv][Rr]\.[Ee][Xx][Ee]/ AND data_win_eventdata_image:/.*(\\[Cc][Mm][Dd]|\\[Pp][Oo][Ww][Ee][Rr][Ss][Hh][Ee][Ll][Ll]|\\[Pp][Ww][Ss][Hh]|\\[Cc][Ee][Rr][Tt][Uu][Tt][Ii][Ll]|\\[Bb][Ii][Tt][Ss][Aa][Dd][Mm][Ii][Nn]|\\[Ww][Hh][Oo][Aa][Mm][Ii]|\\[Nn][Ee][Tt]1?)\.[Ee][Xx][Ee]/
+    pivot_on:
+    - host
+    window: 1h
+  - name: Other SQL tooling or SQL-module script blocks on this host
+    query: (data_win_system_eventID:"4104" AND (data_win_eventdata_scriptBlockText:*sp_configure* OR data_win_eventdata_scriptBlockText:*sp_oacreate* OR data_win_eventdata_scriptBlockText:*openrowset* OR data_win_eventdata_scriptBlockText:*sp_addsrvrolemember* OR data_win_eventdata_scriptBlockText:*System.Data.SqlClient*)) OR (data_win_system_eventID:"1" AND (data_win_eventdata_commandLine:*sqlcmd* OR data_win_eventdata_commandLine:*bcp\ * OR data_win_eventdata_commandLine:*osql*))
+    pivot_on:
+    - host
+    window: 2h
+  - name: Staging and archiving of database exports
+    query: data_win_system_eventID:"11" AND data_win_eventdata_targetFilename:/.*\.([Bb][Aa][Kk]|[Mm][Dd][Ff]|[Ss][Qq][Ll]|[Cc][Ss][Vv]|[Zz][Ii][Pp]|7[Zz]|[Rr][Aa][Rr])/
+    pivot_on:
+    - host
+    window: 2h
+  - name: Outbound network from PowerShell or SQL processes
+    query: data_win_system_eventID:"3" AND data_win_eventdata_image:/.*(\\[Pp][Oo][Ww][Ee][Rr][Ss][Hh][Ee][Ll][Ll]|\\[Pp][Ww][Ss][Hh]|\\[Ss][Qq][Ll][Ss][Ee][Rr][Vv][Rr]|\\[Ss][Qq][Ll][Cc][Mm][Dd])\.[Ee][Xx][Ee]/ AND data_win_eventdata_initiated:"true"
+    pivot_on:
+    - host
+    window: 1h
+  - name: Remote SQL logons or lateral access to this host
+    query: data_win_system_eventID:"4624" AND (data_win_eventdata_logonType:"3" OR data_win_eventdata_logonType:"10")
+    pivot_on:
+    - host
+    - user
+    window: 4h

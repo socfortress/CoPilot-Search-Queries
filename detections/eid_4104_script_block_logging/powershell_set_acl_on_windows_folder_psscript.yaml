@@ -192,19 +192,58 @@ graylog:
   query: data_win_system_eventID:"4104" AND data_win_eventdata_scriptBlockText:/.*[Ss][Ee][Tt]-[Aa][Cc][Ll] .*/ AND data_win_eventdata_scriptBlockText:/.*-[Aa][Cc][Ll][Oo][Bb][Jj][Ee][Cc][Tt] .*/ AND (data_win_eventdata_scriptBlockText:/.*-[Pp][Aa][Tt][Hh] \"[Cc]:\\[Ww][Ii][Nn][Dd][Oo][Ww][Ss].*/ OR data_win_eventdata_scriptBlockText:/.*-[Pp][Aa][Tt][Hh] \"[Cc]:\/[Ww][Ii][Nn][Dd][Oo][Ww][Ss].*/ OR data_win_eventdata_scriptBlockText:/.*-[Pp][Aa][Tt][Hh] '[Cc]:\\[Ww][Ii][Nn][Dd][Oo][Ww][Ss].*/ OR data_win_eventdata_scriptBlockText:/.*-[Pp][Aa][Tt][Hh] '[Cc]:\/[Ww][Ii][Nn][Dd][Oo][Ww][Ss].*/ OR data_win_eventdata_scriptBlockText:/.*-[Pp][Aa][Tt][Hh] [Cc]:\\[Ww][Ii][Nn][Dd][Oo][Ww][Ss].*/ OR data_win_eventdata_scriptBlockText:/.*-[Pp][Aa][Tt][Hh] [Cc]:\/[Ww][Ii][Nn][Dd][Oo][Ww][Ss].*/ OR data_win_eventdata_scriptBlockText:/.*-[Pp][Aa][Tt][Hh] \$[Ee][Nn][Vv]:[Ww][Ii][Nn][Dd][Ii][Rr].*/ OR data_win_eventdata_scriptBlockText:/.*-[Pp][Aa][Tt][Hh] \"\$[Ee][Nn][Vv]:[Ww][Ii][Nn][Dd][Ii][Rr].*/ OR data_win_eventdata_scriptBlockText:/.*-[Pp][Aa][Tt][Hh] '\$[Ee][Nn][Vv]:[Ww][Ii][Nn][Dd][Ii][Rr].*/) AND (data_win_eventdata_scriptBlockText:/.*[Ff][Uu][Ll][Ll][Cc][Oo][Nn][Tt][Rr][Oo][Ll].*/ OR data_win_eventdata_scriptBlockText:/.*[Aa][Ll][Ll][Oo][Ww].*/)
 
 correlation:
-  # Authored by the correlation engine for review.
+  # Authored per-rule (behaviour-researched) for the correlation engine. Related CoPilot
+  # Searches + telemetry pivots to run around an alert, scoped to its host/user/ip/domain.
+  related_rules:
+  - id: 0944e002-e3f6-4eb5-bf69-3a3067b53d73
+    name: PowerShell Set-Acl On Windows Folder
+    reason: Process-creation twin of this script-block detection; the same Set-Acl on C:\Windows seen via the powershell.exe command line confirms the parent process and user that ran it.
+  - id: bdeb2cff-af74-4094-8426-724dc937f20a
+    name: PowerShell Script Change Permission Via Set-Acl
+    reason: Generic Set-Acl permission changes by PowerShell; co-occurs when the attacker loosens ACLs on additional paths beyond the Windows folder.
+  - id: 554601fb-9b71-4bcc-abf4-21a611be4fde
+    name: Suspicious Recursive Takeown
+    reason: Taking ownership of protected Windows files is the usual precursor to Set-Acl granting FullControl so the attacker can overwrite or replace the file.
+  - id: fa7ca5c6-c9d8-11eb-bce9-acde48001122
+    name: Permission Modification using Takeown App
+    reason: takeown.exe ownership grab on system files, the step before ACLs are rewritten to allow tampering.
+  - id: b1b1e316-accc-11eb-a9b4-acde48001122
+    name: ICACLS Grant Command
+    reason: Alternate native tool for the same goal of granting access on protected paths; attackers mix icacls and Set-Acl when opening up system files.
+  - id: c76b796c-27e1-4520-91c4-4a58695c749e
+    name: Windows Files and Dirs Access Rights Modification Via Icacls
+    reason: icacls changing access rights on files and dirs, the co-occurring or fallback method for permission loosening on Windows binaries.
+  - id: 2f77047c-e6e9-4c11-b088-a3de399524cd
+    name: Potential Persistence Via Security Descriptors - ScriptBlock
+    reason: Same script-block telemetry; DACL/security descriptor tampering grants a backdoor access to services or WMI endpoints, a persistence follow-on to permission changes.
+  - id: 22d80745-6f2c-46da-826b-77adaededd74
+    name: Suspicious Service DACL Modification Via Set-Service Cmdlet - PS
+    reason: Permission tampering on services via PowerShell, the service-side counterpart to opening ACLs on the Windows folder, enabling hijackable service persistence.
+  window: 1h
   enrichment_searches:
-  # Rule-specific telemetry pivots the engine runs around an alert from this rule,
-  # scoped to the alert's host/user/IP within the window (behaviour-targeted, not a sweep).
-    - name: "Download / AMSI-bypass / encoded script blocks on this host"
-      query: 'data_win_system_eventID:"4104" AND (data_win_eventdata_scriptBlockText:/.*[Dd][Oo][Ww][Nn][Ll][Oo][Aa][Dd][Ss][Tt][Rr][Ii][Nn][Gg].*/ OR data_win_eventdata_scriptBlockText:/.*[Dd][Oo][Ww][Nn][Ll][Oo][Aa][Dd][Ff][Ii][Ll][Ee].*/ OR data_win_eventdata_scriptBlockText:/.*[Ii][Nn][Vv][Oo][Kk][Ee]-[Ww][Ee][Bb][Rr][Ee][Qq][Uu][Ee][Ss][Tt].*/ OR data_win_eventdata_scriptBlockText:/.*[Nn][Ee][Tt]\.[Ww][Ee][Bb][Cc][Ll][Ii][Ee][Nn][Tt].*/ OR data_win_eventdata_scriptBlockText:/.*[Ff][Rr][Oo][Mm][Bb][Aa][Ss][Ee]64[Ss][Tt][Rr][Ii][Nn][Gg].*/ OR data_win_eventdata_scriptBlockText:/.*[Ii][Ee][Xx].*/ OR data_win_eventdata_scriptBlockText:/.*[Ii][Nn][Vv][Oo][Kk][Ee]-[Ee][Xx][Pp][Rr][Ee][Ss][Ss][Ii][Oo][Nn].*/ OR data_win_eventdata_scriptBlockText:/.*[Ss][Tt][Aa][Rr][Tt]-[Bb][Ii][Tt][Ss][Tt][Rr][Aa][Nn][Ss][Ff][Ee][Rr].*/ OR data_win_eventdata_scriptBlockText:/.*[Aa][Mm][Ss][Ii][Uu][Tt][Ii][Ll][Ss].*/ OR data_win_eventdata_scriptBlockText:/.*-[Ee][Nn][Cc].*/ OR data_win_eventdata_scriptBlockText:/.*-[Ee][Nn][Cc][Oo][Dd][Ee][Dd][Cc][Oo][Mm][Mm][Aa][Nn][Dd].*/ OR data_win_eventdata_scriptBlockText:/.*[Rr][Ee][Ff][Ll][Ee][Cc][Tt][Ii][Oo][Nn]\.[Aa][Ss][Ss][Ee][Mm][Bb][Ll][Yy].*/)'
-      pivot_on: [host]
-      window: 1h
-    - name: "Follow-on LOLBin / signed-binary-proxy execution on this host"
-      query: 'data_win_system_eventID:"1" AND data_win_eventdata_image:/.*(\\[Rr][Uu][Nn][Dd][Ll][Ll]32\.[Ee][Xx][Ee]|\\[Rr][Ee][Gg][Ss][Vv][Rr]32\.[Ee][Xx][Ee]|\\[Mm][Ss][Hh][Tt][Aa]\.[Ee][Xx][Ee]|\\[Ii][Nn][Ss][Tt][Aa][Ll][Ll][Uu][Tt][Ii][Ll]\.[Ee][Xx][Ee]|\\[Rr][Ee][Gg][Aa][Ss][Mm]\.[Ee][Xx][Ee]|\\[Rr][Ee][Gg][Ss][Vv][Cc][Ss]\.[Ee][Xx][Ee]|\\[Mm][Ss][Bb][Uu][Ii][Ll][Dd]\.[Ee][Xx][Ee]|\\[Cc][Ee][Rr][Tt][Uu][Tt][Ii][Ll]\.[Ee][Xx][Ee]|\\[Bb][Ii][Tt][Ss][Aa][Dd][Mm][Ii][Nn]\.[Ee][Xx][Ee]|\\[Ww][Mm][Ii][Cc]\.[Ee][Xx][Ee]|\\[Cc][Mm][Ss][Tt][Pp]\.[Ee][Xx][Ee]|\\[Oo][Dd][Bb][Cc][Cc][Oo][Nn][Ff]\.[Ee][Xx][Ee]|\\[Ff][Oo][Rr][Ff][Ii][Ll][Ee][Ss]\.[Ee][Xx][Ee]|\\[Pp][Cc][Aa][Ll][Uu][Aa]\.[Ee][Xx][Ee]|\\[Mm][Aa][Vv][Ii][Nn][Jj][Ee][Cc][Tt]\.[Ee][Xx][Ee]|\\[Ss][Cc][Rr][Ii][Pp][Tt][Rr][Uu][Nn][Nn][Ee][Rr]\.[Ee][Xx][Ee])/'
-      pivot_on: [host]
-      window: 1h
-    - name: "Memory/credential-dump creation & LSASS access on this host"
-      query: '((data_win_system_eventID:"1" AND data_win_eventdata_image:/.*(\\[Pp][Rr][Oo][Cc][Dd][Uu][Mm][Pp]\.[Ee][Xx][Ee]|\\[Pp][Rr][Oo][Cc][Dd][Uu][Mm][Pp]64\.[Ee][Xx][Ee]|\\[Ss][Qq][Ll][Dd][Uu][Mm][Pp][Ee][Rr]\.[Ee][Xx][Ee]|\\[Cc][Rr][Ee][Aa][Tt][Ee][Dd][Uu][Mm][Pp]\.[Ee][Xx][Ee]|\\[Rr][Dd][Rr][Ll][Ee][Aa][Kk][Dd][Ii][Aa][Gg]\.[Ee][Xx][Ee]|\\[Dd][Uu][Mm][Pp][Ee][Rr][Tt]\.[Ee][Xx][Ee]|\\[Nn][Aa][Nn][Oo][Dd][Uu][Mm][Pp]\.[Ee][Xx][Ee]|\\[Aa][Vv][Dd][Uu][Mm][Pp]\.[Ee][Xx][Ee])/) OR (data_win_system_eventID:"1" AND (data_win_eventdata_commandLine:/.*[Cc][Oo][Mm][Ss][Vv][Cc][Ss]\.[Dd][Ll][Ll].*/ OR data_win_eventdata_commandLine:/.*[Mm][Ii][Nn][Ii][Dd][Uu][Mm][Pp].*/ OR data_win_eventdata_commandLine:/.*[Dd][Uu][Mm][Pp][Ee][Rr][Tt].*/ OR data_win_eventdata_commandLine:/.*[Nn][Aa][Nn][Oo][Dd][Uu][Mm][Pp].*/ OR data_win_eventdata_commandLine:/.*[Ll][Ss][Aa][Ss][Ss].*/ OR data_win_eventdata_commandLine:/.*[Ss][Ee][Kk][Uu][Rr][Ll][Ss][Aa].*/ OR data_win_eventdata_commandLine:/.*[Nn][Tt][Dd][Ss]\.[Dd][Ii][Tt].*/ OR data_win_eventdata_commandLine:/.*[Nn][Tt][Dd][Ss][Uu][Tt][Ii][Ll].*/)) OR (data_win_system_eventID:"10" AND data_win_eventdata_targetImage:/.*(\\[Ll][Ss][Aa][Ss][Ss]\.[Ee][Xx][Ee])/))'
-      pivot_on: [host]
-      window: 1h
+  # Behaviour-targeted hunts the engine runs around the alert (not a sweep).
+  - name: takeown / icacls / cacls ownership and permission changes on Windows paths
+    query: data_win_system_eventID:"1" AND (data_win_eventdata_image:/.*\\([Tt][Aa][Kk][Ee][Oo][Ww][Nn]|[Ii][Cc][Aa][Cc][Ll][Ss]|[Cc][Aa][Cc][Ll][Ss]|[Xx][Cc][Aa][Cc][Ll][Ss])\.[Ee][Xx][Ee]/ OR data_win_eventdata_commandLine:/.*([Ss][Ee][Tt]-[Aa][Cc][Ll]|[Ii][Cc][Aa][Cc][Ll][Ss]|[Tt][Aa][Kk][Ee][Oo][Ww][Nn]).*[Ww][Ii][Nn][Dd][Oo][Ww][Ss].*/)
+    pivot_on:
+    - host
+    window: 1h
+  - name: Executables, DLLs and scripts written into the Windows directory
+    query: data_win_system_eventID:"11" AND data_win_eventdata_targetFilename:/.*\\[Ww][Ii][Nn][Dd][Oo][Ww][Ss]\\.*\.([Ee][Xx][Ee]|[Dd][Ll][Ll]|[Ss][Yy][Ss]|[Pp][Ss]1|[Bb][Aa][Tt]|[Vv][Bb][Ss]|[Jj][Ss])/
+    pivot_on:
+    - host
+    window: 2h
+  - name: Script blocks replacing or deleting Windows files or tampering Defender preferences
+    query: data_win_system_eventID:"4104" AND (data_win_eventdata_scriptBlockText:/.*([Cc][Oo][Pp][Yy]|[Mm][Oo][Vv][Ee]|[Rr][Ee][Mm][Oo][Vv][Ee])-[Ii][Tt][Ee][Mm].*([Ww][Ii][Nn][Dd][Oo][Ww][Ss]|[Ww][Ii][Nn][Dd][Ii][Rr]).*/ OR data_win_eventdata_scriptBlockText:/.*([Aa][Dd][Dd]|[Ss][Ee][Tt])-[Mm][Pp][Pp][Rr][Ee][Ff][Ee][Rr][Ee][Nn][Cc][Ee].*/)
+    pivot_on:
+    - host
+    window: 2h
+  - name: 'Binary-replacement persistence: sethc/utilman IFEO, service and task creation'
+    query: (data_win_system_eventID:"1" AND (data_win_eventdata_commandLine:/.*([Ss][Ee][Tt][Hh][Cc]|[Uu][Tt][Ii][Ll][Mm][Aa][Nn]|[Oo][Ss][Kk]|[Nn][Aa][Rr][Rr][Aa][Tt][Oo][Rr])\.[Ee][Xx][Ee].*/ OR data_win_eventdata_commandLine:/.*[Ss][Cc] +[Cc][Rr][Ee][Aa][Tt][Ee].*/ OR data_win_eventdata_commandLine:/.*[Ss][Cc][Hh][Tt][Aa][Ss][Kk][Ss].*\/[Cc][Rr][Ee][Aa][Tt][Ee].*/)) OR (data_win_system_eventID:"13" AND data_win_eventdata_targetObject:/.*([Ii][Mm][Aa][Gg][Ee] [Ff][Ii][Ll][Ee] [Ee][Xx][Ee][Cc][Uu][Tt][Ii][Oo][Nn] [Oo][Pp][Tt][Ii][Oo][Nn][Ss]|\\[Ss][Ee][Rr][Vv][Ii][Cc][Ee][Ss]\\.*\\[Ii][Mm][Aa][Gg][Ee][Pp][Aa][Tt][Hh]).*/)
+    pivot_on:
+    - host
+    window: 4h
+  - name: Network or DNS activity from the PowerShell host process
+    query: (data_win_system_eventID:"3" AND data_win_eventdata_image:/.*\\([Pp][Oo][Ww][Ee][Rr][Ss][Hh][Ee][Ll][Ll]|[Pp][Ww][Ss][Hh])\.[Ee][Xx][Ee]/ AND data_win_eventdata_initiated:"true") OR (data_win_system_eventID:"22" AND data_win_eventdata_image:/.*\\([Pp][Oo][Ww][Ee][Rr][Ss][Hh][Ee][Ll][Ll]|[Pp][Ww][Ss][Hh])\.[Ee][Xx][Ee]/)
+    pivot_on:
+    - host
+    window: 1h

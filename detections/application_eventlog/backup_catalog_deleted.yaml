@@ -127,19 +127,58 @@ graylog:
   query: data_win_system_eventID:"524" AND data_win_system_providerName:/[Mm][Ii][Cc][Rr][Oo][Ss][Oo][Ff][Tt]-[Ww][Ii][Nn][Dd][Oo][Ww][Ss]-[Bb][Aa][Cc][Kk][Uu][Pp]/
 
 correlation:
-  # Authored by the correlation engine for review.
+  # Authored per-rule (behaviour-researched) for the correlation engine. Related CoPilot
+  # Searches + telemetry pivots to run around an alert, scoped to its host/user/ip/domain.
+  related_rules:
+  - id: 639c9081-f482-47d3-a0bd-ddee3d4ecd76
+    name: All Backups Deleted Via Wbadmin.EXE
+    reason: Event 524 is the log result of 'wbadmin delete catalog'; the same actor typically also runs 'wbadmin delete backup' to destroy the backup sets themselves, completing recovery denial.
+  - id: 89f75308-5b1b-4390-b2d8-d6b2340efaf8
+    name: Windows Backup Deleted Via Wbadmin.EXE
+    reason: Process-creation view of the wbadmin delete command that produces the catalog-deletion event; confirms the command line and parent process.
+  - id: c947b146-0abc-4c87-9c64-b17e9d7274a2
+    name: Shadow Copies Deletion Using Operating Systems Utilities
+    reason: Ransomware pairs catalog deletion with vssadmin/wmic shadow copy deletion to remove every local restore point alongside the Windows Backup catalog.
+  - id: 21ff4ca9-f13a-41ad-b828-0077b2af2e40
+    name: Deletion of Volume Shadow Copies via WMI with PowerShell
+    reason: Alternative shadow copy destruction path used in the same inhibit-system-recovery step as catalog deletion.
+  - id: c9fbe8e9-119d-40a6-9b59-dd58a5d84429
+    name: Potential Ransomware or Unauthorized MBR Tampering Via Bcdedit.EXE
+    reason: bcdedit recoveryenabled No / ignoreallfailures is run in the same pre-encryption script right after backups are deleted, to block boot repair.
+  - id: db1c21e4-cd66-4b4e-85ca-590f0780529c
+    name: Windows Recovery Environment Disabled Via Reagentc
+    reason: Disabling WinRE is another recovery-inhibition step in the same ransomware preparation sequence following backup catalog deletion.
+  - id: fdb829a8-db84-4832-b64b-3e964cd44f01
+    name: Windows Eventlog Cleared Via Wevtutil
+    reason: The rule is tagged T1070 and the operator who wipes backup catalogs commonly clears event logs next to hide the activity.
+  - id: 4b046706-5789-4673-b111-66f25fe99534
+    name: Deleted Data Overwritten Via Cipher.EXE
+    reason: cipher /w overwrites free space after deletion so deleted backups and files cannot be recovered; a destructive follow-on to backup removal.
+  window: 2h
   enrichment_searches:
-  # Rule-specific telemetry pivots the engine runs around an alert from this rule,
-  # scoped to the alert's host/user/IP within the window (behaviour-targeted, not a sweep).
-    - name: "Log-clearing / anti-forensic activity on this host"
-      query: '(((data_win_eventdata_commandLine:/.*[Ww][Ee][Vv][Tt][Uu][Tt][Ii][Ll] [Cc][Ll].*/ OR data_win_eventdata_commandLine:/.*[Cc][Ll][Ee][Aa][Rr]-[Ee][Vv][Ee][Nn][Tt][Ll][Oo][Gg].*/ OR data_win_eventdata_commandLine:/.*[Ff][Ss][Uu][Tt][Ii][Ll] [Uu][Ss][Nn] [Dd][Ee][Ll][Ee][Tt][Ee][Jj][Oo][Uu][Rr][Nn][Aa][Ll].*/ OR data_win_eventdata_commandLine:/.*[Vv][Ss][Ss][Aa][Dd][Mm][Ii][Nn] [Dd][Ee][Ll][Ee][Tt][Ee].*/ OR data_win_eventdata_commandLine:/.*[Ww][Ee][Vv][Tt][Uu][Tt][Ii][Ll] [Cc][Ll][Ee][Aa][Rr]-[Ll][Oo][Gg].*/)) OR ((data_win_system_eventID:"1102" OR data_win_system_eventID:"104")))'
-      pivot_on: [host]
-      window: 2h
-    - name: "Follow-on LOLBin / signed-binary-proxy execution on this host"
-      query: 'data_win_system_eventID:"1" AND data_win_eventdata_image:/.*(\\[Rr][Uu][Nn][Dd][Ll][Ll]32\.[Ee][Xx][Ee]|\\[Rr][Ee][Gg][Ss][Vv][Rr]32\.[Ee][Xx][Ee]|\\[Mm][Ss][Hh][Tt][Aa]\.[Ee][Xx][Ee]|\\[Ii][Nn][Ss][Tt][Aa][Ll][Ll][Uu][Tt][Ii][Ll]\.[Ee][Xx][Ee]|\\[Rr][Ee][Gg][Aa][Ss][Mm]\.[Ee][Xx][Ee]|\\[Rr][Ee][Gg][Ss][Vv][Cc][Ss]\.[Ee][Xx][Ee]|\\[Mm][Ss][Bb][Uu][Ii][Ll][Dd]\.[Ee][Xx][Ee]|\\[Cc][Ee][Rr][Tt][Uu][Tt][Ii][Ll]\.[Ee][Xx][Ee]|\\[Bb][Ii][Tt][Ss][Aa][Dd][Mm][Ii][Nn]\.[Ee][Xx][Ee]|\\[Ww][Mm][Ii][Cc]\.[Ee][Xx][Ee]|\\[Cc][Mm][Ss][Tt][Pp]\.[Ee][Xx][Ee]|\\[Oo][Dd][Bb][Cc][Cc][Oo][Nn][Ff]\.[Ee][Xx][Ee]|\\[Ff][Oo][Rr][Ff][Ii][Ll][Ee][Ss]\.[Ee][Xx][Ee]|\\[Pp][Cc][Aa][Ll][Uu][Aa]\.[Ee][Xx][Ee]|\\[Mm][Aa][Vv][Ii][Nn][Jj][Ee][Cc][Tt]\.[Ee][Xx][Ee]|\\[Ss][Cc][Rr][Ii][Pp][Tt][Rr][Uu][Nn][Nn][Ee][Rr]\.[Ee][Xx][Ee])/'
-      pivot_on: [host]
-      window: 1h
-    - name: "Outbound connections by script interpreters on this host"
-      query: 'data_win_system_eventID:"3" AND data_win_eventdata_image:/.*(\\[Pp][Oo][Ww][Ee][Rr][Ss][Hh][Ee][Ll][Ll]\.[Ee][Xx][Ee]|\\[Pp][Ww][Ss][Hh]\.[Ee][Xx][Ee]|\\[Pp][Oo][Ww][Ee][Rr][Ss][Hh][Ee][Ll][Ll]_[Ii][Ss][Ee]\.[Ee][Xx][Ee]|\\[Cc][Mm][Dd]\.[Ee][Xx][Ee]|\\[Ww][Ss][Cc][Rr][Ii][Pp][Tt]\.[Ee][Xx][Ee]|\\[Cc][Ss][Cc][Rr][Ii][Pp][Tt]\.[Ee][Xx][Ee]|\\[Mm][Ss][Hh][Tt][Aa]\.[Ee][Xx][Ee]|\\[Rr][Uu][Nn][Dd][Ll][Ll]32\.[Ee][Xx][Ee]|\\[Rr][Ee][Gg][Ss][Vv][Rr]32\.[Ee][Xx][Ee])/'
-      pivot_on: [host]
-      window: 1h
+  # Behaviour-targeted hunts the engine runs around the alert (not a sweep).
+  - name: Other recovery-inhibition commands (vssadmin, wmic shadowcopy, bcdedit, reagentc, wbadmin)
+    query: data_win_system_eventID:"1" AND (data_win_eventdata_commandLine:/.*[Ww][Bb][Aa][Dd][Mm][Ii][Nn].*[Dd][Ee][Ll][Ee][Tt][Ee].*/ OR data_win_eventdata_commandLine:/.*[Vv][Ss][Ss][Aa][Dd][Mm][Ii][Nn].*[Dd][Ee][Ll][Ee][Tt][Ee].*[Ss][Hh][Aa][Dd][Oo][Ww].*/ OR data_win_eventdata_commandLine:/.*[Ss][Hh][Aa][Dd][Oo][Ww][Cc][Oo][Pp][Yy].*[Dd][Ee][Ll][Ee][Tt][Ee].*/ OR data_win_eventdata_commandLine:/.*[Bb][Cc][Dd][Ee][Dd][Ii][Tt].*([Rr][Ee][Cc][Oo][Vv][Ee][Rr][Yy][Ee][Nn][Aa][Bb][Ll][Ee][Dd]|[Ii][Gg][Nn][Oo][Rr][Ee][Aa][Ll][Ll][Ff][Aa][Ii][Ll][Uu][Rr][Ee][Ss]).*/ OR data_win_eventdata_commandLine:/.*[Rr][Ee][Aa][Gg][Ee][Nn][Tt][Cc].*[Dd][Ii][Ss][Aa][Bb][Ll][Ee].*/)
+    pivot_on:
+    - host
+    window: 2h
+  - name: Parent process and launcher of the backup deletion (wbadmin/cmd/powershell)
+    query: data_win_system_eventID:"1" AND (data_win_eventdata_image:/.*\\[Ww][Bb][Aa][Dd][Mm][Ii][Nn]\.[Ee][Xx][Ee]/ OR data_win_eventdata_parentImage:/.*\\[Ww][Bb][Aa][Dd][Mm][Ii][Nn]\.[Ee][Xx][Ee]/ OR (data_win_eventdata_commandLine:/.*[Ww][Bb][Aa][Dd][Mm][Ii][Nn].*/ AND data_win_eventdata_image:/.*\\([Cc][Mm][Dd]|[Pp][Oo][Ww][Ee][Rr][Ss][Hh][Ee][Ll][Ll]|[Pp][Ww][Ss][Hh]|[Ww][Ss][Cc][Rr][Ii][Pp][Tt]|[Cc][Ss][Cc][Rr][Ii][Pp][Tt])\.[Ee][Xx][Ee]/))
+    pivot_on:
+    - host
+    window: 1h
+  - name: Services and processes killed to unlock backup/database files before encryption
+    query: data_win_system_eventID:"1" AND (data_win_eventdata_commandLine:/.*[Nn][Ee][Tt]1? [Ss][Tt][Oo][Pp] .*([Ss][Qq][Ll]|[Vv][Ee][Ee][Aa][Mm]|[Bb][Aa][Cc][Kk][Uu][Pp]|[Ee][Xx][Cc][Hh][Aa][Nn][Gg][Ee]|[Vv][Ss][Ss]|[Ss][Ww][Pp][Rr][Vv]).*/ OR data_win_eventdata_commandLine:/.*[Ss][Cc] .*([Ss][Tt][Oo][Pp]|[Cc][Oo][Nn][Ff][Ii][Gg]).*([Ss][Qq][Ll]|[Vv][Ee][Ee][Aa][Mm]|[Bb][Aa][Cc][Kk][Uu][Pp]|[Vv][Ss][Ss]).*/ OR data_win_eventdata_commandLine:/.*[Tt][Aa][Ss][Kk][Kk][Ii][Ll][Ll].*([Ss][Qq][Ll][Ss][Ee][Rr][Vv][Rr]|[Vv][Ee][Ee][Aa][Mm]|[Oo][Rr][Aa][Cc][Ll][Ee]|[Ss][Ee][Rr][Vv][Ii][Cc][Ee][Hh][Oo][Ss][Tt]|[Mm][Ss][Ee][Xx][Cc][Hh][Aa][Nn][Gg][Ee]).*/)
+    pivot_on:
+    - host
+    window: 2h
+  - name: Ransom note drops and mass file renames to encrypted extensions
+    query: data_win_system_eventID:"11" AND (data_win_eventdata_targetFilename:/.*([Rr][Ee][Aa][Dd][Mm][Ee]|[Hh][Oo][Ww][_ -]?[Tt][Oo]|[Dd][Ee][Cc][Rr][Yy][Pp][Tt]|[Rr][Ee][Cc][Oo][Vv][Ee][Rr]|[Rr][Aa][Nn][Ss][Oo][Mm]|[Rr][Ee][Ss][Tt][Oo][Rr][Ee]).*(\.[Tt][Xx][Tt]|\.[Hh][Tt][Aa]|\.[Hh][Tt][Mm][Ll])/ OR data_win_eventdata_targetFilename:/.*\.([Ll][Oo][Cc][Kk][Ee][Dd]|[Ee][Nn][Cc][Rr][Yy][Pp][Tt][Ee][Dd]|[Cc][Rr][Yy][Pp][Tt]|[Ll][Oo][Cc][Kk]|[Rr][Yy][Kk]|[Cc][Oo][Nn][Tt][Ii]|[Bb][Ll][Aa][Cc][Kk][Bb][Yy][Tt][Ee])/)
+    pivot_on:
+    - host
+    window: 2h
+  - name: Event log clearing after backup deletion (Security 1102 / System 104 / wevtutil cl)
+    query: (data_win_system_eventID:"1102" OR data_win_system_eventID:"104" OR (data_win_system_eventID:"1" AND data_win_eventdata_commandLine:/.*[Ww][Ee][Vv][Tt][Uu][Tt][Ii][Ll].*( [Cc][Ll] | [Cc][Ll][Ee][Aa][Rr]-[Ll][Oo][Gg]).*/))
+    pivot_on:
+    - host
+    window: 2h

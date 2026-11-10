@@ -134,19 +134,58 @@ graylog:
   query: data_win_system_providerName:/.*[Mm][Ss][Ss][Qq][Ll].*/ AND data_win_system_eventID:"15457" AND data_win_eventdata_data:/.*[Xx][Pp]_[Cc][Mm][Dd][Ss][Hh][Ee][Ll][Ll].*/
 
 correlation:
-  # Authored by the correlation engine for review.
+  # Authored per-rule (behaviour-researched) for the correlation engine. Related CoPilot
+  # Searches + telemetry pivots to run around an alert, scoped to its host/user/ip/domain.
+  related_rules:
+  - id: 7f103213-a04e-4d59-8261-213dddf22314
+    name: MSSQL XPCmdshell Suspicious Execution
+    reason: 'Direct follow-on: once xp_cmdshell is enabled, the attacker invokes it, and this rule catches the actual xp_cmdshell call with suspicious commands.'
+  - id: 869b9ca7-9ea2-4a5a-8325-e80e62f75445
+    name: Suspicious Child Process Of SQL Server
+    reason: 'Process-level confirmation that xp_cmdshell was used: sqlservr.exe spawning cmd/powershell/whoami etc. is the execution produced by the enabled option.'
+  - id: b3d57a5c-c92e-4b48-9a79-5f124b7cf964
+    name: MSSQL SPProcoption Set
+    reason: Alternative SQL Server persistence/execution (startup stored procedures per the NetSPI reference) frequently configured in the same session as enabling xp_cmdshell.
+  - id: 08200f85-2678-463e-9c32-88dce2f073d1
+    name: MSSQL Add Account To Sysadmin Role
+    reason: 'Precursor/co-occurring: enabling xp_cmdshell requires sysadmin, so attackers often grant themselves the sysadmin role just before or after reconfiguring.'
+  - id: ebfe73c2-5bc9-4ed9-aaa8-8b54b2b4777d
+    name: MSSQL Server Failed Logon From External Network
+    reason: 'Precursor: brute-force or password-spray against an exposed SQL login (e.g. sa) is the typical way the attacker obtained the rights to change this option.'
+  - id: 350dfb37-3706-4cdc-9e2e-5e24bc3a46df
+    name: MSSQL Disable Audit Settings
+    reason: 'Defence evasion paired with the option change: attackers disable SQL Server auditing so the xp_cmdshell activity that follows is not recorded.'
+  - id: 711ab2fe-c9ba-4746-8840-5228a58c3cb8
+    name: MSSQL Extended Stored Procedure Backdoor Maggie
+    reason: 'Alternative persistence on the same SQL Server: registering a malicious extended stored procedure DLL is an adjacent post-compromise step to xp_cmdshell abuse.'
+  - id: 00321fee-ca72-4cce-b011-5415af3b9960
+    name: MSSQL Destructive Query
+    reason: 'Possible impact stage: a SQL instance with xp_cmdshell newly enabled and destructive queries (DROP/DELETE) points to ransomware-style or sabotage activity through the database.'
+  window: 1h
   enrichment_searches:
-  # Rule-specific telemetry pivots the engine runs around an alert from this rule,
-  # scoped to the alert's host/user/IP within the window (behaviour-targeted, not a sweep).
-    - name: "Follow-on LOLBin / signed-binary-proxy execution on this host"
-      query: 'data_win_system_eventID:"1" AND data_win_eventdata_image:/.*(\\[Rr][Uu][Nn][Dd][Ll][Ll]32\.[Ee][Xx][Ee]|\\[Rr][Ee][Gg][Ss][Vv][Rr]32\.[Ee][Xx][Ee]|\\[Mm][Ss][Hh][Tt][Aa]\.[Ee][Xx][Ee]|\\[Ii][Nn][Ss][Tt][Aa][Ll][Ll][Uu][Tt][Ii][Ll]\.[Ee][Xx][Ee]|\\[Rr][Ee][Gg][Aa][Ss][Mm]\.[Ee][Xx][Ee]|\\[Rr][Ee][Gg][Ss][Vv][Cc][Ss]\.[Ee][Xx][Ee]|\\[Mm][Ss][Bb][Uu][Ii][Ll][Dd]\.[Ee][Xx][Ee]|\\[Cc][Ee][Rr][Tt][Uu][Tt][Ii][Ll]\.[Ee][Xx][Ee]|\\[Bb][Ii][Tt][Ss][Aa][Dd][Mm][Ii][Nn]\.[Ee][Xx][Ee]|\\[Ww][Mm][Ii][Cc]\.[Ee][Xx][Ee]|\\[Cc][Mm][Ss][Tt][Pp]\.[Ee][Xx][Ee]|\\[Oo][Dd][Bb][Cc][Cc][Oo][Nn][Ff]\.[Ee][Xx][Ee]|\\[Ff][Oo][Rr][Ff][Ii][Ll][Ee][Ss]\.[Ee][Xx][Ee]|\\[Pp][Cc][Aa][Ll][Uu][Aa]\.[Ee][Xx][Ee]|\\[Mm][Aa][Vv][Ii][Nn][Jj][Ee][Cc][Tt]\.[Ee][Xx][Ee]|\\[Ss][Cc][Rr][Ii][Pp][Tt][Rr][Uu][Nn][Nn][Ee][Rr]\.[Ee][Xx][Ee])/'
-      pivot_on: [host]
-      window: 1h
-    - name: "Outbound connections by script interpreters on this host"
-      query: 'data_win_system_eventID:"3" AND data_win_eventdata_image:/.*(\\[Pp][Oo][Ww][Ee][Rr][Ss][Hh][Ee][Ll][Ll]\.[Ee][Xx][Ee]|\\[Pp][Ww][Ss][Hh]\.[Ee][Xx][Ee]|\\[Pp][Oo][Ww][Ee][Rr][Ss][Hh][Ee][Ll][Ll]_[Ii][Ss][Ee]\.[Ee][Xx][Ee]|\\[Cc][Mm][Dd]\.[Ee][Xx][Ee]|\\[Ww][Ss][Cc][Rr][Ii][Pp][Tt]\.[Ee][Xx][Ee]|\\[Cc][Ss][Cc][Rr][Ii][Pp][Tt]\.[Ee][Xx][Ee]|\\[Mm][Ss][Hh][Tt][Aa]\.[Ee][Xx][Ee]|\\[Rr][Uu][Nn][Dd][Ll][Ll]32\.[Ee][Xx][Ee]|\\[Rr][Ee][Gg][Ss][Vv][Rr]32\.[Ee][Xx][Ee])/'
-      pivot_on: [host]
-      window: 1h
-    - name: "Autostart persistence written on this host (Run keys, services, IFEO)"
-      query: '(data_win_system_eventID:"12" OR data_win_system_eventID:"13") AND (data_win_eventdata_targetObject:/.*[Cc][Uu][Rr][Rr][Ee][Nn][Tt][Vv][Ee][Rr][Ss][Ii][Oo][Nn]\\[Rr][Uu][Nn].*/ OR data_win_eventdata_targetObject:/.*[Cc][Uu][Rr][Rr][Ee][Nn][Tt][Vv][Ee][Rr][Ss][Ii][Oo][Nn]\\[Rr][Uu][Nn][Oo][Nn][Cc][Ee].*/ OR data_win_eventdata_targetObject:/.*[Cc][Uu][Rr][Rr][Ee][Nn][Tt][Cc][Oo][Nn][Tt][Rr][Oo][Ll][Ss][Ee][Tt]\\[Ss][Ee][Rr][Vv][Ii][Cc][Ee][Ss]\\.*/ OR data_win_eventdata_targetObject:/.*[Ii][Mm][Aa][Gg][Ee] [Ff][Ii][Ll][Ee] [Ee][Xx][Ee][Cc][Uu][Tt][Ii][Oo][Nn] [Oo][Pp][Tt][Ii][Oo][Nn][Ss]\\.*/ OR data_win_eventdata_targetObject:/.*[Ww][Ii][Nn][Ll][Oo][Gg][Oo][Nn]\\[Ss][Hh][Ee][Ll][Ll].*/ OR data_win_eventdata_targetObject:/.*[Ww][Ii][Nn][Ll][Oo][Gg][Oo][Nn]\\[Uu][Ss][Ee][Rr][Ii][Nn][Ii][Tt].*/ OR data_win_eventdata_targetObject:/.*[Cc][Uu][Rr][Rr][Ee][Nn][Tt][Vv][Ee][Rr][Ss][Ii][Oo][Nn]\\[Ee][Xx][Pp][Ll][Oo][Rr][Ee][Rr]\\[Rr][Uu][Nn].*/ OR data_win_eventdata_targetObject:/.*[Pp][Oo][Ll][Ii][Cc][Ii][Ee][Ss]\\[Ee][Xx][Pp][Ll][Oo][Rr][Ee][Rr]\\[Rr][Uu][Nn].*/ OR data_win_eventdata_targetObject:/.*[Cc][Uu][Rr][Rr][Ee][Nn][Tt][Vv][Ee][Rr][Ss][Ii][Oo][Nn]\\[Ww][Ii][Nn][Dd][Oo][Ww][Ss]\\[Ll][Oo][Aa][Dd].*/)'
-      pivot_on: [host]
-      window: 4h
+  # Behaviour-targeted hunts the engine runs around the alert (not a sweep).
+  - name: SQL Server service spawning shells or recon tools (xp_cmdshell execution)
+    query: data_win_system_eventID:"1" AND data_win_eventdata_parentImage:/.*\\[Ss][Qq][Ll][Ss][Ee][Rr][Vv][Rr]\.[Ee][Xx][Ee]/ AND data_win_eventdata_image:/.*\\([Cc][Mm][Dd]|[Pp][Oo][Ww][Ee][Rr][Ss][Hh][Ee][Ll][Ll]|[Pp][Ww][Ss][Hh]|[Ww][Hh][Oo][Aa][Mm][Ii]|[Nn][Ee][Tt]1?|[Nn][Ss][Ll][Oo][Oo][Kk][Uu][Pp]|[Cc][Ee][Rr][Tt][Uu][Tt][Ii][Ll]|[Bb][Ii][Tt][Ss][Aa][Dd][Mm][Ii][Nn]|[Cc][Uu][Rr][Ll]|[Mm][Ss][Hh][Tt][Aa]|[Ww][Mm][Ii][Cc]|[Ss][Cc]|[Ss][Cc][Hh][Tt][Aa][Ss][Kk][Ss])\.[Ee][Xx][Ee]/
+    pivot_on:
+    - host
+    window: 1h
+  - name: Other sp_configure changes enabling alternate SQL execution paths
+    query: data_win_system_providerName:/.*[Mm][Ss][Ss][Qq][Ll].*/ AND data_win_system_eventID:"15457" AND data_win_eventdata_data:/.*([Ss]how advanced options|[Oo]le [Aa]utomation|clr enabled|clr strict security|[Aa]d [Hh]oc [Dd]istributed [Qq]ueries|[Dd]atabase [Mm]ail XPs|[Cc]ross db ownership|[Pp]olybase).*/
+    pivot_on:
+    - host
+    window: 2h
+  - name: Payload staged to disk by SQL Server or its spawned shells
+    query: data_win_system_eventID:"11" AND data_win_eventdata_image:/.*\\([Ss][Qq][Ll][Ss][Ee][Rr][Vv][Rr]|[Cc][Mm][Dd]|[Pp][Oo][Ww][Ee][Rr][Ss][Hh][Ee][Ll][Ll]|[Cc][Ee][Rr][Tt][Uu][Tt][Ii][Ll]|[Bb][Ii][Tt][Ss][Aa][Dd][Mm][Ii][Nn])\.[Ee][Xx][Ee]/ AND data_win_eventdata_targetFilename:/.*\.([Ee][Xx][Ee]|[Dd][Ll][Ll]|[Pp][Ss]1|[Bb][Aa][Tt]|[Vv][Bb][Ss]|[Jj][Ss]|[Hh][Tt][Aa]|[Ss][Cc][Rr])/
+    pivot_on:
+    - host
+    window: 2h
+  - name: Download cradles and tool ingress from command lines (post-xp_cmdshell staging)
+    query: data_win_system_eventID:"1" AND data_win_eventdata_commandLine:/.*([Dd]ownload[Ss]tring|[Dd]ownload[Ff]ile|[Ii][Ee][Xx]|[Ii]nvoke-[Ww]eb[Rr]equest|[Ii]wr |-[Uu]rl[Cc]ache|bitsadmin.*\/transfer|curl .*http|[Ee]ncodedcommand|-[Ee]nc ).*/
+    pivot_on:
+    - host
+    window: 2h
+  - name: Account creation, service or scheduled-task persistence following SQL command execution
+    query: data_win_system_eventID:"1" AND data_win_eventdata_commandLine:/.*(net1? +user .*\/add|net1? +localgroup +administrators|[Ss][Cc]\.[Ee][Xx][Ee] +create|[Ss][Cc] +create|[Ss][Cc][Hh][Tt][Aa][Ss][Kk][Ss].*\/create|[Rr][Ee][Gg] +add .*[Cc]urrent[Vv]ersion\\[Rr]un).*/
+    pivot_on:
+    - host
+    window: 4h

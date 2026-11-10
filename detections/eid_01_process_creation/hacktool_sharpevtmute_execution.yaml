@@ -152,19 +152,53 @@ graylog:
   query: data_win_system_eventID:"1" AND (data_win_eventdata_image:/.*\\[Ss][Hh][Aa][Rr][Pp][Ee][Vv][Tt][Mm][Uu][Tt][Ee]\.[Ee][Xx][Ee]/ OR data_win_eventdata_description:/[Ss][Hh][Aa][Rr][Pp][Ee][Vv][Tt][Mm][Uu][Tt][Ee]/ OR data_win_eventdata_commandLine:/.*--[Ff][Ii][Ll][Tt][Ee][Rr] \"[Rr][Uu][Ll][Ee] .*/ OR data_win_eventdata_commandLine:/.*--[Ee][Nn][Cc][Oo][Dd][Ee][Dd] --[Ff][Ii][Ll][Tt][Ee][Rr] \\\".*/)
 
 correlation:
-  # Authored by the correlation engine for review.
+  # Authored per-rule (behaviour-researched) for the correlation engine. Related CoPilot
+  # Searches + telemetry pivots to run around an alert, scoped to its host/user/ip/domain.
+  related_rules:
+  - id: 49329257-089d-46e6-af37-4afce4290685
+    name: HackTool - SharpEvtMute DLL Load
+    reason: 'The tool''s hooking DLL (matched by imphash) loading into a process is the other half of the mute: same tool, same host, usually just before or after the process creation.'
+  - id: 236e7c8e-c9d9-11eb-a824-acde48001122
+    name: Disable Logs Using WevtUtil
+    reason: Attackers pair selective event muting with wevtutil to disable or clear whole channels; both aim to blind the same logging.
+  - id: 0a13e132-651d-11eb-ae93-0242ac130002
+    name: Audit Policy Tampering Via Auditpol
+    reason: Auditpol changes turn off the audit subcategories whose events SharpEvtMute would otherwise have to filter individually.
+  - id: 100ef69e-3327-481c-8e5c-6d80d9507556
+    name: Important Windows Eventlog Cleared
+    reason: A cleared Security/System log on the same host shows the blinding escalated from filtering to destruction.
+  - id: 41421f44-58f9-455d-838a-c398859841d4
+    name: ETW Logging Tamper In .NET Processes Via CommandLine
+    reason: ETW tampering in .NET processes is the sibling log-evasion technique for the same C# tooling.
+  - id: 4d7cda18-1b12-4e52-b45c-d28653210df8
+    name: Sysmon Driver Unloaded Via Fltmc.EXE
+    reason: Unloading the Sysmon driver via fltmc blinds the very telemetry that caught this; an attacker who muted logs often kills the sensor too.
+  - id: 18beca67-ab3e-4ee3-ba7a-a46ca8d7d0cc
+    name: Sysmon Channel Reference Deletion
+    reason: Deleting the Sysmon channel reference is another way to silence logging on the host, often chained with this tool.
+  - id: 2f78da12-f7c7-430b-8b19-a28f269b77a3
+    name: Disable Windows Event Logging Via Registry
+    reason: Disabling event logging via registry is a persistent alternative to in-memory muting and signals the same intent.
+  window: 4h
   enrichment_searches:
-  # Rule-specific telemetry pivots the engine runs around an alert from this rule,
-  # scoped to the alert's host/user/IP within the window (behaviour-targeted, not a sweep).
-    - name: "Other executions of this tool-set on this host (any arguments)"
-      query: 'data_win_system_eventID:"1" AND data_win_eventdata_image:/.*(\\[Ss][Hh][Aa][Rr][Pp][Ee][Vv][Tt][Mm][Uu][Tt][Ee]\.[Ee][Xx][Ee])/'
-      pivot_on: [host]
-      window: 2h
-    - name: "Follow-on LOLBin / signed-binary-proxy execution on this host"
-      query: 'data_win_system_eventID:"1" AND data_win_eventdata_image:/.*(\\[Rr][Uu][Nn][Dd][Ll][Ll]32\.[Ee][Xx][Ee]|\\[Rr][Ee][Gg][Ss][Vv][Rr]32\.[Ee][Xx][Ee]|\\[Mm][Ss][Hh][Tt][Aa]\.[Ee][Xx][Ee]|\\[Ii][Nn][Ss][Tt][Aa][Ll][Ll][Uu][Tt][Ii][Ll]\.[Ee][Xx][Ee]|\\[Rr][Ee][Gg][Aa][Ss][Mm]\.[Ee][Xx][Ee]|\\[Rr][Ee][Gg][Ss][Vv][Cc][Ss]\.[Ee][Xx][Ee]|\\[Mm][Ss][Bb][Uu][Ii][Ll][Dd]\.[Ee][Xx][Ee]|\\[Cc][Ee][Rr][Tt][Uu][Tt][Ii][Ll]\.[Ee][Xx][Ee]|\\[Bb][Ii][Tt][Ss][Aa][Dd][Mm][Ii][Nn]\.[Ee][Xx][Ee]|\\[Ww][Mm][Ii][Cc]\.[Ee][Xx][Ee]|\\[Cc][Mm][Ss][Tt][Pp]\.[Ee][Xx][Ee]|\\[Oo][Dd][Bb][Cc][Cc][Oo][Nn][Ff]\.[Ee][Xx][Ee]|\\[Ff][Oo][Rr][Ff][Ii][Ll][Ee][Ss]\.[Ee][Xx][Ee]|\\[Pp][Cc][Aa][Ll][Uu][Aa]\.[Ee][Xx][Ee]|\\[Mm][Aa][Vv][Ii][Nn][Jj][Ee][Cc][Tt]\.[Ee][Xx][Ee]|\\[Ss][Cc][Rr][Ii][Pp][Tt][Rr][Uu][Nn][Nn][Ee][Rr]\.[Ee][Xx][Ee])/'
-      pivot_on: [host]
-      window: 1h
-    - name: "Outbound connections by script interpreters on this host"
-      query: 'data_win_system_eventID:"3" AND data_win_eventdata_image:/.*(\\[Pp][Oo][Ww][Ee][Rr][Ss][Hh][Ee][Ll][Ll]\.[Ee][Xx][Ee]|\\[Pp][Ww][Ss][Hh]\.[Ee][Xx][Ee]|\\[Pp][Oo][Ww][Ee][Rr][Ss][Hh][Ee][Ll][Ll]_[Ii][Ss][Ee]\.[Ee][Xx][Ee]|\\[Cc][Mm][Dd]\.[Ee][Xx][Ee]|\\[Ww][Ss][Cc][Rr][Ii][Pp][Tt]\.[Ee][Xx][Ee]|\\[Cc][Ss][Cc][Rr][Ii][Pp][Tt]\.[Ee][Xx][Ee]|\\[Mm][Ss][Hh][Tt][Aa]\.[Ee][Xx][Ee]|\\[Rr][Uu][Nn][Dd][Ll][Ll]32\.[Ee][Xx][Ee]|\\[Rr][Ee][Gg][Ss][Vv][Rr]32\.[Ee][Xx][Ee])/'
-      pivot_on: [host]
-      window: 1h
+  # Behaviour-targeted hunts the engine runs around the alert (not a sweep).
+  - name: Event log clearing or disabling commands
+    query: data_win_system_eventID:"1" AND (data_win_eventdata_commandLine:/.*[Ww][Ee][Vv][Tt][Uu][Tt][Ii][Ll].* ([Cc][Ll]|[Ss][Ll]|[Cc][Ll][Ee][Aa][Rr]-[Ll][Oo][Gg]).*/ OR data_win_eventdata_commandLine:/.*[Cc][Ll][Ee][Aa][Rr]-[Ee][Vv][Ee][Nn][Tt][Ll][Oo][Gg].*/ OR data_win_eventdata_commandLine:/.*[Rr][Ee][Mm][Oo][Vv][Ee]-[Ee][Vv][Ee][Nn][Tt][Ll][Oo][Gg].*/)
+    pivot_on: host
+    window: 4h
+  - name: Audit policy and Sysmon sensor tampering
+    query: data_win_system_eventID:"1" AND (data_win_eventdata_commandLine:/.*[Aa][Uu][Dd][Ii][Tt][Pp][Oo][Ll].* \/([Cc][Ll][Ee][Aa][Rr]|[Rr][Ee][Mm][Oo][Vv][Ee]|[Ss][Ee][Tt]).*/ OR data_win_eventdata_commandLine:/.*[Ff][Ll][Tt][Mm][Cc].*[Uu][Nn][Ll][Oo][Aa][Dd].*/ OR data_win_eventdata_commandLine:/.*[Ss][Yy][Ss][Mm][Oo][Nn] .*-[Uu].*/)
+    pivot_on: host
+    window: 4h
+  - name: EventLog service and channel registry changes
+    query: data_win_system_eventID:"13" AND data_win_eventdata_targetObject:/.*\\[Ss][Ee][Rr][Vv][Ii][Cc][Ee][Ss]\\[Ee][Vv][Ee][Nn][Tt][Ll][Oo][Gg]\\.*/ AND NOT data_win_eventdata_image:/.*\\[Ss][Vv][Cc][Hh][Oo][Ss][Tt]\.[Ee][Xx][Ee]/
+    pivot_on: host
+    window: 4h
+  - name: .NET hacktool runtime load from user-writable paths
+    query: data_win_system_eventID:"7" AND data_win_eventdata_imageLoaded:/.*\\[Cc][Ll][Rr]\.[Dd][Ll][Ll]/ AND data_win_eventdata_image:/.*\\([Uu][Ss][Ee][Rr][Ss]|[Pp][Rr][Oo][Gg][Rr][Aa][Mm][Dd][Aa][Tt][Aa]|[Tt][Ee][Mm][Pp]|[Pp][Ee][Rr][Ff][Ll][Oo][Gg][Ss])\\.*/
+    pivot_on: host
+    window: 2h
+  - name: LSASS access that follows logging blindness
+    query: data_win_system_eventID:"10" AND data_win_eventdata_targetImage:/.*\\[Ll][Ss][Aa][Ss][Ss]\.[Ee][Xx][Ee]/ AND NOT data_win_eventdata_sourceImage:/.*\\([Ss][Vv][Cc][Hh][Oo][Ss][Tt]|[Cc][Ss][Rr][Ss][Ss]|[Ww][Ii][Nn][Ii][Nn][Ii][Tt]|[Mm][Ss][Mm][Pp][Ee][Nn][Gg])\.[Ee][Xx][Ee]/
+    pivot_on: host
+    window: 4h

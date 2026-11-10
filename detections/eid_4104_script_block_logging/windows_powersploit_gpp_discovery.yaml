@@ -145,56 +145,58 @@ graylog:
   query: data_win_system_eventID:"4104" AND (data_win_eventdata_scriptBlockText:/.*Get-GPPPassword.*/ OR data_win_eventdata_scriptBlockText:/.*Get-CachedGPPPassword.*/)
 
 correlation:
-  # Authored by the correlation engine for review. Related CoPilot Searches to run
-  # around an alert from this rule, scoped to the same host/user/IP within the window.
+  # Authored per-rule (behaviour-researched) for the correlation engine. Related CoPilot
+  # Searches + telemetry pivots to run around an alert, scoped to its host/user/ip/domain.
   related_rules:
-    - id: 13243068-2d38-11ec-8908-acde48001122
-      name: "ServicePrincipalNames Discovery with PowerShell"
-      reason: "same analytic story: Active Directory Privilege Escalation"
-    - id: 2c568c34-bb57-4b43-9d75-19c605b98e70
-      name: "Windows Create Local Administrator Account Via Net"
-      reason: "same analytic story: Active Directory Privilege Escalation"
-    - id: a44c0be1-d7ab-41e4-92fd-aa9af4fe232c
-      name: "Windows File Share Discovery With Powerview"
-      reason: "same analytic story: Active Directory Privilege Escalation"
-    - id: 39405650-c364-4e1e-a740-32a63ef042a6
-      name: "Windows PowerView AD Access Control List Enumeration"
-      reason: "same analytic story: Active Directory Privilege Escalation"
-    - id: ec570e53-4c76-45a9-804d-dc3f355ff7a7
-      name: "7Zip Compressing Dump Files"
-      reason: "next kill-chain tactic: Collection"
-    - id: 0a1255c5-d732-4b62-ac02-b5152d34fb83
-      name: "ADExplorer Writing Complete AD Snapshot Into .dat File"
-      reason: "next kill-chain tactic: Discovery"
-    - id: 1ea13e8c-03ea-409b-877d-ce5c3d2c1cb3
-      name: "ADFS Database Named Pipe Connection By Uncommon Tool"
-      reason: "next kill-chain tactic: Collection"
-    - id: 75bf09fa-1dd7-4d18-9af9-dd9e492562eb
-      name: "ADSI-Cache File Creation By Uncommon Tool"
-      reason: "next kill-chain tactic: Command and Control"
-    - id: 03e2746e-2b31-42f1-ab7a-eb39365b2422
-      name: "APT31 Judgement Panda Activity"
-      reason: "next kill-chain tactic: Credential Access"
-    - id: fc028194-969d-4122-8abe-0470d5b8f12f
-      name: "Access to Browser Login Data"
-      reason: "next kill-chain tactic: Credential Access"
-  window: 1h
+  - id: 91a2c315-9ee6-4052-a853-6f6a8238f90d
+    name: Findstr GPP Passwords
+    reason: 'Same goal via native tooling: attacker greps SYSVOL for cpassword instead of using Get-GPPPassword; co-occurs or substitutes when PowerSploit is blocked'
+  - id: 05f3c945-dcc8-4393-9f3d-af65077a8f86
+    name: Suspicious SYSVOL Domain Group Policy Access
+    reason: Command-line access to SYSVOL\Policies is the file-harvesting step that Get-GPPPassword automates; precedes or accompanies the script
+  - id: 855bc8b5-2ae8-402e-a9ed-b889e6df1900
+    name: Copy From Or To Admin Share Or Sysvol Folder
+    reason: Copying Groups.xml/Services.xml out of SYSVOL to stage cpassword files for offline decryption
+  - id: 61994268-04f4-11ec-865c-acde48001122
+    name: Get-DomainUser with PowerShell Script Block
+    reason: PowerView user enumeration from the same PowerSploit toolkit, used to find which accounts the recovered GPP password may belong to
+  - id: a360d2b2-065a-11ec-b0bf-acde48001122
+    name: Get DomainPolicy with PowerShell Script Block
+    reason: PowerView domain/password policy recon in the same AD-reconnaissance session, precedes harvesting GPP credentials
+  - id: 676b600a-a94d-4951-b346-11329431e6c1
+    name: Get-DomainController with PowerShell Script Block
+    reason: Locating the DC hosting SYSVOL is a prerequisite step for GPP credential discovery
+  - id: 8148c29c-c952-11eb-9255-acde48001122
+    name: Detect Mimikatz With PowerShell Script Block Logging
+    reason: Same PowerSploit/in-memory toolkit family; attacker pairing GPP harvesting with Invoke-Mimikatz for further credential theft
+  - id: 7b836d7f-179c-4ba4-90a7-a7e60afb48e6
+    name: Execute Invoke-command on Remote Host
+    reason: Recovered GPP local-admin credentials are typically used immediately for PowerShell remoting lateral movement
+  window: 2h
   enrichment_searches:
-  # Rule-specific telemetry pivots the engine runs around an alert from this rule,
-  # scoped to the alert's host/user/IP within the window (behaviour-targeted, not a sweep).
-    - name: "Credential / secret-store access on this host"
-      query: '((((data_win_system_eventID:"1" AND data_win_eventdata_image:/.*(\\[Pp][Rr][Oo][Cc][Dd][Uu][Mm][Pp]\.[Ee][Xx][Ee]|\\[Pp][Rr][Oo][Cc][Dd][Uu][Mm][Pp]64\.[Ee][Xx][Ee]|\\[Ss][Qq][Ll][Dd][Uu][Mm][Pp][Ee][Rr]\.[Ee][Xx][Ee]|\\[Cc][Rr][Ee][Aa][Tt][Ee][Dd][Uu][Mm][Pp]\.[Ee][Xx][Ee]|\\[Rr][Dd][Rr][Ll][Ee][Aa][Kk][Dd][Ii][Aa][Gg]\.[Ee][Xx][Ee]|\\[Dd][Uu][Mm][Pp][Ee][Rr][Tt]\.[Ee][Xx][Ee]|\\[Nn][Aa][Nn][Oo][Dd][Uu][Mm][Pp]\.[Ee][Xx][Ee]|\\[Aa][Vv][Dd][Uu][Mm][Pp]\.[Ee][Xx][Ee])/) OR (data_win_system_eventID:"1" AND (data_win_eventdata_commandLine:/.*[Cc][Oo][Mm][Ss][Vv][Cc][Ss]\.[Dd][Ll][Ll].*/ OR data_win_eventdata_commandLine:/.*[Mm][Ii][Nn][Ii][Dd][Uu][Mm][Pp].*/ OR data_win_eventdata_commandLine:/.*[Dd][Uu][Mm][Pp][Ee][Rr][Tt].*/ OR data_win_eventdata_commandLine:/.*[Nn][Aa][Nn][Oo][Dd][Uu][Mm][Pp].*/ OR data_win_eventdata_commandLine:/.*[Ll][Ss][Aa][Ss][Ss].*/ OR data_win_eventdata_commandLine:/.*[Ss][Ee][Kk][Uu][Rr][Ll][Ss][Aa].*/ OR data_win_eventdata_commandLine:/.*[Nn][Tt][Dd][Ss]\.[Dd][Ii][Tt].*/ OR data_win_eventdata_commandLine:/.*[Nn][Tt][Dd][Ss][Uu][Tt][Ii][Ll].*/)) OR (data_win_system_eventID:"10" AND data_win_eventdata_targetImage:/.*(\\[Ll][Ss][Aa][Ss][Ss]\.[Ee][Xx][Ee])/))) OR ((data_win_eventdata_commandLine:/.*[Uu][Nn][Aa][Tt][Tt][Ee][Nn][Dd]\.[Xx][Mm][Ll].*/ OR data_win_eventdata_commandLine:/.*[Cc][Mm][Dd][Kk][Ee][Yy].*/ OR data_win_eventdata_commandLine:/.*[Gg][Ee][Tt]-[Cc][Rr][Ee][Dd][Ee][Nn][Tt][Ii][Aa][Ll].*/ OR data_win_eventdata_commandLine:/.*[Vv][Aa][Uu][Ll][Tt][Cc][Mm][Dd].*/ OR data_win_eventdata_commandLine:/.*\/[Pp][Aa][Ss][Ss][Ww][Oo][Rr][Dd].*/ OR data_win_eventdata_commandLine:/.*[Nn][Ee][Tt] [Uu][Ss][Ee].*/ OR data_win_eventdata_commandLine:/.*[Cc][Pp][Aa][Ss][Ss][Ww][Oo][Rr][Dd].*/ OR data_win_eventdata_commandLine:/.*[Ww][Ee][Bb]\.[Cc][Oo][Nn][Ff][Ii][Gg].*/)))'
-      pivot_on: [host]
-      window: 2h
-    - name: "Memory/credential-dump creation & LSASS access on this host"
-      query: '((data_win_system_eventID:"1" AND data_win_eventdata_image:/.*(\\[Pp][Rr][Oo][Cc][Dd][Uu][Mm][Pp]\.[Ee][Xx][Ee]|\\[Pp][Rr][Oo][Cc][Dd][Uu][Mm][Pp]64\.[Ee][Xx][Ee]|\\[Ss][Qq][Ll][Dd][Uu][Mm][Pp][Ee][Rr]\.[Ee][Xx][Ee]|\\[Cc][Rr][Ee][Aa][Tt][Ee][Dd][Uu][Mm][Pp]\.[Ee][Xx][Ee]|\\[Rr][Dd][Rr][Ll][Ee][Aa][Kk][Dd][Ii][Aa][Gg]\.[Ee][Xx][Ee]|\\[Dd][Uu][Mm][Pp][Ee][Rr][Tt]\.[Ee][Xx][Ee]|\\[Nn][Aa][Nn][Oo][Dd][Uu][Mm][Pp]\.[Ee][Xx][Ee]|\\[Aa][Vv][Dd][Uu][Mm][Pp]\.[Ee][Xx][Ee])/) OR (data_win_system_eventID:"1" AND (data_win_eventdata_commandLine:/.*[Cc][Oo][Mm][Ss][Vv][Cc][Ss]\.[Dd][Ll][Ll].*/ OR data_win_eventdata_commandLine:/.*[Mm][Ii][Nn][Ii][Dd][Uu][Mm][Pp].*/ OR data_win_eventdata_commandLine:/.*[Dd][Uu][Mm][Pp][Ee][Rr][Tt].*/ OR data_win_eventdata_commandLine:/.*[Nn][Aa][Nn][Oo][Dd][Uu][Mm][Pp].*/ OR data_win_eventdata_commandLine:/.*[Ll][Ss][Aa][Ss][Ss].*/ OR data_win_eventdata_commandLine:/.*[Ss][Ee][Kk][Uu][Rr][Ll][Ss][Aa].*/ OR data_win_eventdata_commandLine:/.*[Nn][Tt][Dd][Ss]\.[Dd][Ii][Tt].*/ OR data_win_eventdata_commandLine:/.*[Nn][Tt][Dd][Ss][Uu][Tt][Ii][Ll].*/)) OR (data_win_system_eventID:"10" AND data_win_eventdata_targetImage:/.*(\\[Ll][Ss][Aa][Ss][Ss]\.[Ee][Xx][Ee])/))'
-      pivot_on: [host]
-      window: 1h
-    - name: "Download / AMSI-bypass / encoded script blocks on this host"
-      query: 'data_win_system_eventID:"4104" AND (data_win_eventdata_scriptBlockText:/.*[Dd][Oo][Ww][Nn][Ll][Oo][Aa][Dd][Ss][Tt][Rr][Ii][Nn][Gg].*/ OR data_win_eventdata_scriptBlockText:/.*[Dd][Oo][Ww][Nn][Ll][Oo][Aa][Dd][Ff][Ii][Ll][Ee].*/ OR data_win_eventdata_scriptBlockText:/.*[Ii][Nn][Vv][Oo][Kk][Ee]-[Ww][Ee][Bb][Rr][Ee][Qq][Uu][Ee][Ss][Tt].*/ OR data_win_eventdata_scriptBlockText:/.*[Nn][Ee][Tt]\.[Ww][Ee][Bb][Cc][Ll][Ii][Ee][Nn][Tt].*/ OR data_win_eventdata_scriptBlockText:/.*[Ff][Rr][Oo][Mm][Bb][Aa][Ss][Ee]64[Ss][Tt][Rr][Ii][Nn][Gg].*/ OR data_win_eventdata_scriptBlockText:/.*[Ii][Ee][Xx].*/ OR data_win_eventdata_scriptBlockText:/.*[Ii][Nn][Vv][Oo][Kk][Ee]-[Ee][Xx][Pp][Rr][Ee][Ss][Ss][Ii][Oo][Nn].*/ OR data_win_eventdata_scriptBlockText:/.*[Ss][Tt][Aa][Rr][Tt]-[Bb][Ii][Tt][Ss][Tt][Rr][Aa][Nn][Ss][Ff][Ee][Rr].*/ OR data_win_eventdata_scriptBlockText:/.*[Aa][Mm][Ss][Ii][Uu][Tt][Ii][Ll][Ss].*/ OR data_win_eventdata_scriptBlockText:/.*-[Ee][Nn][Cc].*/ OR data_win_eventdata_scriptBlockText:/.*-[Ee][Nn][Cc][Oo][Dd][Ee][Dd][Cc][Oo][Mm][Mm][Aa][Nn][Dd].*/ OR data_win_eventdata_scriptBlockText:/.*[Rr][Ee][Ff][Ll][Ee][Cc][Tt][Ii][Oo][Nn]\.[Aa][Ss][Ss][Ee][Mm][Bb][Ll][Yy].*/)'
-      pivot_on: [host]
-      window: 1h
-    - name: "Follow-on LOLBin / signed-binary-proxy execution on this host"
-      query: 'data_win_system_eventID:"1" AND data_win_eventdata_image:/.*(\\[Rr][Uu][Nn][Dd][Ll][Ll]32\.[Ee][Xx][Ee]|\\[Rr][Ee][Gg][Ss][Vv][Rr]32\.[Ee][Xx][Ee]|\\[Mm][Ss][Hh][Tt][Aa]\.[Ee][Xx][Ee]|\\[Ii][Nn][Ss][Tt][Aa][Ll][Ll][Uu][Tt][Ii][Ll]\.[Ee][Xx][Ee]|\\[Rr][Ee][Gg][Aa][Ss][Mm]\.[Ee][Xx][Ee]|\\[Rr][Ee][Gg][Ss][Vv][Cc][Ss]\.[Ee][Xx][Ee]|\\[Mm][Ss][Bb][Uu][Ii][Ll][Dd]\.[Ee][Xx][Ee]|\\[Cc][Ee][Rr][Tt][Uu][Tt][Ii][Ll]\.[Ee][Xx][Ee]|\\[Bb][Ii][Tt][Ss][Aa][Dd][Mm][Ii][Nn]\.[Ee][Xx][Ee]|\\[Ww][Mm][Ii][Cc]\.[Ee][Xx][Ee]|\\[Cc][Mm][Ss][Tt][Pp]\.[Ee][Xx][Ee]|\\[Oo][Dd][Bb][Cc][Cc][Oo][Nn][Ff]\.[Ee][Xx][Ee]|\\[Ff][Oo][Rr][Ff][Ii][Ll][Ee][Ss]\.[Ee][Xx][Ee]|\\[Pp][Cc][Aa][Ll][Uu][Aa]\.[Ee][Xx][Ee]|\\[Mm][Aa][Vv][Ii][Nn][Jj][Ee][Cc][Tt]\.[Ee][Xx][Ee]|\\[Ss][Cc][Rr][Ii][Pp][Tt][Rr][Uu][Nn][Nn][Ee][Rr]\.[Ee][Xx][Ee])/'
-      pivot_on: [host]
-      window: 1h
+  # Behaviour-targeted hunts the engine runs around the alert (not a sweep).
+  - name: Other PowerSploit/PowerView modules run in script blocks
+    query: data_win_system_eventID:"4104" AND (data_win_eventdata_scriptBlockText:/.*(Invoke-Mimikatz|Get-DomainUser|Get-NetUser|Get-DomainComputer|Get-NetComputer|Invoke-Kerberoast|Find-LocalAdminAccess|Invoke-ShareFinder|Get-GPOReport|Get-DomainGPO|Get-NetGPO|Invoke-UserHunter|PowerView|PowerSploit|Get-Keystrokes|Invoke-TokenManipulation).*/)
+    pivot_on:
+    - host
+    window: 2h
+  - name: SYSVOL / Groups.xml / cpassword file access via command line
+    query: data_win_system_eventID:"1" AND (data_win_eventdata_commandLine:/.*[Ss][Yy][Ss][Vv][Oo][Ll].*/ OR data_win_eventdata_commandLine:/.*[Cc][Pp][Aa][Ss][Ss][Ww][Oo][Rr][Dd].*/ OR data_win_eventdata_commandLine:/.*([Gg]roups|[Ss]ervices|[Ss]cheduledtasks|[Dd]atasources|[Pp]rinters|[Dd]rives)\.[Xx][Mm][Ll].*/)
+    pivot_on:
+    - host
+    window: 2h
+  - name: PowerShell outbound connections to SMB/WinRM/LDAP after GPP discovery
+    query: data_win_system_eventID:"3" AND data_win_eventdata_image:/.*[Pp]ower[Ss]hell.*/ AND (data_win_eventdata_destinationPort:"445" OR data_win_eventdata_destinationPort:"5985" OR data_win_eventdata_destinationPort:"5986" OR data_win_eventdata_destinationPort:"389" OR data_win_eventdata_destinationPort:"636" OR data_win_eventdata_destinationPort:"135")
+    pivot_on:
+    - host
+    window: 4h
+  - name: Remote execution using recovered credentials (explicit-cred / network logon, WinRM)
+    query: (data_win_system_eventID:"4648" OR (data_win_system_eventID:"4624" AND (data_win_eventdata_logonType:"3" OR data_win_eventdata_logonType:"9")) OR (data_win_system_eventID:"1" AND (data_win_eventdata_parentImage:/.*[Ww]sm[Pp]rov[Hh]ost.*/ OR data_win_eventdata_commandLine:/.*([Ee]nter-[Pp][Ss][Ss]ession|[Ii]nvoke-[Cc]ommand|[Nn]ew-[Pp][Ss][Ss]ession|[Pp][Ss][Ee]xec|[Ww]inrs).*/)))
+    pivot_on:
+    - user
+    window: 4h
+  - name: Script blocks loading tools from disk/web or dumping credentials
+    query: data_win_system_eventID:"4104" AND (data_win_eventdata_scriptBlockText:/.*(DownloadString|Invoke-WebRequest|IEX|Invoke-Expression|FromBase64String|Add-Type|Import-Module).*/ AND data_win_eventdata_scriptBlockText:/.*(Get-GPPPassword|PowerSploit|PowerView|Exfiltration|Privesc|Recon).*/)
+    pivot_on:
+    - host
+    window: 2h

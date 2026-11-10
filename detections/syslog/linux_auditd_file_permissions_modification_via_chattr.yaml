@@ -104,31 +104,53 @@ graylog:
   query: full_log:/.*chattr.*/ AND full_log:/.*\-i.*/ AND NOT _exists_:data_win_system_eventID AND NOT rule_groups:/.*windows.*/
 
 correlation:
-  # Authored by the correlation engine for review. Related CoPilot Searches to run
-  # around an alert from this rule, scoped to the same host/user/IP within the window.
+  # Authored per-rule (behaviour-researched) for the correlation engine. Related CoPilot
+  # Searches + telemetry pivots to run around an alert, scoped to its host/user/ip/domain.
   related_rules:
-    - id: 4e2a6c91-7f3d-4b6e-9a4f-1c8b0e5a92d4
-      name: "Crontab Interactive Edit Execution"
-      reason: "same analytic story: Linux Persistence"
-    - id: a1b2c3d4-5e6f-7a8b-9c0d-1e2f3a4b5c6d
-      name: "Linux Kernel Module Insertion"
-      reason: "same analytic story: Linux Persistence"
-    - id: 0a23a62d-c5b3-468b-a072-25064a9a8c87
-      name: "Axios NPM Compromise Indicators - Linux"
-      reason: "next kill-chain tactic: Command and Control"
-  window: 1h
+  - id: a5b977d6-8a81-4475-91b9-49dbfcd941f7
+    name: Remove Immutable File Attribute - Auditd
+    reason: Auditd rule for chattr -i, the same attribute clearing seen from another log angle.
+  - id: 34979410-e4b5-4e5d-8cfb-389fdff05c12
+    name: Remove Immutable File Attribute
+    reason: Process-creation view of the same chattr -i activity.
+  - id: 977ef627-4539-4875-adf4-ed8f780c4922
+    name: Auditing Configuration Changes on Linux Host
+    reason: Defense evasion on audit configs often requires chattr -i first.
+  - id: c830f15d-6f6e-430f-8074-6f73d6807841
+    name: Logging Configuration Changes on Linux Host
+    reason: Logging config tampering following attribute removal.
+  - id: 4b3cb710-5e83-4715-8c45-8b2b5b3e5751
+    name: Modification of ld.so.preload
+    reason: ld.so.preload is a classic immutable-protected persistence target.
+  - id: linux-auditd-ssh-config-keys-deletion-001
+    name: Linux Auditd SSH Config Keys Deletion
+    reason: SSH key tampering; authorized_keys are often chattr-locked.
+  - id: 1182f3b3-e716-4efa-99ab-d2685d04360f
+    name: History File Deletion
+    reason: Anti-forensics commonly paired with attribute tampering.
+  - id: linux-unix-shell-configuration-modification-001
+    name: Linux Unix Shell Configuration Modification
+    reason: Shell rc files are common immutable-protected persistence targets.
+  window: 4h
   enrichment_searches:
-  # Rule-specific telemetry pivots the engine runs around an alert from this rule,
-  # scoped to the alert's host/user/IP within the window (behaviour-targeted, not a sweep).
-    - name: "Proxy / tunnelling tooling on this host"
-      query: 'data_process_exec_process_binary:/.*(\/[Ss][Ss][Hh]|\/[Ss][Oo][Cc][Aa][Tt]|\/[Nn][Gg][Rr][Oo][Kk]|\/[Cc][Hh][Ii][Ss][Ee][Ll]|\/[Pp][Rr][Oo][Xx][Yy][Cc][Hh][Aa][Ii][Nn][Ss])/'
-      pivot_on: [host]
-      window: 1h
-    - name: "Shell / interpreter execution on this host"
-      query: '((data_process_exec_process_binary:/.*(\/[Bb][Aa][Ss][Hh]|\/[Ss][Hh]|\/[Dd][Aa][Ss][Hh]|\/[Zz][Ss][Hh]|\/[Kk][Ss][Hh]|\/[Aa][Ss][Hh]|\/[Bb][Uu][Ss][Yy][Bb][Oo][Xx])/) OR (data_process_exec_process_binary:/.*(\/[Pp][Yy][Tt][Hh][Oo][Nn]|\/[Pp][Yy][Tt][Hh][Oo][Nn]3|\/[Pp][Ee][Rr][Ll]|\/[Rr][Uu][Bb][Yy]|\/[Pp][Hh][Pp]|\/[Nn][Oo][Dd][Ee]|\/[Ll][Uu][Aa]|\/[Aa][Ww][Kk])/))'
-      pivot_on: [host]
-      window: 1h
-    - name: "Reconnaissance commands on this host"
-      query: 'data_process_exec_process_binary:/.*(\/[Ww][Hh][Oo][Aa][Mm][Ii]|\/[Ii][Dd]|\/[Uu][Nn][Aa][Mm][Ee]|\/[Hh][Oo][Ss][Tt][Nn][Aa][Mm][Ee]|\/[Hh][Oo][Ss][Tt][Nn][Aa][Mm][Ee][Cc][Tt][Ll]|\/[Ss][Ss]|\/[Nn][Ee][Tt][Ss][Tt][Aa][Tt]|\/[Ii][Ff][Cc][Oo][Nn][Ff][Ii][Gg]|\/[Aa][Rr][Pp]|\/[Ww]|\/[Ww][Hh][Oo]|\/[Ll][Aa][Ss][Tt]|\/[Ll][Ss][Oo][Ff]|\/[Nn][Mm][Aa][Pp]|\/[Dd][Ii][Gg]|\/[Ff][Ii][Nn][Dd])/'
-      pivot_on: [host]
-      window: 1h
+  # Behaviour-targeted hunts the engine runs around the alert (not a sweep).
+  - name: Immutable attribute changes either direction
+    query: data_process_exec_process_binary:/.*chattr.*/
+    pivot_on: host
+    window: 4h
+  - name: Edits to audit, log or preload config
+    query: data_process_exec_process_arguments:/.*(audit\.rules|auditd\.conf|rsyslog|ld\.so\.preload|\/var\/log).*/
+    pivot_on: host
+    window: 4h
+  - name: SSH authorized_keys or shell rc changes
+    query: data_process_exec_process_arguments:/.*(authorized_keys|\.bashrc|\.profile|\/etc\/profile).*/
+    pivot_on: host
+    window: 4h
+  - name: Account or sudoers modification
+    query: (data_process_exec_process_binary:/.*(useradd|usermod|passwd|visudo).*/ OR data_process_exec_process_arguments:/.*sudoers.*/)
+    pivot_on: host
+    window: 4h
+  - name: Log or history deletion
+    query: data_process_exec_process_binary:/.*(rm|shred|truncate).*/ AND data_process_exec_process_arguments:/.*(\/var\/log|history).*/
+    pivot_on: host
+    window: 4h

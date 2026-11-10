@@ -148,44 +148,58 @@ graylog:
   query: data_win_system_eventID:"4624" AND data_win_eventdata_logonType:"9" AND data_win_eventdata_logonProcessName:/[Aa][Dd][Vv][Aa][Pp][Ii]/ AND data_win_eventdata_authenticationPackageName:/[Nn][Ee][Gg][Oo][Tt][Ii][Aa][Tt][Ee]/ AND data_win_eventdata_impersonationLevel:"%%1833"
 
 correlation:
-  # Authored by the correlation engine for review. Related CoPilot Searches to run
-  # around an alert from this rule, scoped to the same host/user/IP within the window.
+  # Authored per-rule (behaviour-researched) for the correlation engine. Related CoPilot
+  # Searches + telemetry pivots to run around an alert, scoped to its host/user/ip/domain.
   related_rules:
-    - id: 0255a820-e564-4e40-af2b-6ac61160335c
-      name: "A New Trust Was Created To A Domain"
-      reason: "next kill-chain tactic: Privilege Escalation"
-    - id: 35ba1d85-724d-42a3-889f-2e2362bcaf23
-      name: "AD Privileged Users or Groups Reconnaissance"
-      reason: "next kill-chain tactic: Discovery"
-    - id: 9eb99343-d336-4020-a3cd-67f3819e68ee
-      name: "Account Tampering - Suspicious Failed Logon Reasons"
-      reason: "next kill-chain tactic: Privilege Escalation"
-    - id: 17d619c1-e020-4347-957e-1d1207455c93
-      name: "Active Directory Replication from Non Machine Account"
-      reason: "next kill-chain tactic: Credential Access"
-    - id: 300bac00-e041-4ee2-9c36-e262656a6ecc
-      name: "Active Directory User Backdoors"
-      reason: "next kill-chain tactic: Privilege Escalation"
-    - id: 2632954e-db1c-49cb-9936-67d1ef1d17d2
-      name: "Addition of SID History to Active Directory Object"
-      reason: "next kill-chain tactic: Privilege Escalation"
+  - id: 192a0330-c20b-4356-90b6-7b7049ae0b87
+    name: Successful Overpass the Hash Attempt
+    reason: Same 4624 logon type 9 / Advapi / Negotiate fingerprint produced by sekurlsa::pth; confirms the NewCredentials logon is credential-forging, not benign runas /netonly.
+  - id: 8eef149c-bd26-49f2-9e5a-9b00e3af499b
+    name: Pass the Hash Activity 2
+    reason: Forged-credential logon on the host is followed by NTLM network logons using the stolen hash against other machines.
+  - id: 941e5c45-cda7-4864-8cea-bbb7458d194a
+    name: Suspicious Remote Logon with Explicit Credentials
+    reason: Alternate credentials supplied via 4648 are the usual companion of a type 9 NewCredentials logon when pivoting to remote systems.
+  - id: 472159c5-31b9-4f56-b794-b766faa8b0a7
+    name: Suspicious LSASS Access Via MalSecLogon
+    reason: Type 9 logons are created through the Secondary Logon service; this detects the seclogon-based LSASS handle abuse used by the same tooling.
+  - id: windows-access-token-winlogon-duplicate-handle-001
+    name: Windows Access Token Manipulation Winlogon Duplicate Token Handle
+    reason: 'Direct precursor: DuplicateToken of a SYSTEM winlogon token is the other half of the token theft/impersonation this alert flags.'
+  - id: windows-access-token-manipulation-sedebugprivilege-001
+    name: Windows Access Token Manipulation SeDebugPrivilege
+    reason: Token theft from other processes requires SeDebugPrivilege; its enablement just before the logon corroborates token manipulation.
+  - id: 50d66fb0-03f8-4da0-8add-84e77d12a020
+    name: Suspicious RunAs-Like Flag Combination
+    reason: Process-creation view of the runas /netonly-style command that causes a LOGON32_LOGON_NEW_CREDENTIALS logon.
+  - id: a642964e-bead-4bed-8910-1bb4d63e3b4d
+    name: HackTool - Mimikatz Execution
+    reason: Mimikatz token::elevate and sekurlsa::pth are the common source of impersonation and type 9 logons.
   window: 1h
   enrichment_searches:
-  # Rule-specific telemetry pivots the engine runs around an alert from this rule,
-  # scoped to the alert's host/user/IP within the window (behaviour-targeted, not a sweep).
-    - name: "UAC-bypass / token-manipulation binaries on this host"
-      query: 'data_win_system_eventID:"1" AND (data_win_eventdata_image:/.*(\\[Ff][Oo][Dd][Hh][Ee][Ll][Pp][Ee][Rr]\.[Ee][Xx][Ee]|\\[Ee][Vv][Ee][Nn][Tt][Vv][Ww][Rr]\.[Ee][Xx][Ee]|\\[Ss][Dd][Cc][Ll][Tt]\.[Ee][Xx][Ee]|\\[Cc][Oo][Mm][Pp][Uu][Tt][Ee][Rr][Dd][Ee][Ff][Aa][Uu][Ll][Tt][Ss]\.[Ee][Xx][Ee]|\\[Ss][Ll][Uu][Ii]\.[Ee][Xx][Ee]|\\[Ww][Ss][Rr][Ee][Ss][Ee][Tt]\.[Ee][Xx][Ee])/ OR data_win_eventdata_parentImage:/.*(\\[Ff][Oo][Dd][Hh][Ee][Ll][Pp][Ee][Rr]\.[Ee][Xx][Ee]|\\[Ee][Vv][Ee][Nn][Tt][Vv][Ww][Rr]\.[Ee][Xx][Ee]|\\[Ss][Dd][Cc][Ll][Tt]\.[Ee][Xx][Ee]|\\[Cc][Oo][Mm][Pp][Uu][Tt][Ee][Rr][Dd][Ee][Ff][Aa][Uu][Ll][Tt][Ss]\.[Ee][Xx][Ee]|\\[Ss][Ll][Uu][Ii]\.[Ee][Xx][Ee]|\\[Ww][Ss][Rr][Ee][Ss][Ee][Tt]\.[Ee][Xx][Ee])/)'
-      pivot_on: [host]
-      window: 2h
-    - name: "Memory/credential-dump creation & LSASS access on this host"
-      query: '((data_win_system_eventID:"1" AND data_win_eventdata_image:/.*(\\[Pp][Rr][Oo][Cc][Dd][Uu][Mm][Pp]\.[Ee][Xx][Ee]|\\[Pp][Rr][Oo][Cc][Dd][Uu][Mm][Pp]64\.[Ee][Xx][Ee]|\\[Ss][Qq][Ll][Dd][Uu][Mm][Pp][Ee][Rr]\.[Ee][Xx][Ee]|\\[Cc][Rr][Ee][Aa][Tt][Ee][Dd][Uu][Mm][Pp]\.[Ee][Xx][Ee]|\\[Rr][Dd][Rr][Ll][Ee][Aa][Kk][Dd][Ii][Aa][Gg]\.[Ee][Xx][Ee]|\\[Dd][Uu][Mm][Pp][Ee][Rr][Tt]\.[Ee][Xx][Ee]|\\[Nn][Aa][Nn][Oo][Dd][Uu][Mm][Pp]\.[Ee][Xx][Ee]|\\[Aa][Vv][Dd][Uu][Mm][Pp]\.[Ee][Xx][Ee])/) OR (data_win_system_eventID:"1" AND (data_win_eventdata_commandLine:/.*[Cc][Oo][Mm][Ss][Vv][Cc][Ss]\.[Dd][Ll][Ll].*/ OR data_win_eventdata_commandLine:/.*[Mm][Ii][Nn][Ii][Dd][Uu][Mm][Pp].*/ OR data_win_eventdata_commandLine:/.*[Dd][Uu][Mm][Pp][Ee][Rr][Tt].*/ OR data_win_eventdata_commandLine:/.*[Nn][Aa][Nn][Oo][Dd][Uu][Mm][Pp].*/ OR data_win_eventdata_commandLine:/.*[Ll][Ss][Aa][Ss][Ss].*/ OR data_win_eventdata_commandLine:/.*[Ss][Ee][Kk][Uu][Rr][Ll][Ss][Aa].*/ OR data_win_eventdata_commandLine:/.*[Nn][Tt][Dd][Ss]\.[Dd][Ii][Tt].*/ OR data_win_eventdata_commandLine:/.*[Nn][Tt][Dd][Ss][Uu][Tt][Ii][Ll].*/)) OR (data_win_system_eventID:"10" AND data_win_eventdata_targetImage:/.*(\\[Ll][Ss][Aa][Ss][Ss]\.[Ee][Xx][Ee])/))'
-      pivot_on: [host]
-      window: 1h
-    - name: "This account's logon activity across hosts"
-      query: '(data_win_system_eventID:"4624" OR data_win_system_eventID:"4625")'
-      pivot_on: [user]
-      window: 6h
-    - name: "Account / group / privilege changes involving this account"
-      query: '(data_win_system_eventID:"4720" OR data_win_system_eventID:"4722" OR data_win_system_eventID:"4724" OR data_win_system_eventID:"4728" OR data_win_system_eventID:"4732" OR data_win_system_eventID:"4756" OR data_win_system_eventID:"4672")'
-      pivot_on: [user]
-      window: 6h
+  # Behaviour-targeted hunts the engine runs around the alert (not a sweep).
+  - name: Token impersonation / runas-netonly / credential tool execution
+    query: data_win_system_eventID:"1" AND (data_win_eventdata_commandLine:/.*[Nn][Ee][Tt][Oo][Nn][Ll][Yy].*/ OR data_win_eventdata_commandLine:/.*[Ss][Ee][Kk][Uu][Rr][Ll][Ss][Aa].*/ OR data_win_eventdata_commandLine:/.*[Tt][Oo][Kk][Ee][Nn]::.*/ OR data_win_eventdata_commandLine:/.*[Ii][Mm][Pp][Ee][Rr][Ss][Oo][Nn][Aa][Tt].*/ OR data_win_eventdata_image:/.*\\([Rr][Uu][Nn][Aa][Ss]|[Mm][Ii][Mm][Ii][Kk][Aa][Tt][Zz]|[Rr][Uu][Bb][Ee][Uu][Ss]|[Ii][Nn][Cc][Oo][Gg][Nn][Ii][Tt][Oo]|[Ss][Hh][Aa][Rr][Pp][Ii][Mm][Pp][Ee][Rr][Ss][Oo][Nn][Aa][Tt][Ii][Oo][Nn])\.[Ee][Xx][Ee]/)
+    pivot_on:
+    - host
+    window: 1h
+  - name: LSASS access via seclogon or token-theft access masks
+    query: data_win_system_eventID:"10" AND data_win_eventdata_targetImage:/.*[Ll][Ss][Aa][Ss][Ss]\.[Ee][Xx][Ee]/ AND (data_win_eventdata_callTrace:/.*[Ss][Ee][Cc][Ll][Oo][Gg][Oo][Nn].*/ OR data_win_eventdata_grantedAccess:"0x1010" OR data_win_eventdata_grantedAccess:"0x1410" OR data_win_eventdata_grantedAccess:"0x1fffff" OR data_win_eventdata_grantedAccess:"0x143a")
+    pivot_on:
+    - host
+    window: 1h
+  - name: Explicit-credential logons (4648) by this account
+    query: data_win_system_eventID:"4648"
+    pivot_on:
+    - user
+    window: 6h
+  - name: Outbound SMB/WinRM/RPC connections and remote service creation after impersonation
+    query: ((data_win_system_eventID:"3" AND (data_win_eventdata_destinationPort:"445" OR data_win_eventdata_destinationPort:"5985" OR data_win_eventdata_destinationPort:"5986" OR data_win_eventdata_destinationPort:"135")) OR data_win_system_eventID:"7045" OR data_win_system_eventID:"4697")
+    pivot_on:
+    - host
+    window: 2h
+  - name: Post-impersonation privilege and domain discovery
+    query: data_win_system_eventID:"1" AND (data_win_eventdata_commandLine:/.*[Ww][Hh][Oo][Aa][Mm][Ii].*\/(priv|all|groups).*/ OR data_win_eventdata_commandLine:/.*[Nn][Ee][Tt]1?\s+(group|localgroup|user).*/ OR data_win_eventdata_commandLine:/.*[Nn][Ll][Tt][Ee][Ss][Tt].*/ OR data_win_eventdata_commandLine:/.*[Dd][Cc][Ll][Ii][Ss][Tt].*/)
+    pivot_on:
+    - host
+    window: 1h

@@ -147,44 +147,58 @@ graylog:
   query: data_win_system_eventID:"11" AND data_win_eventdata_image:/.*\\[Mm][Ss][Ii][Ee][Xx][Ee][Cc]\.[Ee][Xx][Ee]/ AND data_win_eventdata_targetFilename:/[Cc]:\\[Pp][Rr][Oo][Gg][Rr][Aa][Mm] [Ff][Ii][Ll][Ee][Ss] \([Xx]86\)\\[Mm][Ii][Cc][Rr][Oo][Ss][Oo][Ff][Tt]\\[Ee][Dd][Gg][Ee]\\[Aa][Pp][Pp][Ll][Ii][Cc][Aa][Tt][Ii][Oo][Nn].*/ AND data_win_eventdata_targetFilename:/.*\\[Ee][Ll][Ee][Vv][Aa][Tt][Ii][Oo][Nn]_[Ss][Ee][Rr][Vv][Ii][Cc][Ee]\.[Ee][Xx][Ee]/
 
 correlation:
-  # Authored by the correlation engine for review. Related CoPilot Searches to run
-  # around an alert from this rule, scoped to the same host/user/IP within the window.
+  # Authored per-rule (behaviour-researched) for the correlation engine. Related CoPilot
+  # Searches + telemetry pivots to run around an alert, scoped to its host/user/ip/domain.
   related_rules:
-    - id: ec570e53-4c76-45a9-804d-dc3f355ff7a7
-      name: "7Zip Compressing Dump Files"
-      reason: "next kill-chain tactic: Collection"
-    - id: 0a1255c5-d732-4b62-ac02-b5152d34fb83
-      name: "ADExplorer Writing Complete AD Snapshot Into .dat File"
-      reason: "next kill-chain tactic: Discovery"
-    - id: 1ea13e8c-03ea-409b-877d-ce5c3d2c1cb3
-      name: "ADFS Database Named Pipe Connection By Uncommon Tool"
-      reason: "next kill-chain tactic: Collection"
-    - id: 75bf09fa-1dd7-4d18-9af9-dd9e492562eb
-      name: "ADSI-Cache File Creation By Uncommon Tool"
-      reason: "next kill-chain tactic: Command and Control"
-    - id: 33a2d1dd-f3b0-40bd-8baf-7974468927cc
-      name: "APT PRIVATELOG Image Load Pattern"
-      reason: "next kill-chain tactic: Privilege Escalation"
-    - id: 03e2746e-2b31-42f1-ab7a-eb39365b2422
-      name: "APT31 Judgement Panda Activity"
-      reason: "next kill-chain tactic: Credential Access"
-  window: 1h
+  - id: af8bbce4-f751-46b4-8d91-82a33a736f61
+    name: Potential CVE-2021-41379 Exploitation Attempt
+    reason: 'Same CVE: process-creation view of the InstallerFileTakeOver PoC (msiexec rollback abuse), confirming the file drop was exploit execution.'
+  - id: 7dbb86de-a0cc-494c-8aa8-b2996c9ef3c8
+    name: LPE InstallerFileTakeOver PoC CVE-2021-41379
+    reason: Same exploit seen in the Application event log (MsiInstaller errors from the PoC), an independent confirmation on the host.
+  - id: 4a2a2c3e-209f-4d01-b513-4155a540b469
+    name: Suspicious MsiExec Embedding Parent
+    reason: The exploit drives the Windows Installer service via msiexec; abnormal msiexec parentage accompanies the elevation_service.exe overwrite.
+  - id: e22a6eb2-f8a5-44b5-8b44-a2dbd47b1144
+    name: Potential MsiExec Masquerading
+    reason: PoC binaries may run as a renamed or relocated msiexec, indicating the same exploit staging.
+  - id: cd951fdc-4b2f-47f5-ba99-a33bf61e3770
+    name: Always Install Elevated Windows Installer
+    reason: Alternate Windows Installer privilege-escalation path; co-occurs when an attacker probes installer-based LPE.
+  - id: 7c0dcd3d-acf8-4f71-9570-f448b0034f94
+    name: PsExec Service Child Process Execution as LOCAL SYSTEM
+    reason: Once the replaced Edge elevation service runs as SYSTEM, SYSTEM child processes are the likely post-exploitation step.
+  - id: 97a80ec7-0e2f-4d05-9ef4-65760e634f6b
+    name: Security Privileges Enumeration Via Whoami.EXE
+    reason: Attackers check privileges (whoami /priv) before the exploit and to verify SYSTEM afterwards.
+  - id: 8943b567-f14d-4ee8-a0bb-2121d4ce3184
+    name: Dump LSASS via comsvcs DLL
+    reason: With SYSTEM obtained, LSASS credential dumping is the typical follow-on from local privilege escalation.
+  window: 2h
   enrichment_searches:
-  # Rule-specific telemetry pivots the engine runs around an alert from this rule,
-  # scoped to the alert's host/user/IP within the window (behaviour-targeted, not a sweep).
-    - name: "Other executions of this tool-set on this host (any arguments)"
-      query: 'data_win_system_eventID:"1" AND data_win_eventdata_image:/.*(\\[Mm][Ss][Ii][Ee][Xx][Ee][Cc]\.[Ee][Xx][Ee])/'
-      pivot_on: [host]
-      window: 2h
-    - name: "Memory/credential-dump creation & LSASS access on this host"
-      query: '((data_win_system_eventID:"1" AND data_win_eventdata_image:/.*(\\[Pp][Rr][Oo][Cc][Dd][Uu][Mm][Pp]\.[Ee][Xx][Ee]|\\[Pp][Rr][Oo][Cc][Dd][Uu][Mm][Pp]64\.[Ee][Xx][Ee]|\\[Ss][Qq][Ll][Dd][Uu][Mm][Pp][Ee][Rr]\.[Ee][Xx][Ee]|\\[Cc][Rr][Ee][Aa][Tt][Ee][Dd][Uu][Mm][Pp]\.[Ee][Xx][Ee]|\\[Rr][Dd][Rr][Ll][Ee][Aa][Kk][Dd][Ii][Aa][Gg]\.[Ee][Xx][Ee]|\\[Dd][Uu][Mm][Pp][Ee][Rr][Tt]\.[Ee][Xx][Ee]|\\[Nn][Aa][Nn][Oo][Dd][Uu][Mm][Pp]\.[Ee][Xx][Ee]|\\[Aa][Vv][Dd][Uu][Mm][Pp]\.[Ee][Xx][Ee])/) OR (data_win_system_eventID:"1" AND (data_win_eventdata_commandLine:/.*[Cc][Oo][Mm][Ss][Vv][Cc][Ss]\.[Dd][Ll][Ll].*/ OR data_win_eventdata_commandLine:/.*[Mm][Ii][Nn][Ii][Dd][Uu][Mm][Pp].*/ OR data_win_eventdata_commandLine:/.*[Dd][Uu][Mm][Pp][Ee][Rr][Tt].*/ OR data_win_eventdata_commandLine:/.*[Nn][Aa][Nn][Oo][Dd][Uu][Mm][Pp].*/ OR data_win_eventdata_commandLine:/.*[Ll][Ss][Aa][Ss][Ss].*/ OR data_win_eventdata_commandLine:/.*[Ss][Ee][Kk][Uu][Rr][Ll][Ss][Aa].*/ OR data_win_eventdata_commandLine:/.*[Nn][Tt][Dd][Ss]\.[Dd][Ii][Tt].*/ OR data_win_eventdata_commandLine:/.*[Nn][Tt][Dd][Ss][Uu][Tt][Ii][Ll].*/)) OR (data_win_system_eventID:"10" AND data_win_eventdata_targetImage:/.*(\\[Ll][Ss][Aa][Ss][Ss]\.[Ee][Xx][Ee])/))'
-      pivot_on: [host]
-      window: 1h
-    - name: "Execution of programs from user-writable paths on this host"
-      query: 'data_win_system_eventID:"1" AND (data_win_eventdata_image:/.*\\[Uu][Ss][Ee][Rr][Ss]\\.*/ OR data_win_eventdata_image:/.*\\[Pp][Rr][Oo][Gg][Rr][Aa][Mm][Dd][Aa][Tt][Aa]\\.*/ OR data_win_eventdata_image:/.*\\[Ww][Ii][Nn][Dd][Oo][Ww][Ss]\\[Tt][Ee][Mm][Pp]\\.*/ OR data_win_eventdata_image:/.*\\[Aa][Pp][Pp][Dd][Aa][Tt][Aa]\\.*/ OR data_win_eventdata_image:/.*\\[Pp][Uu][Bb][Ll][Ii][Cc]\\.*/ OR data_win_eventdata_image:/.*\\\$[Rr][Ee][Cc][Yy][Cc][Ll][Ee].*/)'
-      pivot_on: [host]
-      window: 1h
-    - name: "Autostart persistence written on this host"
-      query: '(data_win_system_eventID:"12" OR data_win_system_eventID:"13") AND (data_win_eventdata_targetObject:/.*[Cc][Uu][Rr][Rr][Ee][Nn][Tt][Vv][Ee][Rr][Ss][Ii][Oo][Nn]\\[Rr][Uu][Nn].*/ OR data_win_eventdata_targetObject:/.*[Cc][Uu][Rr][Rr][Ee][Nn][Tt][Vv][Ee][Rr][Ss][Ii][Oo][Nn]\\[Rr][Uu][Nn][Oo][Nn][Cc][Ee].*/ OR data_win_eventdata_targetObject:/.*[Cc][Uu][Rr][Rr][Ee][Nn][Tt][Cc][Oo][Nn][Tt][Rr][Oo][Ll][Ss][Ee][Tt]\\[Ss][Ee][Rr][Vv][Ii][Cc][Ee][Ss]\\.*/ OR data_win_eventdata_targetObject:/.*[Ii][Mm][Aa][Gg][Ee] [Ff][Ii][Ll][Ee] [Ee][Xx][Ee][Cc][Uu][Tt][Ii][Oo][Nn] [Oo][Pp][Tt][Ii][Oo][Nn][Ss]\\.*/ OR data_win_eventdata_targetObject:/.*[Ww][Ii][Nn][Ll][Oo][Gg][Oo][Nn]\\[Ss][Hh][Ee][Ll][Ll].*/ OR data_win_eventdata_targetObject:/.*[Ww][Ii][Nn][Ll][Oo][Gg][Oo][Nn]\\[Uu][Ss][Ee][Rr][Ii][Nn][Ii][Tt].*/ OR data_win_eventdata_targetObject:/.*[Cc][Uu][Rr][Rr][Ee][Nn][Tt][Vv][Ee][Rr][Ss][Ii][Oo][Nn]\\[Ee][Xx][Pp][Ll][Oo][Rr][Ee][Rr]\\[Rr][Uu][Nn].*/ OR data_win_eventdata_targetObject:/.*[Pp][Oo][Ll][Ii][Cc][Ii][Ee][Ss]\\[Ee][Xx][Pp][Ll][Oo][Rr][Ee][Rr]\\[Rr][Uu][Nn].*/ OR data_win_eventdata_targetObject:/.*[Cc][Uu][Rr][Rr][Ee][Nn][Tt][Vv][Ee][Rr][Ss][Ii][Oo][Nn]\\[Ww][Ii][Nn][Dd][Oo][Ww][Ss]\\[Ll][Oo][Aa][Dd].*/)'
-      pivot_on: [host]
-      window: 2h
+  # Behaviour-targeted hunts the engine runs around the alert (not a sweep).
+  - name: Edge directory file writes by non-updater processes
+    query: data_win_system_eventID:"11" AND data_win_eventdata_targetFilename:/.*[Mm][Ii][Cc][Rr][Oo][Ss][Oo][Ff][Tt]\\[Ee][Dd][Gg][Ee]\\[Aa][Pp][Pp][Ll][Ii][Cc][Aa][Tt][Ii][Oo][Nn].*/ AND NOT data_win_eventdata_image:/.*[Mm][Ss][Ee][Dd][Gg][Ee][Uu][Pp][Dd][Aa][Tt][Ee].*/
+    pivot_on:
+    - host
+    window: 2h
+  - name: msiexec executions and children with command lines
+    query: data_win_system_eventID:"1" AND (data_win_eventdata_image:/.*\\[Mm][Ss][Ii][Ee][Xx][Ee][Cc]\.[Ee][Xx][Ee]/ OR data_win_eventdata_parentImage:/.*\\[Mm][Ss][Ii][Ee][Xx][Ee][Cc]\.[Ee][Xx][Ee]/)
+    pivot_on:
+    - host
+    window: 2h
+  - name: SYSTEM or elevation_service children spawning shells/recon
+    query: data_win_system_eventID:"1" AND (data_win_eventdata_parentImage:/.*[Ee][Ll][Ee][Vv][Aa][Tt][Ii][Oo][Nn]_[Ss][Ee][Rr][Vv][Ii][Cc][Ee]\.[Ee][Xx][Ee]/ OR (data_win_eventdata_user:/.*[Ss][Yy][Ss][Tt][Ee][Mm]/ AND data_win_eventdata_image:/.*\\([Cc][Mm][Dd]|[Pp][Oo][Ww][Ee][Rr][Ss][Hh][Ee][Ll][Ll]|[Ww][Hh][Oo][Aa][Mm][Ii]|[Nn][Ee][Tt]|[Nn][Ee][Tt]1)\.[Ee][Xx][Ee]/))
+    pivot_on:
+    - host
+    window: 1h
+  - name: Executables/installers dropped in user-writable paths (PoC staging)
+    query: data_win_system_eventID:"11" AND data_win_eventdata_targetFilename:/.*(\\[Uu][Ss][Ee][Rr][Ss]\\|\\[Tt][Ee][Mm][Pp]\\|\\[Pp][Rr][Oo][Gg][Rr][Aa][Mm][Dd][Aa][Tt][Aa]\\).*\.([Ee][Xx][Ee]|[Dd][Ll][Ll]|[Mm][Ss][Ii]|[Rr][Bb][Ss])/
+    pivot_on:
+    - host
+    window: 2h
+  - name: Service creation or autorun persistence after elevation
+    query: (data_win_system_eventID:"13" AND data_win_eventdata_targetObject:/.*([Cc][Uu][Rr][Rr][Ee][Nn][Tt][Cc][Oo][Nn][Tt][Rr][Oo][Ll][Ss][Ee][Tt]\\[Ss][Ee][Rr][Vv][Ii][Cc][Ee][Ss]\\|[Cc][Uu][Rr][Rr][Ee][Nn][Tt][Vv][Ee][Rr][Ss][Ii][Oo][Nn]\\[Rr][Uu][Nn]).*/) OR (data_win_system_eventID:"1" AND data_win_eventdata_commandLine:/.*(sc(\.exe)? +create|schtasks.*\/create|net +(user|localgroup).*\/add).*/)
+    pivot_on:
+    - host
+    window: 4h

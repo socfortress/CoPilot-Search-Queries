@@ -158,41 +158,58 @@ graylog:
   query: (data_win_system_eventID:"4765" OR data_win_system_eventID:"4766" OR (data_win_system_eventID:"4738" AND _exists_:data_win_eventdata_sidHistory AND NOT (data_win_eventdata_sidHistory:"-" OR data_win_eventdata_sidHistory:"%%1793") AND NOT (NOT _exists_:data_win_eventdata_sidHistory)))
 
 correlation:
-  # Authored by the correlation engine for review. Related CoPilot Searches to run
-  # around an alert from this rule, scoped to the same host/user/IP within the window.
+  # Authored per-rule (behaviour-researched) for the correlation engine. Related CoPilot
+  # Searches + telemetry pivots to run around an alert, scoped to its host/user/ip/domain.
   related_rules:
-    - id: 0255a820-e564-4e40-af2b-6ac61160335c
-      name: "A New Trust Was Created To A Domain"
-      reason: "next kill-chain tactic: Privilege Escalation"
-    - id: 35ba1d85-724d-42a3-889f-2e2362bcaf23
-      name: "AD Privileged Users or Groups Reconnaissance"
-      reason: "next kill-chain tactic: Discovery"
-    - id: 9eb99343-d336-4020-a3cd-67f3819e68ee
-      name: "Account Tampering - Suspicious Failed Logon Reasons"
-      reason: "next kill-chain tactic: Privilege Escalation"
-    - id: 17d619c1-e020-4347-957e-1d1207455c93
-      name: "Active Directory Replication from Non Machine Account"
-      reason: "next kill-chain tactic: Credential Access"
-    - id: 300bac00-e041-4ee2-9c36-e262656a6ecc
-      name: "Active Directory User Backdoors"
-      reason: "next kill-chain tactic: Privilege Escalation"
-  window: 1h
+  - id: 611eab06-a145-4dfa-a295-3ccc5c20f59a
+    name: Mimikatz DC Sync
+    reason: SID history injection (mimikatz sid::patch / lsadump::dcshadow) is usually staged by an actor already holding replication rights; DCSync is the preceding step that yielded the krbtgt/admin hashes.
+  - id: 17d619c1-e020-4347-957e-1d1207455c93
+    name: Active Directory Replication from Non Machine Account
+    reason: Directory replication by a user account precedes SID-history abuse (credential harvest) or follows it using the newly privileged identity.
+  - id: 2c99737c-585d-4431-b61a-c911d86ff32f
+    name: Powerview Add-DomainObjectAcl DCSync AD Extend Right
+    reason: Granting DS-Replication rights is an alternate AD persistence path used alongside SID history to keep domain-admin-equivalent access.
+  - id: 300bac00-e041-4ee2-9c36-e262656a6ecc
+    name: Active Directory User Backdoors
+    reason: SID history is one of several AD user-object backdoors (altered sidHistory/msDS-AllowedToDelegateTo/SPN); these co-occur when an attacker plants persistence on accounts.
+  - id: 35ba1d85-724d-42a3-889f-2e2362bcaf23
+    name: AD Privileged Users or Groups Reconnaissance
+    reason: Enumeration of Domain/Enterprise Admins SIDs precedes choosing which privileged SID to inject into sidHistory.
+  - id: a642964e-bead-4bed-8910-1bb4d63e3b4d
+    name: HackTool - Mimikatz Execution
+    reason: sid::add / sid::patch and misc::skeleton are Mimikatz modules performing the 4738 sidHistory write on a DC.
+  - id: 10fb649c-3600-4d37-b1e6-56ea90bb7e09
+    name: User Added To Highly Privileged Group
+    reason: Direct group-membership escalation commonly accompanies or substitutes for the sidHistory grant on the same account.
+  - id: 0255a820-e564-4e40-af2b-6ac61160335c
+    name: A New Trust Was Created To A Domain
+    reason: Cross-domain/forest SID history abuse often rides on a newly created trust with SID filtering disabled.
+  window: 6h
   enrichment_searches:
-  # Rule-specific telemetry pivots the engine runs around an alert from this rule,
-  # scoped to the alert's host/user/IP within the window (behaviour-targeted, not a sweep).
-    - name: "UAC-bypass / token-manipulation binaries on this host"
-      query: 'data_win_system_eventID:"1" AND (data_win_eventdata_image:/.*(\\[Ff][Oo][Dd][Hh][Ee][Ll][Pp][Ee][Rr]\.[Ee][Xx][Ee]|\\[Ee][Vv][Ee][Nn][Tt][Vv][Ww][Rr]\.[Ee][Xx][Ee]|\\[Ss][Dd][Cc][Ll][Tt]\.[Ee][Xx][Ee]|\\[Cc][Oo][Mm][Pp][Uu][Tt][Ee][Rr][Dd][Ee][Ff][Aa][Uu][Ll][Tt][Ss]\.[Ee][Xx][Ee]|\\[Ss][Ll][Uu][Ii]\.[Ee][Xx][Ee]|\\[Ww][Ss][Rr][Ee][Ss][Ee][Tt]\.[Ee][Xx][Ee])/ OR data_win_eventdata_parentImage:/.*(\\[Ff][Oo][Dd][Hh][Ee][Ll][Pp][Ee][Rr]\.[Ee][Xx][Ee]|\\[Ee][Vv][Ee][Nn][Tt][Vv][Ww][Rr]\.[Ee][Xx][Ee]|\\[Ss][Dd][Cc][Ll][Tt]\.[Ee][Xx][Ee]|\\[Cc][Oo][Mm][Pp][Uu][Tt][Ee][Rr][Dd][Ee][Ff][Aa][Uu][Ll][Tt][Ss]\.[Ee][Xx][Ee]|\\[Ss][Ll][Uu][Ii]\.[Ee][Xx][Ee]|\\[Ww][Ss][Rr][Ee][Ss][Ee][Tt]\.[Ee][Xx][Ee])/)'
-      pivot_on: [host]
-      window: 2h
-    - name: "Memory/credential-dump creation & LSASS access on this host"
-      query: '((data_win_system_eventID:"1" AND data_win_eventdata_image:/.*(\\[Pp][Rr][Oo][Cc][Dd][Uu][Mm][Pp]\.[Ee][Xx][Ee]|\\[Pp][Rr][Oo][Cc][Dd][Uu][Mm][Pp]64\.[Ee][Xx][Ee]|\\[Ss][Qq][Ll][Dd][Uu][Mm][Pp][Ee][Rr]\.[Ee][Xx][Ee]|\\[Cc][Rr][Ee][Aa][Tt][Ee][Dd][Uu][Mm][Pp]\.[Ee][Xx][Ee]|\\[Rr][Dd][Rr][Ll][Ee][Aa][Kk][Dd][Ii][Aa][Gg]\.[Ee][Xx][Ee]|\\[Dd][Uu][Mm][Pp][Ee][Rr][Tt]\.[Ee][Xx][Ee]|\\[Nn][Aa][Nn][Oo][Dd][Uu][Mm][Pp]\.[Ee][Xx][Ee]|\\[Aa][Vv][Dd][Uu][Mm][Pp]\.[Ee][Xx][Ee])/) OR (data_win_system_eventID:"1" AND (data_win_eventdata_commandLine:/.*[Cc][Oo][Mm][Ss][Vv][Cc][Ss]\.[Dd][Ll][Ll].*/ OR data_win_eventdata_commandLine:/.*[Mm][Ii][Nn][Ii][Dd][Uu][Mm][Pp].*/ OR data_win_eventdata_commandLine:/.*[Dd][Uu][Mm][Pp][Ee][Rr][Tt].*/ OR data_win_eventdata_commandLine:/.*[Nn][Aa][Nn][Oo][Dd][Uu][Mm][Pp].*/ OR data_win_eventdata_commandLine:/.*[Ll][Ss][Aa][Ss][Ss].*/ OR data_win_eventdata_commandLine:/.*[Ss][Ee][Kk][Uu][Rr][Ll][Ss][Aa].*/ OR data_win_eventdata_commandLine:/.*[Nn][Tt][Dd][Ss]\.[Dd][Ii][Tt].*/ OR data_win_eventdata_commandLine:/.*[Nn][Tt][Dd][Ss][Uu][Tt][Ii][Ll].*/)) OR (data_win_system_eventID:"10" AND data_win_eventdata_targetImage:/.*(\\[Ll][Ss][Aa][Ss][Ss]\.[Ee][Xx][Ee])/))'
-      pivot_on: [host]
-      window: 1h
-    - name: "This account's logon activity across hosts"
-      query: '(data_win_system_eventID:"4624" OR data_win_system_eventID:"4625")'
-      pivot_on: [user]
-      window: 6h
-    - name: "Account / group / privilege changes involving this account"
-      query: '(data_win_system_eventID:"4720" OR data_win_system_eventID:"4722" OR data_win_system_eventID:"4724" OR data_win_system_eventID:"4728" OR data_win_system_eventID:"4732" OR data_win_system_eventID:"4756" OR data_win_system_eventID:"4672")'
-      pivot_on: [user]
-      window: 6h
+  # Behaviour-targeted hunts the engine runs around the alert (not a sweep).
+  - name: Mimikatz SID/DCShadow/DCSync module use on this host
+    query: data_win_system_eventID:"1" AND (data_win_eventdata_commandLine:*sid\:\:patch* OR data_win_eventdata_commandLine:*sid\:\:add* OR data_win_eventdata_commandLine:*lsadump\:\:dcsync* OR data_win_eventdata_commandLine:*lsadump\:\:dcshadow* OR data_win_eventdata_commandLine:*misc\:\:skeleton* OR data_win_eventdata_commandLine:*privilege\:\:debug* OR data_win_eventdata_commandLine:/.*[Mm][Ii][Mm][Ii][Kk][Aa][Tt][Zz].*/)
+    pivot_on:
+    - host
+    window: 2h
+  - name: PowerShell AD cmdlets writing SIDHistory
+    query: data_win_system_eventID:"4104" AND (data_win_eventdata_scriptBlockText:*SIDHistory* OR data_win_eventdata_scriptBlockText:*Add-ADDBSidHistory* OR data_win_eventdata_scriptBlockText:*DsAddSidHistory* OR data_win_eventdata_scriptBlockText:*Set-ADUser* OR data_win_eventdata_scriptBlockText:*Set-ADObject*)
+    pivot_on:
+    - host
+    window: 2h
+  - name: Account, group and privileged-group changes by this actor
+    query: (data_win_system_eventID:"4720" OR data_win_system_eventID:"4728" OR data_win_system_eventID:"4732" OR data_win_system_eventID:"4756" OR data_win_system_eventID:"4735" OR data_win_system_eventID:"4738" OR data_win_system_eventID:"4742" OR data_win_system_eventID:"4724")
+    pivot_on:
+    - user
+    window: 6h
+  - name: Special-privilege and explicit-credential logons by this actor
+    query: (data_win_system_eventID:"4672" OR data_win_system_eventID:"4648" OR (data_win_system_eventID:"4624" AND (data_win_eventdata_logonType:"3" OR data_win_eventdata_logonType:"9" OR data_win_eventdata_logonType:"10")))
+    pivot_on:
+    - user
+    window: 6h
+  - name: Directory replication and Kerberos ticket requests following SID history change
+    query: (data_win_system_eventID:"4662" AND (data_win_eventdata_properties:*1131f6aa* OR data_win_eventdata_properties:*1131f6ad* OR data_win_eventdata_properties:*89e95b76*)) OR data_win_system_eventID:"4769" OR data_win_system_eventID:"4768"
+    pivot_on:
+    - host
+    window: 6h

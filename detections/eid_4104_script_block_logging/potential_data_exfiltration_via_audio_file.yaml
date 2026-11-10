@@ -171,19 +171,55 @@ graylog:
   query: data_win_system_eventID:"4104" AND data_win_eventdata_scriptBlockText:/.*\[[Ss][Yy][Ss][Tt][Ee][Mm]\.[Mm][Aa][Tt][Hh]\]::.*/ AND data_win_eventdata_scriptBlockText:/.*\[[Ii][Oo]\.[Ff][Ii][Ll][Ee][Mm][Oo][Dd][Ee]\]::.*/ AND data_win_eventdata_scriptBlockText:/.*[Bb][Ii][Nn][Aa][Rr][Yy][Ww][Rr][Ii][Tt][Ee][Rr].*/ AND data_win_eventdata_scriptBlockText:/.*0[Xx]52.*/ AND data_win_eventdata_scriptBlockText:/.*0[Xx]49.*/ AND data_win_eventdata_scriptBlockText:/.*0[Xx]46.*/ AND data_win_eventdata_scriptBlockText:/.*0[Xx]57.*/ AND data_win_eventdata_scriptBlockText:/.*0[Xx]41.*/ AND data_win_eventdata_scriptBlockText:/.*0[Xx]56.*/ AND data_win_eventdata_scriptBlockText:/.*0[Xx]45.*/ AND data_win_eventdata_scriptBlockText:/.*0[Xx][Aa][Cc].*/
 
 correlation:
-  # Authored by the correlation engine for review.
+  # Authored per-rule (behaviour-researched) for the correlation engine. Related CoPilot
+  # Searches + telemetry pivots to run around an alert, scoped to its host/user/ip/domain.
+  related_rules:
+  - id: Windows_Archive_Collected_Data_via_Powershell
+    name: Windows Archive Collected Data via Powershell
+    reason: Data is usually collected and archived by PowerShell before being encoded into a WAV (bin2wav); this is the staging precursor on the same host.
+  - id: 06ade821-f6fa-40d0-80af-15bc1d45b3ba
+    name: Windows Exfiltration Over C2 Via Invoke RestMethod
+    reason: After the data is disguised as audio, the .wav is typically sent out over HTTP(S) from PowerShell; this is the direct follow-on transfer.
+  - id: 59e8bf41-7472-412a-90d3-00f3afa452e9
+    name: Windows Exfiltration Over C2 Via Powershell UploadString
+    reason: Alternative PowerShell WebClient upload channel for shipping the encoded WAV payload out.
+  - id: e328cc73-f92a-42fb-b3fa-7c2cffda981a
+    name: Curl File Upload To File Sharing Websites
+    reason: The generated audio file can be uploaded with curl to a file-sharing site, the non-PowerShell exfil path for the same artifact.
+  - id: 7d1aaf3d-4304-425c-b7c3-162055e0b3ab
+    name: Potential Data Exfiltration Activity Via CommandLine Tools
+    reason: Command-line tools used to move the staged WAV off-host are the likely next step after DLP-evading encoding.
+  - id: 9fbf5927-5261-4284-a71d-f681029ea574
+    name: Compress Data and Lock With Password for Exfiltration With 7-ZIP
+    reason: Operators often archive and password-protect collected data before or alongside the WAV encoding; same exfil-prep chain.
+  - id: d59d7842-9a21-4bc6-ba98-64bfe0091355
+    name: Powershell DNSExfiltration
+    reason: Co-occurring PowerShell exfil channel; an actor with a DLP-evasion encoder may fall back to DNS exfiltration of the same data.
+  window: 2h
   enrichment_searches:
-  # Rule-specific telemetry pivots the engine runs around an alert from this rule,
-  # scoped to the alert's host/user/IP within the window (behaviour-targeted, not a sweep).
-    - name: "Download / AMSI-bypass / encoded script blocks on this host"
-      query: 'data_win_system_eventID:"4104" AND (data_win_eventdata_scriptBlockText:/.*[Dd][Oo][Ww][Nn][Ll][Oo][Aa][Dd][Ss][Tt][Rr][Ii][Nn][Gg].*/ OR data_win_eventdata_scriptBlockText:/.*[Dd][Oo][Ww][Nn][Ll][Oo][Aa][Dd][Ff][Ii][Ll][Ee].*/ OR data_win_eventdata_scriptBlockText:/.*[Ii][Nn][Vv][Oo][Kk][Ee]-[Ww][Ee][Bb][Rr][Ee][Qq][Uu][Ee][Ss][Tt].*/ OR data_win_eventdata_scriptBlockText:/.*[Nn][Ee][Tt]\.[Ww][Ee][Bb][Cc][Ll][Ii][Ee][Nn][Tt].*/ OR data_win_eventdata_scriptBlockText:/.*[Ff][Rr][Oo][Mm][Bb][Aa][Ss][Ee]64[Ss][Tt][Rr][Ii][Nn][Gg].*/ OR data_win_eventdata_scriptBlockText:/.*[Ii][Ee][Xx].*/ OR data_win_eventdata_scriptBlockText:/.*[Ii][Nn][Vv][Oo][Kk][Ee]-[Ee][Xx][Pp][Rr][Ee][Ss][Ss][Ii][Oo][Nn].*/ OR data_win_eventdata_scriptBlockText:/.*[Ss][Tt][Aa][Rr][Tt]-[Bb][Ii][Tt][Ss][Tt][Rr][Aa][Nn][Ss][Ff][Ee][Rr].*/ OR data_win_eventdata_scriptBlockText:/.*[Aa][Mm][Ss][Ii][Uu][Tt][Ii][Ll][Ss].*/ OR data_win_eventdata_scriptBlockText:/.*-[Ee][Nn][Cc].*/ OR data_win_eventdata_scriptBlockText:/.*-[Ee][Nn][Cc][Oo][Dd][Ee][Dd][Cc][Oo][Mm][Mm][Aa][Nn][Dd].*/ OR data_win_eventdata_scriptBlockText:/.*[Rr][Ee][Ff][Ll][Ee][Cc][Tt][Ii][Oo][Nn]\.[Aa][Ss][Ss][Ee][Mm][Bb][Ll][Yy].*/)'
-      pivot_on: [host]
-      window: 1h
-    - name: "Follow-on LOLBin / signed-binary-proxy execution on this host"
-      query: 'data_win_system_eventID:"1" AND data_win_eventdata_image:/.*(\\[Rr][Uu][Nn][Dd][Ll][Ll]32\.[Ee][Xx][Ee]|\\[Rr][Ee][Gg][Ss][Vv][Rr]32\.[Ee][Xx][Ee]|\\[Mm][Ss][Hh][Tt][Aa]\.[Ee][Xx][Ee]|\\[Ii][Nn][Ss][Tt][Aa][Ll][Ll][Uu][Tt][Ii][Ll]\.[Ee][Xx][Ee]|\\[Rr][Ee][Gg][Aa][Ss][Mm]\.[Ee][Xx][Ee]|\\[Rr][Ee][Gg][Ss][Vv][Cc][Ss]\.[Ee][Xx][Ee]|\\[Mm][Ss][Bb][Uu][Ii][Ll][Dd]\.[Ee][Xx][Ee]|\\[Cc][Ee][Rr][Tt][Uu][Tt][Ii][Ll]\.[Ee][Xx][Ee]|\\[Bb][Ii][Tt][Ss][Aa][Dd][Mm][Ii][Nn]\.[Ee][Xx][Ee]|\\[Ww][Mm][Ii][Cc]\.[Ee][Xx][Ee]|\\[Cc][Mm][Ss][Tt][Pp]\.[Ee][Xx][Ee]|\\[Oo][Dd][Bb][Cc][Cc][Oo][Nn][Ff]\.[Ee][Xx][Ee]|\\[Ff][Oo][Rr][Ff][Ii][Ll][Ee][Ss]\.[Ee][Xx][Ee]|\\[Pp][Cc][Aa][Ll][Uu][Aa]\.[Ee][Xx][Ee]|\\[Mm][Aa][Vv][Ii][Nn][Jj][Ee][Cc][Tt]\.[Ee][Xx][Ee]|\\[Ss][Cc][Rr][Ii][Pp][Tt][Rr][Uu][Nn][Nn][Ee][Rr]\.[Ee][Xx][Ee])/'
-      pivot_on: [host]
-      window: 1h
-    - name: "Archive / staging & outbound-transfer tooling on this host"
-      query: '(((data_win_system_eventID:"1" AND data_win_eventdata_image:/.*(\\7[Zz]\.[Ee][Xx][Ee]|\\7[Zz][Aa]\.[Ee][Xx][Ee]|\\7[Zz][Rr]\.[Ee][Xx][Ee]|\\[Rr][Aa][Rr]\.[Ee][Xx][Ee]|\\[Ww][Ii][Nn][Rr][Aa][Rr]\.[Ee][Xx][Ee]|\\[Ww][Zz][Zz][Ii][Pp]\.[Ee][Xx][Ee]|\\[Mm][Aa][Kk][Ee][Cc][Aa][Bb]\.[Ee][Xx][Ee])/) OR (data_win_eventdata_commandLine:/.*[Cc][Oo][Mm][Pp][Rr][Ee][Ss][Ss]-[Aa][Rr][Cc][Hh][Ii][Vv][Ee].*/ OR data_win_eventdata_commandLine:/.*\.7[Zz].*/ OR data_win_eventdata_commandLine:/.*\.[Rr][Aa][Rr].*/ OR data_win_eventdata_commandLine:/.* -[Hh][Pp].*/)) OR (((data_win_system_eventID:"1" AND data_win_eventdata_image:/.*(\\[Rr][Cc][Ll][Oo][Nn][Ee]\.[Ee][Xx][Ee]|\\[Cc][Uu][Rr][Ll]\.[Ee][Xx][Ee]|\\[Ww][Gg][Ee][Tt]\.[Ee][Xx][Ee]|\\[Ww][Ii][Nn][Ss][Cc][Pp]\.[Ee][Xx][Ee]|\\[Pp][Ss][Cc][Pp]\.[Ee][Xx][Ee]|\\[Mm][Ee][Gg][Aa][Cc][Mm][Dd]\.[Ee][Xx][Ee]|\\[Mm][Ee][Gg][Aa][Ss][Yy][Nn][Cc]\.[Ee][Xx][Ee])/) OR ((data_win_eventdata_commandLine:/.*[Ii][Nn][Vv][Oo][Kk][Ee]-[Rr][Ee][Ss][Tt][Mm][Ee][Tt][Hh][Oo][Dd].*/ OR data_win_eventdata_commandLine:/.*[Ss][Tt][Aa][Rr][Tt]-[Bb][Ii][Tt][Ss][Tt][Rr][Aa][Nn][Ss][Ff][Ee][Rr].*/ OR data_win_eventdata_commandLine:/.*[Rr][Cc][Ll][Oo][Nn][Ee].*/ OR data_win_eventdata_commandLine:/.*[Tt][Rr][Aa][Nn][Ss][Ff][Ee][Rr]\.[Ss][Hh].*/ OR data_win_eventdata_commandLine:/.*[Aa][Nn][Oo][Nn][Ff][Ii][Ll][Ee][Ss].*/ OR data_win_eventdata_commandLine:/.*[Pp][Aa][Ss][Tt][Ee][Bb][Ii][Nn].*/ OR data_win_eventdata_commandLine:/.*[Mm][Ee][Gg][Aa]\.[Nn][Zz].*/ OR data_win_eventdata_commandLine:/.*-[Oo][Uu][Tt][Ff][Ii][Ll][Ee].*/ OR data_win_eventdata_commandLine:/.*[Uu][Pp][Ll][Oo][Aa][Dd][Ff][Ii][Ll][Ee].*/)))))'
-      pivot_on: [host]
-      window: 2h
+  # Behaviour-targeted hunts the engine runs around the alert (not a sweep).
+  - name: WAV/audio files written by PowerShell or script hosts
+    query: data_win_system_eventID:"11" AND data_win_eventdata_targetFilename:/.*\.[Ww][Aa][Vv]/ AND data_win_eventdata_image:/.*([Pp][Oo][Ww][Ee][Rr][Ss][Hh][Ee][Ll][Ll]|[Pp][Ww][Ss][Hh]|[Ww][Ss][Cc][Rr][Ii][Pp][Tt]|[Cc][Ss][Cc][Rr][Ii][Pp][Tt]).*/
+    pivot_on:
+    - host
+    window: 1h
+  - name: PowerShell file collection and archiving before encoding
+    query: data_win_system_eventID:"4104" AND (data_win_eventdata_scriptBlockText:/.*[Cc][Oo][Mm][Pp][Rr][Ee][Ss][Ss]-[Aa][Rr][Cc][Hh][Ii][Vv][Ee].*/ OR data_win_eventdata_scriptBlockText:/.*[Zz][Ii][Pp][Ff][Ii][Ll][Ee].*/ OR data_win_eventdata_scriptBlockText:/.*[Rr][Ee][Aa][Dd][Aa][Ll][Ll][Bb][Yy][Tt][Ee][Ss].*/ OR data_win_eventdata_scriptBlockText:/.*[Gg][Ee][Tt]-[Cc][Hh][Ii][Ll][Dd][Ii][Tt][Ee][Mm].*-[Rr][Ee][Cc][Uu][Rr][Ss][Ee].*/)
+    pivot_on:
+    - host
+    window: 2h
+  - name: PowerShell outbound upload of data after encoding
+    query: data_win_system_eventID:"4104" AND (data_win_eventdata_scriptBlockText:/.*[Uu][Pp][Ll][Oo][Aa][Dd][Ff][Ii][Ll][Ee].*/ OR data_win_eventdata_scriptBlockText:/.*[Uu][Pp][Ll][Oo][Aa][Dd][Ss][Tt][Rr][Ii][Nn][Gg].*/ OR data_win_eventdata_scriptBlockText:/.*[Uu][Pp][Ll][Oo][Aa][Dd][Dd][Aa][Tt][Aa].*/ OR data_win_eventdata_scriptBlockText:/.*[Ii][Nn][Vv][Oo][Kk][Ee]-[Rr][Ee][Ss][Tt][Mm][Ee][Tt][Hh][Oo][Dd].*-[Mm][Ee][Tt][Hh][Oo][Dd].*[Pp][Oo][Ss][Tt].*/ OR data_win_eventdata_scriptBlockText:/.*[Ii][Nn][Vv][Oo][Kk][Ee]-[Ww][Ee][Bb][Rr][Ee][Qq][Uu][Ee][Ss][Tt].*-[Ii][Nn][Ff][Ii][Ll][Ee].*/)
+    pivot_on:
+    - host
+    window: 2h
+  - name: Outbound transfer tools launched from PowerShell or shells
+    query: data_win_system_eventID:"1" AND data_win_eventdata_image:/.*\\([Cc][Uu][Rr][Ll]|[Ww][Gg][Ee][Tt]|[Rr][Cc][Ll][Oo][Nn][Ee]|[Ww][Ii][Nn][Ss][Cc][Pp]|[Pp][Ss][Cc][Pp]|[Bb][Ii][Tt][Ss][Aa][Dd][Mm][Ii][Nn])\.[Ee][Xx][Ee]/
+    pivot_on:
+    - host
+    window: 2h
+  - name: PowerShell network connections to external hosts
+    query: data_win_system_eventID:"3" AND data_win_eventdata_image:/.*([Pp][Oo][Ww][Ee][Rr][Ss][Hh][Ee][Ll][Ll]|[Pp][Ww][Ss][Hh]).*/ AND data_win_eventdata_initiated:"true" AND NOT data_win_eventdata_destinationIsIpv6:"true"
+    pivot_on:
+    - host
+    window: 2h

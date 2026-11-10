@@ -150,19 +150,58 @@ graylog:
   query: data_win_system_eventID:"4697" AND (data_win_eventdata_serviceFileName:/.*(\$PSHome\[[ ]*[0-9]{1,3}[ ]*\][ ]*\+[ ]*\$PSHome\[).*/ OR data_win_eventdata_serviceFileName:/.*(\$ShellId\[[ ]*[0-9]{1,3}[ ]*\][ ]*\+[ ]*\$ShellId\[).*/ OR data_win_eventdata_serviceFileName:/.*(\$env:Public\[[ ]*[0-9]{1,3}[ ]*\][ ]*\+[ ]*\$env:Public\[).*/ OR data_win_eventdata_serviceFileName:/.*(\$env:ComSpec\[([ ]*[0-9]{1,3}[ ]*,){2}).*/ OR data_win_eventdata_serviceFileName:/.*(\\*mdr\*[^A-Za-z0-9_][ ]*\)\.Name).*/ OR data_win_eventdata_serviceFileName:/.*(\$VerbosePreference\.ToString\().*/ OR data_win_eventdata_serviceFileName:/.*([^ ]tring\][ ]*\$VerbosePreference).*/)
 
 correlation:
-  # Authored by the correlation engine for review.
+  # Authored per-rule (behaviour-researched) for the correlation engine. Related CoPilot
+  # Searches + telemetry pivots to run around an alert, scoped to its host/user/ip/domain.
+  related_rules:
+  - id: 2f211361-7dce-442d-b78a-c04039677378
+    name: Invoke-Obfuscation Obfuscated IEX Invocation - PowerShell Module
+    reason: Same Invoke-Obfuscation IEX pattern seen in PowerShell module logging; confirms the obfuscated string was actually executed by PowerShell, not just registered as a service.
+  - id: e9f55347-2928-4c06-88e5-1a7f8169942e
+    name: Invoke-Obfuscation VAR++ LAUNCHER OBFUSCATION
+    reason: Sibling Invoke-Obfuscation launcher style; the same operator/tooling typically produces several launcher variants on one host.
+  - id: b222df08-0e07-11eb-adc1-0242ac120002
+    name: Invoke-Obfuscation CLIP+ Launcher
+    reason: Another Invoke-Obfuscation launcher in process creation; shows the obfuscated command line that wrapped the service payload.
+  - id: 7eedcc9d-9fdb-4d94-9c54-474e8affc0c7
+    name: Invoke-Obfuscation COMPRESS OBFUSCATION
+    reason: Compressed-payload Invoke-Obfuscation variant; co-occurs when the framework's compress/encode options are used on the same host.
+  - id: 44e24481-6202-4c62-9127-5a0ae8e3fe3d
+    name: Obfuscated PowerShell OneLiner Execution
+    reason: Process-creation view of the obfuscated powershell one-liner that the installed service (4697) launches.
+  - id: d7bcd677-645d-4691-a8d4-7a5602b780d1
+    name: Potential PowerShell Command Line Obfuscation
+    reason: Command-line obfuscation by the service's child powershell.exe is the direct execution of this payload.
+  - id: 17a1be64-8d88-40bf-b5ff-a4f7a50ebcc8
+    name: Suspicious New Service Creation
+    reason: The obfuscated payload was delivered as a new service (4697); sc/New-Service creation is the process-level counterpart of the same persistence or remote-exec step.
+  - id: fdfcbd78-48f1-4a4b-90ac-d82241e368c5
+    name: PsExec Service Execution
+    reason: Service-based remote execution (PsExec/Impacket-style) commonly installs a service whose binary path is an obfuscated powershell command, indicating lateral movement.
+  window: 1h
   enrichment_searches:
-  # Rule-specific telemetry pivots the engine runs around an alert from this rule,
-  # scoped to the alert's host/user/IP within the window (behaviour-targeted, not a sweep).
-    - name: "Encoded / obfuscated script execution on this host"
-      query: 'data_win_system_eventID:"4104" AND (data_win_eventdata_scriptBlockText:/.*[Dd][Oo][Ww][Nn][Ll][Oo][Aa][Dd][Ss][Tt][Rr][Ii][Nn][Gg].*/ OR data_win_eventdata_scriptBlockText:/.*[Dd][Oo][Ww][Nn][Ll][Oo][Aa][Dd][Ff][Ii][Ll][Ee].*/ OR data_win_eventdata_scriptBlockText:/.*[Ii][Nn][Vv][Oo][Kk][Ee]-[Ww][Ee][Bb][Rr][Ee][Qq][Uu][Ee][Ss][Tt].*/ OR data_win_eventdata_scriptBlockText:/.*[Nn][Ee][Tt]\.[Ww][Ee][Bb][Cc][Ll][Ii][Ee][Nn][Tt].*/ OR data_win_eventdata_scriptBlockText:/.*[Ff][Rr][Oo][Mm][Bb][Aa][Ss][Ee]64[Ss][Tt][Rr][Ii][Nn][Gg].*/ OR data_win_eventdata_scriptBlockText:/.*[Ii][Ee][Xx].*/ OR data_win_eventdata_scriptBlockText:/.*[Ii][Nn][Vv][Oo][Kk][Ee]-[Ee][Xx][Pp][Rr][Ee][Ss][Ss][Ii][Oo][Nn].*/ OR data_win_eventdata_scriptBlockText:/.*[Ss][Tt][Aa][Rr][Tt]-[Bb][Ii][Tt][Ss][Tt][Rr][Aa][Nn][Ss][Ff][Ee][Rr].*/ OR data_win_eventdata_scriptBlockText:/.*[Aa][Mm][Ss][Ii][Uu][Tt][Ii][Ll][Ss].*/ OR data_win_eventdata_scriptBlockText:/.*-[Ee][Nn][Cc].*/ OR data_win_eventdata_scriptBlockText:/.*-[Ee][Nn][Cc][Oo][Dd][Ee][Dd][Cc][Oo][Mm][Mm][Aa][Nn][Dd].*/ OR data_win_eventdata_scriptBlockText:/.*[Rr][Ee][Ff][Ll][Ee][Cc][Tt][Ii][Oo][Nn]\.[Aa][Ss][Ss][Ee][Mm][Bb][Ll][Yy].*/)'
-      pivot_on: [host]
-      window: 1h
-    - name: "This account's logon activity across hosts"
-      query: '(data_win_system_eventID:"4624" OR data_win_system_eventID:"4625")'
-      pivot_on: [user]
-      window: 6h
-    - name: "Account / group / privilege changes involving this account"
-      query: '(data_win_system_eventID:"4720" OR data_win_system_eventID:"4722" OR data_win_system_eventID:"4724" OR data_win_system_eventID:"4728" OR data_win_system_eventID:"4732" OR data_win_system_eventID:"4756" OR data_win_system_eventID:"4672")'
-      pivot_on: [user]
-      window: 6h
+  # Behaviour-targeted hunts the engine runs around the alert (not a sweep).
+  - name: Service installs (4697) with powershell/cmd launcher on this host
+    query: data_win_system_eventID:"4697" AND (data_win_eventdata_serviceFileName:*[Pp]owershell* OR data_win_eventdata_serviceFileName:*[Cc]md.exe* OR data_win_eventdata_serviceFileName:*%COMSPEC%* OR data_win_eventdata_serviceFileName:*[Mm]shta*)
+    pivot_on:
+    - host
+    window: 6h
+  - name: Obfuscated PowerShell process launched (service child or encoded)
+    query: data_win_system_eventID:"1" AND data_win_eventdata_image:/.*[Pp]ower[Ss]hell.*/ AND (data_win_eventdata_commandLine:*-[Ee]nc* OR data_win_eventdata_commandLine:*[Ii][Ee][Xx]* OR data_win_eventdata_commandLine:*FromBase64String* OR data_win_eventdata_commandLine:*$env:ComSpec* OR data_win_eventdata_commandLine:*$PSHome* OR data_win_eventdata_commandLine:*services.exe*)
+    pivot_on:
+    - host
+    window: 1h
+  - name: Script block content with IEX, download cradles or AMSI tampering
+    query: data_win_system_eventID:"4104" AND (data_win_eventdata_scriptBlockText:*$PSHome* OR data_win_eventdata_scriptBlockText:*$ShellId* OR data_win_eventdata_scriptBlockText:*DownloadString* OR data_win_eventdata_scriptBlockText:*Net.WebClient* OR data_win_eventdata_scriptBlockText:*FromBase64String* OR data_win_eventdata_scriptBlockText:*AmsiUtils*)
+    pivot_on:
+    - host
+    window: 1h
+  - name: Outbound connections by powershell or services-spawned processes
+    query: data_win_system_eventID:"3" AND (data_win_eventdata_image:/.*[Pp]ower[Ss]hell.*/ OR data_win_eventdata_image:/.*[Cc]md\.exe/ OR data_win_eventdata_image:/.*[Mm]shta\.exe/) AND data_win_eventdata_initiated:"true"
+    pivot_on:
+    - host
+    window: 1h
+  - name: Network (type 3) logons by this account preceding the service install
+    query: data_win_system_eventID:"4624" AND data_win_eventdata_logonType:(3 OR 9 OR 10)
+    pivot_on:
+    - user
+    window: 4h

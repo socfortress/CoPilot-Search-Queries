@@ -135,35 +135,58 @@ graylog:
   query: data_win_system_eventID:"4611" AND data_win_eventdata_logonProcessName:/[Uu][Ss][Ee][Rr]32[Ll][Oo][Gg][Oo][Nn][Pp][Rr][Oo][Cc][Ee][Ss][Ss][Ss]/
 
 correlation:
-  # Authored by the correlation engine for review. Related CoPilot Searches to run
-  # around an alert from this rule, scoped to the same host/user/IP within the window.
+  # Authored per-rule (behaviour-researched) for the correlation engine. Related CoPilot
+  # Searches + telemetry pivots to run around an alert, scoped to its host/user/ip/domain.
   related_rules:
-    - id: 35ba1d85-724d-42a3-889f-2e2362bcaf23
-      name: "AD Privileged Users or Groups Reconnaissance"
-      reason: "next kill-chain tactic: Discovery"
-    - id: 17d619c1-e020-4347-957e-1d1207455c93
-      name: "Active Directory Replication from Non Machine Account"
-      reason: "next kill-chain tactic: Credential Access"
-    - id: 87261fb2-69d0-42fe-b9de-88c6b5f65a43
-      name: "Atera Agent Installation"
-      reason: "next kill-chain tactic: Command and Control"
+  - id: 7ec2c172-dceb-4c10-92c9-87c1881b7e18
+    name: HackTool - Rubeus Execution
+    reason: Process-creation view of the same tool; Rubeus registers its own logon process via LsaRegisterLogonProcess when run with elevated rights, so the binary or command line should exist on the host.
+  - id: 3245cd30-e015-40ff-a31d-5cadd5f377ec
+    name: HackTool - Rubeus Execution - ScriptBlock
+    reason: Rubeus is often loaded reflectively in PowerShell; script block logging confirms in-memory Rubeus behind the 4611 event.
+  - id: 6daac7fc-77d1-449a-a71a-e6b4d59a0e54
+    name: User Couldn't Call a Privileged Service 'LsaRegisterLogonProcess'
+    reason: Same LsaRegisterLogonProcess API; failure (4673) is the unprivileged attempt, a retry as SYSTEM or elevated then yields the 4611.
+  - id: d04ae2b8-ad54-4de0-bd87-4bc1da66aa59
+    name: Kerberoasting Activity - Initial Query
+    reason: Rubeus kerberoast is the most common follow-on, producing bursts of 4769 service ticket requests for SPN accounts.
+  - id: 496a0e47-0a33-4dca-b009-9e6ca3591f39
+    name: Suspicious Kerberos RC4 Ticket Encryption
+    reason: Rubeus requests RC4 tickets for kerberoasting or downgrades, visible as RC4 (0x17) ticket encryption.
+  - id: 192a0330-c20b-4356-90b6-7b7049ae0b87
+    name: Successful Overpass the Hash Attempt
+    reason: Rubeus asktgt/ptt with a hash or key creates a new-credentials logon (type 9) using the Kerberos package, the overpass-the-hash step after registering the logon process.
+  - id: 13bbd574-83ac-11ec-99d4-acde48001122
+    name: Mimikatz PassTheTicket CommandLine Parameters
+    reason: Ticket injection (ptt/kerberos::ptt) is the usual use of tickets Rubeus obtains, often alongside Mimikatz on the same host.
+  - id: caa9a802-8bd8-4b9e-a5cd-4d6221670219
+    name: Suspicious Kerberos Ticket Request via CLI
+    reason: Command-line ticket requests (asktgt, kerberoast, s4u) are the direct actions of Rubeus once its logon process is registered.
   window: 1h
   enrichment_searches:
-  # Rule-specific telemetry pivots the engine runs around an alert from this rule,
-  # scoped to the alert's host/user/IP within the window (behaviour-targeted, not a sweep).
-    - name: "Kerberos ticket requests for this account"
-      query: '(data_win_system_eventID:"4768" OR data_win_system_eventID:"4769" OR data_win_system_eventID:"4771")'
-      pivot_on: [user]
-      window: 6h
-    - name: "Remote-execution / lateral-movement tooling on this host"
-      query: '(data_win_system_eventID:"1" AND data_win_eventdata_image:/.*(\\[Pp][Ss][Ee][Xx][Ee][Cc]\.[Ee][Xx][Ee]|\\[Pp][Ss][Ee][Xx][Ee][Ss][Vv][Cc]\.[Ee][Xx][Ee]|\\[Pp][Aa][Ee][Xx][Ee][Cc]\.[Ee][Xx][Ee]|\\[Ww][Ii][Nn][Rr][Ss]\.[Ee][Xx][Ee]|\\[Mm][Ss][Tt][Ss][Cc]\.[Ee][Xx][Ee]|\\[Ww][Mm][Ii][Cc]\.[Ee][Xx][Ee])/) OR (data_win_system_eventID:"1" AND data_win_eventdata_image:/.*(\\[Pp][Oo][Ww][Ee][Rr][Ss][Hh][Ee][Ll][Ll]\.[Ee][Xx][Ee]|\\[Pp][Ww][Ss][Hh]\.[Ee][Xx][Ee])/ AND (data_win_eventdata_commandLine:/.*[Ii][Nn][Vv][Oo][Kk][Ee]-[Cc][Oo][Mm][Mm][Aa][Nn][Dd].*/ OR data_win_eventdata_commandLine:/.*[Nn][Ee][Ww]-[Pp][Ss][Ss][Ee][Ss][Ss][Ii][Oo][Nn].*/ OR data_win_eventdata_commandLine:/.*[Ee][Nn][Tt][Ee][Rr]-[Pp][Ss][Ss][Ee][Ss][Ss][Ii][Oo][Nn].*/ OR data_win_eventdata_commandLine:/.*-[Cc][Oo][Mm][Pp][Uu][Tt][Ee][Rr][Nn][Aa][Mm][Ee].*/))'
-      pivot_on: [host]
-      window: 2h
-    - name: "This account's logon activity across hosts"
-      query: '(data_win_system_eventID:"4624" OR data_win_system_eventID:"4625")'
-      pivot_on: [user]
-      window: 6h
-    - name: "Account / group / privilege changes involving this account"
-      query: '(data_win_system_eventID:"4720" OR data_win_system_eventID:"4722" OR data_win_system_eventID:"4724" OR data_win_system_eventID:"4728" OR data_win_system_eventID:"4732" OR data_win_system_eventID:"4756" OR data_win_system_eventID:"4672")'
-      pivot_on: [user]
-      window: 6h
+  # Behaviour-targeted hunts the engine runs around the alert (not a sweep).
+  - name: Rubeus binary or Kerberos-abuse command line on this host
+    query: data_win_system_eventID:"1" AND (data_win_eventdata_image:/.*[Rr][Uu][Bb][Ee][Uu][Ss].*/ OR data_win_eventdata_originalFileName:/.*[Rr][Uu][Bb][Ee][Uu][Ss].*/ OR data_win_eventdata_commandLine:/.*(asktgt|asktgs|kerberoast|asreproast|s4u|renew|tgtdeleg|harvest|monitor|\/ptt|\/rc4:|\/aes256:|\/ticket:).*/)
+    pivot_on:
+    - host
+    window: 2h
+  - name: Kerberos ticket requests by this account (TGT/TGS bursts, RC4)
+    query: data_win_system_eventID:("4768" OR "4769" OR "4770" OR "4771")
+    pivot_on:
+    - user
+    window: 4h
+  - name: New-credentials or network logons following ticket abuse
+    query: data_win_system_eventID:"4624" AND (data_win_eventdata_logonType:"9" OR data_win_eventdata_logonType:"3") AND (data_win_eventdata_authenticationPackageName:"Kerberos" OR data_win_eventdata_logonProcessName:/.*[Ss][Ee][Cc][Ll][Oo][Gg][Oo][Nn].*/)
+    pivot_on:
+    - user
+    window: 4h
+  - name: Direct Kerberos (port 88) connections from non-system processes
+    query: data_win_system_eventID:"3" AND data_win_eventdata_destinationPort:"88" AND NOT data_win_eventdata_image:/.*[Ll][Ss][Aa][Ss][Ss]\.[Ee][Xx][Ee]/
+    pivot_on:
+    - host
+    window: 2h
+  - name: LSASS access or privileged-service calls on this host
+    query: (data_win_system_eventID:"10" AND data_win_eventdata_targetImage:/.*[Ll][Ss][Aa][Ss][Ss]\.[Ee][Xx][Ee]/) OR data_win_system_eventID:"4673" OR data_win_system_eventID:"4672"
+    pivot_on:
+    - host
+    window: 1h

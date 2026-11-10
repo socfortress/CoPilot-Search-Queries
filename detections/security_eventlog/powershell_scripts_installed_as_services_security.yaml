@@ -140,41 +140,58 @@ graylog:
   query: data_win_system_eventID:"4697" AND (data_win_eventdata_serviceFileName:/.*[Pp][Oo][Ww][Ee][Rr][Ss][Hh][Ee][Ll][Ll].*/ OR data_win_eventdata_serviceFileName:/.*[Pp][Ww][Ss][Hh].*/)
 
 correlation:
-  # Authored by the correlation engine for review. Related CoPilot Searches to run
-  # around an alert from this rule, scoped to the same host/user/IP within the window.
+  # Authored per-rule (behaviour-researched) for the correlation engine. Related CoPilot
+  # Searches + telemetry pivots to run around an alert, scoped to its host/user/ip/domain.
   related_rules:
-    - id: 0255a820-e564-4e40-af2b-6ac61160335c
-      name: "A New Trust Was Created To A Domain"
-      reason: "next kill-chain tactic: Persistence"
-    - id: 35ba1d85-724d-42a3-889f-2e2362bcaf23
-      name: "AD Privileged Users or Groups Reconnaissance"
-      reason: "next kill-chain tactic: Discovery"
-    - id: 9eb99343-d336-4020-a3cd-67f3819e68ee
-      name: "Account Tampering - Suspicious Failed Logon Reasons"
-      reason: "next kill-chain tactic: Persistence"
-    - id: 17d619c1-e020-4347-957e-1d1207455c93
-      name: "Active Directory Replication from Non Machine Account"
-      reason: "next kill-chain tactic: Credential Access"
-    - id: 300bac00-e041-4ee2-9c36-e262656a6ecc
-      name: "Active Directory User Backdoors"
-      reason: "next kill-chain tactic: Persistence"
-  window: 1h
+  - id: 17a1be64-8d88-40bf-b5ff-a4f7a50ebcc8
+    name: Suspicious New Service Creation
+    reason: Same sc.exe/New-Service creation step seen as process creation; the command line reveals the exact service name and binPath that 4697 only shows as a service file name.
+  - id: 883faa95-175a-4e22-8181-e5761aeb373c
+    name: Suspicious Service Binary Directory
+    reason: Services whose binary sits in Temp/ProgramData/user-writable paths accompany attacker-installed PowerShell services and show where the payload was staged.
+  - id: fdfcbd78-48f1-4a4b-90ac-d82241e368c5
+    name: PsExec Service Execution
+    reason: PsExec/remote service installs (PSEXESVC) are a common way a PowerShell service gets created on a victim from another host, indicating lateral movement.
+  - id: ea011323-7045-460b-b2d7-0f7442ea6b38
+    name: Potential PsExec Remote Execution
+    reason: Remote execution through a created service with an attacker-supplied command line matches the powershell-as-service-binary pattern on the target.
+  - id: c4db14d9-7909-48b4-a054-aa14d89dbb19
+    name: Malicious PowerShell Process - Encoded Command
+    reason: The service's powershell command line is usually -enc/base64; this catches the process that the service launches when it starts.
+  - id: 85b0b087-eddf-4a2b-b033-d771fa2b9775
+    name: PowerShell Download and Execution Cradles
+    reason: A service-hosted PowerShell commonly runs a download cradle to pull the next-stage payload as SYSTEM after installation.
+  - id: 38879043-7e1e-47a9-8d46-6bec88e201df
+    name: Potential Persistence Attempt Via Existing Service Tampering
+    reason: 'Alternative service persistence: attacker repoints an existing service to powershell instead of creating a new one, same T1543/T1569 intent.'
+  - id: 89ca78fd-b37c-4310-b3d3-81a023f83936
+    name: Schtasks Creation Or Modification With SYSTEM Privileges
+    reason: Attackers who install a SYSTEM PowerShell service often add a SYSTEM scheduled task as redundant persistence.
+  window: 2h
   enrichment_searches:
-  # Rule-specific telemetry pivots the engine runs around an alert from this rule,
-  # scoped to the alert's host/user/IP within the window (behaviour-targeted, not a sweep).
-    - name: "Service execution on this host"
-      query: '((data_win_system_eventID:"7045") OR (data_win_system_eventID:"1" AND data_win_eventdata_image:/.*(\\[Ss][Cc]\.[Ee][Xx][Ee])/ AND (data_win_eventdata_commandLine:/.*[Cc][Rr][Ee][Aa][Tt][Ee].*/ OR data_win_eventdata_commandLine:/.*[Cc][Oo][Nn][Ff][Ii][Gg].*/ OR data_win_eventdata_commandLine:/.*[Bb][Ii][Nn][Pp][Aa][Tt][Hh].*/ OR data_win_eventdata_commandLine:/.*[Bb][Ii][Nn][Pp][Aa][Tt][Hh].*/)))'
-      pivot_on: [host]
-      window: 4h
-    - name: "Autostart persistence written on this host (Run keys, services, IFEO)"
-      query: '(data_win_system_eventID:"12" OR data_win_system_eventID:"13") AND (data_win_eventdata_targetObject:/.*[Cc][Uu][Rr][Rr][Ee][Nn][Tt][Vv][Ee][Rr][Ss][Ii][Oo][Nn]\\[Rr][Uu][Nn].*/ OR data_win_eventdata_targetObject:/.*[Cc][Uu][Rr][Rr][Ee][Nn][Tt][Vv][Ee][Rr][Ss][Ii][Oo][Nn]\\[Rr][Uu][Nn][Oo][Nn][Cc][Ee].*/ OR data_win_eventdata_targetObject:/.*[Cc][Uu][Rr][Rr][Ee][Nn][Tt][Cc][Oo][Nn][Tt][Rr][Oo][Ll][Ss][Ee][Tt]\\[Ss][Ee][Rr][Vv][Ii][Cc][Ee][Ss]\\.*/ OR data_win_eventdata_targetObject:/.*[Ii][Mm][Aa][Gg][Ee] [Ff][Ii][Ll][Ee] [Ee][Xx][Ee][Cc][Uu][Tt][Ii][Oo][Nn] [Oo][Pp][Tt][Ii][Oo][Nn][Ss]\\.*/ OR data_win_eventdata_targetObject:/.*[Ww][Ii][Nn][Ll][Oo][Gg][Oo][Nn]\\[Ss][Hh][Ee][Ll][Ll].*/ OR data_win_eventdata_targetObject:/.*[Ww][Ii][Nn][Ll][Oo][Gg][Oo][Nn]\\[Uu][Ss][Ee][Rr][Ii][Nn][Ii][Tt].*/ OR data_win_eventdata_targetObject:/.*[Cc][Uu][Rr][Rr][Ee][Nn][Tt][Vv][Ee][Rr][Ss][Ii][Oo][Nn]\\[Ee][Xx][Pp][Ll][Oo][Rr][Ee][Rr]\\[Rr][Uu][Nn].*/ OR data_win_eventdata_targetObject:/.*[Pp][Oo][Ll][Ii][Cc][Ii][Ee][Ss]\\[Ee][Xx][Pp][Ll][Oo][Rr][Ee][Rr]\\[Rr][Uu][Nn].*/ OR data_win_eventdata_targetObject:/.*[Cc][Uu][Rr][Rr][Ee][Nn][Tt][Vv][Ee][Rr][Ss][Ii][Oo][Nn]\\[Ww][Ii][Nn][Dd][Oo][Ww][Ss]\\[Ll][Oo][Aa][Dd].*/)'
-      pivot_on: [host]
-      window: 4h
-    - name: "This account's logon activity across hosts"
-      query: '(data_win_system_eventID:"4624" OR data_win_system_eventID:"4625")'
-      pivot_on: [user]
-      window: 6h
-    - name: "Account / group / privilege changes involving this account"
-      query: '(data_win_system_eventID:"4720" OR data_win_system_eventID:"4722" OR data_win_system_eventID:"4724" OR data_win_system_eventID:"4728" OR data_win_system_eventID:"4732" OR data_win_system_eventID:"4756" OR data_win_system_eventID:"4672")'
-      pivot_on: [user]
-      window: 6h
+  # Behaviour-targeted hunts the engine runs around the alert (not a sweep).
+  - name: Service installs and sc.exe/New-Service activity
+    query: data_win_system_eventID:"7045" OR data_win_system_eventID:"4697" OR (data_win_system_eventID:"1" AND (data_win_eventdata_commandLine:/.*[Ss][Cc]\.[Ee][Xx][Ee].*[Cc][Rr][Ee][Aa][Tt][Ee].*/ OR data_win_eventdata_commandLine:/.*[Nn][Ee][Ww]-[Ss][Ee][Rr][Vv][Ii][Cc][Ee].*/))
+    pivot_on:
+    - host
+    window: 2h
+  - name: PowerShell spawned by services.exe (service-run payload)
+    query: data_win_system_eventID:"1" AND data_win_eventdata_parentImage:/.*[Ss][Ee][Rr][Vv][Ii][Cc][Ee][Ss]\.[Ee][Xx][Ee]/ AND (data_win_eventdata_image:/.*[Pp][Oo][Ww][Ee][Rr][Ss][Hh][Ee][Ll][Ll].*/ OR data_win_eventdata_image:/.*[Pp][Ww][Ss][Hh].*/ OR data_win_eventdata_image:/.*[Cc][Mm][Dd]\.[Ee][Xx][Ee])
+    pivot_on:
+    - host
+    window: 2h
+  - name: PowerShell outbound network or download activity
+    query: (data_win_system_eventID:"3" AND data_win_eventdata_image:/.*[Pp][Oo][Ww][Ee][Rr][Ss][Hh][Ee][Ll][Ll].*/ AND data_win_eventdata_initiated:"true") OR (data_win_system_eventID:"22" AND data_win_eventdata_image:/.*[Pp][Oo][Ww][Ee][Rr][Ss][Hh][Ee][Ll][Ll].*/)
+    pivot_on:
+    - host
+    window: 2h
+  - name: Suspicious PowerShell script blocks (encoded/download/reflection)
+    query: data_win_system_eventID:"4104" AND (data_win_eventdata_scriptBlockText:*FromBase64String* OR data_win_eventdata_scriptBlockText:*DownloadString* OR data_win_eventdata_scriptBlockText:*IEX* OR data_win_eventdata_scriptBlockText:*Invoke-Expression* OR data_win_eventdata_scriptBlockText:*Net.WebClient* OR data_win_eventdata_scriptBlockText:*Reflection.Assembly*)
+    pivot_on:
+    - host
+    window: 2h
+  - name: Remote logons (network/service) by the installing account
+    query: data_win_system_eventID:"4624" AND (data_win_eventdata_logonType:"3" OR data_win_eventdata_logonType:"5" OR data_win_eventdata_logonType:"10")
+    pivot_on:
+    - user
+    window: 6h

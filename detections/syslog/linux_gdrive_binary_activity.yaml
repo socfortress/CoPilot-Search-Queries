@@ -112,31 +112,49 @@ graylog:
   query: full_log:/.*gdrive.*/ AND NOT _exists_:data_win_system_eventID AND NOT rule_groups:/.*windows.*/
 
 correlation:
-  # Authored by the correlation engine for review. Related CoPilot Searches to run
-  # around an alert from this rule, scoped to the same host/user/IP within the window.
+  # Authored per-rule (behaviour-researched) for the correlation engine. Related CoPilot
+  # Searches + telemetry pivots to run around an alert, scoped to its host/user/ip/domain.
   related_rules:
-    - id: 683e6196-b8e8-11eb-9a79-acde48001122
-      name: "Detect Renamed PSExec"
-      reason: "same analytic story: China-Nexus Threat Activity"
-    - id: 1b7bfb2c-b8e6-11eb-99ac-acde48001122
-      name: "Detect Renamed WinRAR"
-      reason: "same analytic story: China-Nexus Threat Activity"
-    - id: 9be56c82-b1cc-4318-87eb-d138afaaca39
-      name: "Malicious PowerShell Process - Execution Policy Bypass"
-      reason: "same analytic story: China-Nexus Threat Activity"
-  window: 1h
+  - id: c3d9e7f1-6a2b-4d8f-9c2b-5e6f7a8b9c0d
+    name: Linux Suspicious Curl Data Exfiltration
+    reason: Curl upload to other endpoints is the alternate exfil channel used alongside gdrive.
+  - id: cb39d16b-b3b6-4a7a-8222-1cf24b686ffc
+    name: Data Exfiltration with Wget
+    reason: Wget --post-file is another exfiltration path used for the same collected data.
+  - id: linux-sudo-or-su-execution-001
+    name: Linux Sudo Or Su Execution
+    reason: gdrive deployment is often done with sudo; this shows who installed it.
+  - id: cf610c15-ed71-46e1-bdf8-2bd1a99de6c4
+    name: Download File To Potentially Suspicious Directory Via Wget
+    reason: gdrive is usually downloaded into a temp directory via wget before use.
+  - id: 30bcce26-51c5-49f2-99c8-7b59e3af36c7
+    name: Execution Of Script Located In Potentially Suspicious Directory
+    reason: A gdrive binary run from /tmp or /dev/shm indicates attacker staging.
+  window: 4h
   enrichment_searches:
-  # Rule-specific telemetry pivots the engine runs around an alert from this rule,
-  # scoped to the alert's host/user/IP within the window (behaviour-targeted, not a sweep).
-    - name: "Shell / interpreter execution on this host"
-      query: '((data_process_exec_process_binary:/.*(\/[Bb][Aa][Ss][Hh]|\/[Ss][Hh]|\/[Dd][Aa][Ss][Hh]|\/[Zz][Ss][Hh]|\/[Kk][Ss][Hh]|\/[Aa][Ss][Hh]|\/[Bb][Uu][Ss][Yy][Bb][Oo][Xx])/) OR (data_process_exec_process_binary:/.*(\/[Pp][Yy][Tt][Hh][Oo][Nn]|\/[Pp][Yy][Tt][Hh][Oo][Nn]3|\/[Pp][Ee][Rr][Ll]|\/[Rr][Uu][Bb][Yy]|\/[Pp][Hh][Pp]|\/[Nn][Oo][Dd][Ee]|\/[Ll][Uu][Aa]|\/[Aa][Ww][Kk])/))'
-      pivot_on: [host]
-      window: 1h
-    - name: "Reconnaissance commands on this host"
-      query: 'data_process_exec_process_binary:/.*(\/[Ww][Hh][Oo][Aa][Mm][Ii]|\/[Ii][Dd]|\/[Uu][Nn][Aa][Mm][Ee]|\/[Hh][Oo][Ss][Tt][Nn][Aa][Mm][Ee]|\/[Hh][Oo][Ss][Tt][Nn][Aa][Mm][Ee][Cc][Tt][Ll]|\/[Ss][Ss]|\/[Nn][Ee][Tt][Ss][Tt][Aa][Tt]|\/[Ii][Ff][Cc][Oo][Nn][Ff][Ii][Gg]|\/[Aa][Rr][Pp]|\/[Ww]|\/[Ww][Hh][Oo]|\/[Ll][Aa][Ss][Tt]|\/[Ll][Ss][Oo][Ff]|\/[Nn][Mm][Aa][Pp]|\/[Dd][Ii][Gg]|\/[Ff][Ii][Nn][Dd])/'
-      pivot_on: [host]
-      window: 1h
-    - name: "Privilege-escalation tooling executed on this host"
-      query: 'data_process_exec_process_binary:/.*(\/[Ss][Uu][Dd][Oo]|\/[Ss][Uu]|\/[Pp][Kk][Ee][Xx][Ee][Cc]|\/[Dd][Oo][Aa][Ss]|\/[Ss][Ee][Tt][Cc][Aa][Pp]|\/[Cc][Hh][Ss][Hh]|\/[Nn][Ee][Ww][Gg][Rr][Pp])/'
-      pivot_on: [host]
-      window: 2h
+  # Behaviour-targeted hunts the engine runs around the alert (not a sweep).
+  - name: gdrive command usage (upload/download/auth)
+    query: (data_process_exec_process_binary:/.*\/([Gg][Dd][Rr][Ii][Vv][Ee])/ OR data_process_exec_process_arguments:/.*([Gg][Dd][Rr][Ii][Vv][Ee] [Uu][Pp][Ll][Oo][Aa][Dd]|[Gg][Dd][Rr][Ii][Vv][Ee] [Dd][Oo][Ww][Nn][Ll][Oo][Aa][Dd]|[Gg][Dd][Rr][Ii][Vv][Ee] [Aa][Bb][Oo][Uu][Tt]|[Gg][Dd][Rr][Ii][Vv][Ee] [Ll][Ii][Ss][Tt]|[Gg][Dd][Rr][Ii][Vv][Ee] [Ss][Yy][Nn][Cc]|[Gg][Dd][Rr][Ii][Vv][Ee] [Ss][Hh][Aa][Rr][Ee]).*/)
+    pivot_on:
+    - host
+    window: 4h
+  - name: 'Binary staging: download and chmod of gdrive'
+    query: (((data_process_exec_process_binary:/.*\/([Cc][Uu][Rr][Ll]|[Ww][Gg][Ee][Tt])/ AND data_process_exec_process_arguments:/.*([Hh][Tt][Tt][Pp]:\/\/|[Hh][Tt][Tt][Pp][Ss]:\/\/|[Ff][Tt][Pp]:\/\/).*/) AND data_process_exec_process_arguments:/.*([Gg][Dd][Rr][Ii][Vv][Ee]).*/) OR (data_process_exec_process_binary:/.*\/([Cc][Hh][Mm][Oo][Dd])/ AND data_process_exec_process_arguments:/.*([Gg][Dd][Rr][Ii][Vv][Ee]).*/))
+    pivot_on:
+    - host
+    window: 4h
+  - name: Data collection and archiving before upload
+    query: data_process_exec_process_binary:/.*\/([Tt][Aa][Rr]|[Zz][Ii][Pp]|7[Zz]|7[Zz][Aa]|[Gg][Zz][Ii][Pp]|[Rr][Aa][Rr])/ AND data_process_exec_process_arguments:/.*(\/[Ee][Tt][Cc]\/|\/[Hh][Oo][Mm][Ee]\/|\/[Vv][Aa][Rr]\/|\/[Rr][Oo][Oo][Tt]\/|\.[Ss][Ss][Hh]|\.[Tt][Aa][Rr]|\.[Zz][Ii][Pp]|\/[Tt][Mm][Pp]\/).*/
+    pivot_on:
+    - host
+    window: 4h
+  - name: Other exfiltration utilities (curl upload, rclone, wget post)
+    query: data_process_exec_process_binary:/.*\/([Rr][Cc][Ll][Oo][Nn][Ee]|[Mm][Ee][Gg][Aa][Cc][Mm][Dd]|[Ss][Cc][Pp]|[Ss][Ff][Tt][Pp]|[Nn][Cc]|[Cc][Uu][Rr][Ll]|[Ww][Gg][Ee][Tt])/ AND data_process_exec_process_arguments:/.*(\-\-[Uu][Pp][Ll][Oo][Aa][Dd]\-[Ff][Ii][Ll][Ee]|\-[Tt] |\-\-[Pp][Oo][Ss][Tt]\-[Ff][Ii][Ll][Ee]|\-[Ff] |[Rr][Cc][Ll][Oo][Nn][Ee]|[Mm][Ee][Gg][Aa]).*/
+    pivot_on:
+    - host
+    window: 4h
+  - name: Credential and token files accessed
+    query: data_process_exec_process_arguments:/.*(\.[Gg][Dd][Rr][Ii][Vv][Ee]|[Tt][Oo][Kk][Ee][Nn]_[Vv]2\.[Jj][Ss][Oo][Nn]|\.[Cc][Oo][Nn][Ff][Ii][Gg]\/[Gg][Dd][Rr][Ii][Vv][Ee]|\.[Ss][Ss][Hh]\/|[Ii][Dd]_[Rr][Ss][Aa]|\/[Ee][Tt][Cc]\/[Ss][Hh][Aa][Dd][Oo][Ww]|\.[Aa][Ww][Ss]\/[Cc][Rr][Ee][Dd][Ee][Nn][Tt][Ii][Aa][Ll][Ss]).*/
+    pivot_on:
+    - host
+    window: 24h

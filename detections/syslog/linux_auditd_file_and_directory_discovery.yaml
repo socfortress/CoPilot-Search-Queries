@@ -120,19 +120,53 @@ graylog:
   query: (full_log:/.*find.*/ OR full_log:/.*grep.*/) AND (full_log:/.*\.pdf.*/ OR full_log:/.*\.doc.*/ OR full_log:/.*\.xlsx.*/ OR full_log:/.*\.jpg.*/ OR full_log:/.*\.png.*/ OR full_log:/.*\.mp4.*/ OR full_log:/.*\.mp3.*/ OR full_log:/.*\.avi.*/) AND NOT _exists_:data_win_system_eventID AND NOT rule_groups:/.*windows.*/
 
 correlation:
-  # Authored by the correlation engine for review.
+  # Authored per-rule (behaviour-researched) for the correlation engine. Related CoPilot
+  # Searches + telemetry pivots to run around an alert, scoped to its host/user/ip/domain.
+  related_rules:
+  - id: 8344c0e5-5783-47cc-9cf9-a0f7fd03e6cf
+    name: Potential Discovery Activity Using Find - Linux
+    reason: Generic find-based enumeration by the same actor.
+  - id: e34cfa0c-0a50-4210-9cb3-5632d08eb041
+    name: Potential GobRAT File Discovery Via Grep
+    reason: grep-driven file discovery typical of RAT recon.
+  - id: linux-auditd-database-file-and-directory-discovery-001
+    name: Linux Auditd Database File And Directory Discovery
+    reason: Parallel discovery of database files on the same host.
+  - id: 4d5e6f7a-8b90-2345-6789-01abcdef2345
+    name: Linux Credential Discovery
+    reason: Keyword find/grep for passwords on the same host; sibling of vault and key hunting in one credential-harvest pass.
+  - id: 3b4c5d6e-7f80-1234-5678-90abcdef1234
+    name: Linux SSH Key Discovery
+    reason: Same discovery sweep aimed at SSH private keys; credential hunting commonly covers keys, passwords and vaults together.
+  - id: linux-auditd-data-transfer-size-limits-via-split-001
+    name: Linux Auditd Data Transfer Size Limits Via Split
+    reason: Chunking collected files to fit exfil size limits after discovery.
+  - id: c3d9e7f1-6a2b-4d8f-9c2b-5e6f7a8b9c0d
+    name: Linux Suspicious Curl Data Exfiltration
+    reason: Found documents or credentials leave the host via curl.
+  - id: cb39d16b-b3b6-4a7a-8222-1cf24b686ffc
+    name: Data Exfiltration with Wget
+    reason: Wget-based POST/upload of located files.
+  window: 4h
   enrichment_searches:
-  # Rule-specific telemetry pivots the engine runs around an alert from this rule,
-  # scoped to the alert's host/user/IP within the window (behaviour-targeted, not a sweep).
-    - name: "File / directory discovery commands on this host"
-      query: '((data_process_exec_process_binary:/.*(\/[Ff][Ii][Nn][Dd]|\/[Ll][Oo][Cc][Aa][Tt][Ee]|\/[Ll][Ss])/) OR (data_process_exec_process_binary:/.*(\/[Ww][Hh][Oo][Aa][Mm][Ii]|\/[Ii][Dd]|\/[Uu][Nn][Aa][Mm][Ee]|\/[Hh][Oo][Ss][Tt][Nn][Aa][Mm][Ee]|\/[Hh][Oo][Ss][Tt][Nn][Aa][Mm][Ee][Cc][Tt][Ll]|\/[Ss][Ss]|\/[Nn][Ee][Tt][Ss][Tt][Aa][Tt]|\/[Ii][Ff][Cc][Oo][Nn][Ff][Ii][Gg]|\/[Aa][Rr][Pp]|\/[Ww]|\/[Ww][Hh][Oo]|\/[Ll][Aa][Ss][Tt]|\/[Ll][Ss][Oo][Ff]|\/[Nn][Mm][Aa][Pp]|\/[Dd][Ii][Gg]|\/[Ff][Ii][Nn][Dd])/))'
-      pivot_on: [host]
-      window: 1h
-    - name: "Shell / interpreter execution on this host"
-      query: '((data_process_exec_process_binary:/.*(\/[Bb][Aa][Ss][Hh]|\/[Ss][Hh]|\/[Dd][Aa][Ss][Hh]|\/[Zz][Ss][Hh]|\/[Kk][Ss][Hh]|\/[Aa][Ss][Hh]|\/[Bb][Uu][Ss][Yy][Bb][Oo][Xx])/) OR (data_process_exec_process_binary:/.*(\/[Pp][Yy][Tt][Hh][Oo][Nn]|\/[Pp][Yy][Tt][Hh][Oo][Nn]3|\/[Pp][Ee][Rr][Ll]|\/[Rr][Uu][Bb][Yy]|\/[Pp][Hh][Pp]|\/[Nn][Oo][Dd][Ee]|\/[Ll][Uu][Aa]|\/[Aa][Ww][Kk])/))'
-      pivot_on: [host]
-      window: 1h
-    - name: "Reconnaissance commands on this host"
-      query: 'data_process_exec_process_binary:/.*(\/[Ww][Hh][Oo][Aa][Mm][Ii]|\/[Ii][Dd]|\/[Uu][Nn][Aa][Mm][Ee]|\/[Hh][Oo][Ss][Tt][Nn][Aa][Mm][Ee]|\/[Hh][Oo][Ss][Tt][Nn][Aa][Mm][Ee][Cc][Tt][Ll]|\/[Ss][Ss]|\/[Nn][Ee][Tt][Ss][Tt][Aa][Tt]|\/[Ii][Ff][Cc][Oo][Nn][Ff][Ii][Gg]|\/[Aa][Rr][Pp]|\/[Ww]|\/[Ww][Hh][Oo]|\/[Ll][Aa][Ss][Tt]|\/[Ll][Ss][Oo][Ff]|\/[Nn][Mm][Aa][Pp]|\/[Dd][Ii][Gg]|\/[Ff][Ii][Nn][Dd])/'
-      pivot_on: [host]
-      window: 1h
+  # Behaviour-targeted hunts the engine runs around the alert (not a sweep).
+  - name: Archiving or compressing files on host
+    query: data_process_exec_process_binary:/.*(tar|zip|7z|7za|gzip|rar).*/
+    pivot_on: host
+    window: 4h
+  - name: Outbound transfer tools
+    query: data_process_exec_process_binary:/.*(curl|wget|scp|rsync|nc|ncat|sftp|ftp).*/
+    pivot_on: host
+    window: 4h
+  - name: Find/grep with broad document or archive targets
+    query: data_process_exec_process_binary:/.*(find|grep|locate).*/ AND data_process_exec_process_arguments:/.*(\.pdf|\.doc|\.xls|\.zip|\.sql|\.bak).*/
+    pivot_on: host
+    window: 2h
+  - name: Copy or staging to tmp or shm
+    query: data_process_exec_process_binary:/.*(cp|mv|rsync).*/ AND data_process_exec_process_arguments:/.*(\/tmp|\/dev\/shm|\/var\/tmp).*/
+    pivot_on: host
+    window: 4h
+  - name: Remote login and privilege activity by user
+    query: data_process_exec_process_binary:/.*(ssh|scp|sudo|su).*/
+    pivot_on: user
+    window: 6h

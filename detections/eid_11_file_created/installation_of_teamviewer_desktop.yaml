@@ -133,44 +133,58 @@ graylog:
   query: data_win_system_eventID:"11" AND data_win_eventdata_targetFilename:/.*\\[Tt][Ee][Aa][Mm][Vv][Ii][Ee][Ww][Ee][Rr]_[Dd][Ee][Ss][Kk][Tt][Oo][Pp]\.[Ee][Xx][Ee]/
 
 correlation:
-  # Authored by the correlation engine for review. Related CoPilot Searches to run
-  # around an alert from this rule, scoped to the same host/user/IP within the window.
+  # Authored per-rule (behaviour-researched) for the correlation engine. Related CoPilot
+  # Searches + telemetry pivots to run around an alert, scoped to its host/user/ip/domain.
   related_rules:
-    - id: 75bf09fa-1dd7-4d18-9af9-dd9e492562eb
-      name: "ADSI-Cache File Creation By Uncommon Tool"
-      reason: "next kill-chain tactic: Command and Control"
-    - id: 639c9081-f482-47d3-a0bd-ddee3d4ecd76
-      name: "All Backups Deleted Via Wbadmin.EXE"
-      reason: "next kill-chain tactic: Impact"
-    - id: 0b9ad457-2554-44c1-82c2-d56a99c42377
-      name: "Anydesk Temporary Artefact"
-      reason: "next kill-chain tactic: Command and Control"
-    - id: 7cff77e1-9663-46a3-8260-17f2e1aa9d0a
-      name: "AppX Package Installation Attempts Via AppInstaller.EXE"
-      reason: "next kill-chain tactic: Command and Control"
-    - id: 1f0f6176-6482-4027-b151-00071af39d7e
-      name: "Arbitrary File Download Via ConfigSecurityPolicy.EXE"
-      reason: "next kill-chain tactic: Exfiltration"
-    - id: eee00933-a761-4cd0-be70-c42fe91731e7
-      name: "Arbitrary File Download Via GfxDownloadWrapper.EXE"
-      reason: "next kill-chain tactic: Command and Control"
-  window: 1h
+  - id: 162ab1e4-6874-4564-853c-53ec3ab8be01
+    name: TeamViewer Remote Session
+    reason: 'Direct follow-on: TeamViewer session/connection log files written after install show the tool was actually used for an inbound remote session.'
+  - id: ccad96d7-a48c-4f13-8b9c-9f6a31cba454
+    name: Detect Remote Access Software Usage FileInfo
+    reason: 'Co-occurring: execution of remote access software on the same host confirms the installed tool is running.'
+  - id: 0b9ad457-2554-44c1-82c2-d56a99c42377
+    name: Anydesk Temporary Artefact
+    reason: 'Same-class co-occurrence: attackers often deploy redundant remote-access tools (TeamViewer plus AnyDesk) for resilient access.'
+  - id: 114e7f1c-f137-48c8-8f54-3088c24ce4b9
+    name: Remote Access Tool - AnyDesk Silent Installation
+    reason: 'Redundant-RAT pattern: silent install of a second remote tool alongside TeamViewer suggests deliberate access staging, not helpdesk use.'
+  - id: fec96f39-988b-4586-b746-b93d59fd1922
+    name: ScreenConnect Temporary Installation Artefact
+    reason: 'Same-class co-occurrence: ScreenConnect is another RMM favored for hands-on-keyboard access; both on one host suggests tool staging.'
+  - id: 17a1be64-8d88-40bf-b5ff-a4f7a50ebcc8
+    name: Suspicious New Service Creation
+    reason: TeamViewer installs a service for unattended access; a suspicious service creation nearby reveals persistence or a separate implant.
+  - id: 2c568c34-bb57-4b43-9d75-19c605b98e70
+    name: Windows Create Local Administrator Account Via Net
+    reason: 'Likely next step: after securing remote access, attackers create a backup local admin account for durable access.'
+  - id: de587dce-915e-4218-aac4-835ca6af6f70
+    name: Potential Persistence Attempt Via Run Keys Using Reg.EXE
+    reason: 'Likely next step: Run-key persistence keeps the remote client or a companion payload alive across reboots.'
+  window: 2h
   enrichment_searches:
-  # Rule-specific telemetry pivots the engine runs around an alert from this rule,
-  # scoped to the alert's host/user/IP within the window (behaviour-targeted, not a sweep).
-    - name: "Remote-access / RMM tooling on this host"
-      query: '((data_win_system_eventID:"1" AND data_win_eventdata_image:/.*(\\[Nn][Gg][Rr][Oo][Kk]\.[Ee][Xx][Ee]|\\[Pp][Ll][Ii][Nn][Kk]\.[Ee][Xx][Ee]|\\[Ss][Ss][Hh]\.[Ee][Xx][Ee]|\\[Ff][Rr][Pp][Cc]\.[Ee][Xx][Ee]|\\[Cc][Hh][Ii][Ss][Ee][Ll]\.[Ee][Xx][Ee]|\\[Cc][Ll][Oo][Uu][Dd][Ff][Ll][Aa][Rr][Ee][Dd]\.[Ee][Xx][Ee])/) OR (data_win_system_eventID:"3" AND data_win_eventdata_image:/.*(\\[Nn][Gg][Rr][Oo][Kk]\.[Ee][Xx][Ee]|\\[Pp][Ll][Ii][Nn][Kk]\.[Ee][Xx][Ee]|\\[Ss][Ss][Hh]\.[Ee][Xx][Ee]|\\[Ff][Rr][Pp][Cc]\.[Ee][Xx][Ee]|\\[Cc][Hh][Ii][Ss][Ee][Ll]\.[Ee][Xx][Ee]|\\[Cc][Ll][Oo][Uu][Dd][Ff][Ll][Aa][Rr][Ee][Dd]\.[Ee][Xx][Ee])/) OR ((data_win_eventdata_commandLine:/.*-[Rr] 127\.0\.0\.1.*/ OR data_win_eventdata_commandLine:/.*[Ss][Ss][Hh] -[Rr].*/ OR data_win_eventdata_commandLine:/.*[Pp][Oo][Rr][Tt][Ff][Ww][Dd].*/ OR data_win_eventdata_commandLine:/.*[Ss][Oo][Cc][Kk][Ss].*/)))'
-      pivot_on: [host]
-      window: 1h
-    - name: "Archive / staging & outbound-transfer tooling on this host"
-      query: '(((data_win_system_eventID:"1" AND data_win_eventdata_image:/.*(\\7[Zz]\.[Ee][Xx][Ee]|\\7[Zz][Aa]\.[Ee][Xx][Ee]|\\7[Zz][Rr]\.[Ee][Xx][Ee]|\\[Rr][Aa][Rr]\.[Ee][Xx][Ee]|\\[Ww][Ii][Nn][Rr][Aa][Rr]\.[Ee][Xx][Ee]|\\[Ww][Zz][Zz][Ii][Pp]\.[Ee][Xx][Ee]|\\[Mm][Aa][Kk][Ee][Cc][Aa][Bb]\.[Ee][Xx][Ee])/) OR (data_win_eventdata_commandLine:/.*[Cc][Oo][Mm][Pp][Rr][Ee][Ss][Ss]-[Aa][Rr][Cc][Hh][Ii][Vv][Ee].*/ OR data_win_eventdata_commandLine:/.*\.7[Zz].*/ OR data_win_eventdata_commandLine:/.*\.[Rr][Aa][Rr].*/ OR data_win_eventdata_commandLine:/.* -[Hh][Pp].*/)) OR (((data_win_system_eventID:"1" AND data_win_eventdata_image:/.*(\\[Rr][Cc][Ll][Oo][Nn][Ee]\.[Ee][Xx][Ee]|\\[Cc][Uu][Rr][Ll]\.[Ee][Xx][Ee]|\\[Ww][Gg][Ee][Tt]\.[Ee][Xx][Ee]|\\[Ww][Ii][Nn][Ss][Cc][Pp]\.[Ee][Xx][Ee]|\\[Pp][Ss][Cc][Pp]\.[Ee][Xx][Ee]|\\[Mm][Ee][Gg][Aa][Cc][Mm][Dd]\.[Ee][Xx][Ee]|\\[Mm][Ee][Gg][Aa][Ss][Yy][Nn][Cc]\.[Ee][Xx][Ee])/) OR ((data_win_eventdata_commandLine:/.*[Ii][Nn][Vv][Oo][Kk][Ee]-[Rr][Ee][Ss][Tt][Mm][Ee][Tt][Hh][Oo][Dd].*/ OR data_win_eventdata_commandLine:/.*[Ss][Tt][Aa][Rr][Tt]-[Bb][Ii][Tt][Ss][Tt][Rr][Aa][Nn][Ss][Ff][Ee][Rr].*/ OR data_win_eventdata_commandLine:/.*[Rr][Cc][Ll][Oo][Nn][Ee].*/ OR data_win_eventdata_commandLine:/.*[Tt][Rr][Aa][Nn][Ss][Ff][Ee][Rr]\.[Ss][Hh].*/ OR data_win_eventdata_commandLine:/.*[Aa][Nn][Oo][Nn][Ff][Ii][Ll][Ee][Ss].*/ OR data_win_eventdata_commandLine:/.*[Pp][Aa][Ss][Tt][Ee][Bb][Ii][Nn].*/ OR data_win_eventdata_commandLine:/.*[Mm][Ee][Gg][Aa]\.[Nn][Zz].*/ OR data_win_eventdata_commandLine:/.*-[Oo][Uu][Tt][Ff][Ii][Ll][Ee].*/ OR data_win_eventdata_commandLine:/.*[Uu][Pp][Ll][Oo][Aa][Dd][Ff][Ii][Ll][Ee].*/)))))'
-      pivot_on: [host]
-      window: 2h
-    - name: "Execution of programs from user-writable paths on this host"
-      query: 'data_win_system_eventID:"1" AND (data_win_eventdata_image:/.*\\[Uu][Ss][Ee][Rr][Ss]\\.*/ OR data_win_eventdata_image:/.*\\[Pp][Rr][Oo][Gg][Rr][Aa][Mm][Dd][Aa][Tt][Aa]\\.*/ OR data_win_eventdata_image:/.*\\[Ww][Ii][Nn][Dd][Oo][Ww][Ss]\\[Tt][Ee][Mm][Pp]\\.*/ OR data_win_eventdata_image:/.*\\[Aa][Pp][Pp][Dd][Aa][Tt][Aa]\\.*/ OR data_win_eventdata_image:/.*\\[Pp][Uu][Bb][Ll][Ii][Cc]\\.*/ OR data_win_eventdata_image:/.*\\\$[Rr][Ee][Cc][Yy][Cc][Ll][Ee].*/)'
-      pivot_on: [host]
-      window: 1h
-    - name: "Autostart persistence written on this host"
-      query: '(data_win_system_eventID:"12" OR data_win_system_eventID:"13") AND (data_win_eventdata_targetObject:/.*[Cc][Uu][Rr][Rr][Ee][Nn][Tt][Vv][Ee][Rr][Ss][Ii][Oo][Nn]\\[Rr][Uu][Nn].*/ OR data_win_eventdata_targetObject:/.*[Cc][Uu][Rr][Rr][Ee][Nn][Tt][Vv][Ee][Rr][Ss][Ii][Oo][Nn]\\[Rr][Uu][Nn][Oo][Nn][Cc][Ee].*/ OR data_win_eventdata_targetObject:/.*[Cc][Uu][Rr][Rr][Ee][Nn][Tt][Cc][Oo][Nn][Tt][Rr][Oo][Ll][Ss][Ee][Tt]\\[Ss][Ee][Rr][Vv][Ii][Cc][Ee][Ss]\\.*/ OR data_win_eventdata_targetObject:/.*[Ii][Mm][Aa][Gg][Ee] [Ff][Ii][Ll][Ee] [Ee][Xx][Ee][Cc][Uu][Tt][Ii][Oo][Nn] [Oo][Pp][Tt][Ii][Oo][Nn][Ss]\\.*/ OR data_win_eventdata_targetObject:/.*[Ww][Ii][Nn][Ll][Oo][Gg][Oo][Nn]\\[Ss][Hh][Ee][Ll][Ll].*/ OR data_win_eventdata_targetObject:/.*[Ww][Ii][Nn][Ll][Oo][Gg][Oo][Nn]\\[Uu][Ss][Ee][Rr][Ii][Nn][Ii][Tt].*/ OR data_win_eventdata_targetObject:/.*[Cc][Uu][Rr][Rr][Ee][Nn][Tt][Vv][Ee][Rr][Ss][Ii][Oo][Nn]\\[Ee][Xx][Pp][Ll][Oo][Rr][Ee][Rr]\\[Rr][Uu][Nn].*/ OR data_win_eventdata_targetObject:/.*[Pp][Oo][Ll][Ii][Cc][Ii][Ee][Ss]\\[Ee][Xx][Pp][Ll][Oo][Rr][Ee][Rr]\\[Rr][Uu][Nn].*/ OR data_win_eventdata_targetObject:/.*[Cc][Uu][Rr][Rr][Ee][Nn][Tt][Vv][Ee][Rr][Ss][Ii][Oo][Nn]\\[Ww][Ii][Nn][Dd][Oo][Ww][Ss]\\[Ll][Oo][Aa][Dd].*/)'
-      pivot_on: [host]
-      window: 2h
+  # Behaviour-targeted hunts the engine runs around the alert (not a sweep).
+  - name: TeamViewer process execution and unattended-access command lines
+    query: data_win_system_eventID:"1" AND (data_win_eventdata_image:/.*\[Tt]eam[Vv]iewer.*/ OR data_win_eventdata_parentImage:/.*\[Tt]eam[Vv]iewer.*/ OR data_win_eventdata_commandLine:/.*[Tt]eam[Vv]iewer.*(--|\/)([Ss]ilent|[Pp]assword|[Ss]etup|[Ss]ervice|[Cc]onnect|[Aa]ssign).*/)
+    pivot_on:
+    - host
+    window: 2h
+  - name: Network and DNS contact with TeamViewer infrastructure
+    query: (data_win_system_eventID:"3" AND data_win_eventdata_image:/.*\[Tt]eam[Vv]iewer.*/) OR (data_win_system_eventID:"22" AND data_win_eventdata_queryName:/.*([Tt]eam[Vv]iewer\.com|[Rr]outer[0-9]*\.[Tt]eam[Vv]iewer).*/)
+    pivot_on:
+    - host
+    window: 2h
+  - name: TeamViewer files and session logs written on host
+    query: data_win_system_eventID:"11" AND (data_win_eventdata_targetFilename:*[Tt]eam[Vv]iewer*.exe OR data_win_eventdata_targetFilename:*[Tt]eam[Vv]iewer*.msi OR data_win_eventdata_targetFilename:*[Tt]eam[Vv]iewer*Logfile*.log OR data_win_eventdata_targetFilename:*Connections_incoming.txt)
+    pivot_on:
+    - host
+    window: 2h
+  - name: 'Access hardening after remote tool install: new accounts, firewall, services'
+    query: data_win_system_eventID:"1" AND (data_win_eventdata_commandLine:/.*[Nn]et1? +user .*\/[Aa][Dd][Dd].*/ OR data_win_eventdata_commandLine:/.*[Nn]et1? +localgroup +[Aa]dministrators.*/ OR data_win_eventdata_commandLine:/.*[Nn]etsh.*[Aa]dvfirewall.*[Aa]dd.*/ OR data_win_eventdata_commandLine:/.*(sc|sc\.exe) +(create|config).*/)
+    pivot_on:
+    - host
+    window: 4h
+  - name: Other remote-access/RMM tools staged on host
+    query: data_win_system_eventID:"1" AND data_win_eventdata_image:/.*\([Aa]ny[Dd]esk|[Ss]creen[Cc]onnect.*|[Aa]tera[Aa]gent|[Rr]ust[Dd]esk|[Ss]plashtop.*|[Nn]et[Ss]upport.*|[Uu]ltra[Vv]iewer|[Mm]esh[Aa]gent|[Ll]og[Mm]e[Ii]n.*|[Rr]utserv|[Tt]ight[Vv][Nn][Cc]).*/
+    pivot_on:
+    - host
+    window: 24h

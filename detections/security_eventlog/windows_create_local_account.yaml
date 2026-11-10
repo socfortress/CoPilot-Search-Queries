@@ -127,62 +127,58 @@ graylog:
   query: data_win_system_eventID:"4720"
 
 correlation:
-  # Authored by the correlation engine for review. Related CoPilot Searches to run
-  # around an alert from this rule, scoped to the same host/user/IP within the window.
+  # Authored per-rule (behaviour-researched) for the correlation engine. Related CoPilot
+  # Searches + telemetry pivots to run around an alert, scoped to its host/user/ip/domain.
   related_rules:
-    - id: a5d85486-b89c-11eb-8267-acde48001122
-      name: "Allow Inbound Traffic In Firewall Rule"
-      reason: "same analytic story: Lateral Movement"
-    - id: f64da023-b988-4775-8d57-38e512beb56e
-      name: "Get-DomainComputer with PowerShell Script Block"
-      reason: "same analytic story: Lateral Movement"
-    - id: 89275e7e-0548-11ec-bf75-acde48001122
-      name: "Get-DomainTrust with PowerShell Script Block"
-      reason: "same analytic story: Lateral Movement"
-    - id: 70fac80e-0bf1-11ec-9ba0-acde48001122
-      name: "Get-ForestTrust with PowerShell Script Block"
-      reason: "same analytic story: Lateral Movement"
-    - id: a4e8f3a4-48b2-11ec-bcfc-3e22fbd008af
-      name: "Interactive Session on Remote Endpoint with PowerShell"
-      reason: "same analytic story: Lateral Movement"
-    - id: windows-powershell-invoke-wmiexec-usage-001
-      name: "PowerShell Invoke WmiExec Usage"
-      reason: "same analytic story: Lateral Movement"
-    - id: windows-powershell-remote-services-add-trustedhost-001
-      name: "Powershell Remote Services Add TrustedHost"
-      reason: "same analytic story: Lateral Movement"
-    - id: 2c568c34-bb57-4b43-9d75-19c605b98e70
-      name: "Windows Create Local Administrator Account Via Net"
-      reason: "same analytic story: Lateral Movement"
-    - id: 78e678d2-bf64-4fe6-aa52-2f7b11dddee7
-      name: "Windows Detect Network Scanner Behavior"
-      reason: "same analytic story: Lateral Movement"
-    - id: 5df35d50-e1a3-4a52-a337-92e69d9b1b8a
-      name: "Windows PowerShell Process With Malicious String"
-      reason: "same analytic story: Lateral Movement"
-    - id: windows-winrm-spawning-process-001
-      name: "Windows WinRM Spawning a Process"
-      reason: "same analytic story: Lateral Movement"
-    - id: ec570e53-4c76-45a9-804d-dc3f355ff7a7
-      name: "7Zip Compressing Dump Files"
-      reason: "next kill-chain tactic: Collection"
-  window: 1h
+  - id: cd219ff3-fa99-45d4-8380-a7d15116c6dc
+    name: New User Created Via Net.EXE
+    reason: 'Process-level view of the same account creation: net user /add is the usual command that generates the 4720 event, naming the parent process and operator.'
+  - id: 2c568c34-bb57-4b43-9d75-19c605b98e70
+    name: Windows Create Local Administrator Account Via Net
+    reason: 'Escalated variant of the same action: an account created and put in Administrators in one go confirms persistence rather than a helpdesk task.'
+  - id: c265cf08-3f99-46c1-8d59-328247057d57
+    name: User Added to Local Administrator Group
+    reason: 'Immediate follow-on: the new account is normally added to Administrators (4732) seconds after 4720, giving it privilege.'
+  - id: ffa28e60-bdb1-46e0-9f82-05f7a61cc06e
+    name: User Added to Remote Desktop Users Group
+    reason: Attackers grant the backdoor account RDP rights so they can log in interactively with it.
+  - id: 7b449a5e-1db5-4dd0-a2dc-4e3a67282538
+    name: Hidden Local User Creation
+    reason: Concealment of the newly created account (trailing $ or hidden names) distinguishes malicious persistence from admin work.
+  - id: cfeed607-6aa4-4bbd-9627-b637deb723c8
+    name: New or Renamed User Account with '$' Character
+    reason: A created or renamed account mimicking a machine account is a stealth technique for the same backdoor account.
+  - id: 9ec9fb1b-e059-4489-9642-f270c207923d
+    name: Hiding User Account Via SpecialAccounts Registry Key - CommandLine
+    reason: Hiding the new account from the logon screen via the SpecialAccounts registry key typically follows account creation.
+  - id: 0d5675be-bc88-4172-86d3-1e96a4476536
+    name: Potential Tampering With RDP Related Registry Keys Via Reg.EXE
+    reason: Enabling RDP access is the next step after creating a local account to log in with it remotely.
+  window: 2h
   enrichment_searches:
-  # Rule-specific telemetry pivots the engine runs around an alert from this rule,
-  # scoped to the alert's host/user/IP within the window (behaviour-targeted, not a sweep).
-    - name: "Local account / group creation on this host"
-      query: '(((data_win_system_eventID:"4720" OR data_win_system_eventID:"4728" OR data_win_system_eventID:"4732" OR data_win_system_eventID:"4756")) OR (data_win_system_eventID:"1" AND data_win_eventdata_image:/.*(\\[Nn][Ee][Tt]\.[Ee][Xx][Ee]|\\[Nn][Ee][Tt]1\.[Ee][Xx][Ee])/ AND (data_win_eventdata_commandLine:/.*[Uu][Ss][Ee][Rr] .*/ OR data_win_eventdata_commandLine:/.*[Ll][Oo][Cc][Aa][Ll][Gg][Rr][Oo][Uu][Pp].*/ OR data_win_eventdata_commandLine:/.*[Gg][Rr][Oo][Uu][Pp] .*/)))'
-      pivot_on: [host]
-      window: 6h
-    - name: "Memory/credential-dump creation & LSASS access on this host"
-      query: '((data_win_system_eventID:"1" AND data_win_eventdata_image:/.*(\\[Pp][Rr][Oo][Cc][Dd][Uu][Mm][Pp]\.[Ee][Xx][Ee]|\\[Pp][Rr][Oo][Cc][Dd][Uu][Mm][Pp]64\.[Ee][Xx][Ee]|\\[Ss][Qq][Ll][Dd][Uu][Mm][Pp][Ee][Rr]\.[Ee][Xx][Ee]|\\[Cc][Rr][Ee][Aa][Tt][Ee][Dd][Uu][Mm][Pp]\.[Ee][Xx][Ee]|\\[Rr][Dd][Rr][Ll][Ee][Aa][Kk][Dd][Ii][Aa][Gg]\.[Ee][Xx][Ee]|\\[Dd][Uu][Mm][Pp][Ee][Rr][Tt]\.[Ee][Xx][Ee]|\\[Nn][Aa][Nn][Oo][Dd][Uu][Mm][Pp]\.[Ee][Xx][Ee]|\\[Aa][Vv][Dd][Uu][Mm][Pp]\.[Ee][Xx][Ee])/) OR (data_win_system_eventID:"1" AND (data_win_eventdata_commandLine:/.*[Cc][Oo][Mm][Ss][Vv][Cc][Ss]\.[Dd][Ll][Ll].*/ OR data_win_eventdata_commandLine:/.*[Mm][Ii][Nn][Ii][Dd][Uu][Mm][Pp].*/ OR data_win_eventdata_commandLine:/.*[Dd][Uu][Mm][Pp][Ee][Rr][Tt].*/ OR data_win_eventdata_commandLine:/.*[Nn][Aa][Nn][Oo][Dd][Uu][Mm][Pp].*/ OR data_win_eventdata_commandLine:/.*[Ll][Ss][Aa][Ss][Ss].*/ OR data_win_eventdata_commandLine:/.*[Ss][Ee][Kk][Uu][Rr][Ll][Ss][Aa].*/ OR data_win_eventdata_commandLine:/.*[Nn][Tt][Dd][Ss]\.[Dd][Ii][Tt].*/ OR data_win_eventdata_commandLine:/.*[Nn][Tt][Dd][Ss][Uu][Tt][Ii][Ll].*/)) OR (data_win_system_eventID:"10" AND data_win_eventdata_targetImage:/.*(\\[Ll][Ss][Aa][Ss][Ss]\.[Ee][Xx][Ee])/))'
-      pivot_on: [host]
-      window: 1h
-    - name: "This account's logon activity across hosts"
-      query: '(data_win_system_eventID:"4624" OR data_win_system_eventID:"4625")'
-      pivot_on: [user]
-      window: 6h
-    - name: "Account / group / privilege changes involving this account"
-      query: '(data_win_system_eventID:"4720" OR data_win_system_eventID:"4722" OR data_win_system_eventID:"4724" OR data_win_system_eventID:"4728" OR data_win_system_eventID:"4732" OR data_win_system_eventID:"4756" OR data_win_system_eventID:"4672")'
-      pivot_on: [user]
-      window: 6h
+  # Behaviour-targeted hunts the engine runs around the alert (not a sweep).
+  - name: Account creation commands (net user /add, New-LocalUser, wmic useraccount)
+    query: data_win_system_eventID:"1" AND ((data_win_eventdata_image:/.*[\\][Nn][Ee][Tt]1?\.[Ee][Xx][Ee]/ AND data_win_eventdata_commandLine:/.*[Uu][Ss][Ee][Rr].*\/[Aa][Dd][Dd].*/) OR data_win_eventdata_commandLine:/.*[Nn][Ee][Ww]-[Ll][Oo][Cc][Aa][Ll][Uu][Ss][Ee][Rr].*/ OR data_win_eventdata_commandLine:/.*[Ww][Mm][Ii][Cc].*[Uu][Ss][Ee][Rr][Aa][Cc][Cc][Oo][Uu][Nn][Tt].*/)
+    pivot_on:
+    - host
+    window: 2h
+  - name: New account added to Administrators / RDP groups
+    query: (data_win_system_eventID:"4732" OR data_win_system_eventID:"4728" OR data_win_system_eventID:"4756") OR (data_win_system_eventID:"1" AND data_win_eventdata_commandLine:/.*[Ll][Oo][Cc][Aa][Ll][Gg][Rr][Oo][Uu][Pp].*(\/[Aa][Dd][Dd]| -[Aa][Dd][Dd]).*/)
+    pivot_on:
+    - host
+    window: 2h
+  - name: Account hiding and RDP enablement registry changes
+    query: (data_win_system_eventID:"13" OR data_win_system_eventID:"12") AND (data_win_eventdata_targetObject:*SpecialAccounts* OR data_win_eventdata_targetObject:*fDenyTSConnections* OR data_win_eventdata_targetObject:*UserList*)
+    pivot_on:
+    - host
+    window: 4h
+  - name: First logons by the new account
+    query: data_win_system_eventID:"4624" OR data_win_system_eventID:"4625" OR data_win_system_eventID:"4648"
+    pivot_on:
+    - user
+    window: 24h
+  - name: Firewall or RDP enablement via netsh/PowerShell
+    query: data_win_system_eventID:"1" AND (data_win_eventdata_commandLine:/.*[Nn][Ee][Tt][Ss][Hh].*[Ff][Ii][Rr][Ee][Ww][Aa][Ll][Ll].*/ OR data_win_eventdata_commandLine:/.*[Ff][Dd][Ee][Nn][Yy][Tt][Ss][Cc][Oo][Nn][Nn][Ee][Cc][Tt][Ii][Oo][Nn][Ss].*/ OR data_win_eventdata_commandLine:/.*[Ee][Nn][Aa][Bb][Ll][Ee]-[Nn][Ee][Tt][Ff][Ii][Rr][Ee][Ww][Aa][Ll][Ll][Rr][Uu][Ll][Ee].*/)
+    pivot_on:
+    - host
+    window: 4h

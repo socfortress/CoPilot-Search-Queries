@@ -145,23 +145,57 @@ graylog:
   query: (data_win_system_providerName:/[Kk][Ee][Rr][Bb][Ee][Rr][Oo][Ss]-[Kk][Ee][Yy]-[Dd][Ii][Ss][Tt][Rr][Ii][Bb][Uu][Tt][Ii][Oo][Nn]-[Cc][Ee][Nn][Tt][Ee][Rr]/ OR data_win_system_providerName:/[Mm][Ii][Cc][Rr][Oo][Ss][Oo][Ff][Tt]-[Ww][Ii][Nn][Dd][Oo][Ww][Ss]-[Kk][Ee][Rr][Bb][Ee][Rr][Oo][Ss]-[Kk][Ee][Yy]-[Dd][Ii][Ss][Tt][Rr][Ii][Bb][Uu][Tt][Ii][Oo][Nn]-[Cc][Ee][Nn][Tt][Ee][Rr]/) AND (data_win_system_eventID:"39" OR data_win_system_eventID:"41")
 
 correlation:
-  # Authored by the correlation engine for review.
+  # Authored per-rule (behaviour-researched) for the correlation engine. Related CoPilot
+  # Searches + telemetry pivots to run around an alert, scoped to its host/user/ip/domain.
+  related_rules:
+  - id: 762f2482-ff21-4970-8939-0aa317a886bb
+    name: HackTool - Certify Execution
+    reason: Certify enumerates/abuses vulnerable ADCS templates to request a spoofed-SAN certificate; the weak-mapping KDC event is what appears when that certificate is later used for PKINIT.
+  - id: cd8c163e-a19b-402e-bdd5-419ff5859f12
+    name: HackTool - ADCSPwn Execution
+    reason: ADCSPwn relays to ADCS to obtain a certificate; using it for Kerberos auth against a non-strict-mapping KDC triggers this event.
+  - id: bfbd3291-de87-4b7c-88a2-d6a5deb28668
+    name: ADCS Certificate Template Configuration Vulnerability with Risky EKU
+    reason: A template with risky EKU/enrollee-supplied SAN is the precondition that lets an attacker obtain the certificate later used without strong mapping (ESC1/ESC6, CVE-2022-26923 class).
+  - id: f598ea0c-c25a-4f72-a219-50c44411c791
+    name: Possible Shadow Credentials Added
+    reason: Writing msDS-KeyCredentialLink gives an attacker a key-trust certificate to authenticate as the victim via PKINIT, an alternate path to certificate logon with weak mapping.
+  - id: 6a53d871-682d-40b6-83e0-b7c1a6c4e3a5
+    name: PetitPotam Suspicious Kerberos TGT Request
+    reason: Coercion plus ADCS relay ends in a machine-account certificate and a certificate-based TGT request, the same machine-name-spoofing outcome this event flags.
+  - id: f7644214-0eb0-4ace-9455-331ec4c09253
+    name: Kerberos Manipulation
+    reason: Follow-on Kerberos failures/anomalies as the attacker uses the forged-identity TGT and tickets.
+  - id: 3ffd6f51-e6c1-47b7-94b4-c1e61d4117c5
+    name: Certificate Exported Via Certutil.EXE
+    reason: Exporting a PFX/private key is how a stolen or enrolled certificate is carried to another host for PKINIT logon.
+  window: 1h
   enrichment_searches:
-  # Rule-specific telemetry pivots the engine runs around an alert from this rule,
-  # scoped to the alert's host/user/IP within the window (behaviour-targeted, not a sweep).
-    - name: "Memory/credential-dump creation & LSASS access on this host"
-      query: '((data_win_system_eventID:"1" AND data_win_eventdata_image:/.*(\\[Pp][Rr][Oo][Cc][Dd][Uu][Mm][Pp]\.[Ee][Xx][Ee]|\\[Pp][Rr][Oo][Cc][Dd][Uu][Mm][Pp]64\.[Ee][Xx][Ee]|\\[Ss][Qq][Ll][Dd][Uu][Mm][Pp][Ee][Rr]\.[Ee][Xx][Ee]|\\[Cc][Rr][Ee][Aa][Tt][Ee][Dd][Uu][Mm][Pp]\.[Ee][Xx][Ee]|\\[Rr][Dd][Rr][Ll][Ee][Aa][Kk][Dd][Ii][Aa][Gg]\.[Ee][Xx][Ee]|\\[Dd][Uu][Mm][Pp][Ee][Rr][Tt]\.[Ee][Xx][Ee]|\\[Nn][Aa][Nn][Oo][Dd][Uu][Mm][Pp]\.[Ee][Xx][Ee]|\\[Aa][Vv][Dd][Uu][Mm][Pp]\.[Ee][Xx][Ee])/) OR (data_win_system_eventID:"1" AND (data_win_eventdata_commandLine:/.*[Cc][Oo][Mm][Ss][Vv][Cc][Ss]\.[Dd][Ll][Ll].*/ OR data_win_eventdata_commandLine:/.*[Mm][Ii][Nn][Ii][Dd][Uu][Mm][Pp].*/ OR data_win_eventdata_commandLine:/.*[Dd][Uu][Mm][Pp][Ee][Rr][Tt].*/ OR data_win_eventdata_commandLine:/.*[Nn][Aa][Nn][Oo][Dd][Uu][Mm][Pp].*/ OR data_win_eventdata_commandLine:/.*[Ll][Ss][Aa][Ss][Ss].*/ OR data_win_eventdata_commandLine:/.*[Ss][Ee][Kk][Uu][Rr][Ll][Ss][Aa].*/ OR data_win_eventdata_commandLine:/.*[Nn][Tt][Dd][Ss]\.[Dd][Ii][Tt].*/ OR data_win_eventdata_commandLine:/.*[Nn][Tt][Dd][Ss][Uu][Tt][Ii][Ll].*/)) OR (data_win_system_eventID:"10" AND data_win_eventdata_targetImage:/.*(\\[Ll][Ss][Aa][Ss][Ss]\.[Ee][Xx][Ee])/))'
-      pivot_on: [host]
-      window: 1h
-    - name: "Service installations on this host"
-      query: 'data_win_system_eventID:"7045"'
-      pivot_on: [host]
-      window: 6h
-    - name: "Follow-on LOLBin / signed-binary-proxy execution on this host"
-      query: 'data_win_system_eventID:"1" AND data_win_eventdata_image:/.*(\\[Rr][Uu][Nn][Dd][Ll][Ll]32\.[Ee][Xx][Ee]|\\[Rr][Ee][Gg][Ss][Vv][Rr]32\.[Ee][Xx][Ee]|\\[Mm][Ss][Hh][Tt][Aa]\.[Ee][Xx][Ee]|\\[Ii][Nn][Ss][Tt][Aa][Ll][Ll][Uu][Tt][Ii][Ll]\.[Ee][Xx][Ee]|\\[Rr][Ee][Gg][Aa][Ss][Mm]\.[Ee][Xx][Ee]|\\[Rr][Ee][Gg][Ss][Vv][Cc][Ss]\.[Ee][Xx][Ee]|\\[Mm][Ss][Bb][Uu][Ii][Ll][Dd]\.[Ee][Xx][Ee]|\\[Cc][Ee][Rr][Tt][Uu][Tt][Ii][Ll]\.[Ee][Xx][Ee]|\\[Bb][Ii][Tt][Ss][Aa][Dd][Mm][Ii][Nn]\.[Ee][Xx][Ee]|\\[Ww][Mm][Ii][Cc]\.[Ee][Xx][Ee]|\\[Cc][Mm][Ss][Tt][Pp]\.[Ee][Xx][Ee]|\\[Oo][Dd][Bb][Cc][Cc][Oo][Nn][Ff]\.[Ee][Xx][Ee]|\\[Ff][Oo][Rr][Ff][Ii][Ll][Ee][Ss]\.[Ee][Xx][Ee]|\\[Pp][Cc][Aa][Ll][Uu][Aa]\.[Ee][Xx][Ee]|\\[Mm][Aa][Vv][Ii][Nn][Jj][Ee][Cc][Tt]\.[Ee][Xx][Ee]|\\[Ss][Cc][Rr][Ii][Pp][Tt][Rr][Uu][Nn][Nn][Ee][Rr]\.[Ee][Xx][Ee])/'
-      pivot_on: [host]
-      window: 2h
-    - name: "UAC-bypass / privilege-escalation binaries on this host"
-      query: 'data_win_system_eventID:"1" AND (data_win_eventdata_image:/.*(\\[Ff][Oo][Dd][Hh][Ee][Ll][Pp][Ee][Rr]\.[Ee][Xx][Ee]|\\[Ee][Vv][Ee][Nn][Tt][Vv][Ww][Rr]\.[Ee][Xx][Ee]|\\[Ss][Dd][Cc][Ll][Tt]\.[Ee][Xx][Ee]|\\[Cc][Oo][Mm][Pp][Uu][Tt][Ee][Rr][Dd][Ee][Ff][Aa][Uu][Ll][Tt][Ss]\.[Ee][Xx][Ee]|\\[Ss][Ll][Uu][Ii]\.[Ee][Xx][Ee]|\\[Ww][Ss][Rr][Ee][Ss][Ee][Tt]\.[Ee][Xx][Ee])/ OR data_win_eventdata_parentImage:/.*(\\[Ff][Oo][Dd][Hh][Ee][Ll][Pp][Ee][Rr]\.[Ee][Xx][Ee]|\\[Ee][Vv][Ee][Nn][Tt][Vv][Ww][Rr]\.[Ee][Xx][Ee]|\\[Ss][Dd][Cc][Ll][Tt]\.[Ee][Xx][Ee]|\\[Cc][Oo][Mm][Pp][Uu][Tt][Ee][Rr][Dd][Ee][Ff][Aa][Uu][Ll][Tt][Ss]\.[Ee][Xx][Ee]|\\[Ss][Ll][Uu][Ii]\.[Ee][Xx][Ee]|\\[Ww][Ss][Rr][Ee][Ss][Ee][Tt]\.[Ee][Xx][Ee])/)'
-      pivot_on: [host]
-      window: 2h
+  # Behaviour-targeted hunts the engine runs around the alert (not a sweep).
+  - name: ADCS abuse tooling execution (Certify/Certipy/ADCSPwn/Rubeus)
+    query: data_win_system_eventID:"1" AND (data_win_eventdata_image:/.*[\\\/]([Cc]ertify|[Rr]ubeus|[Aa][Dd][Cc][Ss][Pp][Ww][Nn]|[Cc]ertipy|[Ww]hisker|[Pp][Ss][Ee][Xx][Ee][Cc]).*\.[Ee][Xx][Ee]/ OR data_win_eventdata_commandLine:/.*([Cc]ertify|[Rr]ubeus|[Cc]ertipy|[Ww]hisker).*/ OR data_win_eventdata_commandLine:/.*(\/[Aa]ltname|\/[Tt]emplate:|asktgt.*\/certificate|[Pp][Kk][Ii][Nn][Ii][Tt]|[Cc]ertreq).*/)
+    pivot_on:
+    - host
+    window: 2h
+  - name: Certificate/PFX export or enrollment request
+    query: (data_win_system_eventID:"1" AND (data_win_eventdata_commandLine:/.*[Cc]ertutil.*(-[Ee]xportPFX|-[Ss]plit|-[Rr]equest|-[Ee]nroll).*/ OR data_win_eventdata_commandLine:/.*([Ee]xport-[Pp]fx[Cc]ertificate|[Ee]xport-[Cc]ertificate|[Cc]ertreq).*/)) OR (data_win_system_eventID:"11" AND (data_win_eventdata_targetFilename:*.pfx OR data_win_eventdata_targetFilename:*.p12 OR data_win_eventdata_targetFilename:*.ccache OR data_win_eventdata_targetFilename:*.kirbi))
+    pivot_on:
+    - host
+    window: 4h
+  - name: Certificate-based Kerberos logons and ticket requests (PKINIT)
+    query: (data_win_system_eventID:"4768" AND data_win_eventdata_preAuthType:"16") OR (data_win_system_eventID:"4769" AND data_win_eventdata_ticketEncryptionType:"0x17") OR (data_win_system_eventID:"4771") OR data_win_eventdata_certIssuerName:*
+    pivot_on:
+    - host
+    - user
+    window: 2h
+  - name: Shadow credentials / key-credential and AD object modification
+    query: (data_win_system_eventID:"5136" AND data_win_eventdata_attributeLDAPDisplayName:"msDS-KeyCredentialLink") OR (data_win_system_eventID:"4742" AND data_win_eventdata_userAccountControl:*) OR (data_win_system_eventID:"4738" AND data_win_eventdata_userPrincipalName:*)
+    pivot_on:
+    - host
+    window: 6h
+  - name: Lateral movement or privileged logon after certificate auth
+    query: (data_win_system_eventID:"4624" AND (data_win_eventdata_logonType:"3" OR data_win_eventdata_logonType:"9") AND data_win_eventdata_authenticationPackageName:"Kerberos") OR data_win_system_eventID:"4672" OR (data_win_system_eventID:"4662" AND data_win_eventdata_properties:*1131f6a*)
+    pivot_on:
+    - host
+    - user
+    window: 2h

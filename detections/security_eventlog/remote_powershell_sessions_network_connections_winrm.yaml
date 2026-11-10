@@ -140,41 +140,58 @@ graylog:
   query: data_win_system_eventID:"5156" AND (data_win_eventdata_destPort:"5985" OR data_win_eventdata_destPort:"5986") AND data_win_eventdata_layerRTID:"44"
 
 correlation:
-  # Authored by the correlation engine for review. Related CoPilot Searches to run
-  # around an alert from this rule, scoped to the same host/user/IP within the window.
+  # Authored per-rule (behaviour-researched) for the correlation engine. Related CoPilot
+  # Searches + telemetry pivots to run around an alert, scoped to its host/user/ip/domain.
   related_rules:
-    - id: 0255a820-e564-4e40-af2b-6ac61160335c
-      name: "A New Trust Was Created To A Domain"
-      reason: "next kill-chain tactic: Persistence"
-    - id: 35ba1d85-724d-42a3-889f-2e2362bcaf23
-      name: "AD Privileged Users or Groups Reconnaissance"
-      reason: "next kill-chain tactic: Discovery"
-    - id: 9eb99343-d336-4020-a3cd-67f3819e68ee
-      name: "Account Tampering - Suspicious Failed Logon Reasons"
-      reason: "next kill-chain tactic: Persistence"
-    - id: 17d619c1-e020-4347-957e-1d1207455c93
-      name: "Active Directory Replication from Non Machine Account"
-      reason: "next kill-chain tactic: Credential Access"
-    - id: 300bac00-e041-4ee2-9c36-e262656a6ecc
-      name: "Active Directory User Backdoors"
-      reason: "next kill-chain tactic: Persistence"
+  - id: 734f8d9b-42b8-41b2-bcf5-abaf49d5a3c8
+    name: Remote PowerShell Session Host Process (WinRM)
+    reason: Inbound 5985/5986 connection is followed by WinRM spawning wsmprovhost.exe, the server-side host of the remote session; confirms the connection became a real session.
+  - id: 5cc2cda8-f261-4d88-a2de-e9e193c86716
+    name: Suspicious Processes Spawned by WinRM
+    reason: 'Direct follow-on: commands the remote operator runs inside the session appear as children of wsmprovhost/winrshost.'
+  - id: windows-winrm-spawning-process-001
+    name: Windows WinRM Spawning a Process
+    reason: Co-occurring process-creation evidence of what was executed through the WinRM channel opened by the inbound connection.
+  - id: 7d4c618e-4716-11ec-951c-3e22fbd008af
+    name: Remote Process Instantiation via WinRM and PowerShell Script Block
+    reason: Script block logging showing remote process creation via WinRM (Invoke-WmiMethod/CIM) on the same host, the attacker's payload execution step.
+  - id: a197e378-d31b-41c0-9635-cfdf1c1bb423
+    name: HackTool - WinRM Access Via Evil-WinRM
+    reason: If the source of the inbound 5985/5986 connection is an Evil-WinRM operator, this identifies the attacker tooling driving the session.
+  - id: 941e5c45-cda7-4864-8cea-bbb7458d194a
+    name: Suspicious Remote Logon with Explicit Credentials
+    reason: 'Precursor: remote WinRM access requires authentication, often with explicitly supplied stolen credentials (4648) just before the connection.'
+  - id: 8eef149c-bd26-49f2-9e5a-9b00e3af499b
+    name: Pass the Hash Activity 2
+    reason: WinRM sessions authenticated via NTLM network logon with a stolen hash show as pass-the-hash logons on the target at the same time.
+  - id: 586a8d6b-6bfe-4ad9-9d78-888cd2fe50c3
+    name: Remote Service Activity via SVCCTL Named Pipe
+    reason: 'Follow-on lateral movement: after landing via WinRM the operator commonly pivots to further hosts via remote service creation.'
   window: 1h
   enrichment_searches:
-  # Rule-specific telemetry pivots the engine runs around an alert from this rule,
-  # scoped to the alert's host/user/IP within the window (behaviour-targeted, not a sweep).
-    - name: "Outbound connections by script interpreters on this host"
-      query: 'data_win_system_eventID:"3" AND data_win_eventdata_image:/.*(\\[Pp][Oo][Ww][Ee][Rr][Ss][Hh][Ee][Ll][Ll]\.[Ee][Xx][Ee]|\\[Pp][Ww][Ss][Hh]\.[Ee][Xx][Ee]|\\[Pp][Oo][Ww][Ee][Rr][Ss][Hh][Ee][Ll][Ll]_[Ii][Ss][Ee]\.[Ee][Xx][Ee]|\\[Cc][Mm][Dd]\.[Ee][Xx][Ee]|\\[Ww][Ss][Cc][Rr][Ii][Pp][Tt]\.[Ee][Xx][Ee]|\\[Cc][Ss][Cc][Rr][Ii][Pp][Tt]\.[Ee][Xx][Ee]|\\[Mm][Ss][Hh][Tt][Aa]\.[Ee][Xx][Ee]|\\[Rr][Uu][Nn][Dd][Ll][Ll]32\.[Ee][Xx][Ee]|\\[Rr][Ee][Gg][Ss][Vv][Rr]32\.[Ee][Xx][Ee])/'
-      pivot_on: [host]
-      window: 1h
-    - name: "Autostart persistence written on this host (Run keys, services, IFEO)"
-      query: '(data_win_system_eventID:"12" OR data_win_system_eventID:"13") AND (data_win_eventdata_targetObject:/.*[Cc][Uu][Rr][Rr][Ee][Nn][Tt][Vv][Ee][Rr][Ss][Ii][Oo][Nn]\\[Rr][Uu][Nn].*/ OR data_win_eventdata_targetObject:/.*[Cc][Uu][Rr][Rr][Ee][Nn][Tt][Vv][Ee][Rr][Ss][Ii][Oo][Nn]\\[Rr][Uu][Nn][Oo][Nn][Cc][Ee].*/ OR data_win_eventdata_targetObject:/.*[Cc][Uu][Rr][Rr][Ee][Nn][Tt][Cc][Oo][Nn][Tt][Rr][Oo][Ll][Ss][Ee][Tt]\\[Ss][Ee][Rr][Vv][Ii][Cc][Ee][Ss]\\.*/ OR data_win_eventdata_targetObject:/.*[Ii][Mm][Aa][Gg][Ee] [Ff][Ii][Ll][Ee] [Ee][Xx][Ee][Cc][Uu][Tt][Ii][Oo][Nn] [Oo][Pp][Tt][Ii][Oo][Nn][Ss]\\.*/ OR data_win_eventdata_targetObject:/.*[Ww][Ii][Nn][Ll][Oo][Gg][Oo][Nn]\\[Ss][Hh][Ee][Ll][Ll].*/ OR data_win_eventdata_targetObject:/.*[Ww][Ii][Nn][Ll][Oo][Gg][Oo][Nn]\\[Uu][Ss][Ee][Rr][Ii][Nn][Ii][Tt].*/ OR data_win_eventdata_targetObject:/.*[Cc][Uu][Rr][Rr][Ee][Nn][Tt][Vv][Ee][Rr][Ss][Ii][Oo][Nn]\\[Ee][Xx][Pp][Ll][Oo][Rr][Ee][Rr]\\[Rr][Uu][Nn].*/ OR data_win_eventdata_targetObject:/.*[Pp][Oo][Ll][Ii][Cc][Ii][Ee][Ss]\\[Ee][Xx][Pp][Ll][Oo][Rr][Ee][Rr]\\[Rr][Uu][Nn].*/ OR data_win_eventdata_targetObject:/.*[Cc][Uu][Rr][Rr][Ee][Nn][Tt][Vv][Ee][Rr][Ss][Ii][Oo][Nn]\\[Ww][Ii][Nn][Dd][Oo][Ww][Ss]\\[Ll][Oo][Aa][Dd].*/)'
-      pivot_on: [host]
-      window: 4h
-    - name: "This account's logon activity across hosts"
-      query: '(data_win_system_eventID:"4624" OR data_win_system_eventID:"4625")'
-      pivot_on: [user]
-      window: 6h
-    - name: "Account / group / privilege changes involving this account"
-      query: '(data_win_system_eventID:"4720" OR data_win_system_eventID:"4722" OR data_win_system_eventID:"4724" OR data_win_system_eventID:"4728" OR data_win_system_eventID:"4732" OR data_win_system_eventID:"4756" OR data_win_system_eventID:"4672")'
-      pivot_on: [user]
-      window: 6h
+  # Behaviour-targeted hunts the engine runs around the alert (not a sweep).
+  - name: Processes spawned by the WinRM host process (wsmprovhost)
+    query: data_win_system_eventID:"1" AND data_win_eventdata_parentImage:/.*[Ww][Ss][Mm][Pp][Rr][Oo][Vv][Hh][Oo][Ss][Tt]\.[Ee][Xx][Ee]/
+    pivot_on:
+    - host
+    window: 1h
+  - name: Network logons and explicit-credential use on this host
+    query: ((data_win_system_eventID:"4624" AND data_win_eventdata_logonType:"3") OR data_win_system_eventID:"4648")
+    pivot_on:
+    - host
+    window: 2h
+  - name: Remote-execution and download cmdlets in PowerShell script blocks
+    query: data_win_system_eventID:"4104" AND (data_win_eventdata_scriptBlockText:*Invoke\-Command* OR data_win_eventdata_scriptBlockText:*Enter\-PSSession* OR data_win_eventdata_scriptBlockText:*New\-PSSession* OR data_win_eventdata_scriptBlockText:*Invoke\-WmiMethod* OR data_win_eventdata_scriptBlockText:*Invoke\-CimMethod* OR data_win_eventdata_scriptBlockText:*DownloadString* OR data_win_eventdata_scriptBlockText:*FromBase64String*)
+    pivot_on:
+    - host
+    window: 2h
+  - name: Credential access or lateral tooling on this host after WinRM access
+    query: (data_win_system_eventID:"10" AND data_win_eventdata_targetImage:/.*[Ll][Ss][Aa][Ss][Ss]\.[Ee][Xx][Ee]/) OR (data_win_system_eventID:"1" AND (data_win_eventdata_commandLine:*sekurlsa* OR data_win_eventdata_commandLine:*comsvcs* OR data_win_eventdata_commandLine:*MiniDump* OR data_win_eventdata_commandLine:*psexec* OR data_win_eventdata_commandLine:*schtasks*))
+    pivot_on:
+    - host
+    window: 4h
+  - name: Executables and scripts dropped to staging paths on this host
+    query: data_win_system_eventID:"11" AND (data_win_eventdata_targetFilename:*\\Temp\\* OR data_win_eventdata_targetFilename:*\\ProgramData\\* OR data_win_eventdata_targetFilename:*\\Users\\Public\\*) AND (data_win_eventdata_targetFilename:*.exe OR data_win_eventdata_targetFilename:*.dll OR data_win_eventdata_targetFilename:*.ps1 OR data_win_eventdata_targetFilename:*.bat)
+    pivot_on:
+    - host
+    window: 2h

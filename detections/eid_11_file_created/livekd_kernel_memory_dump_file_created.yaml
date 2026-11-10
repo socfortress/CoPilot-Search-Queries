@@ -135,23 +135,58 @@ graylog:
   query: data_win_system_eventID:"11" AND data_win_eventdata_targetFilename:/[Cc]:\\[Ww][Ii][Nn][Dd][Oo][Ww][Ss]\\[Ll][Ii][Vv][Ee][Kk][Dd]\.[Dd][Mm][Pp]/
 
 correlation:
-  # Authored by the correlation engine for review.
+  # Authored per-rule (behaviour-researched) for the correlation engine. Related CoPilot
+  # Searches + telemetry pivots to run around an alert, scoped to its host/user/ip/domain.
+  related_rules:
+  - id: c7746f1c-47d3-43d6-8c45-cd1e54b6b0a2
+    name: Kernel Memory Dump Via LiveKD
+    reason: The livekd.exe process launch with dump switches is the direct cause of the C:\Windows\livekd.dmp file creation; confirms the actor and command line.
+  - id: a85f7765-698a-4088-afa0-ecfbf8d01fa4
+    name: Potential Memory Dumping Activity Via LiveKD
+    reason: Same tool producing the dump via different command-line shapes (e.g. -m/-o, renamed or staged binary); co-occurs with the resulting livekd.dmp.
+  - id: 16fe46bb-4f64-46aa-817d-ff7bec4a2352
+    name: LiveKD Driver Creation
+    reason: LiveKD drops livekd.sys when first run; this precedes the dump file and shows the tool was freshly executed on the host.
+  - id: 059c5af9-5131-4d8d-92b2-de4ad6146712
+    name: LiveKD Driver Creation By Uncommon Process
+    reason: Indicates LiveKD was deployed or launched by an unusual parent (script, renamed binary) rather than an admin, raising the odds the dump is hostile.
+  - id: 27ee9438-90dc-4bef-904b-d3ef927f5e7e
+    name: Windows Kernel Debugger Execution
+    reason: Kernel debuggers (kd/windbg) are used to open and parse the dump after creation to extract credentials or secrets from kernel memory.
+  - id: 6902955a-01b7-432c-b32a-6f5f81d8f625
+    name: LSASS Process Dump Artefact In CrashDumps Folder
+    reason: Alternate memory-dump-for-credentials path; seen alongside kernel dump when an attacker harvests secrets from memory by several methods.
+  - id: 2e65275c-8288-4ab4-aeb7-6274f58b6b20
+    name: Procdump Execution
+    reason: Another Sysinternals memory dumping tool; attackers chain Sysinternals utilities (LiveKD, ProcDump) for credential theft.
+  - id: 8943b567-f14d-4ee8-a0bb-2121d4ce3184
+    name: Dump LSASS via comsvcs DLL
+    reason: Common companion/fallback technique to obtain credential material from memory when kernel dump is the goal.
+  window: 2h
   enrichment_searches:
-  # Rule-specific telemetry pivots the engine runs around an alert from this rule,
-  # scoped to the alert's host/user/IP within the window (behaviour-targeted, not a sweep).
-    - name: "Memory/credential-dump creation & LSASS access on this host"
-      query: '((data_win_system_eventID:"1" AND data_win_eventdata_image:/.*(\\[Pp][Rr][Oo][Cc][Dd][Uu][Mm][Pp]\.[Ee][Xx][Ee]|\\[Pp][Rr][Oo][Cc][Dd][Uu][Mm][Pp]64\.[Ee][Xx][Ee]|\\[Ss][Qq][Ll][Dd][Uu][Mm][Pp][Ee][Rr]\.[Ee][Xx][Ee]|\\[Cc][Rr][Ee][Aa][Tt][Ee][Dd][Uu][Mm][Pp]\.[Ee][Xx][Ee]|\\[Rr][Dd][Rr][Ll][Ee][Aa][Kk][Dd][Ii][Aa][Gg]\.[Ee][Xx][Ee]|\\[Dd][Uu][Mm][Pp][Ee][Rr][Tt]\.[Ee][Xx][Ee]|\\[Nn][Aa][Nn][Oo][Dd][Uu][Mm][Pp]\.[Ee][Xx][Ee]|\\[Aa][Vv][Dd][Uu][Mm][Pp]\.[Ee][Xx][Ee])/) OR (data_win_system_eventID:"1" AND (data_win_eventdata_commandLine:/.*[Cc][Oo][Mm][Ss][Vv][Cc][Ss]\.[Dd][Ll][Ll].*/ OR data_win_eventdata_commandLine:/.*[Mm][Ii][Nn][Ii][Dd][Uu][Mm][Pp].*/ OR data_win_eventdata_commandLine:/.*[Dd][Uu][Mm][Pp][Ee][Rr][Tt].*/ OR data_win_eventdata_commandLine:/.*[Nn][Aa][Nn][Oo][Dd][Uu][Mm][Pp].*/ OR data_win_eventdata_commandLine:/.*[Ll][Ss][Aa][Ss][Ss].*/ OR data_win_eventdata_commandLine:/.*[Ss][Ee][Kk][Uu][Rr][Ll][Ss][Aa].*/ OR data_win_eventdata_commandLine:/.*[Nn][Tt][Dd][Ss]\.[Dd][Ii][Tt].*/ OR data_win_eventdata_commandLine:/.*[Nn][Tt][Dd][Ss][Uu][Tt][Ii][Ll].*/)) OR (data_win_system_eventID:"10" AND data_win_eventdata_targetImage:/.*(\\[Ll][Ss][Aa][Ss][Ss]\.[Ee][Xx][Ee])/))'
-      pivot_on: [host]
-      window: 1h
-    - name: "Execution of programs from user-writable paths on this host"
-      query: 'data_win_system_eventID:"1" AND (data_win_eventdata_image:/.*\\[Uu][Ss][Ee][Rr][Ss]\\.*/ OR data_win_eventdata_image:/.*\\[Pp][Rr][Oo][Gg][Rr][Aa][Mm][Dd][Aa][Tt][Aa]\\.*/ OR data_win_eventdata_image:/.*\\[Ww][Ii][Nn][Dd][Oo][Ww][Ss]\\[Tt][Ee][Mm][Pp]\\.*/ OR data_win_eventdata_image:/.*\\[Aa][Pp][Pp][Dd][Aa][Tt][Aa]\\.*/ OR data_win_eventdata_image:/.*\\[Pp][Uu][Bb][Ll][Ii][Cc]\\.*/ OR data_win_eventdata_image:/.*\\\$[Rr][Ee][Cc][Yy][Cc][Ll][Ee].*/)'
-      pivot_on: [host]
-      window: 1h
-    - name: "Autostart persistence written on this host"
-      query: '(data_win_system_eventID:"12" OR data_win_system_eventID:"13") AND (data_win_eventdata_targetObject:/.*[Cc][Uu][Rr][Rr][Ee][Nn][Tt][Vv][Ee][Rr][Ss][Ii][Oo][Nn]\\[Rr][Uu][Nn].*/ OR data_win_eventdata_targetObject:/.*[Cc][Uu][Rr][Rr][Ee][Nn][Tt][Vv][Ee][Rr][Ss][Ii][Oo][Nn]\\[Rr][Uu][Nn][Oo][Nn][Cc][Ee].*/ OR data_win_eventdata_targetObject:/.*[Cc][Uu][Rr][Rr][Ee][Nn][Tt][Cc][Oo][Nn][Tt][Rr][Oo][Ll][Ss][Ee][Tt]\\[Ss][Ee][Rr][Vv][Ii][Cc][Ee][Ss]\\.*/ OR data_win_eventdata_targetObject:/.*[Ii][Mm][Aa][Gg][Ee] [Ff][Ii][Ll][Ee] [Ee][Xx][Ee][Cc][Uu][Tt][Ii][Oo][Nn] [Oo][Pp][Tt][Ii][Oo][Nn][Ss]\\.*/ OR data_win_eventdata_targetObject:/.*[Ww][Ii][Nn][Ll][Oo][Gg][Oo][Nn]\\[Ss][Hh][Ee][Ll][Ll].*/ OR data_win_eventdata_targetObject:/.*[Ww][Ii][Nn][Ll][Oo][Gg][Oo][Nn]\\[Uu][Ss][Ee][Rr][Ii][Nn][Ii][Tt].*/ OR data_win_eventdata_targetObject:/.*[Cc][Uu][Rr][Rr][Ee][Nn][Tt][Vv][Ee][Rr][Ss][Ii][Oo][Nn]\\[Ee][Xx][Pp][Ll][Oo][Rr][Ee][Rr]\\[Rr][Uu][Nn].*/ OR data_win_eventdata_targetObject:/.*[Pp][Oo][Ll][Ii][Cc][Ii][Ee][Ss]\\[Ee][Xx][Pp][Ll][Oo][Rr][Ee][Rr]\\[Rr][Uu][Nn].*/ OR data_win_eventdata_targetObject:/.*[Cc][Uu][Rr][Rr][Ee][Nn][Tt][Vv][Ee][Rr][Ss][Ii][Oo][Nn]\\[Ww][Ii][Nn][Dd][Oo][Ww][Ss]\\[Ll][Oo][Aa][Dd].*/)'
-      pivot_on: [host]
-      window: 2h
-    - name: "UAC-bypass / privilege-escalation binaries on this host"
-      query: 'data_win_system_eventID:"1" AND (data_win_eventdata_image:/.*(\\[Ff][Oo][Dd][Hh][Ee][Ll][Pp][Ee][Rr]\.[Ee][Xx][Ee]|\\[Ee][Vv][Ee][Nn][Tt][Vv][Ww][Rr]\.[Ee][Xx][Ee]|\\[Ss][Dd][Cc][Ll][Tt]\.[Ee][Xx][Ee]|\\[Cc][Oo][Mm][Pp][Uu][Tt][Ee][Rr][Dd][Ee][Ff][Aa][Uu][Ll][Tt][Ss]\.[Ee][Xx][Ee]|\\[Ss][Ll][Uu][Ii]\.[Ee][Xx][Ee]|\\[Ww][Ss][Rr][Ee][Ss][Ee][Tt]\.[Ee][Xx][Ee])/ OR data_win_eventdata_parentImage:/.*(\\[Ff][Oo][Dd][Hh][Ee][Ll][Pp][Ee][Rr]\.[Ee][Xx][Ee]|\\[Ee][Vv][Ee][Nn][Tt][Vv][Ww][Rr]\.[Ee][Xx][Ee]|\\[Ss][Dd][Cc][Ll][Tt]\.[Ee][Xx][Ee]|\\[Cc][Oo][Mm][Pp][Uu][Tt][Ee][Rr][Dd][Ee][Ff][Aa][Uu][Ll][Tt][Ss]\.[Ee][Xx][Ee]|\\[Ss][Ll][Uu][Ii]\.[Ee][Xx][Ee]|\\[Ww][Ss][Rr][Ee][Ss][Ee][Tt]\.[Ee][Xx][Ee])/)'
-      pivot_on: [host]
-      window: 2h
+  # Behaviour-targeted hunts the engine runs around the alert (not a sweep).
+  - name: LiveKD execution and dump command line
+    query: data_win_system_eventID:"1" AND (data_win_eventdata_image:/.*[Ll][Ii][Vv][Ee][Kk][Dd](64)?\.[Ee][Xx][Ee]/ OR data_win_eventdata_originalFileName:/[Ll][Ii][Vv][Ee][Kk][Dd].*/ OR data_win_eventdata_commandLine:/.*[Ll][Ii][Vv][Ee][Kk][Dd].*/)
+    pivot_on:
+    - host
+    window: 2h
+  - name: LiveKD driver and dump-related file creation
+    query: data_win_system_eventID:"11" AND (data_win_eventdata_targetFilename:/.*[Ll][Ii][Vv][Ee][Kk][Dd].*/ OR data_win_eventdata_targetFilename:/.*\.[Dd][Mm][Pp]/ OR data_win_eventdata_targetFilename:/.*[Mm][Ee][Mm][Oo][Rr][Yy]\.[Dd][Mm][Pp]/)
+    pivot_on:
+    - host
+    window: 2h
+  - name: Debugger or dump-parsing tools opening the dump
+    query: data_win_system_eventID:"1" AND (data_win_eventdata_image:/.*\\([Kk][Dd]|[Ww][Ii][Nn][Dd][Bb][Gg]|[Cc][Dd][Bb]|[Dd][Bb][Gg][Hh][Oo][Ss][Tt])(64)?\.[Ee][Xx][Ee]/ OR data_win_eventdata_commandLine:/.*[Ll][Ii][Vv][Ee][Kk][Dd]\.[Dd][Mm][Pp].*/ OR data_win_eventdata_commandLine:/.*[Vv][Oo][Ll][Aa][Tt][Ii][Ll][Ii][Tt][Yy].*/)
+    pivot_on:
+    - host
+    window: 4h
+  - name: Dump staging, archiving or exfil after creation
+    query: data_win_system_eventID:"1" AND ((data_win_eventdata_image:/.*\\(7z|7za|rar|winrar|tar|makecab|compact)\.[Ee][Xx][Ee]/ AND data_win_eventdata_commandLine:/.*\.[Dd][Mm][Pp].*/) OR (data_win_eventdata_commandLine:/.*[Dd][Mm][Pp].*/ AND (data_win_eventdata_commandLine:/.*([Cc][Uu][Rr][Ll]|[Ss][Cc][Pp]|[Ff][Tt][Pp]|[Ii][Nn][Vv][Oo][Kk][Ee]-[Ww][Ee][Bb][Rr][Ee][Qq][Uu][Ee][Ss][Tt]).*/)))
+    pivot_on:
+    - host
+    window: 6h
+  - name: Process access to LSASS on this host
+    query: data_win_system_eventID:"10" AND data_win_eventdata_targetImage:/.*\\[Ll][Ss][Aa][Ss][Ss]\.[Ee][Xx][Ee]/
+    pivot_on:
+    - host
+    window: 2h

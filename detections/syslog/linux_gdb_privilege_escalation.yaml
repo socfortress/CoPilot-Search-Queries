@@ -113,25 +113,49 @@ graylog:
   query: full_log:/.*gdb.*/ AND NOT _exists_:data_win_system_eventID AND NOT rule_groups:/.*windows.*/
 
 correlation:
-  # Authored by the correlation engine for review. Related CoPilot Searches to run
-  # around an alert from this rule, scoped to the same host/user/IP within the window.
+  # Authored per-rule (behaviour-researched) for the correlation engine. Related CoPilot
+  # Searches + telemetry pivots to run around an alert, scoped to its host/user/ip/domain.
   related_rules:
-    - id: 26f86252-1549-45e1-a212-eb26840e86bc
-      name: "File Download or Read to Pipe Execution"
-      reason: "same analytic story: Linux Living Off The Land"
-  window: 1h
+  - id: linux-sudo-or-su-execution-001
+    name: Linux Sudo Or Su Execution
+    reason: gdb escape needs sudo rights; sudo execution identifies the user and permitted command.
+  - id: linux-find-privilege-escalation-001
+    name: Linux Find Privilege Escalation
+    reason: Sibling GTFOBins sudo abuse, usually tried in the same session when one binary is permitted.
+  - id: linux-auditd-possible-access-sudoers-file-001
+    name: Linux Auditd Possible Access To Sudoers File
+    reason: Sudoers inspection reveals the gdb entry the actor then abused.
+  - id: linux-pkexec-privilege-escalation-001
+    name: Linux pkexec Privilege Escalation
+    reason: Alternate local privilege escalation attempted in the same hands-on session.
+  - id: linux-busybox-privilege-escalation-001
+    name: Linux BusyBox Privilege Escalation
+    reason: Another sudo-allowed GTFOBin tried when probing for any permitted escape.
+  window: 2h
   enrichment_searches:
-  # Rule-specific telemetry pivots the engine runs around an alert from this rule,
-  # scoped to the alert's host/user/IP within the window (behaviour-targeted, not a sweep).
-    - name: "Privilege-escalation tooling executed on this host"
-      query: 'data_process_exec_process_binary:/.*(\/[Ss][Uu][Dd][Oo]|\/[Ss][Uu]|\/[Pp][Kk][Ee][Xx][Ee][Cc]|\/[Dd][Oo][Aa][Ss]|\/[Ss][Ee][Tt][Cc][Aa][Pp]|\/[Cc][Hh][Ss][Hh]|\/[Nn][Ee][Ww][Gg][Rr][Pp])/'
-      pivot_on: [host]
-      window: 2h
-    - name: "Shell / interpreter execution on this host"
-      query: '((data_process_exec_process_binary:/.*(\/[Bb][Aa][Ss][Hh]|\/[Ss][Hh]|\/[Dd][Aa][Ss][Hh]|\/[Zz][Ss][Hh]|\/[Kk][Ss][Hh]|\/[Aa][Ss][Hh]|\/[Bb][Uu][Ss][Yy][Bb][Oo][Xx])/) OR (data_process_exec_process_binary:/.*(\/[Pp][Yy][Tt][Hh][Oo][Nn]|\/[Pp][Yy][Tt][Hh][Oo][Nn]3|\/[Pp][Ee][Rr][Ll]|\/[Rr][Uu][Bb][Yy]|\/[Pp][Hh][Pp]|\/[Nn][Oo][Dd][Ee]|\/[Ll][Uu][Aa]|\/[Aa][Ww][Kk])/))'
-      pivot_on: [host]
-      window: 1h
-    - name: "Reconnaissance commands on this host"
-      query: 'data_process_exec_process_binary:/.*(\/[Ww][Hh][Oo][Aa][Mm][Ii]|\/[Ii][Dd]|\/[Uu][Nn][Aa][Mm][Ee]|\/[Hh][Oo][Ss][Tt][Nn][Aa][Mm][Ee]|\/[Hh][Oo][Ss][Tt][Nn][Aa][Mm][Ee][Cc][Tt][Ll]|\/[Ss][Ss]|\/[Nn][Ee][Tt][Ss][Tt][Aa][Tt]|\/[Ii][Ff][Cc][Oo][Nn][Ff][Ii][Gg]|\/[Aa][Rr][Pp]|\/[Ww]|\/[Ww][Hh][Oo]|\/[Ll][Aa][Ss][Tt]|\/[Ll][Ss][Oo][Ff]|\/[Nn][Mm][Aa][Pp]|\/[Dd][Ii][Gg]|\/[Ff][Ii][Nn][Dd])/'
-      pivot_on: [host]
-      window: 1h
+  # Behaviour-targeted hunts the engine runs around the alert (not a sweep).
+  - name: gdb launched with batch/escape flags
+    query: data_process_exec_process_binary:/.*\/([Gg][Dd][Bb])/ AND data_process_exec_process_arguments:/.*(\-[Nn][Xx]|\-[Ee][Xx]|\-[Bb][Aa][Tt][Cc][Hh]|[Oo][Ss]\.[Ss][Yy][Ss][Tt][Ee][Mm]|[Pp][Yy][Tt][Hh][Oo][Nn]).*/
+    pivot_on:
+    - host
+    window: 2h
+  - name: Sudo listing and sudoers recon
+    query: (data_process_exec_process_binary:/.*\/([Ss][Uu][Dd][Oo])/ AND data_process_exec_process_arguments:/.*( \-[Ll]|\-[Ll][Ll]|\-\-[Ll][Ii][Ss][Tt]).*/) OR full_log:/.*(\/[Ee][Tt][Cc]\/[Ss][Uu][Dd][Oo][Ee][Rr][Ss]|[Ss][Uu][Dd][Oo][Ee][Rr][Ss]\.[Dd]).*/
+    pivot_on:
+    - host
+    window: 4h
+  - name: Debugger attach to running processes (credential theft)
+    query: data_process_exec_process_binary:/.*\/([Gg][Dd][Bb]|[Gg][Cc][Oo][Rr][Ee]|[Ss][Tt][Rr][Aa][Cc][Ee]|[Ll][Tt][Rr][Aa][Cc][Ee])/ AND data_process_exec_process_arguments:/.*([Aa][Tt][Tt][Aa][Cc][Hh]|\-[Pp] |\-\-[Pp][Ii][Dd]|[Gg][Cc][Oo][Rr][Ee]|\/[Pp][Rr][Oo][Cc]\/).*/
+    pivot_on:
+    - host
+    window: 4h
+  - name: Root actions after escape (accounts, SUID, shadow)
+    query: data_process_exec_process_arguments:/.*([Cc][Hh][Mm][Oo][Dd] \+[Ss]|[Cc][Hh][Mm][Oo][Dd] [Uu]\+[Ss]|[Cc][Hh][Mm][Oo][Dd] 4755|\/[Ee][Tt][Cc]\/[Ss][Hh][Aa][Dd][Oo][Ww]|[Uu][Ss][Ee][Rr][Aa][Dd][Dd]|[Uu][Ss][Ee][Rr][Mm][Oo][Dd]|[Aa][Dd][Dd][Uu][Ss][Ee][Rr]|[Vv][Ii][Ss][Uu][Dd][Oo]|[Aa][Uu][Tt][Hh][Oo][Rr][Ii][Zz][Ee][Dd]_[Kk][Ee][Yy][Ss]).*/
+    pivot_on:
+    - host
+    window: 4h
+  - name: Payload download after elevation
+    query: (data_process_exec_process_binary:/.*\/([Cc][Uu][Rr][Ll]|[Ww][Gg][Ee][Tt])/ AND data_process_exec_process_arguments:/.*([Hh][Tt][Tt][Pp]:\/\/|[Hh][Tt][Tt][Pp][Ss]:\/\/|[Ff][Tt][Pp]:\/\/).*/)
+    pivot_on:
+    - host
+    window: 4h

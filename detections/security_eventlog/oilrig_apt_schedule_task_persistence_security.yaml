@@ -150,41 +150,55 @@ graylog:
   query: data_win_system_eventID:"4698" AND (data_win_eventdata_taskName:/[Ss][Cc] [Ss][Cc][Hh][Ee][Dd][Uu][Ll][Ee][Dd] [Ss][Cc][Aa][Nn]/ OR data_win_eventdata_taskName:/[Uu][Pp][Dd][Aa][Tt][Mm][Aa][Cc][Hh][Ii][Nn][Ee]/)
 
 correlation:
-  # Authored by the correlation engine for review. Related CoPilot Searches to run
-  # around an alert from this rule, scoped to the same host/user/IP within the window.
+  # Authored per-rule (behaviour-researched) for the correlation engine. Related CoPilot
+  # Searches + telemetry pivots to run around an alert, scoped to its host/user/ip/domain.
   related_rules:
-    - id: 0255a820-e564-4e40-af2b-6ac61160335c
-      name: "A New Trust Was Created To A Domain"
-      reason: "next kill-chain tactic: Persistence"
-    - id: 35ba1d85-724d-42a3-889f-2e2362bcaf23
-      name: "AD Privileged Users or Groups Reconnaissance"
-      reason: "next kill-chain tactic: Discovery"
-    - id: 9eb99343-d336-4020-a3cd-67f3819e68ee
-      name: "Account Tampering - Suspicious Failed Logon Reasons"
-      reason: "next kill-chain tactic: Persistence"
-    - id: 17d619c1-e020-4347-957e-1d1207455c93
-      name: "Active Directory Replication from Non Machine Account"
-      reason: "next kill-chain tactic: Credential Access"
-    - id: 300bac00-e041-4ee2-9c36-e262656a6ecc
-      name: "Active Directory User Backdoors"
-      reason: "next kill-chain tactic: Persistence"
-  window: 1h
+  - id: ce6e34ca-966d-41c9-8d93-5b06c8b97a06
+    name: OilRig APT Activity
+    reason: 'Same OilRig toolset: the Nyotron report covers both the task creation (4698) and the schtasks/cmd process-creation side, so the process-level creation of the same task confirms the 4698 event.'
+  - id: 7bdf2a7c-3acc-4091-9581-0a77dad1c5b5
+    name: OilRig APT Registry Persistence
+    reason: Same OilRig campaign pairs the scheduled task with registry persistence/config changes (T1112); both on one host means layered persistence rather than a one-off task.
+  - id: f6de6525-4509-495a-8a82-1f8b0ed73a00
+    name: Remote Task Creation via ATSVC Named Pipe
+    reason: If the task was created remotely over the atsvc pipe, the 4698 is lateral movement/remote persistence, so this identifies the source host and actor.
+  - id: 89ca78fd-b37c-4310-b3d3-81a023f83936
+    name: Schtasks Creation Or Modification With SYSTEM Privileges
+    reason: OilRig tasks run as SYSTEM; schtasks /ru SYSTEM is the command-line counterpart of the task registered in the 4698 event.
+  - id: 80e1f67a-4596-4351-98f5-a9c3efabac95
+    name: Suspicious Scheduled Task Write to System32 Tasks
+    reason: Creating the task writes its XML definition under System32\Tasks, so a file-creation hit corroborates the task from the file side, including tasks added by tools that bypass schtasks.exe.
+  - id: 3b8e5084-4de9-449a-a40d-0e11014f2e2d
+    name: Diamond Sleet APT Scheduled Task Creation
+    reason: Sibling 4698-based detection for a different APT; both firing on one host points to multiple actors or a shared tooling path.
+  - id: 8fa65166-f463-4fd2-ad4f-1436133c52e1
+    name: Scheduled Tasks Names Used By SVR For GraphicalProton Backdoor
+    reason: Also a 4698 task-name match for known malicious task names, so multiple known-bad task names on the host indicate a broader implant set.
+  window: 2h
   enrichment_searches:
-  # Rule-specific telemetry pivots the engine runs around an alert from this rule,
-  # scoped to the alert's host/user/IP within the window (behaviour-targeted, not a sweep).
-    - name: "Autostart / security-setting registry changes on this host"
-      query: '(((data_win_system_eventID:"12" OR data_win_system_eventID:"13") AND (data_win_eventdata_targetObject:/.*[Cc][Uu][Rr][Rr][Ee][Nn][Tt][Vv][Ee][Rr][Ss][Ii][Oo][Nn]\\[Rr][Uu][Nn].*/ OR data_win_eventdata_targetObject:/.*[Cc][Uu][Rr][Rr][Ee][Nn][Tt][Vv][Ee][Rr][Ss][Ii][Oo][Nn]\\[Rr][Uu][Nn][Oo][Nn][Cc][Ee].*/ OR data_win_eventdata_targetObject:/.*[Cc][Uu][Rr][Rr][Ee][Nn][Tt][Cc][Oo][Nn][Tt][Rr][Oo][Ll][Ss][Ee][Tt]\\[Ss][Ee][Rr][Vv][Ii][Cc][Ee][Ss]\\.*/ OR data_win_eventdata_targetObject:/.*[Ii][Mm][Aa][Gg][Ee] [Ff][Ii][Ll][Ee] [Ee][Xx][Ee][Cc][Uu][Tt][Ii][Oo][Nn] [Oo][Pp][Tt][Ii][Oo][Nn][Ss]\\.*/ OR data_win_eventdata_targetObject:/.*[Ww][Ii][Nn][Ll][Oo][Gg][Oo][Nn]\\[Ss][Hh][Ee][Ll][Ll].*/ OR data_win_eventdata_targetObject:/.*[Ww][Ii][Nn][Ll][Oo][Gg][Oo][Nn]\\[Uu][Ss][Ee][Rr][Ii][Nn][Ii][Tt].*/ OR data_win_eventdata_targetObject:/.*[Cc][Uu][Rr][Rr][Ee][Nn][Tt][Vv][Ee][Rr][Ss][Ii][Oo][Nn]\\[Ee][Xx][Pp][Ll][Oo][Rr][Ee][Rr]\\[Rr][Uu][Nn].*/ OR data_win_eventdata_targetObject:/.*[Pp][Oo][Ll][Ii][Cc][Ii][Ee][Ss]\\[Ee][Xx][Pp][Ll][Oo][Rr][Ee][Rr]\\[Rr][Uu][Nn].*/ OR data_win_eventdata_targetObject:/.*[Cc][Uu][Rr][Rr][Ee][Nn][Tt][Vv][Ee][Rr][Ss][Ii][Oo][Nn]\\[Ww][Ii][Nn][Dd][Oo][Ww][Ss]\\[Ll][Oo][Aa][Dd].*/)) OR (data_win_system_eventID:"1" AND (data_win_eventdata_commandLine:/.*[Ss][Ee][Tt]-[Mm][Pp][Pp][Rr][Ee][Ff][Ee][Rr][Ee][Nn][Cc][Ee].*/ OR data_win_eventdata_commandLine:/.*[Dd][Ii][Ss][Aa][Bb][Ll][Ee][Rr][Ee][Aa][Ll][Tt][Ii][Mm][Ee][Mm][Oo][Nn][Ii][Tt][Oo][Rr][Ii][Nn][Gg].*/ OR data_win_eventdata_commandLine:/.*[Dd][Ii][Ss][Aa][Bb][Ll][Ee][Aa][Nn][Tt][Ii][Ss][Pp][Yy][Ww][Aa][Rr][Ee].*/ OR data_win_eventdata_commandLine:/.*[Aa][Dd][Dd]-[Mm][Pp][Pp][Rr][Ee][Ff][Ee][Rr][Ee][Nn][Cc][Ee] -[Ee][Xx][Cc][Ll][Uu][Ss][Ii][Oo][Nn][Pp][Aa][Tt][Hh].*/ OR data_win_eventdata_commandLine:/.*[Ww][Ee][Vv][Tt][Uu][Tt][Ii][Ll].*/ OR data_win_eventdata_commandLine:/.*[Cc][Ll][Ee][Aa][Rr]-[Ee][Vv][Ee][Nn][Tt][Ll][Oo][Gg].*/ OR data_win_eventdata_commandLine:/.*[Ff][Ss][Uu][Tt][Ii][Ll] [Uu][Ss][Nn] [Dd][Ee][Ll][Ee][Tt][Ee][Jj][Oo][Uu][Rr][Nn][Aa][Ll].*/ OR data_win_eventdata_commandLine:/.*[Vv][Ss][Ss][Aa][Dd][Mm][Ii][Nn].*/ OR data_win_eventdata_commandLine:/.*[Ss][Tt][Oo][Pp]-[Ss][Ee][Rr][Vv][Ii][Cc][Ee].*/ OR data_win_eventdata_commandLine:/.*[Ss][Cc] [Ss][Tt][Oo][Pp].*/ OR data_win_eventdata_commandLine:/.*[Ss][Cc] [Cc][Oo][Nn][Ff][Ii][Gg].*/)))'
-      pivot_on: [host]
-      window: 2h
-    - name: "Scheduled-task creation on this host"
-      query: '((data_win_system_eventID:"1" AND data_win_eventdata_image:/.*(\\[Ss][Cc][Hh][Tt][Aa][Ss][Kk][Ss]\.[Ee][Xx][Ee]|\\[Aa][Tt]\.[Ee][Xx][Ee])/) OR ((data_win_system_eventID:"4698" OR data_win_system_eventID:"4702")))'
-      pivot_on: [host]
-      window: 4h
-    - name: "Service installation / creation on this host"
-      query: '((data_win_system_eventID:"7045") OR (data_win_system_eventID:"1" AND data_win_eventdata_image:/.*(\\[Ss][Cc]\.[Ee][Xx][Ee])/ AND (data_win_eventdata_commandLine:/.*[Cc][Rr][Ee][Aa][Tt][Ee].*/ OR data_win_eventdata_commandLine:/.*[Cc][Oo][Nn][Ff][Ii][Gg].*/ OR data_win_eventdata_commandLine:/.*[Bb][Ii][Nn][Pp][Aa][Tt][Hh].*/ OR data_win_eventdata_commandLine:/.*[Bb][Ii][Nn][Pp][Aa][Tt][Hh].*/)))'
-      pivot_on: [host]
-      window: 4h
-    - name: "Outbound C2 / web-protocol connections by interpreters on this host"
-      query: '(((data_win_system_eventID:"1" AND data_win_eventdata_image:/.*(\\[Cc][Ee][Rr][Tt][Uu][Tt][Ii][Ll]\.[Ee][Xx][Ee]|\\[Bb][Ii][Tt][Ss][Aa][Dd][Mm][Ii][Nn]\.[Ee][Xx][Ee]|\\[Cc][Uu][Rr][Ll]\.[Ee][Xx][Ee]|\\[Ww][Gg][Ee][Tt]\.[Ee][Xx][Ee])/) OR (data_win_eventdata_commandLine:/.*[Dd][Oo][Ww][Nn][Ll][Oo][Aa][Dd][Ss][Tt][Rr][Ii][Nn][Gg].*/ OR data_win_eventdata_commandLine:/.*[Dd][Oo][Ww][Nn][Ll][Oo][Aa][Dd][Ff][Ii][Ll][Ee].*/ OR data_win_eventdata_commandLine:/.*[Ii][Nn][Vv][Oo][Kk][Ee]-[Ww][Ee][Bb][Rr][Ee][Qq][Uu][Ee][Ss][Tt].*/ OR data_win_eventdata_commandLine:/.*[Nn][Ee][Tt]\.[Ww][Ee][Bb][Cc][Ll][Ii][Ee][Nn][Tt].*/ OR data_win_eventdata_commandLine:/.*[Ss][Tt][Aa][Rr][Tt]-[Bb][Ii][Tt][Ss][Tt][Rr][Aa][Nn][Ss][Ff][Ee][Rr].*/ OR data_win_eventdata_commandLine:/.*[Ii][Ww][Rr] .*/ OR data_win_eventdata_commandLine:/.*[Cc][Uu][Rr][Ll] .*/ OR data_win_eventdata_commandLine:/.*[Ww][Gg][Ee][Tt] .*/)) OR (data_win_system_eventID:"3" AND data_win_eventdata_image:/.*(\\[Pp][Oo][Ww][Ee][Rr][Ss][Hh][Ee][Ll][Ll]\.[Ee][Xx][Ee]|\\[Pp][Ww][Ss][Hh]\.[Ee][Xx][Ee]|\\[Pp][Oo][Ww][Ee][Rr][Ss][Hh][Ee][Ll][Ll]_[Ii][Ss][Ee]\.[Ee][Xx][Ee]|\\[Cc][Mm][Dd]\.[Ee][Xx][Ee]|\\[Ww][Ss][Cc][Rr][Ii][Pp][Tt]\.[Ee][Xx][Ee]|\\[Cc][Ss][Cc][Rr][Ii][Pp][Tt]\.[Ee][Xx][Ee]|\\[Mm][Ss][Hh][Tt][Aa]\.[Ee][Xx][Ee]|\\[Rr][Uu][Nn][Dd][Ll][Ll]32\.[Ee][Xx][Ee]|\\[Rr][Ee][Gg][Ss][Vv][Rr]32\.[Ee][Xx][Ee])/))'
-      pivot_on: [host]
-      window: 1h
+  # Behaviour-targeted hunts the engine runs around the alert (not a sweep).
+  - name: schtasks/at creating or running OilRig-named tasks
+    query: data_win_system_eventID:"1" AND (data_win_eventdata_image:/.*[Ss][Cc][Hh][Tt][Aa][Ss][Kk][Ss]\.[Ee][Xx][Ee]/ OR data_win_eventdata_image:/.*[Aa][Tt]\.[Ee][Xx][Ee]/) AND (data_win_eventdata_commandLine:*Scheduled\ Scan* OR data_win_eventdata_commandLine:*UpdatMachine* OR data_win_eventdata_commandLine:*\/create* OR data_win_eventdata_commandLine:*\/ru\ SYSTEM*)
+    pivot_on:
+    - host
+    window: 2h
+  - name: Script interpreters launched by Task Scheduler (payload execution)
+    query: data_win_system_eventID:"1" AND data_win_eventdata_parentCommandLine:*Schedule* AND (data_win_eventdata_image:/.*(\\[Pp][Oo][Ww][Ee][Rr][Ss][Hh][Ee][Ll][Ll]|\\[Cc][Mm][Dd]|\\[Ww][Ss][Cc][Rr][Ii][Pp][Tt]|\\[Cc][Ss][Cc][Rr][Ii][Pp][Tt]|\\[Mm][Ss][Hh][Tt][Aa])\.[Ee][Xx][Ee]/)
+    pivot_on:
+    - host
+    window: 4h
+  - name: Payload files dropped to ProgramData/Temp/Public (script or exe)
+    query: data_win_system_eventID:"11" AND data_win_eventdata_targetFilename:/.*(\\[Pp][Rr][Oo][Gg][Rr][Aa][Mm][Dd][Aa][Tt][Aa]|\\[Tt][Ee][Mm][Pp]|\\[Pp][Uu][Bb][Ll][Ii][Cc]|\\[Aa][Pp][Pp][Dd][Aa][Tt][Aa]).*\.([Vv][Bb][Ss]|[Pp][Ss]1|[Bb][Aa][Tt]|[Jj][Ss]|[Ee][Xx][Ee]|[Dd][Ll][Ll])/
+    pivot_on:
+    - host
+    window: 2h
+  - name: DNS tunnelling / C2 over DNS (nslookup or high-entropy TXT queries)
+    query: (data_win_system_eventID:"22" AND (data_win_eventdata_image:/.*(\\[Pp][Oo][Ww][Ee][Rr][Ss][Hh][Ee][Ll][Ll]|\\[Ww][Ss][Cc][Rr][Ii][Pp][Tt]|\\[Cc][Ss][Cc][Rr][Ii][Pp][Tt]|\\[Nn][Ss][Ll][Oo][Oo][Kk][Uu][Pp]|\\[Cc][Mm][Dd])\.[Ee][Xx][Ee]/)) OR (data_win_system_eventID:"1" AND data_win_eventdata_commandLine:/.*[Nn][Ss][Ll][Oo][Oo][Kk][Uu][Pp].*-([Tt][Yy][Pp][Ee]|[Qq][Uu][Ee][Rr][Yy][Tt][Yy][Pp][Ee])=?[Tt][Xx][Tt].*/)
+    pivot_on:
+    - host
+    window: 2h
+  - name: Registry persistence and config changes (Run keys, services)
+    query: (data_win_system_eventID:"12" OR data_win_system_eventID:"13") AND data_win_eventdata_targetObject:/.*(\\[Cc][Uu][Rr][Rr][Ee][Nn][Tt][Vv][Ee][Rr][Ss][Ii][Oo][Nn]\\[Rr][Uu][Nn]|\\[Ss][Ee][Rr][Vv][Ii][Cc][Ee][Ss]\\|\\[Ss][Cc][Hh][Ee][Dd][Uu][Ll][Ee]\\[Tt][Aa][Ss][Kk][Cc][Aa][Cc][Hh][Ee]).*/
+    pivot_on:
+    - host
+    window: 2h

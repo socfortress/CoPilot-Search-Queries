@@ -153,23 +153,58 @@ graylog:
   query: data_win_system_eventID:"11" AND data_win_eventdata_targetFilename:/[Cc]:\\[Ww][Ii][Nn][Dd][Oo][Ww][Ss]\\[Ss][Yy][Ss][Tt][Ee][Mm]32\\[Cc][Oo][Nn][Ff][Ii][Gg].*/ AND (data_win_eventdata_targetFilename:/.*\\[Hh][Oo][Tt][Ff][Ii][Xx][Ii][Nn][Ff][Oo]\.[Tt][Xx][Tt]/ OR data_win_eventdata_targetFilename:/.*\\[Nn][Ee][Tt][Ii][Oo][Ss][Tt][Aa][Tt][Ee]\.[Tt][Xx][Tt]/ OR data_win_eventdata_targetFilename:/.*\\[Ss][Yy][Ss][Pp][Oo][Rr][Tt][Ss][Ll][Oo][Gg]\.[Tt][Xx][Tt]/ OR data_win_eventdata_targetFilename:/.*\\[Vv][Mm][Ss][Ww][Ii][Tt][Cc][Hh][Ll][Oo][Gg]\.[Ee][Vv][Tt][Xx]/)
 
 correlation:
-  # Authored by the correlation engine for review.
+  # Authored per-rule (behaviour-researched) for the correlation engine. Related CoPilot
+  # Searches + telemetry pivots to run around an alert, scoped to its host/user/ip/domain.
+  related_rules:
+  - id: 575dce0c-8139-4e30-9295-1ee75969f7fe
+    name: Potential Reconnaissance Activity Via GatherNetworkInfo.VBS
+    reason: 'Direct process-side twin: cscript/wscript launching gatherNetworkInfo.vbs is what writes Hotfixinfo.txt/netiostate.txt/sysportslog.txt into System32\config; same execution seen from EID 1.'
+  - id: b6676963-0353-4f88-90f5-36c20d443c6a
+    name: Cscript/Wscript Potentially Suspicious Child Process
+    reason: gatherNetworkInfo.vbs runs under cscript/wscript; a script host spawning cmd/powershell/rundll32 around the same time shows the script was driven by an operator or dropper rather than an admin.
+  - id: cea72823-df4d-4567-950c-0b579eaf0846
+    name: Potential Dropper Script Execution Via WScript/CScript/MSHTA
+    reason: Trojanized installers and droppers use script hosts to run built-in recon then stage payloads; precursor that explains why the LOLBin script was run.
+  - id: c248c896-e412-4279-8c15-1c558067b6fa
+    name: Enumerate All Information With Whoami.EXE
+    reason: Same operator typically pairs the all-in-one network/host dump with whoami /all to learn privileges; co-occurring discovery on the same host.
+  - id: 9d7ca793-f6bd-471c-8d0f-11e68b2f0d2f
+    name: Computer System Reconnaissance Via Wmic.EXE
+    reason: Script output covers hotfix/network state; manual WMIC computer-system queries are the companion hand-run host enumeration in the same discovery burst.
+  - id: 2cf5cc25-f39a-436d-a790-4857e5995ede
+    name: Network Connection Discovery With Netstat
+    reason: netiostate.txt/sysportslog.txt capture connection and port state; netstat is the manual equivalent used to find lateral-movement targets.
+  - id: 5cc90652-4cbd-4241-aa3b-4b462fa5a248
+    name: Potential Recon Activity Via Nltest.EXE
+    reason: After host/network mapping, attackers move to domain and DC discovery with nltest to choose lateral-movement targets.
+  - id: 9fbf5927-5261-4284-a71d-f681029ea574
+    name: Compress Data and Lock With Password for Exfiltration With 7-ZIP
+    reason: Recon output files are commonly collected and archived for exfiltration; a follow-on staging step to the gathered data.
+  window: 2h
   enrichment_searches:
-  # Rule-specific telemetry pivots the engine runs around an alert from this rule,
-  # scoped to the alert's host/user/IP within the window (behaviour-targeted, not a sweep).
-    - name: "Remote-execution / lateral-movement tooling on this host"
-      query: '(data_win_system_eventID:"1" AND data_win_eventdata_image:/.*(\\[Pp][Ss][Ee][Xx][Ee][Cc]\.[Ee][Xx][Ee]|\\[Pp][Ss][Ee][Xx][Ee][Ss][Vv][Cc]\.[Ee][Xx][Ee]|\\[Pp][Aa][Ee][Xx][Ee][Cc]\.[Ee][Xx][Ee]|\\[Ww][Ii][Nn][Rr][Ss]\.[Ee][Xx][Ee]|\\[Mm][Ss][Tt][Ss][Cc]\.[Ee][Xx][Ee]|\\[Ww][Mm][Ii][Cc]\.[Ee][Xx][Ee])/) OR (data_win_system_eventID:"1" AND data_win_eventdata_image:/.*(\\[Pp][Oo][Ww][Ee][Rr][Ss][Hh][Ee][Ll][Ll]\.[Ee][Xx][Ee]|\\[Pp][Ww][Ss][Hh]\.[Ee][Xx][Ee])/ AND (data_win_eventdata_commandLine:/.*[Ii][Nn][Vv][Oo][Kk][Ee]-[Cc][Oo][Mm][Mm][Aa][Nn][Dd].*/ OR data_win_eventdata_commandLine:/.*[Nn][Ee][Ww]-[Pp][Ss][Ss][Ee][Ss][Ss][Ii][Oo][Nn].*/ OR data_win_eventdata_commandLine:/.*[Ee][Nn][Tt][Ee][Rr]-[Pp][Ss][Ss][Ee][Ss][Ss][Ii][Oo][Nn].*/ OR data_win_eventdata_commandLine:/.*-[Cc][Oo][Mm][Pp][Uu][Tt][Ee][Rr][Nn][Aa][Mm][Ee].*/))'
-      pivot_on: [host]
-      window: 2h
-    - name: "Execution of programs from user-writable paths on this host"
-      query: 'data_win_system_eventID:"1" AND (data_win_eventdata_image:/.*\\[Uu][Ss][Ee][Rr][Ss]\\.*/ OR data_win_eventdata_image:/.*\\[Pp][Rr][Oo][Gg][Rr][Aa][Mm][Dd][Aa][Tt][Aa]\\.*/ OR data_win_eventdata_image:/.*\\[Ww][Ii][Nn][Dd][Oo][Ww][Ss]\\[Tt][Ee][Mm][Pp]\\.*/ OR data_win_eventdata_image:/.*\\[Aa][Pp][Pp][Dd][Aa][Tt][Aa]\\.*/ OR data_win_eventdata_image:/.*\\[Pp][Uu][Bb][Ll][Ii][Cc]\\.*/ OR data_win_eventdata_image:/.*\\\$[Rr][Ee][Cc][Yy][Cc][Ll][Ee].*/)'
-      pivot_on: [host]
-      window: 1h
-    - name: "Autostart persistence written on this host"
-      query: '(data_win_system_eventID:"12" OR data_win_system_eventID:"13") AND (data_win_eventdata_targetObject:/.*[Cc][Uu][Rr][Rr][Ee][Nn][Tt][Vv][Ee][Rr][Ss][Ii][Oo][Nn]\\[Rr][Uu][Nn].*/ OR data_win_eventdata_targetObject:/.*[Cc][Uu][Rr][Rr][Ee][Nn][Tt][Vv][Ee][Rr][Ss][Ii][Oo][Nn]\\[Rr][Uu][Nn][Oo][Nn][Cc][Ee].*/ OR data_win_eventdata_targetObject:/.*[Cc][Uu][Rr][Rr][Ee][Nn][Tt][Cc][Oo][Nn][Tt][Rr][Oo][Ll][Ss][Ee][Tt]\\[Ss][Ee][Rr][Vv][Ii][Cc][Ee][Ss]\\.*/ OR data_win_eventdata_targetObject:/.*[Ii][Mm][Aa][Gg][Ee] [Ff][Ii][Ll][Ee] [Ee][Xx][Ee][Cc][Uu][Tt][Ii][Oo][Nn] [Oo][Pp][Tt][Ii][Oo][Nn][Ss]\\.*/ OR data_win_eventdata_targetObject:/.*[Ww][Ii][Nn][Ll][Oo][Gg][Oo][Nn]\\[Ss][Hh][Ee][Ll][Ll].*/ OR data_win_eventdata_targetObject:/.*[Ww][Ii][Nn][Ll][Oo][Gg][Oo][Nn]\\[Uu][Ss][Ee][Rr][Ii][Nn][Ii][Tt].*/ OR data_win_eventdata_targetObject:/.*[Cc][Uu][Rr][Rr][Ee][Nn][Tt][Vv][Ee][Rr][Ss][Ii][Oo][Nn]\\[Ee][Xx][Pp][Ll][Oo][Rr][Ee][Rr]\\[Rr][Uu][Nn].*/ OR data_win_eventdata_targetObject:/.*[Pp][Oo][Ll][Ii][Cc][Ii][Ee][Ss]\\[Ee][Xx][Pp][Ll][Oo][Rr][Ee][Rr]\\[Rr][Uu][Nn].*/ OR data_win_eventdata_targetObject:/.*[Cc][Uu][Rr][Rr][Ee][Nn][Tt][Vv][Ee][Rr][Ss][Ii][Oo][Nn]\\[Ww][Ii][Nn][Dd][Oo][Ww][Ss]\\[Ll][Oo][Aa][Dd].*/)'
-      pivot_on: [host]
-      window: 2h
-    - name: "Host / domain reconnaissance commands on this host"
-      query: 'data_win_system_eventID:"1" AND data_win_eventdata_image:/.*(\\[Ww][Hh][Oo][Aa][Mm][Ii]\.[Ee][Xx][Ee]|\\[Nn][Ee][Tt]\.[Ee][Xx][Ee]|\\[Nn][Ee][Tt]1\.[Ee][Xx][Ee]|\\[Nn][Ll][Tt][Ee][Ss][Tt]\.[Ee][Xx][Ee]|\\[Ss][Yy][Ss][Tt][Ee][Mm][Ii][Nn][Ff][Oo]\.[Ee][Xx][Ee]|\\[Ii][Pp][Cc][Oo][Nn][Ff][Ii][Gg]\.[Ee][Xx][Ee]|\\[Aa][Rr][Pp]\.[Ee][Xx][Ee]|\\[Rr][Oo][Uu][Tt][Ee]\.[Ee][Xx][Ee]|\\[Tt][Aa][Ss][Kk][Ll][Ii][Ss][Tt]\.[Ee][Xx][Ee]|\\[Qq][Uu][Ss][Ee][Rr]\.[Ee][Xx][Ee]|\\[Qq][Ww][Ii][Nn][Ss][Tt][Aa]\.[Ee][Xx][Ee]|\\[Dd][Ss][Qq][Uu][Ee][Rr][Yy]\.[Ee][Xx][Ee]|\\[Nn][Bb][Tt][Ss][Tt][Aa][Tt]\.[Ee][Xx][Ee]|\\[Hh][Oo][Ss][Tt][Nn][Aa][Mm][Ee]\.[Ee][Xx][Ee]|\\[Nn][Ee][Tt][Ss][Tt][Aa][Tt]\.[Ee][Xx][Ee]|\\[Rr][Ee][Gg]\.[Ee][Xx][Ee])/'
-      pivot_on: [host]
-      window: 1h
+  # Behaviour-targeted hunts the engine runs around the alert (not a sweep).
+  - name: Script host executing gatherNetworkInfo.vbs or recon-output staging
+    query: data_win_system_eventID:"1" AND data_win_eventdata_image:/.*\\[Cc]?[Ww]?[Ss][Cc][Rr][Ii][Pp][Tt]\.[Ee][Xx][Ee]/ AND data_win_eventdata_commandLine:/.*([Gg][Aa][Tt][Hh][Ee][Rr][Nn][Ee][Tt][Ww][Oo][Rr][Kk][Ii][Nn][Ff][Oo]|[Hh][Oo][Tt][Ff][Ii][Xx][Ii][Nn][Ff][Oo]|[Nn][Ee][Tt][Ii][Oo][Ss][Tt][Aa][Tt][Ee]).*/
+    pivot_on:
+    - host
+    window: 1h
+  - name: Script host spawning shells or LOLBins (who launched the recon script)
+    query: data_win_system_eventID:"1" AND data_win_eventdata_parentImage:/.*\\([Ww][Ss][Cc][Rr][Ii][Pp][Tt]|[Cc][Ss][Cc][Rr][Ii][Pp][Tt]|[Mm][Ss][Hh][Tt][Aa])\.[Ee][Xx][Ee]/ AND data_win_eventdata_image:/.*\\([Cc][Mm][Dd]|[Pp][Oo][Ww][Ee][Rr][Ss][Hh][Ee][Ll][Ll]|[Pp][Ww][Ss][Hh]|[Rr][Uu][Nn][Dd][Ll][Ll]32|[Rr][Ee][Gg][Ss][Vv][Rr]32|[Cc][Uu][Rr][Ll]|[Bb][Ii][Tt][Ss][Aa][Dd][Mm][Ii][Nn]|[Cc][Ee][Rr][Tt][Uu][Tt][Ii][Ll])\.[Ee][Xx][Ee]/
+    pivot_on:
+    - host
+    window: 2h
+  - name: Follow-on host/domain discovery commands (whoami, nltest, net, netstat, ipconfig, systeminfo)
+    query: data_win_system_eventID:"1" AND data_win_eventdata_image:/.*\\([Ww][Hh][Oo][Aa][Mm][Ii]|[Nn][Ll][Tt][Ee][Ss][Tt]|[Nn][Ee][Tt]1?|[Nn][Ee][Tt][Ss][Tt][Aa][Tt]|[Ii][Pp][Cc][Oo][Nn][Ff][Ii][Gg]|[Ss][Yy][Ss][Tt][Ee][Mm][Ii][Nn][Ff][Oo]|[Ss][Ee][Tt][Ss][Pp][Nn]|[Dd][Ss][Qq][Uu][Ee][Rr][Yy])\.[Ee][Xx][Ee]/
+    pivot_on:
+    - host
+    window: 2h
+  - name: Archiving or staging of collected recon output
+    query: (data_win_system_eventID:"1" AND data_win_eventdata_commandLine:/.*([Hh][Oo][Tt][Ff][Ii][Xx][Ii][Nn][Ff][Oo]|[Nn][Ee][Tt][Ii][Oo][Ss][Tt][Aa][Tt][Ee]|[Ss][Yy][Ss][Pp][Oo][Rr][Tt][Ss][Ll][Oo][Gg]|[Gg][Aa][Tt][Hh][Ee][Rr][Nn][Ee][Tt][Ww][Oo][Rr][Kk][Ii][Nn][Ff][Oo]).*/) OR (data_win_system_eventID:"11" AND data_win_eventdata_targetFilename:/.*\.([Zz][Ii][Pp]|[Rr][Aa][Rr]|7[Zz]|[Cc][Aa][Bb])/ AND data_win_eventdata_image:/.*\\([Cc][Mm][Dd]|[Pp][Oo][Ww][Ee][Rr][Ss][Hh][Ee][Ll][Ll]|7[Zz]|[Ww][Ii][Nn][Rr][Aa][Rr]|[Rr][Aa][Rr]|[Tt][Aa][Rr])\.?[Ee]?[Xx]?[Ee]?/)
+    pivot_on:
+    - host
+    window: 4h
+  - name: Outbound network connections from script hosts (exfil or C2 after recon)
+    query: data_win_system_eventID:"3" AND data_win_eventdata_image:/.*\\([Ww][Ss][Cc][Rr][Ii][Pp][Tt]|[Cc][Ss][Cc][Rr][Ii][Pp][Tt]|[Mm][Ss][Hh][Tt][Aa]|[Pp][Oo][Ww][Ee][Rr][Ss][Hh][Ee][Ll][Ll]|[Pp][Ww][Ss][Hh]|[Cc][Uu][Rr][Ll]|[Bb][Ii][Tt][Ss][Aa][Dd][Mm][Ii][Nn])\.[Ee][Xx][Ee]/ AND data_win_eventdata_initiated:"true"
+    pivot_on:
+    - host
+    window: 4h

@@ -186,19 +186,58 @@ graylog:
   query: data_win_system_providerName:/[Ss][Ee][Rr][Vv][Ii][Cc][Ee] [Cc][Oo][Nn][Tt][Rr][Oo][Ll] [Mm][Aa][Nn][Aa][Gg][Ee][Rr]/ AND data_win_system_eventID:"7023" AND (data_win_eventdata_param1:/.* [Aa][Nn][Tt][Ii][Vv][Ii][Rr][Uu][Ss].*/ OR data_win_eventdata_param1:/.* [Ff][Ii][Rr][Ee][Ww][Aa][Ll][Ll].*/ OR data_win_eventdata_param1:/.*[Aa][Pp][Pp][Ll][Ii][Cc][Aa][Tt][Ii][Oo][Nn] [Gg][Uu][Aa][Rr][Dd].*/ OR data_win_eventdata_param1:/.*[Bb][Ii][Tt][Ll][Oo][Cc][Kk][Ee][Rr] [Dd][Rr][Ii][Vv][Ee] [Ee][Nn][Cc][Rr][Yy][Pp][Tt][Ii][Oo][Nn] [Ss][Ee][Rr][Vv][Ii][Cc][Ee].*/ OR data_win_eventdata_param1:/.*[Ee][Nn][Cc][Rr][Yy][Pp][Tt][Ii][Nn][Gg] [Ff][Ii][Ll][Ee] [Ss][Yy][Ss][Tt][Ee][Mm].*/ OR data_win_eventdata_param1:/.*[Mm][Ii][Cc][Rr][Oo][Ss][Oo][Ff][Tt] [Dd][Ee][Ff][Ee][Nn][Dd][Ee][Rr].*/ OR data_win_eventdata_param1:/.*[Tt][Hh][Rr][Ee][Aa][Tt] [Pp][Rr][Oo][Tt][Ee][Cc][Tt][Ii][Oo][Nn].*/ OR data_win_eventdata_param1:/.*[Ww][Ii][Nn][Dd][Oo][Ww][Ss] [Ee][Vv][Ee][Nn][Tt] [Ll][Oo][Gg].*/ OR data_win_eventdata_binary:/.*770069006[Ee]0064006500660065006[Ee]006400.*/ OR data_win_eventdata_binary:/.*4500760065006[Ee]0074004[Cc]006[Ff]006700.*/ OR data_win_eventdata_binary:/.*6[Dd]0070007300730076006300.*/ OR data_win_eventdata_binary:/.*530065006[Ee]0073006500.*/ OR data_win_eventdata_binary:/.*450046005300.*/ OR data_win_eventdata_binary:/.*420044004500530056004300.*/)
 
 correlation:
-  # Authored by the correlation engine for review.
+  # Authored per-rule (behaviour-researched) for the correlation engine. Related CoPilot
+  # Searches + telemetry pivots to run around an alert, scoped to its host/user/ip/domain.
+  related_rules:
+  - id: 56abae0c-6212-4b97-adc0-0b559bb950c3
+    name: Important Windows Service Terminated Unexpectedly
+    reason: Sibling SCM rule (7034) for the same defensive services; crashes and error terminations of Defender/Firewall/EventLog services together point to forced kill or tampering rather than a one-off fault.
+  - id: windows-attempt-stop-security-service-001
+    name: Windows Attempt To Stop Security Service
+    reason: 'The command-line cause: net stop/sc stop/Stop-Service against AV or firewall services is what produces this 7023 termination.'
+  - id: b28e58e4-2a72-4fae-bdee-0fbe904db642
+    name: Windows Defender Real-time Protection Disabled
+    reason: If the Defender service terminated, real-time protection being disabled confirms the AV was blinded intentionally.
+  - id: 6c0a7755-6d31-44fa-80e1-133e57752680
+    name: Windows Defender Threat Detection Service Disabled
+    reason: Same System log channel; Defender threat-detection service disabled immediately before or after a termination shows defense evasion in progress.
+  - id: 100ef69e-3327-481c-8e5c-6d80d9507556
+    name: Important Windows Eventlog Cleared
+    reason: Attackers who kill the Windows Event Log or AV services frequently follow by clearing logs to hide their actions.
+  - id: 1321dc4e-a1fe-481d-a016-52c45f0c8b4f
+    name: Windows Defender Exclusions Added
+    reason: Defender tampering often pairs exclusions with service disruption so payloads can be staged and run unscanned.
+  - id: 431a1fdb-4799-4f3b-91c3-a683b003fc49
+    name: New Kernel Driver Via SC.EXE
+    reason: BlackLotus-style and BYOVD attacks load a kernel driver to kill protected security services; a new driver around the termination is the likely mechanism.
+  - id: 1d61f71d-59d2-479e-9562-4ff5f4ead16b
+    name: Suspicious Service Installation
+    reason: A malicious service (7045) installed alongside or after the security service termination is the typical persistence or execution follow-on.
+  window: 2h
   enrichment_searches:
-  # Rule-specific telemetry pivots the engine runs around an alert from this rule,
-  # scoped to the alert's host/user/IP within the window (behaviour-targeted, not a sweep).
-    - name: "Service installations on this host"
-      query: 'data_win_system_eventID:"7045"'
-      pivot_on: [host]
-      window: 6h
-    - name: "Follow-on LOLBin / signed-binary-proxy execution on this host"
-      query: 'data_win_system_eventID:"1" AND data_win_eventdata_image:/.*(\\[Rr][Uu][Nn][Dd][Ll][Ll]32\.[Ee][Xx][Ee]|\\[Rr][Ee][Gg][Ss][Vv][Rr]32\.[Ee][Xx][Ee]|\\[Mm][Ss][Hh][Tt][Aa]\.[Ee][Xx][Ee]|\\[Ii][Nn][Ss][Tt][Aa][Ll][Ll][Uu][Tt][Ii][Ll]\.[Ee][Xx][Ee]|\\[Rr][Ee][Gg][Aa][Ss][Mm]\.[Ee][Xx][Ee]|\\[Rr][Ee][Gg][Ss][Vv][Cc][Ss]\.[Ee][Xx][Ee]|\\[Mm][Ss][Bb][Uu][Ii][Ll][Dd]\.[Ee][Xx][Ee]|\\[Cc][Ee][Rr][Tt][Uu][Tt][Ii][Ll]\.[Ee][Xx][Ee]|\\[Bb][Ii][Tt][Ss][Aa][Dd][Mm][Ii][Nn]\.[Ee][Xx][Ee]|\\[Ww][Mm][Ii][Cc]\.[Ee][Xx][Ee]|\\[Cc][Mm][Ss][Tt][Pp]\.[Ee][Xx][Ee]|\\[Oo][Dd][Bb][Cc][Cc][Oo][Nn][Ff]\.[Ee][Xx][Ee]|\\[Ff][Oo][Rr][Ff][Ii][Ll][Ee][Ss]\.[Ee][Xx][Ee]|\\[Pp][Cc][Aa][Ll][Uu][Aa]\.[Ee][Xx][Ee]|\\[Mm][Aa][Vv][Ii][Nn][Jj][Ee][Cc][Tt]\.[Ee][Xx][Ee]|\\[Ss][Cc][Rr][Ii][Pp][Tt][Rr][Uu][Nn][Nn][Ee][Rr]\.[Ee][Xx][Ee])/'
-      pivot_on: [host]
-      window: 2h
-    - name: "Memory/credential-dump creation & LSASS access on this host"
-      query: '((data_win_system_eventID:"1" AND data_win_eventdata_image:/.*(\\[Pp][Rr][Oo][Cc][Dd][Uu][Mm][Pp]\.[Ee][Xx][Ee]|\\[Pp][Rr][Oo][Cc][Dd][Uu][Mm][Pp]64\.[Ee][Xx][Ee]|\\[Ss][Qq][Ll][Dd][Uu][Mm][Pp][Ee][Rr]\.[Ee][Xx][Ee]|\\[Cc][Rr][Ee][Aa][Tt][Ee][Dd][Uu][Mm][Pp]\.[Ee][Xx][Ee]|\\[Rr][Dd][Rr][Ll][Ee][Aa][Kk][Dd][Ii][Aa][Gg]\.[Ee][Xx][Ee]|\\[Dd][Uu][Mm][Pp][Ee][Rr][Tt]\.[Ee][Xx][Ee]|\\[Nn][Aa][Nn][Oo][Dd][Uu][Mm][Pp]\.[Ee][Xx][Ee]|\\[Aa][Vv][Dd][Uu][Mm][Pp]\.[Ee][Xx][Ee])/) OR (data_win_system_eventID:"1" AND (data_win_eventdata_commandLine:/.*[Cc][Oo][Mm][Ss][Vv][Cc][Ss]\.[Dd][Ll][Ll].*/ OR data_win_eventdata_commandLine:/.*[Mm][Ii][Nn][Ii][Dd][Uu][Mm][Pp].*/ OR data_win_eventdata_commandLine:/.*[Dd][Uu][Mm][Pp][Ee][Rr][Tt].*/ OR data_win_eventdata_commandLine:/.*[Nn][Aa][Nn][Oo][Dd][Uu][Mm][Pp].*/ OR data_win_eventdata_commandLine:/.*[Ll][Ss][Aa][Ss][Ss].*/ OR data_win_eventdata_commandLine:/.*[Ss][Ee][Kk][Uu][Rr][Ll][Ss][Aa].*/ OR data_win_eventdata_commandLine:/.*[Nn][Tt][Dd][Ss]\.[Dd][Ii][Tt].*/ OR data_win_eventdata_commandLine:/.*[Nn][Tt][Dd][Ss][Uu][Tt][Ii][Ll].*/)) OR (data_win_system_eventID:"10" AND data_win_eventdata_targetImage:/.*(\\[Ll][Ss][Aa][Ss][Ss]\.[Ee][Xx][Ee])/))'
-      pivot_on: [host]
-      window: 1h
+  # Behaviour-targeted hunts the engine runs around the alert (not a sweep).
+  - name: Service stop/disable commands against security services
+    query: data_win_system_eventID:"1" AND (data_win_eventdata_commandLine:/.*([Nn][Ee][Tt]1? [Ss][Tt][Oo][Pp]|[Ss][Cc](\.[Ee][Xx][Ee])? (stop|config|delete)|[Ss][Tt][Oo][Pp]-[Ss][Ee][Rr][Vv][Ii][Cc][Ee]|[Tt][Aa][Ss][Kk][Kk][Ii][Ll][Ll]).*([Ww][Ii][Nn][Dd][Ee][Ff][Ee][Nn][Dd]|[Ss][Ee][Nn][Ss][Ee]|[Mm][Pp][Ss][Ss][Vv][Cc]|[Mm][Ss][Mm][Pp][Ee][Nn][Gg]|[Mm][Pp][Ss][Ww][Nn][Ss][Cc]|[Ee][Vv][Ee][Nn][Tt][Ll][Oo][Gg]|[Mm][Pp][Ss][Ss][Vv][Cc]|[Ff][Ii][Rr][Ee][Ww][Aa][Ll][Ll]|[Bb][Dd][Ee][Ss][Vv][Cc]).*/)
+    pivot_on:
+    - host
+    window: 1h
+  - name: Defender and firewall disable via registry or Set-MpPreference
+    query: (data_win_system_eventID:"13" AND data_win_eventdata_targetObject:/.*([Dd][Ii][Ss][Aa][Bb][Ll][Ee][Aa][Nn][Tt][Ii][Ss][Pp][Yy][Ww][Aa][Rr][Ee]|[Dd][Ii][Ss][Aa][Bb][Ll][Ee][Rr][Ee][Aa][Ll][Tt][Ii][Mm][Ee][Mm][Oo][Nn][Ii][Tt][Oo][Rr][Ii][Nn][Gg]|[Ee][Nn][Aa][Bb][Ll][Ee][Ff][Ii][Rr][Ee][Ww][Aa][Ll][Ll]|[Ww][Ii][Nn][Dd][Ee][Ff][Ee][Nn][Dd]\\[Ss][Tt][Aa][Rr][Tt]).*/) OR (data_win_system_eventID:"1" AND data_win_eventdata_commandLine:/.*([Ss][Ee][Tt]-[Mm][Pp][Pp][Rr][Ee][Ff][Ee][Rr][Ee][Nn][Cc][Ee]|[Aa][Dd][Dd]-[Mm][Pp][Pp][Rr][Ee][Ff][Ee][Rr][Ee][Nn][Cc][Ee]|[Aa][Dd][Vv][Ff][Ii][Rr][Ee][Ww][Aa][Ll][Ll].*[Oo][Ff][Ff]).*/)
+    pivot_on:
+    - host
+    window: 2h
+  - name: Service installs and kernel driver loads (BYOVD/BlackLotus follow-on)
+    query: data_win_system_eventID:"7045" OR (data_win_system_eventID:"1" AND data_win_eventdata_commandLine:/.*[Ss][Cc](\.[Ee][Xx][Ee])? +[Cc][Rr][Ee][Aa][Tt][Ee].*([Tt][Yy][Pp][Ee]= *[Kk][Ee][Rr][Nn][Ee][Ll]).*/) OR data_win_system_eventID:"6"
+    pivot_on:
+    - host
+    window: 6h
+  - name: Boot configuration and Secure Boot tampering
+    query: data_win_system_eventID:"1" AND (data_win_eventdata_commandLine:/.*[Bb][Cc][Dd][Ee][Dd][Ii][Tt].*([Nn][Oo][Ii][Nn][Tt][Ee][Gg][Rr][Ii][Tt][Yy][Cc][Hh][Ee][Cc][Kk][Ss]|[Tt][Ee][Ss][Tt][Ss][Ii][Gg][Nn][Ii][Nn][Gg]|[Rr][Ee][Cc][Oo][Vv][Ee][Rr][Yy][Ee][Nn][Aa][Bb][Ll][Ee][Dd]|[Bb][Oo][Oo][Tt][Ss][Tt][Aa][Tt][Uu][Ss][Pp][Oo][Ll][Ii][Cc][Yy]).*/ OR data_win_eventdata_commandLine:/.*[Mm][Oo][Uu][Nn][Tt][Vv][Oo][Ll].*/ OR data_win_eventdata_commandLine:/.*[Rr][Ee][Aa][Gg][Ee][Nn][Tt][Cc].*[/-][Dd][Ii][Ss][Aa][Bb][Ll][Ee].*/)
+    pivot_on:
+    - host
+    window: 6h
+  - name: Event log clearing or audit disabling after termination
+    query: (data_win_system_eventID:"1102" OR data_win_system_eventID:"104") OR (data_win_system_eventID:"1" AND data_win_eventdata_commandLine:/.*([Ww][Ee][Vv][Tt][Uu][Tt][Ii][Ll].*( cl | clear-log|sl .*\/e:false)|[Cc][Ll][Ee][Aa][Rr]-[Ee][Vv][Ee][Nn][Tt][Ll][Oo][Gg]|[Aa][Uu][Dd][Ii][Tt][Pp][Oo][Ll].*(\/clear|\/remove|[Nn][Oo] [Aa][Uu][Dd][Ii][Tt][Ii][Nn][Gg])).*/)
+    pivot_on:
+    - host
+    window: 4h

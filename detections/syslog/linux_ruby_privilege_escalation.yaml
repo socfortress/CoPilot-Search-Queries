@@ -125,25 +125,47 @@ graylog:
   query: (full_log:/.*ruby.*/ OR full_log:/.*72756279.*/) AND NOT _exists_:data_win_system_eventID AND NOT rule_groups:/.*windows.*/
 
 correlation:
-  # Authored by the correlation engine for review. Related CoPilot Searches to run
-  # around an alert from this rule, scoped to the same host/user/IP within the window.
+  # Authored per-rule (behaviour-researched) for the correlation engine. Related CoPilot
+  # Searches + telemetry pivots to run around an alert, scoped to its host/user/ip/domain.
   related_rules:
-    - id: 26f86252-1549-45e1-a212-eb26840e86bc
-      name: "File Download or Read to Pipe Execution"
-      reason: "same analytic story: Linux Living Off The Land"
-  window: 1h
+  - id: linux-sudo-or-su-execution-001
+    name: Linux Sudo Or Su Execution
+    reason: ruby -e escalation runs through sudo; shows sudo context and prior attempts.
+  - id: b8bdac18-c06e-4016-ac30-221553e74f59
+    name: Potential Ruby Reverse Shell
+    reason: Ruby -e with sudo may be a reverse shell payload rather than a local shell.
+  - id: linux-gem-privilege-escalation-001
+    name: Linux Gem Privilege Escalation
+    reason: Same Ruby ecosystem GTFOBins vector tried back-to-back.
+  - id: linux-puppet-privilege-escalation-001
+    name: Linux Puppet Privilege Escalation
+    reason: Puppet is Ruby-based; sibling sudo-to-root vector.
+  - id: linux-sudoers-tmp-file-creation-001
+    name: Linux Sudoers Tmp File Creation
+    reason: Root obtained then sudoers modified for persistence.
+  - id: linux-auditd-add-user-001
+    name: Linux Auditd Add User
+    reason: Backdoor user creation commonly follows a root shell.
+  window: 2h
   enrichment_searches:
-  # Rule-specific telemetry pivots the engine runs around an alert from this rule,
-  # scoped to the alert's host/user/IP within the window (behaviour-targeted, not a sweep).
-    - name: "Privilege-escalation tooling executed on this host"
-      query: 'data_process_exec_process_binary:/.*(\/[Ss][Uu][Dd][Oo]|\/[Ss][Uu]|\/[Pp][Kk][Ee][Xx][Ee][Cc]|\/[Dd][Oo][Aa][Ss]|\/[Ss][Ee][Tt][Cc][Aa][Pp]|\/[Cc][Hh][Ss][Hh]|\/[Nn][Ee][Ww][Gg][Rr][Pp])/'
-      pivot_on: [host]
-      window: 2h
-    - name: "Shell / interpreter execution on this host"
-      query: '((data_process_exec_process_binary:/.*(\/[Bb][Aa][Ss][Hh]|\/[Ss][Hh]|\/[Dd][Aa][Ss][Hh]|\/[Zz][Ss][Hh]|\/[Kk][Ss][Hh]|\/[Aa][Ss][Hh]|\/[Bb][Uu][Ss][Yy][Bb][Oo][Xx])/) OR (data_process_exec_process_binary:/.*(\/[Pp][Yy][Tt][Hh][Oo][Nn]|\/[Pp][Yy][Tt][Hh][Oo][Nn]3|\/[Pp][Ee][Rr][Ll]|\/[Rr][Uu][Bb][Yy]|\/[Pp][Hh][Pp]|\/[Nn][Oo][Dd][Ee]|\/[Ll][Uu][Aa]|\/[Aa][Ww][Kk])/))'
-      pivot_on: [host]
-      window: 1h
-    - name: "Reconnaissance commands on this host"
-      query: 'data_process_exec_process_binary:/.*(\/[Ww][Hh][Oo][Aa][Mm][Ii]|\/[Ii][Dd]|\/[Uu][Nn][Aa][Mm][Ee]|\/[Hh][Oo][Ss][Tt][Nn][Aa][Mm][Ee]|\/[Hh][Oo][Ss][Tt][Nn][Aa][Mm][Ee][Cc][Tt][Ll]|\/[Ss][Ss]|\/[Nn][Ee][Tt][Ss][Tt][Aa][Tt]|\/[Ii][Ff][Cc][Oo][Nn][Ff][Ii][Gg]|\/[Aa][Rr][Pp]|\/[Ww]|\/[Ww][Hh][Oo]|\/[Ll][Aa][Ss][Tt]|\/[Ll][Ss][Oo][Ff]|\/[Nn][Mm][Aa][Pp]|\/[Dd][Ii][Gg]|\/[Ff][Ii][Nn][Dd])/'
-      pivot_on: [host]
-      window: 1h
+  # Behaviour-targeted hunts the engine runs around the alert (not a sweep).
+  - name: Ruby inline execution
+    query: full_log:/.*ruby.*(-e|exec|system|spawn|TCPSocket|\/bin\/sh).*/
+    pivot_on: host
+    window: 2h
+  - name: Sudo launching interpreters
+    query: full_log:/.*sudo.*(ruby|irb|gem|puppet|python|perl|bash|sh).*/
+    pivot_on: host
+    window: 2h
+  - name: Account and sudoers changes
+    query: full_log:/.*(useradd|adduser|usermod|visudo|\/etc\/sudoers|\/etc\/shadow|authorized_keys).*/
+    pivot_on: host
+    window: 4h
+  - name: Reverse shell indicators
+    query: full_log:/.*(\/dev\/tcp\/|nc -e|bash -i|TCPSocket).*/
+    pivot_on: host
+    window: 2h
+  - name: SUID staging
+    query: full_log:/.*(chmod [0-9]*[4267][0-7]{3}|chmod .*\+s|chown root).*/
+    pivot_on: host
+    window: 2h

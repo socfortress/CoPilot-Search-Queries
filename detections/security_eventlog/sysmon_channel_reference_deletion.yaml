@@ -180,44 +180,58 @@ graylog:
   query: ((data_win_system_eventID:"4657" AND (data_win_eventdata_objectName:/.*[Ww][Ii][Nn][Ee][Vv][Tt]\\[Pp][Uu][Bb][Ll][Ii][Ss][Hh][Ee][Rr][Ss]\\\{5770385[Ff]-[Cc]22[Aa]-43[Ee]0-[Bb][Ff]4[Cc]-06[Ff]5698[Ff][Ff][Bb][Dd]9\}.*/ OR data_win_eventdata_objectName:/.*[Ww][Ii][Nn][Ee][Vv][Tt]\\[Cc][Hh][Aa][Nn][Nn][Ee][Ll][Ss]\\[Mm][Ii][Cc][Rr][Oo][Ss][Oo][Ff][Tt]-[Ww][Ii][Nn][Dd][Oo][Ww][Ss]-[Ss][Yy][Ss][Mm][Oo][Nn]\/[Oo][Pp][Ee][Rr][Aa][Tt][Ii][Oo][Nn][Aa][Ll].*/) AND data_win_eventdata_objectValueName:/[Ee][Nn][Aa][Bb][Ll][Ee][Dd]/ AND data_win_eventdata_newValue:"0") OR (data_win_system_eventID:"4663" AND (data_win_eventdata_objectName:/.*[Ww][Ii][Nn][Ee][Vv][Tt]\\[Pp][Uu][Bb][Ll][Ii][Ss][Hh][Ee][Rr][Ss]\\\{5770385[Ff]-[Cc]22[Aa]-43[Ee]0-[Bb][Ff]4[Cc]-06[Ff]5698[Ff][Ff][Bb][Dd]9\}.*/ OR data_win_eventdata_objectName:/.*[Ww][Ii][Nn][Ee][Vv][Tt]\\[Cc][Hh][Aa][Nn][Nn][Ee][Ll][Ss]\\[Mm][Ii][Cc][Rr][Oo][Ss][Oo][Ff][Tt]-[Ww][Ii][Nn][Dd][Oo][Ww][Ss]-[Ss][Yy][Ss][Mm][Oo][Nn]\/[Oo][Pp][Ee][Rr][Aa][Tt][Ii][Oo][Nn][Aa][Ll].*/) AND data_win_eventdata_accessMask:/0[Xx]10000/))
 
 correlation:
-  # Authored by the correlation engine for review. Related CoPilot Searches to run
-  # around an alert from this rule, scoped to the same host/user/IP within the window.
+  # Authored per-rule (behaviour-researched) for the correlation engine. Related CoPilot
+  # Searches + telemetry pivots to run around an alert, scoped to its host/user/ip/domain.
   related_rules:
-    - id: 0255a820-e564-4e40-af2b-6ac61160335c
-      name: "A New Trust Was Created To A Domain"
-      reason: "next kill-chain tactic: Persistence"
-    - id: 35ba1d85-724d-42a3-889f-2e2362bcaf23
-      name: "AD Privileged Users or Groups Reconnaissance"
-      reason: "next kill-chain tactic: Discovery"
-    - id: 9eb99343-d336-4020-a3cd-67f3819e68ee
-      name: "Account Tampering - Suspicious Failed Logon Reasons"
-      reason: "next kill-chain tactic: Persistence"
-    - id: 17d619c1-e020-4347-957e-1d1207455c93
-      name: "Active Directory Replication from Non Machine Account"
-      reason: "next kill-chain tactic: Credential Access"
-    - id: 300bac00-e041-4ee2-9c36-e262656a6ecc
-      name: "Active Directory User Backdoors"
-      reason: "next kill-chain tactic: Persistence"
-    - id: 2632954e-db1c-49cb-9936-67d1ef1d17d2
-      name: "Addition of SID History to Active Directory Object"
-      reason: "next kill-chain tactic: Privilege Escalation"
-  window: 1h
+  - id: 8ac03a65-6c84-4116-acad-dc1558ff7a77
+    name: Sysmon Configuration Change
+    reason: Sysmon EID 16 config-change event; attackers who mute Sysmon often alter or reload its config around the same time, so a hit on the same host confirms Sysmon tampering.
+  - id: 4916a35e-bfc4-47d0-8e25-a003d7067061
+    name: Sysmon Driver Altitude Change
+    reason: Alternate way of blinding Sysmon by changing the SysmonDrv altitude in the registry; same defence-evasion goal, often chained with channel disabling.
+  - id: 4d7cda18-1b12-4e52-b45c-d28653210df8
+    name: Sysmon Driver Unloaded Via Fltmc.EXE
+    reason: Unloading the Sysmon minifilter driver is the next step of disabling Sysmon after muting its channel.
+  - id: 6a5f68d1-c4b5-46b9-94ee-5324892ea939
+    name: Uninstall Sysinternals Sysmon
+    reason: Outright removal of Sysmon is the end state of the tampering this rule flags as an early step.
+  - id: 87911521-7098-470b-a459-9a57fc80bdfd
+    name: Sysmon Configuration Update
+    reason: Sysmon.exe -c config reload used to push a permissive or empty config, a companion technique to disabling the channel.
+  - id: 2f78da12-f7c7-430b-8b19-a28f269b77a3
+    name: Disable Windows Event Logging Via Registry
+    reason: Same registry-based logging suppression tradecraft applied to other event channels on the same host.
+  - id: ba226dcf-d390-4642-b9af-b534872f1156
+    name: Windows Event Log Access Tampering Via Registry
+    reason: Registry changes to event log channel access, a sibling method to blind or hide logging after the Sysmon channel is touched.
+  - id: fdb829a8-db84-4832-b64b-3e964cd44f01
+    name: Windows Eventlog Cleared Via Wevtutil
+    reason: After suppressing Sysmon, operators typically clear remaining event logs to erase traces of the intrusion.
+  window: 2h
   enrichment_searches:
-  # Rule-specific telemetry pivots the engine runs around an alert from this rule,
-  # scoped to the alert's host/user/IP within the window (behaviour-targeted, not a sweep).
-    - name: "Autostart / security-setting registry changes on this host"
-      query: '(((data_win_system_eventID:"12" OR data_win_system_eventID:"13") AND (data_win_eventdata_targetObject:/.*[Cc][Uu][Rr][Rr][Ee][Nn][Tt][Vv][Ee][Rr][Ss][Ii][Oo][Nn]\\[Rr][Uu][Nn].*/ OR data_win_eventdata_targetObject:/.*[Cc][Uu][Rr][Rr][Ee][Nn][Tt][Vv][Ee][Rr][Ss][Ii][Oo][Nn]\\[Rr][Uu][Nn][Oo][Nn][Cc][Ee].*/ OR data_win_eventdata_targetObject:/.*[Cc][Uu][Rr][Rr][Ee][Nn][Tt][Cc][Oo][Nn][Tt][Rr][Oo][Ll][Ss][Ee][Tt]\\[Ss][Ee][Rr][Vv][Ii][Cc][Ee][Ss]\\.*/ OR data_win_eventdata_targetObject:/.*[Ii][Mm][Aa][Gg][Ee] [Ff][Ii][Ll][Ee] [Ee][Xx][Ee][Cc][Uu][Tt][Ii][Oo][Nn] [Oo][Pp][Tt][Ii][Oo][Nn][Ss]\\.*/ OR data_win_eventdata_targetObject:/.*[Ww][Ii][Nn][Ll][Oo][Gg][Oo][Nn]\\[Ss][Hh][Ee][Ll][Ll].*/ OR data_win_eventdata_targetObject:/.*[Ww][Ii][Nn][Ll][Oo][Gg][Oo][Nn]\\[Uu][Ss][Ee][Rr][Ii][Nn][Ii][Tt].*/ OR data_win_eventdata_targetObject:/.*[Cc][Uu][Rr][Rr][Ee][Nn][Tt][Vv][Ee][Rr][Ss][Ii][Oo][Nn]\\[Ee][Xx][Pp][Ll][Oo][Rr][Ee][Rr]\\[Rr][Uu][Nn].*/ OR data_win_eventdata_targetObject:/.*[Pp][Oo][Ll][Ii][Cc][Ii][Ee][Ss]\\[Ee][Xx][Pp][Ll][Oo][Rr][Ee][Rr]\\[Rr][Uu][Nn].*/ OR data_win_eventdata_targetObject:/.*[Cc][Uu][Rr][Rr][Ee][Nn][Tt][Vv][Ee][Rr][Ss][Ii][Oo][Nn]\\[Ww][Ii][Nn][Dd][Oo][Ww][Ss]\\[Ll][Oo][Aa][Dd].*/)) OR (data_win_system_eventID:"1" AND (data_win_eventdata_commandLine:/.*[Ss][Ee][Tt]-[Mm][Pp][Pp][Rr][Ee][Ff][Ee][Rr][Ee][Nn][Cc][Ee].*/ OR data_win_eventdata_commandLine:/.*[Dd][Ii][Ss][Aa][Bb][Ll][Ee][Rr][Ee][Aa][Ll][Tt][Ii][Mm][Ee][Mm][Oo][Nn][Ii][Tt][Oo][Rr][Ii][Nn][Gg].*/ OR data_win_eventdata_commandLine:/.*[Dd][Ii][Ss][Aa][Bb][Ll][Ee][Aa][Nn][Tt][Ii][Ss][Pp][Yy][Ww][Aa][Rr][Ee].*/ OR data_win_eventdata_commandLine:/.*[Aa][Dd][Dd]-[Mm][Pp][Pp][Rr][Ee][Ff][Ee][Rr][Ee][Nn][Cc][Ee] -[Ee][Xx][Cc][Ll][Uu][Ss][Ii][Oo][Nn][Pp][Aa][Tt][Hh].*/ OR data_win_eventdata_commandLine:/.*[Ww][Ee][Vv][Tt][Uu][Tt][Ii][Ll].*/ OR data_win_eventdata_commandLine:/.*[Cc][Ll][Ee][Aa][Rr]-[Ee][Vv][Ee][Nn][Tt][Ll][Oo][Gg].*/ OR data_win_eventdata_commandLine:/.*[Ff][Ss][Uu][Tt][Ii][Ll] [Uu][Ss][Nn] [Dd][Ee][Ll][Ee][Tt][Ee][Jj][Oo][Uu][Rr][Nn][Aa][Ll].*/ OR data_win_eventdata_commandLine:/.*[Vv][Ss][Ss][Aa][Dd][Mm][Ii][Nn].*/ OR data_win_eventdata_commandLine:/.*[Ss][Tt][Oo][Pp]-[Ss][Ee][Rr][Vv][Ii][Cc][Ee].*/ OR data_win_eventdata_commandLine:/.*[Ss][Cc] [Ss][Tt][Oo][Pp].*/ OR data_win_eventdata_commandLine:/.*[Ss][Cc] [Cc][Oo][Nn][Ff][Ii][Gg].*/)))'
-      pivot_on: [host]
-      window: 2h
-    - name: "Follow-on LOLBin / signed-binary-proxy execution on this host"
-      query: 'data_win_system_eventID:"1" AND data_win_eventdata_image:/.*(\\[Rr][Uu][Nn][Dd][Ll][Ll]32\.[Ee][Xx][Ee]|\\[Rr][Ee][Gg][Ss][Vv][Rr]32\.[Ee][Xx][Ee]|\\[Mm][Ss][Hh][Tt][Aa]\.[Ee][Xx][Ee]|\\[Ii][Nn][Ss][Tt][Aa][Ll][Ll][Uu][Tt][Ii][Ll]\.[Ee][Xx][Ee]|\\[Rr][Ee][Gg][Aa][Ss][Mm]\.[Ee][Xx][Ee]|\\[Rr][Ee][Gg][Ss][Vv][Cc][Ss]\.[Ee][Xx][Ee]|\\[Mm][Ss][Bb][Uu][Ii][Ll][Dd]\.[Ee][Xx][Ee]|\\[Cc][Ee][Rr][Tt][Uu][Tt][Ii][Ll]\.[Ee][Xx][Ee]|\\[Bb][Ii][Tt][Ss][Aa][Dd][Mm][Ii][Nn]\.[Ee][Xx][Ee]|\\[Ww][Mm][Ii][Cc]\.[Ee][Xx][Ee]|\\[Cc][Mm][Ss][Tt][Pp]\.[Ee][Xx][Ee]|\\[Oo][Dd][Bb][Cc][Cc][Oo][Nn][Ff]\.[Ee][Xx][Ee]|\\[Ff][Oo][Rr][Ff][Ii][Ll][Ee][Ss]\.[Ee][Xx][Ee]|\\[Pp][Cc][Aa][Ll][Uu][Aa]\.[Ee][Xx][Ee]|\\[Mm][Aa][Vv][Ii][Nn][Jj][Ee][Cc][Tt]\.[Ee][Xx][Ee]|\\[Ss][Cc][Rr][Ii][Pp][Tt][Rr][Uu][Nn][Nn][Ee][Rr]\.[Ee][Xx][Ee])/'
-      pivot_on: [host]
-      window: 1h
-    - name: "This account's logon activity across hosts"
-      query: '(data_win_system_eventID:"4624" OR data_win_system_eventID:"4625")'
-      pivot_on: [user]
-      window: 6h
-    - name: "Account / group / privilege changes involving this account"
-      query: '(data_win_system_eventID:"4720" OR data_win_system_eventID:"4722" OR data_win_system_eventID:"4724" OR data_win_system_eventID:"4728" OR data_win_system_eventID:"4732" OR data_win_system_eventID:"4756" OR data_win_system_eventID:"4672")'
-      pivot_on: [user]
-      window: 6h
+  # Behaviour-targeted hunts the engine runs around the alert (not a sweep).
+  - name: Other event-log and channel registry tampering (WINEVT keys) on this host
+    query: (data_win_system_eventID:"13" OR data_win_system_eventID:"4657" OR data_win_system_eventID:"4663") AND data_win_eventdata_targetObject:*WINEVT*
+    pivot_on:
+    - host
+    window: 2h
+  - name: Sysmon driver/service stop, unload or uninstall commands
+    query: data_win_system_eventID:"1" AND (data_win_eventdata_commandLine:/.*[Ff][Ll][Tt][Mm][Cc].*[Uu][Nn][Ll][Oo][Aa][Dd].*/ OR data_win_eventdata_commandLine:/.*[Ss][Yy][Ss][Mm][Oo][Nn].*-[Uu].*/ OR data_win_eventdata_commandLine:/.*([Ss][Cc]|[Nn][Ee][Tt]) +([Ss][Tt][Oo][Pp]|[Dd][Ee][Ll][Ee][Tt][Ee]) +[Ss][Yy][Ss][Mm][Oo][Nn].*/ OR data_win_eventdata_commandLine:/.*[Ss][Yy][Ss][Mm][Oo][Nn][Dd][Rr][Vv].*/ OR data_win_eventdata_commandLine:/.*[Ss][Yy][Ss][Mm][Oo][Nn].*-[Cc] .*/)
+    pivot_on:
+    - host
+    window: 2h
+  - name: Reg.exe / PowerShell editing Sysmon or WINEVT registry keys
+    query: data_win_system_eventID:"1" AND data_win_eventdata_commandLine:/.*[Ww][Ii][Nn][Ee][Vv][Tt].*/ AND (data_win_eventdata_commandLine:/.*[Rr][Ee][Gg].*/ OR data_win_eventdata_commandLine:/.*[Ss][Ee][Tt]-[Ii][Tt][Ee][Mm][Pp][Rr][Oo][Pp][Ee][Rr][Tt][Yy].*/)
+    pivot_on:
+    - host
+    window: 1h
+  - name: Event log clearing or audit policy changes (EID 1102/104, wevtutil, auditpol)
+    query: (data_win_system_eventID:"1102" OR data_win_system_eventID:"104" OR data_win_system_eventID:"4719" OR (data_win_system_eventID:"1" AND (data_win_eventdata_commandLine:/.*[Ww][Ee][Vv][Tt][Uu][Tt][Ii][Ll].*[Cc][Ll].*/ OR data_win_eventdata_commandLine:/.*[Aa][Uu][Dd][Ii][Tt][Pp][Oo][Ll].*/ OR data_win_eventdata_commandLine:/.*[Cc][Ll][Ee][Aa][Rr]-[Ee][Vv][Ee][Nn][Tt][Ll][Oo][Gg].*/)))
+    pivot_on:
+    - host
+    window: 2h
+  - name: Defender tampering or security-service stops after Sysmon muting
+    query: data_win_system_eventID:"1" AND (data_win_eventdata_commandLine:/.*[Ss][Ee][Tt]-[Mm][Pp][Pp][Rr][Ee][Ff][Ee][Rr][Ee][Nn][Cc][Ee].*[Dd][Ii][Ss][Aa][Bb][Ll][Ee].*/ OR data_win_eventdata_commandLine:/.*[Aa][Dd][Dd]-[Mm][Pp][Pp][Rr][Ee][Ff][Ee][Rr][Ee][Nn][Cc][Ee].*[Ee][Xx][Cc][Ll][Uu][Ss][Ii][Oo][Nn].*/ OR data_win_eventdata_commandLine:/.*[Ss][Cc].*[Ss][Tt][Oo][Pp].*[Ww][Ii][Nn][Dd][Ee][Ff][Ee][Nn][Dd].*/)
+    pivot_on:
+    - host
+    window: 4h

@@ -150,19 +150,58 @@ graylog:
   query: data_win_system_eventID:"4662" AND data_win_eventdata_objectServer:/[Dd][Ss]/ AND data_win_eventdata_accessMask:/0[Xx]40000/ AND (data_win_eventdata_objectType:/19195[Aa]5[Bb]-6[Dd][Aa]0-11[Dd]0-[Aa][Ff][Dd]3-00[Cc]04[Ff][Dd]930[Cc]9/ OR data_win_eventdata_objectType:/[Dd][Oo][Mm][Aa][Ii][Nn][Dd][Nn][Ss]/)
 
 correlation:
-  # Authored by the correlation engine for review.
+  # Authored per-rule (behaviour-researched) for the correlation engine. Related CoPilot
+  # Searches + telemetry pivots to run around an alert, scoped to its host/user/ip/domain.
+  related_rules:
+  - id: e4a96dfd-667a-4487-b942-ccef5a1e81e8
+    name: Windows Find Interesting ACL with FindInterestingDomainAcl
+    reason: 'Precursor: attackers enumerate domain ACLs with PowerView to find an object they can WriteDAC on before modifying the domain root DACL.'
+  - id: 2c99737c-585d-4431-b61a-c911d86ff32f
+    name: Powerview Add-DomainObjectAcl DCSync AD Extend Right
+    reason: 'Same act seen from the directory side: WriteDAC on domainDNS is how replication extended rights are granted to a controlled account.'
+  - id: 01c42d3c-242d-4655-85b2-34f1739632f7
+    name: Potentially Over Permissive Permissions Granted Using Dsacls.EXE
+    reason: Command-line alternative to PowerView for granting rights on the domain object, which would produce this 4662 WriteDAC event.
+  - id: 17d619c1-e020-4347-957e-1d1207455c93
+    name: Active Directory Replication from Non Machine Account
+    reason: 'Follow-on: once the DACL grants replication rights, the account performs DCSync, logged as 4662 replication GUIDs from a non-DC account.'
+  - id: da63bc76-61ae-11eb-ae93-0242ac130002
+    name: Ntdsutil Export NTDS
+    reason: Alternate credential theft path after DACL tampering when the attacker lands on a DC and exports NTDS.dit.
+  - id: 94dc4390-6b7c-4784-8ffc-335334404650
+    name: Dump Ntds.dit To Suspicious Location
+    reason: Follow-on domain credential harvesting by NTDS.dit dumping once domain-level privilege is obtained.
+  - id: 10fb649c-3600-4d37-b1e6-56ea90bb7e09
+    name: User Added To Highly Privileged Group
+    reason: 'Parallel persistence: an actor able to rewrite domain DACLs often also adds accounts to Domain Admins or similar groups.'
+  - id: 2632954e-db1c-49cb-9936-67d1ef1d17d2
+    name: Addition of SID History to Active Directory Object
+    reason: Co-occurring AD privilege-persistence technique used by actors who hold rights to modify domain objects.
+  window: 1h
   enrichment_searches:
-  # Rule-specific telemetry pivots the engine runs around an alert from this rule,
-  # scoped to the alert's host/user/IP within the window (behaviour-targeted, not a sweep).
-    - name: "This account's logon activity across hosts"
-      query: '(data_win_system_eventID:"4624" OR data_win_system_eventID:"4625")'
-      pivot_on: [user]
-      window: 6h
-    - name: "Account / group / privilege changes involving this account"
-      query: '(data_win_system_eventID:"4720" OR data_win_system_eventID:"4722" OR data_win_system_eventID:"4724" OR data_win_system_eventID:"4728" OR data_win_system_eventID:"4732" OR data_win_system_eventID:"4756" OR data_win_system_eventID:"4672")'
-      pivot_on: [user]
-      window: 6h
-    - name: "Memory/credential-dump creation & LSASS access on this host"
-      query: '((data_win_system_eventID:"1" AND data_win_eventdata_image:/.*(\\[Pp][Rr][Oo][Cc][Dd][Uu][Mm][Pp]\.[Ee][Xx][Ee]|\\[Pp][Rr][Oo][Cc][Dd][Uu][Mm][Pp]64\.[Ee][Xx][Ee]|\\[Ss][Qq][Ll][Dd][Uu][Mm][Pp][Ee][Rr]\.[Ee][Xx][Ee]|\\[Cc][Rr][Ee][Aa][Tt][Ee][Dd][Uu][Mm][Pp]\.[Ee][Xx][Ee]|\\[Rr][Dd][Rr][Ll][Ee][Aa][Kk][Dd][Ii][Aa][Gg]\.[Ee][Xx][Ee]|\\[Dd][Uu][Mm][Pp][Ee][Rr][Tt]\.[Ee][Xx][Ee]|\\[Nn][Aa][Nn][Oo][Dd][Uu][Mm][Pp]\.[Ee][Xx][Ee]|\\[Aa][Vv][Dd][Uu][Mm][Pp]\.[Ee][Xx][Ee])/) OR (data_win_system_eventID:"1" AND (data_win_eventdata_commandLine:/.*[Cc][Oo][Mm][Ss][Vv][Cc][Ss]\.[Dd][Ll][Ll].*/ OR data_win_eventdata_commandLine:/.*[Mm][Ii][Nn][Ii][Dd][Uu][Mm][Pp].*/ OR data_win_eventdata_commandLine:/.*[Dd][Uu][Mm][Pp][Ee][Rr][Tt].*/ OR data_win_eventdata_commandLine:/.*[Nn][Aa][Nn][Oo][Dd][Uu][Mm][Pp].*/ OR data_win_eventdata_commandLine:/.*[Ll][Ss][Aa][Ss][Ss].*/ OR data_win_eventdata_commandLine:/.*[Ss][Ee][Kk][Uu][Rr][Ll][Ss][Aa].*/ OR data_win_eventdata_commandLine:/.*[Nn][Tt][Dd][Ss]\.[Dd][Ii][Tt].*/ OR data_win_eventdata_commandLine:/.*[Nn][Tt][Dd][Ss][Uu][Tt][Ii][Ll].*/)) OR (data_win_system_eventID:"10" AND data_win_eventdata_targetImage:/.*(\\[Ll][Ss][Aa][Ss][Ss]\.[Ee][Xx][Ee])/))'
-      pivot_on: [host]
-      window: 1h
+  # Behaviour-targeted hunts the engine runs around the alert (not a sweep).
+  - name: DCSync replication rights exercised (non-machine account)
+    query: data_win_system_eventID:"4662" AND (data_win_eventdata_properties:*1131f6aa-9c07-11d1-f79f-00c04fc2dcd2* OR data_win_eventdata_properties:*1131f6ad-9c07-11d1-f79f-00c04fc2dcd2* OR data_win_eventdata_properties:*89e95b76-444d-4c62-991a-0facbeda640c*)
+    pivot_on:
+    - user
+    window: 6h
+  - name: Domain object security descriptor changes (5136/4670)
+    query: (data_win_system_eventID:"5136" AND data_win_eventdata_attributeLDAPDisplayName:/[Nn][Tt][Ss][Ee][Cc][Uu][Rr][Ii][Tt][Yy][Dd][Ee][Ss][Cc][Rr][Ii][Pp][Tt][Oo][Rr]/) OR data_win_system_eventID:"4670"
+    pivot_on:
+    - user
+    window: 6h
+  - name: ACL tooling and DCSync/NTDS tool execution
+    query: data_win_system_eventID:"1" AND (data_win_eventdata_image:/.*\\[Dd][Ss][Aa][Cc][Ll][Ss]\.[Ee][Xx][Ee]/ OR data_win_eventdata_image:/.*\\[Nn][Tt][Dd][Ss][Uu][Tt][Ii][Ll]\.[Ee][Xx][Ee]/ OR data_win_eventdata_commandLine:*Add-DomainObjectAcl* OR data_win_eventdata_commandLine:*Add-ObjectAcl* OR data_win_eventdata_commandLine:*[Ll][Ss][Aa][Dd][Uu][Mm][Pp]* OR data_win_eventdata_commandLine:*[Dd][Cc][Ss][Yy][Nn][Cc]* OR data_win_eventdata_commandLine:*[Ss][Ee][Cc][Rr][Ee][Tt][Ss][Dd][Uu][Mm][Pp]*)
+    pivot_on:
+    - host
+    window: 2h
+  - name: PowerShell script blocks manipulating AD ACLs
+    query: data_win_system_eventID:"4104" AND (data_win_eventdata_scriptBlockText:*Add-DomainObjectAcl* OR data_win_eventdata_scriptBlockText:*Set-Acl* OR data_win_eventdata_scriptBlockText:*ActiveDirectoryAccessRule* OR data_win_eventdata_scriptBlockText:*Find-InterestingDomainAcl* OR data_win_eventdata_scriptBlockText:*Get-DomainObjectAcl*)
+    pivot_on:
+    - host
+    window: 4h
+  - name: Privileged group membership changes by this account
+    query: data_win_system_eventID:("4728" OR "4732" OR "4756" OR "4670" OR "5136")
+    pivot_on:
+    - user
+    window: 24h

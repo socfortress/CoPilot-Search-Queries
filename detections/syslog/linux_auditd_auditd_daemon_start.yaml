@@ -105,19 +105,47 @@ graylog:
   query: full_log:/.*type=DAEMON_START.*/ AND NOT _exists_:data_win_system_eventID AND NOT rule_groups:/.*windows.*/
 
 correlation:
-  # Authored by the correlation engine for review.
+  # Authored per-rule (behaviour-researched) for the correlation engine. Related CoPilot
+  # Searches + telemetry pivots to run around an alert, scoped to its host/user/ip/domain.
+  related_rules:
+  - id: linux-auditd-daemon-shutdown-001
+    name: Linux Auditd Daemon Shutdown
+    reason: Preceding stop bounds the blind window
+  - id: linux-auditd-daemon-abort-001
+    name: Linux Auditd Daemon Abort
+    reason: Start after abort indicates crash/kill then recovery
+  - id: bed26dea-4525-47f4-b24a-76e30e44ffb0
+    name: Audit Rules Deleted Via Auditctl
+    reason: Restarted with fewer rules is evasion
+  - id: 977ef627-4539-4875-adf4-ed8f780c4922
+    name: Auditing Configuration Changes on Linux Host
+    reason: Config edited before restart so new rules take effect
+  - id: 80915f59-9b56-4616-9de0-fd0dea6c12fe
+    name: Linux Logs Clearing Attempts
+    reason: Log cleanup around the restart
+  - id: 1182f3b3-e716-4efa-99ab-d2685d04360f
+    name: History File Deletion
+    reason: Shell history cleanup is a common companion during evasion
+  window: 2h
   enrichment_searches:
-  # Rule-specific telemetry pivots the engine runs around an alert from this rule,
-  # scoped to the alert's host/user/IP within the window (behaviour-targeted, not a sweep).
-    - name: "Security-tool / firewall tampering on this host"
-      query: '((data_process_exec_process_binary:/.*(\/[Cc][Hh][Aa][Tt][Tt][Rr]|\/[Ss][Hh][Rr][Ee][Dd]|\/[Aa][Uu][Dd][Ii][Tt][Cc][Tt][Ll]|\/[Ss][Ee][Tt][Ee][Nn][Ff][Oo][Rr][Cc][Ee])/) OR (data_process_exec_process_arguments:/.*[Hh][Ii][Ss][Tt][Oo][Rr][Yy] -[Cc].*/) OR (data_process_exec_process_arguments:/.*\/[Vv][Aa][Rr]\/[Ll][Oo][Gg].*/) OR (data_process_exec_process_arguments:/.*[Ii][Pp][Tt][Aa][Bb][Ll][Ee][Ss] -[Ff].*/))'
-      pivot_on: [host]
-      window: 2h
-    - name: "Shell / interpreter execution on this host"
-      query: '((data_process_exec_process_binary:/.*(\/[Bb][Aa][Ss][Hh]|\/[Ss][Hh]|\/[Dd][Aa][Ss][Hh]|\/[Zz][Ss][Hh]|\/[Kk][Ss][Hh]|\/[Aa][Ss][Hh]|\/[Bb][Uu][Ss][Yy][Bb][Oo][Xx])/) OR (data_process_exec_process_binary:/.*(\/[Pp][Yy][Tt][Hh][Oo][Nn]|\/[Pp][Yy][Tt][Hh][Oo][Nn]3|\/[Pp][Ee][Rr][Ll]|\/[Rr][Uu][Bb][Yy]|\/[Pp][Hh][Pp]|\/[Nn][Oo][Dd][Ee]|\/[Ll][Uu][Aa]|\/[Aa][Ww][Kk])/))'
-      pivot_on: [host]
-      window: 1h
-    - name: "Reconnaissance commands on this host"
-      query: 'data_process_exec_process_binary:/.*(\/[Ww][Hh][Oo][Aa][Mm][Ii]|\/[Ii][Dd]|\/[Uu][Nn][Aa][Mm][Ee]|\/[Hh][Oo][Ss][Tt][Nn][Aa][Mm][Ee]|\/[Hh][Oo][Ss][Tt][Nn][Aa][Mm][Ee][Cc][Tt][Ll]|\/[Ss][Ss]|\/[Nn][Ee][Tt][Ss][Tt][Aa][Tt]|\/[Ii][Ff][Cc][Oo][Nn][Ff][Ii][Gg]|\/[Aa][Rr][Pp]|\/[Ww]|\/[Ww][Hh][Oo]|\/[Ll][Aa][Ss][Tt]|\/[Ll][Ss][Oo][Ff]|\/[Nn][Mm][Aa][Pp]|\/[Dd][Ii][Gg]|\/[Ff][Ii][Nn][Dd])/'
-      pivot_on: [host]
-      window: 1h
+  # Behaviour-targeted hunts the engine runs around the alert (not a sweep).
+  - name: Audit config and rule changes
+    query: full_log:/.*(auditctl|audit\.rules|auditd\.conf|augenrules|type=CONFIG_CHANGE).*/
+    pivot_on:
+    - host
+    window: 2h
+  - name: Boot vs manual restart indicators
+    query: full_log:/.*(type=SYSTEM_BOOT|type=SYSTEM_RUNLEVEL|type=SYSTEM_SHUTDOWN|systemctl.*restart.*auditd|service auditd).*/
+    pivot_on:
+    - host
+    window: 2h
+  - name: Log and history cleanup
+    query: data_process_exec_process_binary:/.*(\/[Rr][Mm]|\/[Ss][Hh][Rr][Ee][Dd]|\/[Tt][Rr][Uu][Nn][Cc][Aa][Tt][Ee])/ AND full_log:/.*(\/var\/log|bash_history).*/
+    pivot_on:
+    - host
+    window: 4h
+  - name: Auditd/log service stop or disable
+    query: full_log:/.*(systemctl|service).*(stop|disable|mask).*/ AND full_log:/.*(auditd|rsyslog|wazuh).*/
+    pivot_on:
+    - host
+    window: 2h

@@ -137,23 +137,55 @@ graylog:
   query: data_win_system_eventID:"11" AND (data_win_eventdata_targetFilename:/.*\\[Nn][Pp][Pp][Ss][Pp][Yy]\.[Tt][Xx][Tt]/ OR data_win_eventdata_targetFilename:/.*\\[Nn][Pp][Pp][Ss][Pp][Yy]\.[Dd][Ll][Ll]/)
 
 correlation:
-  # Authored by the correlation engine for review.
+  # Authored per-rule (behaviour-researched) for the correlation engine. Related CoPilot
+  # Searches + telemetry pivots to run around an alert, scoped to its host/user/ip/domain.
+  related_rules:
+  - id: 0442defa-b4a2-41c9-ae2c-ea7042fc4701
+    name: Potential Credential Dumping Attempt Using New NetworkProvider - REG
+    reason: NPPSpy only works once its DLL is registered in the NetworkProvider ProviderOrder registry value; this is the registration step that makes the dropped NPPSpy.dll capture logon passwords.
+  - id: baef1ec6-2ca9-47a3-97cc-4cf2bda10b77
+    name: Potential Credential Dumping Attempt Using New NetworkProvider - CLI
+    reason: Command-line (PowerShell/reg) installation of the malicious network provider, the usual way NPPSpy is enabled after the files are dropped.
+  - id: b3503044-60ce-4bf4-bbcb-e3db98788823
+    name: DLL Load via LSASS
+    reason: Registered network provider DLLs are loaded by LSASS/mpnotify at logon; confirms NPPSpy.dll actually became active.
+  - id: 857c8db3-c89b-42fb-882b-f681c7cf4da2
+    name: Unsigned Image Loaded Into LSASS Process
+    reason: The unsigned NPPSpy.dll loaded into lsass.exe is the point where cleartext passwords start being harvested.
+  - id: eeb30123-9fbd-4ee8-aaa0-2e545bbed6dc
+    name: Security Support Provider (SSP) Added to LSA Configuration
+    reason: Sibling LSA-loaded credential-capture persistence (SSP/mimilib); operators using NPPSpy often try other LSA plug-in mechanisms on the same host.
+  - id: 41f6531d-af6e-4c6e-918f-b946f2b85a36
+    name: Potential Persistence Via LSA Extensions
+    reason: LSA extension registry changes are an alternate way to load credential-stealing DLLs into LSASS alongside NPPSpy.
+  - id: 8fbf3271-1ef6-4e94-8210-03c2317947f6
+    name: Cred Dump Tools Dropped Files
+    reason: 'Same file-creation stage: credential dumping tools or their output files dropped on the host by the same operator.'
+  window: 2h
   enrichment_searches:
-  # Rule-specific telemetry pivots the engine runs around an alert from this rule,
-  # scoped to the alert's host/user/IP within the window (behaviour-targeted, not a sweep).
-    - name: "Remote-execution / lateral-movement tooling on this host"
-      query: '(data_win_system_eventID:"1" AND data_win_eventdata_image:/.*(\\[Pp][Ss][Ee][Xx][Ee][Cc]\.[Ee][Xx][Ee]|\\[Pp][Ss][Ee][Xx][Ee][Ss][Vv][Cc]\.[Ee][Xx][Ee]|\\[Pp][Aa][Ee][Xx][Ee][Cc]\.[Ee][Xx][Ee]|\\[Ww][Ii][Nn][Rr][Ss]\.[Ee][Xx][Ee]|\\[Mm][Ss][Tt][Ss][Cc]\.[Ee][Xx][Ee]|\\[Ww][Mm][Ii][Cc]\.[Ee][Xx][Ee])/) OR (data_win_system_eventID:"1" AND data_win_eventdata_image:/.*(\\[Pp][Oo][Ww][Ee][Rr][Ss][Hh][Ee][Ll][Ll]\.[Ee][Xx][Ee]|\\[Pp][Ww][Ss][Hh]\.[Ee][Xx][Ee])/ AND (data_win_eventdata_commandLine:/.*[Ii][Nn][Vv][Oo][Kk][Ee]-[Cc][Oo][Mm][Mm][Aa][Nn][Dd].*/ OR data_win_eventdata_commandLine:/.*[Nn][Ee][Ww]-[Pp][Ss][Ss][Ee][Ss][Ss][Ii][Oo][Nn].*/ OR data_win_eventdata_commandLine:/.*[Ee][Nn][Tt][Ee][Rr]-[Pp][Ss][Ss][Ee][Ss][Ss][Ii][Oo][Nn].*/ OR data_win_eventdata_commandLine:/.*-[Cc][Oo][Mm][Pp][Uu][Tt][Ee][Rr][Nn][Aa][Mm][Ee].*/))'
-      pivot_on: [host]
-      window: 2h
-    - name: "Execution of programs from user-writable paths on this host"
-      query: 'data_win_system_eventID:"1" AND (data_win_eventdata_image:/.*\\[Uu][Ss][Ee][Rr][Ss]\\.*/ OR data_win_eventdata_image:/.*\\[Pp][Rr][Oo][Gg][Rr][Aa][Mm][Dd][Aa][Tt][Aa]\\.*/ OR data_win_eventdata_image:/.*\\[Ww][Ii][Nn][Dd][Oo][Ww][Ss]\\[Tt][Ee][Mm][Pp]\\.*/ OR data_win_eventdata_image:/.*\\[Aa][Pp][Pp][Dd][Aa][Tt][Aa]\\.*/ OR data_win_eventdata_image:/.*\\[Pp][Uu][Bb][Ll][Ii][Cc]\\.*/ OR data_win_eventdata_image:/.*\\\$[Rr][Ee][Cc][Yy][Cc][Ll][Ee].*/)'
-      pivot_on: [host]
-      window: 1h
-    - name: "Autostart persistence written on this host"
-      query: '(data_win_system_eventID:"12" OR data_win_system_eventID:"13") AND (data_win_eventdata_targetObject:/.*[Cc][Uu][Rr][Rr][Ee][Nn][Tt][Vv][Ee][Rr][Ss][Ii][Oo][Nn]\\[Rr][Uu][Nn].*/ OR data_win_eventdata_targetObject:/.*[Cc][Uu][Rr][Rr][Ee][Nn][Tt][Vv][Ee][Rr][Ss][Ii][Oo][Nn]\\[Rr][Uu][Nn][Oo][Nn][Cc][Ee].*/ OR data_win_eventdata_targetObject:/.*[Cc][Uu][Rr][Rr][Ee][Nn][Tt][Cc][Oo][Nn][Tt][Rr][Oo][Ll][Ss][Ee][Tt]\\[Ss][Ee][Rr][Vv][Ii][Cc][Ee][Ss]\\.*/ OR data_win_eventdata_targetObject:/.*[Ii][Mm][Aa][Gg][Ee] [Ff][Ii][Ll][Ee] [Ee][Xx][Ee][Cc][Uu][Tt][Ii][Oo][Nn] [Oo][Pp][Tt][Ii][Oo][Nn][Ss]\\.*/ OR data_win_eventdata_targetObject:/.*[Ww][Ii][Nn][Ll][Oo][Gg][Oo][Nn]\\[Ss][Hh][Ee][Ll][Ll].*/ OR data_win_eventdata_targetObject:/.*[Ww][Ii][Nn][Ll][Oo][Gg][Oo][Nn]\\[Uu][Ss][Ee][Rr][Ii][Nn][Ii][Tt].*/ OR data_win_eventdata_targetObject:/.*[Cc][Uu][Rr][Rr][Ee][Nn][Tt][Vv][Ee][Rr][Ss][Ii][Oo][Nn]\\[Ee][Xx][Pp][Ll][Oo][Rr][Ee][Rr]\\[Rr][Uu][Nn].*/ OR data_win_eventdata_targetObject:/.*[Pp][Oo][Ll][Ii][Cc][Ii][Ee][Ss]\\[Ee][Xx][Pp][Ll][Oo][Rr][Ee][Rr]\\[Rr][Uu][Nn].*/ OR data_win_eventdata_targetObject:/.*[Cc][Uu][Rr][Rr][Ee][Nn][Tt][Vv][Ee][Rr][Ss][Ii][Oo][Nn]\\[Ww][Ii][Nn][Dd][Oo][Ww][Ss]\\[Ll][Oo][Aa][Dd].*/)'
-      pivot_on: [host]
-      window: 2h
-    - name: "Memory/credential-dump creation & LSASS access on this host"
-      query: '((data_win_system_eventID:"1" AND data_win_eventdata_image:/.*(\\[Pp][Rr][Oo][Cc][Dd][Uu][Mm][Pp]\.[Ee][Xx][Ee]|\\[Pp][Rr][Oo][Cc][Dd][Uu][Mm][Pp]64\.[Ee][Xx][Ee]|\\[Ss][Qq][Ll][Dd][Uu][Mm][Pp][Ee][Rr]\.[Ee][Xx][Ee]|\\[Cc][Rr][Ee][Aa][Tt][Ee][Dd][Uu][Mm][Pp]\.[Ee][Xx][Ee]|\\[Rr][Dd][Rr][Ll][Ee][Aa][Kk][Dd][Ii][Aa][Gg]\.[Ee][Xx][Ee]|\\[Dd][Uu][Mm][Pp][Ee][Rr][Tt]\.[Ee][Xx][Ee]|\\[Nn][Aa][Nn][Oo][Dd][Uu][Mm][Pp]\.[Ee][Xx][Ee]|\\[Aa][Vv][Dd][Uu][Mm][Pp]\.[Ee][Xx][Ee])/) OR (data_win_system_eventID:"1" AND (data_win_eventdata_commandLine:/.*[Cc][Oo][Mm][Ss][Vv][Cc][Ss]\.[Dd][Ll][Ll].*/ OR data_win_eventdata_commandLine:/.*[Mm][Ii][Nn][Ii][Dd][Uu][Mm][Pp].*/ OR data_win_eventdata_commandLine:/.*[Dd][Uu][Mm][Pp][Ee][Rr][Tt].*/ OR data_win_eventdata_commandLine:/.*[Nn][Aa][Nn][Oo][Dd][Uu][Mm][Pp].*/ OR data_win_eventdata_commandLine:/.*[Ll][Ss][Aa][Ss][Ss].*/ OR data_win_eventdata_commandLine:/.*[Ss][Ee][Kk][Uu][Rr][Ll][Ss][Aa].*/ OR data_win_eventdata_commandLine:/.*[Nn][Tt][Dd][Ss]\.[Dd][Ii][Tt].*/ OR data_win_eventdata_commandLine:/.*[Nn][Tt][Dd][Ss][Uu][Tt][Ii][Ll].*/)) OR (data_win_system_eventID:"10" AND data_win_eventdata_targetImage:/.*(\\[Ll][Ss][Aa][Ss][Ss]\.[Ee][Xx][Ee])/))'
-      pivot_on: [host]
-      window: 1h
+  # Behaviour-targeted hunts the engine runs around the alert (not a sweep).
+  - name: Network provider / LSA plug-in registry registration
+    query: (data_win_system_eventID:"12" OR data_win_system_eventID:"13") AND (data_win_eventdata_targetObject:/.*[Nn][Ee][Tt][Ww][Oo][Rr][Kk][Pp][Rr][Oo][Vv][Ii][Dd][Ee][Rr].*/ OR data_win_eventdata_targetObject:/.*[Pp][Rr][Oo][Vv][Ii][Dd][Ee][Rr][Oo][Rr][Dd][Ee][Rr].*/ OR data_win_eventdata_targetObject:/.*\[Cc]ontrol\[Ll][Ss][Aa]\.*/)
+    pivot_on:
+    - host
+    window: 2h
+  - name: Unsigned DLL loaded into LSASS or mpnotify/winlogon
+    query: data_win_system_eventID:"7" AND (data_win_eventdata_image:/.*\[Ll][Ss][Aa][Ss][Ss]\.[Ee][Xx][Ee]/ OR data_win_eventdata_image:/.*\[Mm][Pp][Nn][Oo][Tt][Ii][Ff][Yy]\.[Ee][Xx][Ee]/ OR data_win_eventdata_image:/.*\[Ww][Ii][Nn][Ll][Oo][Gg][Oo][Nn]\.[Ee][Xx][Ee]/) AND data_win_eventdata_signed:"false"
+    pivot_on:
+    - host
+    window: 6h
+  - name: Process that dropped NPPSpy and its command line
+    query: data_win_system_eventID:"1" AND (data_win_eventdata_commandLine:/.*[Nn][Pp][Pp][Ss][Pp][Yy].*/ OR data_win_eventdata_commandLine:/.*[Nn][Ee][Tt][Ww][Oo][Rr][Kk][Pp][Rr][Oo][Vv][Ii][Dd][Ee][Rr].*/ OR data_win_eventdata_commandLine:/.*[Ee][Nn][Aa][Bb][Ll][Ee]-[Nn][Pp][Pp].*/)
+    pivot_on:
+    - host
+    window: 2h
+  - name: DLL or credential-log file creation in System32 and NPPSpy artefacts
+    query: data_win_system_eventID:"11" AND (data_win_eventdata_targetFilename:/.*\[Ww][Ii][Nn][Dd][Oo][Ww][Ss]\[Ss][Yy][Ss][Tt][Ee][Mm]32\.*\.[Dd][Ll][Ll]/ OR data_win_eventdata_targetFilename:/.*\[Nn][Pp][Pp][Ss][Pp][Yy].*/)
+    pivot_on:
+    - host
+    window: 6h
+  - name: Interactive logon activity that NPPSpy would capture
+    query: data_win_system_eventID:"4624" AND (data_win_eventdata_logonType:"2" OR data_win_eventdata_logonType:"10" OR data_win_eventdata_logonType:"7")
+    pivot_on:
+    - host
+    window: 24h

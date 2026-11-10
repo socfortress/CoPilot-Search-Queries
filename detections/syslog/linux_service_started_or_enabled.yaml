@@ -127,40 +127,47 @@ graylog:
   query: (full_log:/.*systemctl.*/ OR full_log:/.*service.*/) AND (full_log:/.* start .*/ OR full_log:/.* enable .*/) AND NOT _exists_:data_win_system_eventID AND NOT rule_groups:/.*windows.*/
 
 correlation:
-  # Authored by the correlation engine for review. Related CoPilot Searches to run
-  # around an alert from this rule, scoped to the same host/user/IP within the window.
+  # Authored per-rule (behaviour-researched) for the correlation engine. Related CoPilot
+  # Searches + telemetry pivots to run around an alert, scoped to its host/user/ip/domain.
   related_rules:
-    - id: 26f86252-1549-45e1-a212-eb26840e86bc
-      name: "File Download or Read to Pipe Execution"
-      reason: "same analytic story: Linux Living Off The Land"
-    - id: cb909b3e-512b-11ec-aa31-3e22fbd008af
-      name: "Possible Lateral Movement PowerShell Spawn"
-      reason: "same analytic story: Scheduled Tasks"
-    - id: 12c80db8-ef62-4456-92df-b23e1b3219f6
-      name: "Windows Enable Win32 ScheduledJob via Registry"
-      reason: "same analytic story: Scheduled Tasks"
-    - id: ddf82fcb-e9ee-40e3-8712-a50b5bf323fc
-      name: "Windows PowerShell ScheduleTask"
-      reason: "same analytic story: Scheduled Tasks"
-    - id: windows-scheduled-task-created-public-path-001
-      name: "Windows Scheduled Task Created Within Public Path"
-      reason: "same analytic story: Scheduled Tasks"
-    - id: windows-scheduled-task-created-spawn-shell-001
-      name: "Windows Scheduled Task Created to Spawn Shell"
-      reason: "same analytic story: Scheduled Tasks"
-  window: 1h
+  - id: linux-service-file-created-in-systemd-directory-001
+    name: Linux Service File Created In Systemd Directory
+    reason: Enabling a service right after its unit file was created is the classic systemd persistence install.
+  - id: 31545105-3444-4584-bebf-c466353230d2
+    name: Touch Suspicious Service File
+    reason: Service files created with touch precede enabling them; same install chain.
+  - id: b3c8e2d1-4f1a-4b7c-9a22-91a6f2c4e8de
+    name: Linux Init Script Persistence Detection
+    reason: Init scripts are the alternative persistence route to systemd; both indicate boot persistence.
+  - id: linux-service-restarted-001
+    name: Linux Service Restarted
+    reason: Restart/reload of the same or related services typically follows enabling.
+  - id: linux-sudo-or-su-execution-001
+    name: Linux Sudo Or Su Execution
+    reason: Creating/enabling services requires root; shows the elevation path.
+  - id: linux-append-cronjob-entry-001
+    name: Linux Append Cronjob Entry On Existing Cronjob File
+    reason: Attackers commonly stack cron persistence alongside new services.
+  window: 4h
   enrichment_searches:
-  # Rule-specific telemetry pivots the engine runs around an alert from this rule,
-  # scoped to the alert's host/user/IP within the window (behaviour-targeted, not a sweep).
-    - name: "Cron / at / systemd-timer scheduling on this host"
-      query: '((data_process_exec_process_binary:/.*(\/[Cc][Rr][Oo][Nn][Tt][Aa][Bb]|\/[Aa][Tt])/) OR (data_process_exec_process_arguments:/.*\/[Ee][Tt][Cc]\/[Cc][Rr][Oo][Nn].*/) OR (data_process_exec_process_arguments:/.*[Ss][Yy][Ss][Tt][Ee][Mm][Dd]\/[Ss][Yy][Ss][Tt][Ee][Mm].*/) OR (data_process_exec_process_arguments:/.*\.[Tt][Ii][Mm][Ee][Rr].*/))'
-      pivot_on: [host]
-      window: 4h
-    - name: "Shell / interpreter execution on this host"
-      query: '((data_process_exec_process_binary:/.*(\/[Bb][Aa][Ss][Hh]|\/[Ss][Hh]|\/[Dd][Aa][Ss][Hh]|\/[Zz][Ss][Hh]|\/[Kk][Ss][Hh]|\/[Aa][Ss][Hh]|\/[Bb][Uu][Ss][Yy][Bb][Oo][Xx])/) OR (data_process_exec_process_binary:/.*(\/[Pp][Yy][Tt][Hh][Oo][Nn]|\/[Pp][Yy][Tt][Hh][Oo][Nn]3|\/[Pp][Ee][Rr][Ll]|\/[Rr][Uu][Bb][Yy]|\/[Pp][Hh][Pp]|\/[Nn][Oo][Dd][Ee]|\/[Ll][Uu][Aa]|\/[Aa][Ww][Kk])/))'
-      pivot_on: [host]
-      window: 1h
-    - name: "Reconnaissance commands on this host"
-      query: 'data_process_exec_process_binary:/.*(\/[Ww][Hh][Oo][Aa][Mm][Ii]|\/[Ii][Dd]|\/[Uu][Nn][Aa][Mm][Ee]|\/[Hh][Oo][Ss][Tt][Nn][Aa][Mm][Ee]|\/[Hh][Oo][Ss][Tt][Nn][Aa][Mm][Ee][Cc][Tt][Ll]|\/[Ss][Ss]|\/[Nn][Ee][Tt][Ss][Tt][Aa][Tt]|\/[Ii][Ff][Cc][Oo][Nn][Ff][Ii][Gg]|\/[Aa][Rr][Pp]|\/[Ww]|\/[Ww][Hh][Oo]|\/[Ll][Aa][Ss][Tt]|\/[Ll][Ss][Oo][Ff]|\/[Nn][Mm][Aa][Pp]|\/[Dd][Ii][Gg]|\/[Ff][Ii][Nn][Dd])/'
-      pivot_on: [host]
-      window: 1h
+  # Behaviour-targeted hunts the engine runs around the alert (not a sweep).
+  - name: Unit file written to systemd paths
+    query: full_log:/.*(\/etc\/systemd\/system|\/lib\/systemd\/system|\/usr\/lib\/systemd|\.config\/systemd\/user).*/
+    pivot_on: host
+    window: 2h
+  - name: Init script or rc.local persistence
+    query: full_log:/.*(\/etc\/init\.d\/|rc\.local|update-rc\.d|chkconfig).*/
+    pivot_on: host
+    window: 4h
+  - name: Cron persistence alongside service
+    query: full_log:/.*(crontab|\/etc\/cron|\/var\/spool\/cron).*/ AND NOT _exists_:data_win_system_eventID
+    pivot_on: host
+    window: 4h
+  - name: Payload staged in writable dirs
+    query: full_log:/.*(\/tmp\/|\/dev\/shm\/|\/var\/tmp\/).*(chmod|curl|wget|\.sh|\.elf).*/
+    pivot_on: host
+    window: 2h
+  - name: Sudo or su elevation
+    query: full_log:/.*(sudo|su -|su root|pkexec).*/ AND NOT _exists_:data_win_system_eventID
+    pivot_on: user
+    window: 1h

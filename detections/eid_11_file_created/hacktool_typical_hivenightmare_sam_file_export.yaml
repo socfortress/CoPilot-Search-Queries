@@ -168,44 +168,58 @@ graylog:
   query: data_win_system_eventID:"11" AND (data_win_eventdata_targetFilename:/.*\\[Hh][Ii][Vv][Ee]_[Ss][Aa][Mm]_.*/ OR data_win_eventdata_targetFilename:/.*\\[Ss][Aa][Mm]-2021-.*/ OR data_win_eventdata_targetFilename:/.*\\[Ss][Aa][Mm]-2022-.*/ OR data_win_eventdata_targetFilename:/.*\\[Ss][Aa][Mm]-2023-.*/ OR data_win_eventdata_targetFilename:/.*\\[Ss][Aa][Mm]-[Hh][Aa][Xx][Xx].*/ OR data_win_eventdata_targetFilename:/.*\\[Ss][Aa][Mm]\.[Ss][Aa][Vv][Ee].*/ OR data_win_eventdata_targetFilename:/[Cc]:\\[Ww][Ii][Nn][Dd][Oo][Ww][Ss]\\[Tt][Ee][Mm][Pp]\\[Ss][Aa][Mm]/)
 
 correlation:
-  # Authored by the correlation engine for review. Related CoPilot Searches to run
-  # around an alert from this rule, scoped to the same host/user/IP within the window.
+  # Authored per-rule (behaviour-researched) for the correlation engine. Related CoPilot
+  # Searches + telemetry pivots to run around an alert, scoped to its host/user/ip/domain.
   related_rules:
-    - id: ec570e53-4c76-45a9-804d-dc3f355ff7a7
-      name: "7Zip Compressing Dump Files"
-      reason: "next kill-chain tactic: Collection"
-    - id: 0a1255c5-d732-4b62-ac02-b5152d34fb83
-      name: "ADExplorer Writing Complete AD Snapshot Into .dat File"
-      reason: "next kill-chain tactic: Discovery"
-    - id: 1ea13e8c-03ea-409b-877d-ce5c3d2c1cb3
-      name: "ADFS Database Named Pipe Connection By Uncommon Tool"
-      reason: "next kill-chain tactic: Collection"
-    - id: 75bf09fa-1dd7-4d18-9af9-dd9e492562eb
-      name: "ADSI-Cache File Creation By Uncommon Tool"
-      reason: "next kill-chain tactic: Command and Control"
-    - id: 03e2746e-2b31-42f1-ab7a-eb39365b2422
-      name: "APT31 Judgement Panda Activity"
-      reason: "next kill-chain tactic: Credential Access"
-    - id: fc028194-969d-4122-8abe-0470d5b8f12f
-      name: "Access to Browser Login Data"
-      reason: "next kill-chain tactic: Credential Access"
+  - id: fd877b94-9bb5-4191-bb25-d79cbd93c167
+    name: Dumping of Sensitive Hives Via Reg.EXE
+    reason: Alternative/co-occurring way to export SAM/SYSTEM/SECURITY hives; an operator who gets a HiveNightmare SAM file often also saves SYSTEM (needed for the boot key) with reg save.
+  - id: d372f928-ce4f-11eb-a762-acde48001122
+    name: Esentutl SAM Copy
+    reason: 'Same objective via a LOLBin: copying the locked SAM hive from a shadow copy; a fallback when the HiveNightmare tool is blocked.'
+  - id: 1af57a4b-460a-4738-9034-db68b880c665
+    name: PowerShell SAM Copy
+    reason: Invoke-HiveNightmare-style PowerShell copying SAM from the VSS GLOBALROOT path is the scripted variant that writes the same exported files.
+  - id: c73124a7-3e89-44a3-bdc1-25fe4df754b1
+    name: Copy From VolumeShadowCopy Via Cmd.EXE
+    reason: HiveNightmare exploits readable shadow copies; copying hive files out of HarddiskVolumeShadowCopy is the direct precursor/equivalent of the file export.
+  - id: f57f8d16-1f39-4dcb-a604-6c73d9b54b3d
+    name: Sensitive File Access Via Volume Shadow Copy Backup
+    reason: Shadow-copy path access to SAM/SYSTEM/NTDS is the exact primitive CVE-2021-36934 abuses, seen just before the hive file is written.
+  - id: 40b19fa6-d835-400c-b301-41f3a2baacaf
+    name: VolumeShadowCopy Symlink Creation Via Mklink
+    reason: mklink to a shadow copy is a common way to expose the VSS copy so the SAM/SYSTEM hives become readable before export.
+  - id: b17ea6f7-6e90-447e-a799-e6c0a493d6ce
+    name: Shadow Copies Creation Using Operating Systems Utilities
+    reason: Attackers on patched or no-snapshot hosts create a shadow copy themselves so the hive can then be read and exported.
+  - id: 6e2a900a-ced9-4e4a-a9c2-13e706f9518a
+    name: HackTool - Potential Remote Credential Dumping Activity Via CrackMapExec Or Impacket-Secretsdump
+    reason: 'Follow-on/parallel: after local hive export the same operator may dump SAM remotely with secretsdump/CME against other hosts using the recovered hashes.'
   window: 1h
   enrichment_searches:
-  # Rule-specific telemetry pivots the engine runs around an alert from this rule,
-  # scoped to the alert's host/user/IP within the window (behaviour-targeted, not a sweep).
-    - name: "Credential / secret-store access on this host"
-      query: '((((data_win_system_eventID:"1" AND data_win_eventdata_image:/.*(\\[Pp][Rr][Oo][Cc][Dd][Uu][Mm][Pp]\.[Ee][Xx][Ee]|\\[Pp][Rr][Oo][Cc][Dd][Uu][Mm][Pp]64\.[Ee][Xx][Ee]|\\[Ss][Qq][Ll][Dd][Uu][Mm][Pp][Ee][Rr]\.[Ee][Xx][Ee]|\\[Cc][Rr][Ee][Aa][Tt][Ee][Dd][Uu][Mm][Pp]\.[Ee][Xx][Ee]|\\[Rr][Dd][Rr][Ll][Ee][Aa][Kk][Dd][Ii][Aa][Gg]\.[Ee][Xx][Ee]|\\[Dd][Uu][Mm][Pp][Ee][Rr][Tt]\.[Ee][Xx][Ee]|\\[Nn][Aa][Nn][Oo][Dd][Uu][Mm][Pp]\.[Ee][Xx][Ee]|\\[Aa][Vv][Dd][Uu][Mm][Pp]\.[Ee][Xx][Ee])/) OR (data_win_system_eventID:"1" AND (data_win_eventdata_commandLine:/.*[Cc][Oo][Mm][Ss][Vv][Cc][Ss]\.[Dd][Ll][Ll].*/ OR data_win_eventdata_commandLine:/.*[Mm][Ii][Nn][Ii][Dd][Uu][Mm][Pp].*/ OR data_win_eventdata_commandLine:/.*[Dd][Uu][Mm][Pp][Ee][Rr][Tt].*/ OR data_win_eventdata_commandLine:/.*[Nn][Aa][Nn][Oo][Dd][Uu][Mm][Pp].*/ OR data_win_eventdata_commandLine:/.*[Ll][Ss][Aa][Ss][Ss].*/ OR data_win_eventdata_commandLine:/.*[Ss][Ee][Kk][Uu][Rr][Ll][Ss][Aa].*/ OR data_win_eventdata_commandLine:/.*[Nn][Tt][Dd][Ss]\.[Dd][Ii][Tt].*/ OR data_win_eventdata_commandLine:/.*[Nn][Tt][Dd][Ss][Uu][Tt][Ii][Ll].*/)) OR (data_win_system_eventID:"10" AND data_win_eventdata_targetImage:/.*(\\[Ll][Ss][Aa][Ss][Ss]\.[Ee][Xx][Ee])/))) OR ((data_win_eventdata_commandLine:/.*[Uu][Nn][Aa][Tt][Tt][Ee][Nn][Dd]\.[Xx][Mm][Ll].*/ OR data_win_eventdata_commandLine:/.*[Cc][Mm][Dd][Kk][Ee][Yy].*/ OR data_win_eventdata_commandLine:/.*[Gg][Ee][Tt]-[Cc][Rr][Ee][Dd][Ee][Nn][Tt][Ii][Aa][Ll].*/ OR data_win_eventdata_commandLine:/.*[Vv][Aa][Uu][Ll][Tt][Cc][Mm][Dd].*/ OR data_win_eventdata_commandLine:/.*\/[Pp][Aa][Ss][Ss][Ww][Oo][Rr][Dd].*/ OR data_win_eventdata_commandLine:/.*[Nn][Ee][Tt] [Uu][Ss][Ee].*/ OR data_win_eventdata_commandLine:/.*[Cc][Pp][Aa][Ss][Ss][Ww][Oo][Rr][Dd].*/ OR data_win_eventdata_commandLine:/.*[Ww][Ee][Bb]\.[Cc][Oo][Nn][Ff][Ii][Gg].*/)))'
-      pivot_on: [host]
-      window: 2h
-    - name: "Remote-execution / lateral-movement tooling on this host"
-      query: '(data_win_system_eventID:"1" AND data_win_eventdata_image:/.*(\\[Pp][Ss][Ee][Xx][Ee][Cc]\.[Ee][Xx][Ee]|\\[Pp][Ss][Ee][Xx][Ee][Ss][Vv][Cc]\.[Ee][Xx][Ee]|\\[Pp][Aa][Ee][Xx][Ee][Cc]\.[Ee][Xx][Ee]|\\[Ww][Ii][Nn][Rr][Ss]\.[Ee][Xx][Ee]|\\[Mm][Ss][Tt][Ss][Cc]\.[Ee][Xx][Ee]|\\[Ww][Mm][Ii][Cc]\.[Ee][Xx][Ee])/) OR (data_win_system_eventID:"1" AND data_win_eventdata_image:/.*(\\[Pp][Oo][Ww][Ee][Rr][Ss][Hh][Ee][Ll][Ll]\.[Ee][Xx][Ee]|\\[Pp][Ww][Ss][Hh]\.[Ee][Xx][Ee])/ AND (data_win_eventdata_commandLine:/.*[Ii][Nn][Vv][Oo][Kk][Ee]-[Cc][Oo][Mm][Mm][Aa][Nn][Dd].*/ OR data_win_eventdata_commandLine:/.*[Nn][Ee][Ww]-[Pp][Ss][Ss][Ee][Ss][Ss][Ii][Oo][Nn].*/ OR data_win_eventdata_commandLine:/.*[Ee][Nn][Tt][Ee][Rr]-[Pp][Ss][Ss][Ee][Ss][Ss][Ii][Oo][Nn].*/ OR data_win_eventdata_commandLine:/.*-[Cc][Oo][Mm][Pp][Uu][Tt][Ee][Rr][Nn][Aa][Mm][Ee].*/))'
-      pivot_on: [host]
-      window: 2h
-    - name: "Execution of programs from user-writable paths on this host"
-      query: 'data_win_system_eventID:"1" AND (data_win_eventdata_image:/.*\\[Uu][Ss][Ee][Rr][Ss]\\.*/ OR data_win_eventdata_image:/.*\\[Pp][Rr][Oo][Gg][Rr][Aa][Mm][Dd][Aa][Tt][Aa]\\.*/ OR data_win_eventdata_image:/.*\\[Ww][Ii][Nn][Dd][Oo][Ww][Ss]\\[Tt][Ee][Mm][Pp]\\.*/ OR data_win_eventdata_image:/.*\\[Aa][Pp][Pp][Dd][Aa][Tt][Aa]\\.*/ OR data_win_eventdata_image:/.*\\[Pp][Uu][Bb][Ll][Ii][Cc]\\.*/ OR data_win_eventdata_image:/.*\\\$[Rr][Ee][Cc][Yy][Cc][Ll][Ee].*/)'
-      pivot_on: [host]
-      window: 1h
-    - name: "Autostart persistence written on this host"
-      query: '(data_win_system_eventID:"12" OR data_win_system_eventID:"13") AND (data_win_eventdata_targetObject:/.*[Cc][Uu][Rr][Rr][Ee][Nn][Tt][Vv][Ee][Rr][Ss][Ii][Oo][Nn]\\[Rr][Uu][Nn].*/ OR data_win_eventdata_targetObject:/.*[Cc][Uu][Rr][Rr][Ee][Nn][Tt][Vv][Ee][Rr][Ss][Ii][Oo][Nn]\\[Rr][Uu][Nn][Oo][Nn][Cc][Ee].*/ OR data_win_eventdata_targetObject:/.*[Cc][Uu][Rr][Rr][Ee][Nn][Tt][Cc][Oo][Nn][Tt][Rr][Oo][Ll][Ss][Ee][Tt]\\[Ss][Ee][Rr][Vv][Ii][Cc][Ee][Ss]\\.*/ OR data_win_eventdata_targetObject:/.*[Ii][Mm][Aa][Gg][Ee] [Ff][Ii][Ll][Ee] [Ee][Xx][Ee][Cc][Uu][Tt][Ii][Oo][Nn] [Oo][Pp][Tt][Ii][Oo][Nn][Ss]\\.*/ OR data_win_eventdata_targetObject:/.*[Ww][Ii][Nn][Ll][Oo][Gg][Oo][Nn]\\[Ss][Hh][Ee][Ll][Ll].*/ OR data_win_eventdata_targetObject:/.*[Ww][Ii][Nn][Ll][Oo][Gg][Oo][Nn]\\[Uu][Ss][Ee][Rr][Ii][Nn][Ii][Tt].*/ OR data_win_eventdata_targetObject:/.*[Cc][Uu][Rr][Rr][Ee][Nn][Tt][Vv][Ee][Rr][Ss][Ii][Oo][Nn]\\[Ee][Xx][Pp][Ll][Oo][Rr][Ee][Rr]\\[Rr][Uu][Nn].*/ OR data_win_eventdata_targetObject:/.*[Pp][Oo][Ll][Ii][Cc][Ii][Ee][Ss]\\[Ee][Xx][Pp][Ll][Oo][Rr][Ee][Rr]\\[Rr][Uu][Nn].*/ OR data_win_eventdata_targetObject:/.*[Cc][Uu][Rr][Rr][Ee][Nn][Tt][Vv][Ee][Rr][Ss][Ii][Oo][Nn]\\[Ww][Ii][Nn][Dd][Oo][Ww][Ss]\\[Ll][Oo][Aa][Dd].*/)'
-      pivot_on: [host]
-      window: 2h
+  # Behaviour-targeted hunts the engine runs around the alert (not a sweep).
+  - name: Registry hive saves and shadow-copy hive access
+    query: data_win_system_eventID:"1" AND ((data_win_eventdata_commandLine:/.*[Rr][Ee][Gg].*[Ss][Aa][Vv][Ee].*(\\[Ss][Aa][Mm]|\\[Ss][Yy][Ss][Tt][Ee][Mm]|\\[Ss][Ee][Cc][Uu][Rr][Ii][Tt][Yy]).*/) OR data_win_eventdata_commandLine:/.*[Gg][Ll][Oo][Bb][Aa][Ll][Rr][Oo][Oo][Tt].*[Dd][Ee][Vv][Ii][Cc][Ee].*[Hh][Aa][Rr][Dd][Dd][Ii][Ss][Kk][Vv][Oo][Ll][Uu][Mm][Ee][Ss][Hh][Aa][Dd][Oo][Ww].*/ OR data_win_eventdata_commandLine:/.*[Ss][Hh][Aa][Dd][Oo][Ww][Cc][Oo][Pp][Yy].*[Cc][Oo][Nn][Ff][Ii][Gg].*[Ss][Aa][Mm].*/ OR (data_win_eventdata_commandLine:/.*[Ee][Ss][Ee][Nn][Tt][Uu][Tt][Ll].*/ AND data_win_eventdata_commandLine:/.*[Ss][Aa][Mm].*/))
+    pivot_on:
+    - host
+    window: 1h
+  - name: Shadow copy creation, listing or linking
+    query: data_win_system_eventID:"1" AND ((data_win_eventdata_image:/.*\\[Vv][Ss][Ss][Aa][Dd][Mm][Ii][Nn]\.[Ee][Xx][Ee]/ AND data_win_eventdata_commandLine:/.*([Cc][Rr][Ee][Aa][Tt][Ee]|[Ll][Ii][Ss][Tt]).*[Ss][Hh][Aa][Dd][Oo][Ww].*/) OR (data_win_eventdata_image:/.*\\[Ww][Mm][Ii][Cc]\.[Ee][Xx][Ee]/ AND data_win_eventdata_commandLine:/.*[Ss][Hh][Aa][Dd][Oo][Ww][Cc][Oo][Pp][Yy].*/) OR (data_win_eventdata_commandLine:/.*[Mm][Kk][Ll][Ii][Nn][Kk].*/ AND data_win_eventdata_commandLine:/.*[Ss][Hh][Aa][Dd][Oo][Ww].*/) OR data_win_eventdata_commandLine:/.*[Ww][Ii][Nn]32_[Ss][Hh][Aa][Dd][Oo][Ww][Cc][Oo][Pp][Yy].*/)
+    pivot_on:
+    - host
+    window: 2h
+  - name: SAM/SYSTEM/SECURITY hive files written elsewhere
+    query: data_win_system_eventID:"11" AND (data_win_eventdata_targetFilename:/.*\\([Ss][Aa][Mm]|[Ss][Yy][Ss][Tt][Ee][Mm]|[Ss][Ee][Cc][Uu][Rr][Ii][Tt][Yy])(\.[Ss][Aa][Vv][Ee]|\.[Bb][Aa][Kk]|\.[Hh][Ii][Vv]|\.[Tt][Xx][Tt])?/ OR data_win_eventdata_targetFilename:/.*([Ss][Aa][Mm]|[Ss][Yy][Ss][Tt][Ee][Mm])[-_.](save|dump|copy|backup|hive).*/ OR data_win_eventdata_targetFilename:/.*\\[Nn][Tt][Dd][Ss]\.[Dd][Ii][Tt].*/) AND NOT data_win_eventdata_targetFilename:/[Cc]:\\[Ww][Ii][Nn][Dd][Oo][Ww][Ss]\\[Ss][Yy][Ss][Tt][Ee][Mm]32\\[Cc][Oo][Nn][Ff][Ii][Gg]\\.*/
+    pivot_on:
+    - host
+    window: 2h
+  - name: Credential-cracking and pass-the-hash tooling after hive export
+    query: data_win_system_eventID:"1" AND (data_win_eventdata_commandLine:/.*([Ss][Ee][Cc][Rr][Ee][Tt][Ss][Dd][Uu][Mm][Pp]|[Ii][Mm][Pp][Aa][Cc][Kk][Ee][Tt]|[Mm][Ii][Mm][Ii][Kk][Aa][Tt][Zz]|[Ll][Ss][Aa][Dd][Uu][Mm][Pp]|[Pp][Yy][Pp][Yy][Kk][Aa][Tt][Zz]|[Cc][Rr][Aa][Cc][Kk][Mm][Aa][Pp][Ee][Xx][Ee][Cc]|[Pp][Aa][Ss][Ss]-[Tt][Hh][Ee]-[Hh][Aa][Ss][Hh]|[Ss][Ee][Kk][Uu][Rr][Ll][Ss][Aa]::[Pp][Tt][Hh]).*/ OR data_win_eventdata_commandLine:/.*([Nn][Tt][Ll][Mm]|[Nn][Tt][Hh][Aa][Ss][Hh]).*[Hh][Aa][Ss][Hh].*/ OR data_win_eventdata_image:/.*\\([Hh][Aa][Ss][Hh][Cc][Aa][Tt]|[Jj][Oo][Hh][Nn])(64)?\.[Ee][Xx][Ee]/)
+    pivot_on:
+    - host
+    window: 6h
+  - name: Outbound transfer of the exported hive or archive
+    query: (data_win_system_eventID:"1" AND ((data_win_eventdata_image:/.*\\([Cc][Uu][Rr][Ll]|[Ss][Cc][Pp]|[Ff][Tt][Pp]|[Rr][Cc][Ll][Oo][Nn][Ee]|[Bb][Ii][Tt][Ss][Aa][Dd][Mm][Ii][Nn]|[Cc][Ee][Rr][Tt][Uu][Tt][Ii][Ll])\.[Ee][Xx][Ee]/ AND data_win_eventdata_commandLine:/.*([Ss][Aa][Mm]|[Ss][Yy][Ss][Tt][Ee][Mm]|[Hh][Ii][Vv][Ee]).*/) OR (data_win_eventdata_commandLine:/.*([Cc][Oo][Mm][Pp][Rr][Ee][Ss][Ss]-[Aa][Rr][Cc][Hh][Ii][Vv][Ee]|[Rr][Aa][Rr]|7[Zz]).*/ AND data_win_eventdata_commandLine:/.*([Ss][Aa][Mm]|[Hh][Ii][Vv][Ee]).*/))) OR (data_win_system_eventID:"3" AND data_win_eventdata_initiated:"true" AND data_win_eventdata_image:/.*\\([Pp][Oo][Ww][Ee][Rr][Ss][Hh][Ee][Ll][Ll]|[Pp][Ww][Ss][Hh]|[Cc][Uu][Rr][Ll]|[Ss][Cc][Pp])(\.[Ee][Xx][Ee])/)
+    pivot_on:
+    - host
+    window: 4h

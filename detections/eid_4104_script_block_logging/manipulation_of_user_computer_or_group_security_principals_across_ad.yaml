@@ -140,44 +140,61 @@ graylog:
   query: data_win_system_eventID:"4104" AND data_win_eventdata_scriptBlockText:/.*[Ss][Yy][Ss][Tt][Ee][Mm]\.[Dd][Ii][Rr][Ee][Cc][Tt][Oo][Rr][Yy][Ss][Ee][Rr][Vv][Ii][Cc][Ee][Ss]\.[Aa][Cc][Cc][Oo][Uu][Nn][Tt][Mm][Aa][Nn][Aa][Gg][Ee][Mm][Ee][Nn][Tt].*/
 
 correlation:
-  # Authored by the correlation engine for review. Related CoPilot Searches to run
-  # around an alert from this rule, scoped to the same host/user/IP within the window.
+  # Authored per-rule (behaviour-researched) for the correlation engine. Related CoPilot
+  # Searches + telemetry pivots to run around an alert, scoped to its host/user/ip/domain.
   related_rules:
-    - id: ec570e53-4c76-45a9-804d-dc3f355ff7a7
-      name: "7Zip Compressing Dump Files"
-      reason: "next kill-chain tactic: Collection"
-    - id: 0a1255c5-d732-4b62-ac02-b5152d34fb83
-      name: "ADExplorer Writing Complete AD Snapshot Into .dat File"
-      reason: "next kill-chain tactic: Discovery"
-    - id: 1ea13e8c-03ea-409b-877d-ce5c3d2c1cb3
-      name: "ADFS Database Named Pipe Connection By Uncommon Tool"
-      reason: "next kill-chain tactic: Collection"
-    - id: 75bf09fa-1dd7-4d18-9af9-dd9e492562eb
-      name: "ADSI-Cache File Creation By Uncommon Tool"
-      reason: "next kill-chain tactic: Command and Control"
-    - id: 33a2d1dd-f3b0-40bd-8baf-7974468927cc
-      name: "APT PRIVATELOG Image Load Pattern"
-      reason: "next kill-chain tactic: Privilege Escalation"
-    - id: 03e2746e-2b31-42f1-ab7a-eb39365b2422
-      name: "APT31 Judgement Panda Activity"
-      reason: "next kill-chain tactic: Credential Access"
-  window: 1h
+  - id: cd219ff3-fa99-45d4-8380-a7d15116c6dc
+    name: New User Created Via Net.EXE
+    reason: Same account-creation goal via net.exe instead of the .NET AccountManagement API; attackers fall back to it when the PowerShell route is blocked or to create a second persistence account.
+  - id: 3fb2e8e3-7bc0-4567-9722-c5ab9f8595eb
+    name: Windows Create Local Account
+    reason: Security 4720 on the same host is the audit-log confirmation that the PrincipalContext/UserPrincipal script actually created an account.
+  - id: 10fb649c-3600-4d37-b1e6-56ea90bb7e09
+    name: User Added To Highly Privileged Group
+    reason: 'Natural next step after creating a principal: add it to Domain/Enterprise Admins or similar to make the persistence account useful.'
+  - id: ad720b90-25ad-43ff-9b5e-5c841facc8e5
+    name: User Added to Local Administrators Group
+    reason: AccountManagement GroupPrincipal.Members.Add often follows account creation to grant local admin rights on the host.
+  - id: c265cf08-3f99-46c1-8d59-328247057d57
+    name: User Added to Local Administrator Group
+    reason: Security-log (4732) evidence of the group membership change that the script block performed.
+  - id: 48a45d45-8112-416b-8a67-46e03a4b2107
+    name: Remove Account From Domain Admin Group
+    reason: 'Same 4104 telemetry family: scripted AD group membership manipulation, including cleanup or admin lockout by an intruder.'
+  - id: f48a5557-be06-4b96-b8e8-be563e387620
+    name: Windows ESX Admins Group Creation via PowerShell
+    reason: Scripted creation of a privileged AD group (CVE-2024-37085 abuse) is a sibling use of directory principal manipulation from PowerShell.
+  - id: 70bc5215-526f-4477-963c-a47a5c9ebd12
+    name: Potential Active Directory Enumeration Using AD Module - ProcCreation
+    reason: AD reconnaissance via PowerShell typically precedes the creation or modification of directory principals.
+  window: 2h
   enrichment_searches:
-  # Rule-specific telemetry pivots the engine runs around an alert from this rule,
-  # scoped to the alert's host/user/IP within the window (behaviour-targeted, not a sweep).
-    - name: "Local account / group creation on this host"
-      query: '(((data_win_system_eventID:"4720" OR data_win_system_eventID:"4728" OR data_win_system_eventID:"4732" OR data_win_system_eventID:"4756")) OR (data_win_system_eventID:"1" AND data_win_eventdata_image:/.*(\\[Nn][Ee][Tt]\.[Ee][Xx][Ee]|\\[Nn][Ee][Tt]1\.[Ee][Xx][Ee])/ AND (data_win_eventdata_commandLine:/.*[Uu][Ss][Ee][Rr] .*/ OR data_win_eventdata_commandLine:/.*[Ll][Oo][Cc][Aa][Ll][Gg][Rr][Oo][Uu][Pp].*/ OR data_win_eventdata_commandLine:/.*[Gg][Rr][Oo][Uu][Pp] .*/)))'
-      pivot_on: [host]
-      window: 6h
-    - name: "Follow-on LOLBin / signed-binary-proxy execution on this host"
-      query: 'data_win_system_eventID:"1" AND data_win_eventdata_image:/.*(\\[Rr][Uu][Nn][Dd][Ll][Ll]32\.[Ee][Xx][Ee]|\\[Rr][Ee][Gg][Ss][Vv][Rr]32\.[Ee][Xx][Ee]|\\[Mm][Ss][Hh][Tt][Aa]\.[Ee][Xx][Ee]|\\[Ii][Nn][Ss][Tt][Aa][Ll][Ll][Uu][Tt][Ii][Ll]\.[Ee][Xx][Ee]|\\[Rr][Ee][Gg][Aa][Ss][Mm]\.[Ee][Xx][Ee]|\\[Rr][Ee][Gg][Ss][Vv][Cc][Ss]\.[Ee][Xx][Ee]|\\[Mm][Ss][Bb][Uu][Ii][Ll][Dd]\.[Ee][Xx][Ee]|\\[Cc][Ee][Rr][Tt][Uu][Tt][Ii][Ll]\.[Ee][Xx][Ee]|\\[Bb][Ii][Tt][Ss][Aa][Dd][Mm][Ii][Nn]\.[Ee][Xx][Ee]|\\[Ww][Mm][Ii][Cc]\.[Ee][Xx][Ee]|\\[Cc][Mm][Ss][Tt][Pp]\.[Ee][Xx][Ee]|\\[Oo][Dd][Bb][Cc][Cc][Oo][Nn][Ff]\.[Ee][Xx][Ee]|\\[Ff][Oo][Rr][Ff][Ii][Ll][Ee][Ss]\.[Ee][Xx][Ee]|\\[Pp][Cc][Aa][Ll][Uu][Aa]\.[Ee][Xx][Ee]|\\[Mm][Aa][Vv][Ii][Nn][Jj][Ee][Cc][Tt]\.[Ee][Xx][Ee]|\\[Ss][Cc][Rr][Ii][Pp][Tt][Rr][Uu][Nn][Nn][Ee][Rr]\.[Ee][Xx][Ee])/'
-      pivot_on: [host]
-      window: 1h
-    - name: "Download / AMSI-bypass / encoded script blocks on this host"
-      query: 'data_win_system_eventID:"4104" AND (data_win_eventdata_scriptBlockText:/.*[Dd][Oo][Ww][Nn][Ll][Oo][Aa][Dd][Ss][Tt][Rr][Ii][Nn][Gg].*/ OR data_win_eventdata_scriptBlockText:/.*[Dd][Oo][Ww][Nn][Ll][Oo][Aa][Dd][Ff][Ii][Ll][Ee].*/ OR data_win_eventdata_scriptBlockText:/.*[Ii][Nn][Vv][Oo][Kk][Ee]-[Ww][Ee][Bb][Rr][Ee][Qq][Uu][Ee][Ss][Tt].*/ OR data_win_eventdata_scriptBlockText:/.*[Nn][Ee][Tt]\.[Ww][Ee][Bb][Cc][Ll][Ii][Ee][Nn][Tt].*/ OR data_win_eventdata_scriptBlockText:/.*[Ff][Rr][Oo][Mm][Bb][Aa][Ss][Ee]64[Ss][Tt][Rr][Ii][Nn][Gg].*/ OR data_win_eventdata_scriptBlockText:/.*[Ii][Ee][Xx].*/ OR data_win_eventdata_scriptBlockText:/.*[Ii][Nn][Vv][Oo][Kk][Ee]-[Ee][Xx][Pp][Rr][Ee][Ss][Ss][Ii][Oo][Nn].*/ OR data_win_eventdata_scriptBlockText:/.*[Ss][Tt][Aa][Rr][Tt]-[Bb][Ii][Tt][Ss][Tt][Rr][Aa][Nn][Ss][Ff][Ee][Rr].*/ OR data_win_eventdata_scriptBlockText:/.*[Aa][Mm][Ss][Ii][Uu][Tt][Ii][Ll][Ss].*/ OR data_win_eventdata_scriptBlockText:/.*-[Ee][Nn][Cc].*/ OR data_win_eventdata_scriptBlockText:/.*-[Ee][Nn][Cc][Oo][Dd][Ee][Dd][Cc][Oo][Mm][Mm][Aa][Nn][Dd].*/ OR data_win_eventdata_scriptBlockText:/.*[Rr][Ee][Ff][Ll][Ee][Cc][Tt][Ii][Oo][Nn]\.[Aa][Ss][Ss][Ee][Mm][Bb][Ll][Yy].*/)'
-      pivot_on: [host]
-      window: 1h
-    - name: "Autostart persistence written on this host (Run keys, services, IFEO)"
-      query: '(data_win_system_eventID:"12" OR data_win_system_eventID:"13") AND (data_win_eventdata_targetObject:/.*[Cc][Uu][Rr][Rr][Ee][Nn][Tt][Vv][Ee][Rr][Ss][Ii][Oo][Nn]\\[Rr][Uu][Nn].*/ OR data_win_eventdata_targetObject:/.*[Cc][Uu][Rr][Rr][Ee][Nn][Tt][Vv][Ee][Rr][Ss][Ii][Oo][Nn]\\[Rr][Uu][Nn][Oo][Nn][Cc][Ee].*/ OR data_win_eventdata_targetObject:/.*[Cc][Uu][Rr][Rr][Ee][Nn][Tt][Cc][Oo][Nn][Tt][Rr][Oo][Ll][Ss][Ee][Tt]\\[Ss][Ee][Rr][Vv][Ii][Cc][Ee][Ss]\\.*/ OR data_win_eventdata_targetObject:/.*[Ii][Mm][Aa][Gg][Ee] [Ff][Ii][Ll][Ee] [Ee][Xx][Ee][Cc][Uu][Tt][Ii][Oo][Nn] [Oo][Pp][Tt][Ii][Oo][Nn][Ss]\\.*/ OR data_win_eventdata_targetObject:/.*[Ww][Ii][Nn][Ll][Oo][Gg][Oo][Nn]\\[Ss][Hh][Ee][Ll][Ll].*/ OR data_win_eventdata_targetObject:/.*[Ww][Ii][Nn][Ll][Oo][Gg][Oo][Nn]\\[Uu][Ss][Ee][Rr][Ii][Nn][Ii][Tt].*/ OR data_win_eventdata_targetObject:/.*[Cc][Uu][Rr][Rr][Ee][Nn][Tt][Vv][Ee][Rr][Ss][Ii][Oo][Nn]\\[Ee][Xx][Pp][Ll][Oo][Rr][Ee][Rr]\\[Rr][Uu][Nn].*/ OR data_win_eventdata_targetObject:/.*[Pp][Oo][Ll][Ii][Cc][Ii][Ee][Ss]\\[Ee][Xx][Pp][Ll][Oo][Rr][Ee][Rr]\\[Rr][Uu][Nn].*/ OR data_win_eventdata_targetObject:/.*[Cc][Uu][Rr][Rr][Ee][Nn][Tt][Vv][Ee][Rr][Ss][Ii][Oo][Nn]\\[Ww][Ii][Nn][Dd][Oo][Ww][Ss]\\[Ll][Oo][Aa][Dd].*/)'
-      pivot_on: [host]
-      window: 4h
+  # Behaviour-targeted hunts the engine runs around the alert (not a sweep).
+  - name: Account creation or group membership change events
+    query: data_win_system_eventID:("4720" OR "4722" OR "4724" OR "4728" OR "4732" OR "4756" OR "4738")
+    pivot_on:
+    - host
+    - user
+    window: 2h
+  - name: net.exe / dsadd / New-ADUser account and group commands
+    query: data_win_system_eventID:"1" AND (data_win_eventdata_commandLine:/.*[Nn]et1?(\.[Ee][Xx][Ee])? +(user|localgroup|group) .*(\/add|\/domain).*/ OR data_win_eventdata_commandLine:/.*([Nn]ew-[Aa][Dd][Uu][Ss][Ee][Rr]|[Aa]dd-[Aa][Dd][Gg][Rr][Oo][Uu][Pp][Mm][Ee][Mm][Bb][Ee][Rr]|[Dd][Ss][Aa][Dd][Dd]).*/)
+    pivot_on:
+    - host
+    window: 2h
+  - name: Other script blocks touching AD or account APIs
+    query: data_win_system_eventID:"4104" AND (data_win_eventdata_scriptBlockText:*New-ADUser* OR data_win_eventdata_scriptBlockText:*Add-ADGroupMember* OR data_win_eventdata_scriptBlockText:*DirectorySearcher* OR data_win_eventdata_scriptBlockText:*PrincipalContext* OR data_win_eventdata_scriptBlockText:*ADSI* OR data_win_eventdata_scriptBlockText:*Set-ADAccountPassword* OR data_win_eventdata_scriptBlockText:*Enable-ADAccount*)
+    pivot_on:
+    - host
+    - user
+    window: 4h
+  - name: Network logon of newly created or privileged account
+    query: data_win_system_eventID:("4624" OR "4672") AND NOT data_win_eventdata_targetUserName:*$
+    pivot_on:
+    - host
+    - user
+    window: 6h
+  - name: Outbound LDAP/SMB/RPC connections from PowerShell
+    query: data_win_system_eventID:"3" AND data_win_eventdata_image:/.*[Pp]ower[Ss]hell.*/ AND data_win_eventdata_destinationPort:("389" OR "636" OR "445" OR "135" OR "3268")
+    pivot_on:
+    - host
+    window: 2h
