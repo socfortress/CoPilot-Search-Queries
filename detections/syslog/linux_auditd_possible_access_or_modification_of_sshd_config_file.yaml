@@ -113,19 +113,43 @@ graylog:
   query: (full_log:/.*sshd_config.*/ OR full_log:/.*\/etc\/ssh\/.*/) AND NOT _exists_:data_win_system_eventID AND NOT rule_groups:/.*windows.*/
 
 correlation:
-  # Authored by the correlation engine for review.
+  # Authored per-rule (behaviour-researched) for the correlation engine. Related CoPilot
+  # Searches + telemetry pivots to run around an alert, scoped to its host/user/ip/domain.
+  related_rules:
+  - id: 3b4c5d6e-7f80-1234-5678-90abcdef1234
+    name: Linux SSH Key Discovery
+    reason: Key hunting commonly accompanies sshd reconnaissance/modification for lateral access.
+  - id: linux-private-keys-certificate-enumeration-001
+    name: Linux Private Keys and Certificate Enumeration
+    reason: Key harvesting alongside altered sshd settings enables persistent remote access.
+  - id: linux-sudo-or-su-execution-001
+    name: Linux Sudo Or Su Execution
+    reason: Editing /etc/ssh requires root; shows the escalation used.
+  - id: linux-service-restarted-001
+    name: Linux Service Restarted
+    reason: sshd must be restarted/reloaded for config changes to take effect.
+  - id: linux-auditd-add-user-001
+    name: Linux Auditd Add User
+    reason: New account plus permissive sshd config is a classic backdoor pair.
+  - id: linux-auditd-possible-access-credential-files-001
+    name: Linux Auditd Possible Access To Credential Files
+    reason: Credential file reads often precede enabling password or root SSH login.
+  window: 4h
   enrichment_searches:
-  # Rule-specific telemetry pivots the engine runs around an alert from this rule,
-  # scoped to the alert's host/user/IP within the window (behaviour-targeted, not a sweep).
-    - name: "Secret / key-file access on this host"
-      query: '((data_process_exec_process_arguments:/.*\/[Ee][Tt][Cc]\/[Ss][Hh][Aa][Dd][Oo][Ww].*/) OR (data_process_exec_process_arguments:/.*\/[Ee][Tt][Cc]\/[Pp][Aa][Ss][Ss][Ww][Dd].*/) OR (data_process_exec_process_arguments:/.*\/[Ee][Tt][Cc]\/[Ss][Uu][Dd][Oo][Ee][Rr][Ss].*/) OR (data_process_exec_process_arguments:/.*[Ii][Dd]_[Rr][Ss][Aa].*/) OR (data_process_exec_process_arguments:/.*\.[Ss][Ss][Hh]\/.*/) OR (data_process_exec_process_arguments:/.*\/[Ee][Tt][Cc]\/[Gg][Ss][Hh][Aa][Dd][Oo][Ww].*/))'
-      pivot_on: [host]
-      window: 2h
-    - name: "Shell / interpreter execution on this host"
-      query: '((data_process_exec_process_binary:/.*(\/[Bb][Aa][Ss][Hh]|\/[Ss][Hh]|\/[Dd][Aa][Ss][Hh]|\/[Zz][Ss][Hh]|\/[Kk][Ss][Hh]|\/[Aa][Ss][Hh]|\/[Bb][Uu][Ss][Yy][Bb][Oo][Xx])/) OR (data_process_exec_process_binary:/.*(\/[Pp][Yy][Tt][Hh][Oo][Nn]|\/[Pp][Yy][Tt][Hh][Oo][Nn]3|\/[Pp][Ee][Rr][Ll]|\/[Rr][Uu][Bb][Yy]|\/[Pp][Hh][Pp]|\/[Nn][Oo][Dd][Ee]|\/[Ll][Uu][Aa]|\/[Aa][Ww][Kk])/))'
-      pivot_on: [host]
-      window: 1h
-    - name: "Reconnaissance commands on this host"
-      query: 'data_process_exec_process_binary:/.*(\/[Ww][Hh][Oo][Aa][Mm][Ii]|\/[Ii][Dd]|\/[Uu][Nn][Aa][Mm][Ee]|\/[Hh][Oo][Ss][Tt][Nn][Aa][Mm][Ee]|\/[Hh][Oo][Ss][Tt][Nn][Aa][Mm][Ee][Cc][Tt][Ll]|\/[Ss][Ss]|\/[Nn][Ee][Tt][Ss][Tt][Aa][Tt]|\/[Ii][Ff][Cc][Oo][Nn][Ff][Ii][Gg]|\/[Aa][Rr][Pp]|\/[Ww]|\/[Ww][Hh][Oo]|\/[Ll][Aa][Ss][Tt]|\/[Ll][Ss][Oo][Ff]|\/[Nn][Mm][Aa][Pp]|\/[Dd][Ii][Gg]|\/[Ff][Ii][Nn][Dd])/'
-      pivot_on: [host]
-      window: 1h
+  # Behaviour-targeted hunts the engine runs around the alert (not a sweep).
+  - name: sshd restart or reload
+    query: full_log:/.*(systemctl.*(restart|reload).*ssh|service ssh.*(restart|reload)|kill -HUP).*/
+    pivot_on: host
+    window: 2h
+  - name: authorized_keys modification
+    query: full_log:/.*authorized_keys.*/
+    pivot_on: host
+    window: 4h
+  - name: Config edit via sed/echo/tee
+    query: full_log:/.*(sed -i|echo|tee).*(sshd_config|PermitRootLogin|PasswordAuthentication|PermitEmptyPasswords).*/
+    pivot_on: host
+    window: 2h
+  - name: Successful SSH logins afterwards
+    query: full_log:/.*(Accepted (password|publickey)|sshd.*session opened).*/
+    pivot_on: host
+    window: 6h

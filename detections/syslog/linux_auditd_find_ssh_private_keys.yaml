@@ -119,19 +119,58 @@ graylog:
   query: (full_log:/.*find.*/ OR full_log:/.*grep.*/) AND (full_log:/.*id_rsa.*/ OR full_log:/.*id_dsa.*/ OR full_log:/.*authorized_keys.*/ OR full_log:/.*ssh_key.*/) AND NOT _exists_:data_win_system_eventID AND NOT rule_groups:/.*windows.*/
 
 correlation:
-  # Authored by the correlation engine for review.
+  # Authored per-rule (behaviour-researched) for the correlation engine. Related CoPilot
+  # Searches + telemetry pivots to run around an alert, scoped to its host/user/ip/domain.
+  related_rules:
+  - id: 4d5e6f7a-8b90-2345-6789-01abcdef2345
+    name: Linux Credential Discovery
+    reason: Same actor usually sweeps other credential material (history, config, tokens) alongside SSH keys
+  - id: linux-private-keys-certificate-enumeration-001
+    name: Linux Private Keys and Certificate Enumeration
+    reason: Broader private key and certificate enumeration is the same harvesting objective, often in the same shell session
+  - id: linux-auditd-possible-access-credential-files-001
+    name: Linux Auditd Possible Access To Credential Files
+    reason: Reading /etc/shadow or credential files is the usual next step once key hunting has located targets
+  - id: d4e5f6a7-8b9c-4d1e-a2b3-5f6e7a8b9c1d
+    name: Linux SSH Configuration Access
+    reason: Reads of ssh/sshd config follow key discovery as the attacker maps trust and lateral paths
+  - id: linux-auditd-ssh-config-keys-deletion-001
+    name: Linux Auditd SSH Config Keys Deletion
+    reason: Deleting or replacing SSH keys/authorized_keys after discovery indicates tampering or backdoor key planting
+  - id: f3g4h5i6-7890-1112-1314-151617181920
+    name: Linux File Discovery Detection
+    reason: Generic file discovery preceding the targeted key search shows hands-on-keyboard reconnaissance
+  - id: f0025a69-e1b7-4dda-a53c-db21fa2d4071
+    name: Script Interpreter Spawning Credential Scanner - Linux
+    reason: Interpreter-spawned credential scanners are the automated variant of the same key hunt
+  - id: 8737b7f6-8df3-4bb7-b1da-06019b99b687
+    name: Shell Invocation Via Ssh - Linux
+    reason: 'Harvested keys get used: ssh is launched to pivot to other hosts'
+  window: 2h
   enrichment_searches:
-  # Rule-specific telemetry pivots the engine runs around an alert from this rule,
-  # scoped to the alert's host/user/IP within the window (behaviour-targeted, not a sweep).
-    - name: "Shell / interpreter execution on this host"
-      query: '((data_process_exec_process_binary:/.*(\/[Bb][Aa][Ss][Hh]|\/[Ss][Hh]|\/[Dd][Aa][Ss][Hh]|\/[Zz][Ss][Hh]|\/[Kk][Ss][Hh]|\/[Aa][Ss][Hh]|\/[Bb][Uu][Ss][Yy][Bb][Oo][Xx])/) OR (data_process_exec_process_binary:/.*(\/[Pp][Yy][Tt][Hh][Oo][Nn]|\/[Pp][Yy][Tt][Hh][Oo][Nn]3|\/[Pp][Ee][Rr][Ll]|\/[Rr][Uu][Bb][Yy]|\/[Pp][Hh][Pp]|\/[Nn][Oo][Dd][Ee]|\/[Ll][Uu][Aa]|\/[Aa][Ww][Kk])/))'
-      pivot_on: [host]
-      window: 1h
-    - name: "Reconnaissance commands on this host"
-      query: 'data_process_exec_process_binary:/.*(\/[Ww][Hh][Oo][Aa][Mm][Ii]|\/[Ii][Dd]|\/[Uu][Nn][Aa][Mm][Ee]|\/[Hh][Oo][Ss][Tt][Nn][Aa][Mm][Ee]|\/[Hh][Oo][Ss][Tt][Nn][Aa][Mm][Ee][Cc][Tt][Ll]|\/[Ss][Ss]|\/[Nn][Ee][Tt][Ss][Tt][Aa][Tt]|\/[Ii][Ff][Cc][Oo][Nn][Ff][Ii][Gg]|\/[Aa][Rr][Pp]|\/[Ww]|\/[Ww][Hh][Oo]|\/[Ll][Aa][Ss][Tt]|\/[Ll][Ss][Oo][Ff]|\/[Nn][Mm][Aa][Pp]|\/[Dd][Ii][Gg]|\/[Ff][Ii][Nn][Dd])/'
-      pivot_on: [host]
-      window: 1h
-    - name: "Privilege-escalation tooling executed on this host"
-      query: 'data_process_exec_process_binary:/.*(\/[Ss][Uu][Dd][Oo]|\/[Ss][Uu]|\/[Pp][Kk][Ee][Xx][Ee][Cc]|\/[Dd][Oo][Aa][Ss]|\/[Ss][Ee][Tt][Cc][Aa][Pp]|\/[Cc][Hh][Ss][Hh]|\/[Nn][Ee][Ww][Gg][Rr][Pp])/'
-      pivot_on: [host]
-      window: 2h
+  # Behaviour-targeted hunts the engine runs around the alert (not a sweep).
+  - name: Reads or copies of SSH key material
+    query: (data_process_exec_process_arguments:/.*(id_rsa|id_dsa|id_ecdsa|id_ed25519|authorized_keys|known_hosts).*/) AND (data_process_exec_process_binary:/.*\/([Cc][Aa][Tt]|[Ll][Ee][Ss][Ss]|[Mm][Oo][Rr][Ee]|[Hh][Ee][Aa][Dd]|[Tt][Aa][Ii][Ll]|[Cc][Pp]|[Ss][Cc][Pp]|[Rr][Ss][Yy][Nn][Cc]|[Tt][Aa][Rr]|[Bb][Aa][Ss][Ee]64|[Xx][Xx][Dd]).*/)
+    pivot_on:
+    - host
+    window: 2h
+  - name: Archiving or staging of key material
+    query: (data_process_exec_process_binary:/.*\/([Tt][Aa][Rr]|[Zz][Ii][Pp]|[Gg][Zz][Ii][Pp]|[Bb][Zz][Ii][Pp]2|7[Zz]|[Rr][Ss][Yy][Nn][Cc]).*/) AND (data_process_exec_process_arguments:/.*(\.ssh|id_rsa|id_ed25519|authorized_keys).*/)
+    pivot_on:
+    - host
+    window: 2h
+  - name: Outbound transfer tools launched on the host
+    query: data_process_exec_process_binary:/.*\/([Cc][Uu][Rr][Ll]|[Ww][Gg][Ee][Tt]|[Nn][Cc]|[Nn][Cc][Aa][Tt]|[Ss][Cc][Pp]|[Ss][Ff][Tt][Pp]|[Ff][Tt][Pp]|[Ss][Oo][Cc][Aa][Tt]).*/
+    pivot_on:
+    - host
+    window: 4h
+  - name: Outbound SSH sessions that may use harvested keys
+    query: (data_process_exec_process_binary:/.*\/[Ss][Ss][Hh]/) AND (data_process_exec_process_arguments:/.*(-i |StrictHostKeyChecking|-o ).*/)
+    pivot_on:
+    - host
+    window: 6h
+  - name: Other credential files read
+    query: data_process_exec_process_arguments:/.*(\/etc\/shadow|\/etc\/passwd|\.bash_history|\.aws\/credentials|\.git-credentials|\.netrc).*/
+    pivot_on:
+    - host
+    window: 2h

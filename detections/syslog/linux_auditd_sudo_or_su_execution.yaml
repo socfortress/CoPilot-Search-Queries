@@ -125,23 +125,53 @@ graylog:
   query: (full_log:/.*sudo .*/ OR full_log:/.* su .*/ OR full_log:/.*\/usr\/bin\/sudo.*/ OR full_log:/.*\/usr\/bin\/su.*/) AND NOT _exists_:data_win_system_eventID AND NOT rule_groups:/.*windows.*/
 
 correlation:
-  # Authored by the correlation engine for review.
+  # Authored per-rule (behaviour-researched) for the correlation engine. Related CoPilot
+  # Searches + telemetry pivots to run around an alert, scoped to its host/user/ip/domain.
+  related_rules:
+  - id: linux-common-process-elevation-control-001
+    name: Linux Common Process For Elevation Control
+    reason: Wider view of elevation utilities (sudo/su/pkexec/doas) used in the same session.
+  - id: linux-pkexec-privilege-escalation-001
+    name: Linux pkexec Privilege Escalation
+    reason: Alternative escalation path when sudo/su is restricted.
+  - id: a1b2c3d4-5e6f-7a8b-9c0d-e1f2a3b4c5d6
+    name: Linux Sudoers File Access
+    reason: Reading sudoers to learn what elevation is allowed precedes abusing sudo.
+  - id: linux-visudo-utility-execution-001
+    name: Linux Visudo Utility Execution
+    reason: Edits to sudoers after sudo use signal privilege persistence.
+  - id: linux-sudoers-tmp-file-creation-001
+    name: Linux Sudoers Tmp File Creation
+    reason: Sudoers edit artifact following root access.
+  - id: linux-setuid-using-chmod-utility-001
+    name: Linux Setuid Using Chmod Utility
+    reason: Root commands commonly plant SUID backdoors.
+  - id: linux-auditd-add-user-001
+    name: Linux Auditd Add User
+    reason: Rogue account creation is a typical post-elevation action.
+  - id: linux-whoami-user-discovery-001
+    name: Linux Whoami User Discovery
+    reason: Identity checks commonly follow a successful su/sudo.
+  window: 2h
   enrichment_searches:
-  # Rule-specific telemetry pivots the engine runs around an alert from this rule,
-  # scoped to the alert's host/user/IP within the window (behaviour-targeted, not a sweep).
-    - name: "Privilege-escalation tooling executed on this host"
-      query: 'data_process_exec_process_binary:/.*(\/[Ss][Uu][Dd][Oo]|\/[Ss][Uu]|\/[Pp][Kk][Ee][Xx][Ee][Cc]|\/[Dd][Oo][Aa][Ss]|\/[Ss][Ee][Tt][Cc][Aa][Pp]|\/[Cc][Hh][Ss][Hh]|\/[Nn][Ee][Ww][Gg][Rr][Pp])/'
-      pivot_on: [host]
-      window: 2h
-    - name: "Persistence via cron / systemd / shell profiles on this host"
-      query: '((data_process_exec_process_binary:/.*(\/[Cc][Rr][Oo][Nn][Tt][Aa][Bb]|\/[Ss][Yy][Ss][Tt][Ee][Mm][Cc][Tt][Ll]|\/[Aa][Tt]|\/[Uu][Pp][Dd][Aa][Tt][Ee]-[Rr][Cc]\.[Dd])/) OR (data_process_exec_process_arguments:/.*\/[Ee][Tt][Cc]\/[Cc][Rr][Oo][Nn].*/) OR (data_process_exec_process_arguments:/.*\/[Ee][Tt][Cc]\/[Ss][Yy][Ss][Tt][Ee][Mm][Dd].*/) OR (data_process_exec_process_arguments:/.*[Rr][Cc]\.[Ll][Oo][Cc][Aa][Ll].*/) OR (data_process_exec_process_arguments:/.*\.[Bb][Aa][Ss][Hh][Rr][Cc].*/) OR (data_process_exec_process_arguments:/.*\.[Bb][Aa][Ss][Hh]_[Pp][Rr][Oo][Ff][Ii][Ll][Ee].*/) OR (data_process_exec_process_arguments:/.*\/[Ee][Tt][Cc]\/[Pp][Rr][Oo][Ff][Ii][Ll][Ee].*/) OR (data_process_exec_process_arguments:/.*[Aa][Uu][Tt][Hh][Oo][Rr][Ii][Zz][Ee][Dd]_[Kk][Ee][Yy][Ss].*/) OR (data_process_exec_process_arguments:/.*\/[Ee][Tt][Cc]\/[Ii][Nn][Ii][Tt]\.[Dd].*/))'
-      pivot_on: [host]
-      window: 4h
-    - name: "Shell / interpreter execution on this host"
-      query: '((data_process_exec_process_binary:/.*(\/[Bb][Aa][Ss][Hh]|\/[Ss][Hh]|\/[Dd][Aa][Ss][Hh]|\/[Zz][Ss][Hh]|\/[Kk][Ss][Hh]|\/[Aa][Ss][Hh]|\/[Bb][Uu][Ss][Yy][Bb][Oo][Xx])/) OR (data_process_exec_process_binary:/.*(\/[Pp][Yy][Tt][Hh][Oo][Nn]|\/[Pp][Yy][Tt][Hh][Oo][Nn]3|\/[Pp][Ee][Rr][Ll]|\/[Rr][Uu][Bb][Yy]|\/[Pp][Hh][Pp]|\/[Nn][Oo][Dd][Ee]|\/[Ll][Uu][Aa]|\/[Aa][Ww][Kk])/))'
-      pivot_on: [host]
-      window: 1h
-    - name: "Reconnaissance commands on this host"
-      query: 'data_process_exec_process_binary:/.*(\/[Ww][Hh][Oo][Aa][Mm][Ii]|\/[Ii][Dd]|\/[Uu][Nn][Aa][Mm][Ee]|\/[Hh][Oo][Ss][Tt][Nn][Aa][Mm][Ee]|\/[Hh][Oo][Ss][Tt][Nn][Aa][Mm][Ee][Cc][Tt][Ll]|\/[Ss][Ss]|\/[Nn][Ee][Tt][Ss][Tt][Aa][Tt]|\/[Ii][Ff][Cc][Oo][Nn][Ff][Ii][Gg]|\/[Aa][Rr][Pp]|\/[Ww]|\/[Ww][Hh][Oo]|\/[Ll][Aa][Ss][Tt]|\/[Ll][Ss][Oo][Ff]|\/[Nn][Mm][Aa][Pp]|\/[Dd][Ii][Gg]|\/[Ff][Ii][Nn][Dd])/'
-      pivot_on: [host]
-      window: 1h
+  # Behaviour-targeted hunts the engine runs around the alert (not a sweep).
+  - name: Privilege and account changes as root
+    query: data_process_exec_process_binary:/.*(\/[Uu][Ss][Ee][Rr][Aa][Dd][Dd]|\/[Aa][Dd][Dd][Uu][Ss][Ee][Rr]|\/[Uu][Ss][Ee][Rr][Mm][Oo][Dd]|\/[Pp][Aa][Ss][Ss][Ww][Dd]|\/[Cc][Hh][Mm][Oo][Dd]|\/[Cc][Hh][Oo][Ww][Nn]|\/[Vv][Ii][Ss][Uu][Dd][Oo])/
+    pivot_on: host
+    window: 2h
+  - name: Interactive root shell via sudo or su
+    query: data_process_exec_process_arguments:/.*([Ss][Uu][Dd][Oo] +(-[Ii]|-[Ss]|[Ss][Uu]|[Bb][Aa][Ss][Hh]|[Ss][Hh])|[Ss][Uu] +-).*/
+    pivot_on: user
+    window: 2h
+  - name: Credential and sensitive file access
+    query: data_process_exec_process_arguments:/.*(\/[Ee][Tt][Cc]\/[Ss][Hh][Aa][Dd][Oo][Ww]|\/[Ee][Tt][Cc]\/[Ss][Uu][Dd][Oo][Ee][Rr][Ss]|[Ii][Dd]_[Rr][Ss][Aa]|\.[Ss][Ss][Hh]\/).*/
+    pivot_on: host
+    window: 2h
+  - name: Persistence mechanisms after elevation
+    query: (data_process_exec_process_binary:/.*(\/[Cc][Rr][Oo][Nn][Tt][Aa][Bb]|\/[Ss][Yy][Ss][Tt][Ee][Mm][Cc][Tt][Ll]|\/[Aa][Tt])/ OR data_process_exec_process_arguments:/.*(\/[Ee][Tt][Cc]\/[Cc][Rr][Oo][Nn]|\/[Ee][Tt][Cc]\/[Ss][Yy][Ss][Tt][Ee][Mm][Dd]|[Rr][Cc]\.[Ll][Oo][Cc][Aa][Ll]|[Aa][Uu][Tt][Hh][Oo][Rr][Ii][Zz][Ee][Dd]_[Kk][Ee][Yy][Ss]).*/)
+    pivot_on: host
+    window: 4h
+  - name: Download and execute as root
+    query: data_process_exec_process_binary:/.*(\/[Cc][Uu][Rr][Ll]|\/[Ww][Gg][Ee][Tt]|\/[Nn][Cc]|\/[Pp][Yy][Tt][Hh][Oo][Nn]3?)/ AND data_process_exec_process_arguments:/.*([Hh][Tt][Tt][Pp]|\/[Tt][Mm][Pp]\/).*/
+    pivot_on: host
+    window: 2h

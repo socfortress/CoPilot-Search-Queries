@@ -131,28 +131,53 @@ graylog:
   query: full_log:/.*\/kernel\/drivers\/.*/ AND NOT _exists_:data_win_system_eventID AND NOT rule_groups:/.*windows.*/
 
 correlation:
-  # Authored by the correlation engine for review. Related CoPilot Searches to run
-  # around an alert from this rule, scoped to the same host/user/IP within the window.
+  # Authored per-rule (behaviour-researched) for the correlation engine. Related CoPilot
+  # Searches + telemetry pivots to run around an alert, scoped to its host/user/ip/domain.
   related_rules:
-    - id: 4e2a6c91-7f3d-4b6e-9a4f-1c8b0e5a92d4
-      name: "Crontab Interactive Edit Execution"
-      reason: "same analytic story: Linux Persistence"
-    - id: a1b2c3d4-5e6f-7a8b-9c0d-1e2f3a4b5c6d
-      name: "Linux Kernel Module Insertion"
-      reason: "same analytic story: Linux Persistence"
+  - id: a1b2c3d4-5e6f-7a8b-9c0d-1e2f3a4b5c6d
+    name: Linux Kernel Module Insertion
+    reason: A .ko dropped into the driver tree is typically followed by loading it
+  - id: f1e2d3c4-5b6a-7d8e-9f0a-1b2c3d4e5f6a
+    name: Linux Kernel Module Load
+    reason: Kernel module load events confirm a dropped driver was activated
+  - id: 106d7cbd-80ff-4985-b682-a7043e5acb72
+    name: Loading of Kernel Module via Insmod
+    reason: insmod loading is the direct activation path for a planted module
+  - id: linux-medusa-rootkit-001
+    name: Linux Medusa Rootkit
+    reason: Rootkits install through kernel module drops and modprobe/depmod
+  - id: linux-kernel-module-rmmod-utility-001
+    name: Linux Kernel Module Using Rmmod Utility
+    reason: Module unloading indicates replacement or cleanup of a driver
+  - id: linux-unload-module-via-modprobe-001
+    name: Linux Unload Module Via Modprobe
+    reason: modprobe -r shows removal or swapping of kernel modules
+  - id: linux-preload-hijack-via-preload-file-001
+    name: Linux Preload Hijack Via Preload File
+    reason: Alternate userland rootkit mechanism often used alongside kernel modules
+  - id: 80915f59-9b56-4616-9de0-fd0dea6c12fe
+    name: Linux Logs Clearing Attempts
+    reason: Rootkit installs are followed by log clearing
   window: 1h
   enrichment_searches:
-  # Rule-specific telemetry pivots the engine runs around an alert from this rule,
-  # scoped to the alert's host/user/IP within the window (behaviour-targeted, not a sweep).
-    - name: "Shell / interpreter execution on this host"
-      query: '((data_process_exec_process_binary:/.*(\/[Bb][Aa][Ss][Hh]|\/[Ss][Hh]|\/[Dd][Aa][Ss][Hh]|\/[Zz][Ss][Hh]|\/[Kk][Ss][Hh]|\/[Aa][Ss][Hh]|\/[Bb][Uu][Ss][Yy][Bb][Oo][Xx])/) OR (data_process_exec_process_binary:/.*(\/[Pp][Yy][Tt][Hh][Oo][Nn]|\/[Pp][Yy][Tt][Hh][Oo][Nn]3|\/[Pp][Ee][Rr][Ll]|\/[Rr][Uu][Bb][Yy]|\/[Pp][Hh][Pp]|\/[Nn][Oo][Dd][Ee]|\/[Ll][Uu][Aa]|\/[Aa][Ww][Kk])/))'
-      pivot_on: [host]
-      window: 1h
-    - name: "Reconnaissance commands on this host"
-      query: 'data_process_exec_process_binary:/.*(\/[Ww][Hh][Oo][Aa][Mm][Ii]|\/[Ii][Dd]|\/[Uu][Nn][Aa][Mm][Ee]|\/[Hh][Oo][Ss][Tt][Nn][Aa][Mm][Ee]|\/[Hh][Oo][Ss][Tt][Nn][Aa][Mm][Ee][Cc][Tt][Ll]|\/[Ss][Ss]|\/[Nn][Ee][Tt][Ss][Tt][Aa][Tt]|\/[Ii][Ff][Cc][Oo][Nn][Ff][Ii][Gg]|\/[Aa][Rr][Pp]|\/[Ww]|\/[Ww][Hh][Oo]|\/[Ll][Aa][Ss][Tt]|\/[Ll][Ss][Oo][Ff]|\/[Nn][Mm][Aa][Pp]|\/[Dd][Ii][Gg]|\/[Ff][Ii][Nn][Dd])/'
-      pivot_on: [host]
-      window: 1h
-    - name: "Privilege-escalation tooling executed on this host"
-      query: 'data_process_exec_process_binary:/.*(\/[Ss][Uu][Dd][Oo]|\/[Ss][Uu]|\/[Pp][Kk][Ee][Xx][Ee][Cc]|\/[Dd][Oo][Aa][Ss]|\/[Ss][Ee][Tt][Cc][Aa][Pp]|\/[Cc][Hh][Ss][Hh]|\/[Nn][Ee][Ww][Gg][Rr][Pp])/'
-      pivot_on: [host]
-      window: 2h
+  # Behaviour-targeted hunts the engine runs around the alert (not a sweep).
+  - name: Module load and depmod activity
+    query: data_process_exec_process_binary:/.*(\\/[Ii][Nn][Ss][Mm][Oo][Dd]|\\/[Mm][Oo][Dd][Pp][Rr][Oo][Bb][Ee]|\\/[Dd][Ee][Pp][Mm][Oo][Dd]|\\/[Kk][Mm][Oo][Dd])/
+    pivot_on: host
+    window: 2h
+  - name: Kernel module file drops and builds
+    query: data_process_exec_process_binary:/.*(\\/[Cc][Pp]|\\/[Mm][Vv]|\\/[Ii][Nn][Ss][Tt][Aa][Ll][Ll]|\\/[Mm][Aa][Kk][Ee]|\\/[Gg][Cc][Cc]|\\/[Tt][Ee][Ee]|\\/[Dd][Dd])/ AND data_process_exec_process_arguments:/.*(\.[Kk][Oo]|\/[Ll][Ii][Bb]\/[Mm][Oo][Dd][Uu][Ll][Ee][Ss]|\/[Kk][Ee][Rr][Nn][Ee][Ll]\/[Dd][Rr][Ii][Vv][Ee][Rr][Ss]|[Kk][Bb][Uu][Ii][Ll][Dd]|[Ll][Ii][Nn][Uu][Xx]\-[Hh][Ee][Aa][Dd][Ee][Rr][Ss]).*/
+    pivot_on: host
+    window: 2h
+  - name: Remote tool download before module drop
+    query: data_process_exec_process_binary:/.*(\\/[Cc][Uu][Rr][Ll]|\\/[Ww][Gg][Ee][Tt]|\\/[Ss][Cc][Pp]|\\/[Tt][Ff][Tt][Pp])/ AND data_process_exec_process_arguments:/.*([Hh][Tt][Tt][Pp]|\.[Kk][Oo]|\.[Tt][Aa][Rr]|\.[Ss][Hh]).*/
+    pivot_on: host
+    window: 2h
+  - name: Anti-forensics after kernel tampering
+    query: (data_process_exec_process_binary:/.*(\\/[Rr][Mm]|\\/[Ss][Hh][Rr][Ee][Dd]|\\/[Tt][Rr][Uu][Nn][Cc][Aa][Tt][Ee]|\\/[Dd][Mm][Ee][Ss][Gg]|\\/[Jj][Oo][Uu][Rr][Nn][Aa][Ll][Cc][Tt][Ll])/ AND data_process_exec_process_arguments:/.*(\/[Vv][Aa][Rr]\/[Ll][Oo][Gg]|\-\-[Cc][Ll][Ee][Aa][Rr]|\-\-[Vv][Aa][Cc][Uu][Uu][Mm]|\.[Bb][Aa][Ss][Hh]_[Hh][Ii][Ss][Tt][Oo][Rr][Yy]).*/)
+    pivot_on: host
+    window: 2h
+  - name: Privilege elevation preceding module install
+    query: data_process_exec_process_binary:/.*(\\/[Ss][Uu][Dd][Oo]|\\/[Ss][Uu]|\\/[Pp][Kk][Ee][Xx][Ee][Cc]|\\/[Dd][Oo][Aa][Ss])/
+    pivot_on: host
+    window: 1h

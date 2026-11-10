@@ -131,42 +131,50 @@ correlation:
   related_rules:
   - id: lnx-doas-001
     name: Linux doas Execution Detection
-    reason: Syslog/auditd view of the same doas execution; corroborates the Tetragon exec event on the same host.
-  - id: linux-sudo-or-su-execution-001
-    name: Linux Sudo Or Su Execution
-    reason: An attacker using doas often also tries sudo/su; shows the wider privilege-switch attempts.
-  - id: linux-visudo-utility-execution-001
-    name: Linux Visudo Utility Execution
-    reason: Editing privilege config to grant rights precedes doas/sudo abuse.
-  - id: linux-sudoers-tmp-file-creation-001
-    name: Linux Sudoers Tmp File Creation
-    reason: Sudoers edit in progress indicates persistence of elevated rights alongside doas use.
-  - id: linux-setuid-using-chmod-utility-001
-    name: Linux Setuid Using Chmod Utility
-    reason: Setuid planting is a common follow-on after gaining root via doas.
-  - id: 6a50f16c-3b7b-42d1-b081-0fdd3ba70a73
-    name: User Added To Root/Sudoers Group Using Usermod
-    reason: Adding the account to privileged groups is an alternate or follow-on escalation route.
+    reason: Same doas execution seen through syslog/auditd telemetry; confirms the privilege-escalation attempt from a second sensor.
+  - id: 0f79c4d2-4e1f-4683-9c36-b5469a665e06
+    name: Access of Sudoers File Content
+    reason: Reading sudoers/doas policy is the reconnaissance step that precedes picking doas or sudo as an escalation path.
+  - id: fa4aaed5-4fe0-498d-bbc0-08e3346387ba
+    name: Copy Passwd Or Shadow From TMP Path
+    reason: Once elevated through doas, staging passwd/shadow copies is the typical credential-harvest follow-on.
+  - id: 6419afd1-3742-47a5-a7e6-b50386cd15f8
+    name: Chmod Targeting Sensitive Directories
+    reason: Root via doas is commonly used to loosen permissions on sensitive paths for persistence or access.
+  - id: 30bcce26-51c5-49f2-99c8-7b59e3af36c7
+    name: Execution Of Script Located In Potentially Suspicious Directory
+    reason: A script dropped in /tmp or similar and run under doas indicates the escalated payload stage.
+  - id: e3a8a052-111f-4606-9aee-f28ebeb76776
+    name: Disabling Security Tools
+    reason: Elevated actors frequently stop EDR/audit agents right after gaining root.
+  - id: 1182f3b3-e716-4efa-99ab-d2685d04360f
+    name: History File Deletion
+    reason: Clearing shell history after privileged commands is a common cleanup step following escalation.
   window: 2h
   enrichment_searches:
   # Behaviour-targeted hunts the engine runs around the alert (not a sweep).
-  - name: Commands run via doas
+  - name: Commands run through doas with their arguments
     query: data_process_exec_parent_binary:"/usr/bin/doas"
-    pivot_on: host
+    pivot_on:
+    - host
     window: 2h
-  - name: Edits to doas.conf / sudoers
-    query: data_process_exec_process_arguments:(*doas.conf* OR *sudoers*)
-    pivot_on: host
+  - name: Reads or edits of doas/sudo policy files
+    query: data_process_exec_process_arguments:/.*(doas\.conf|\/etc\/sudoers).*/
+    pivot_on:
+    - host
     window: 6h
-  - name: Account and group changes
-    query: data_process_exec_process_binary:("/usr/sbin/useradd" OR "/usr/sbin/usermod" OR "/usr/bin/passwd" OR "/usr/sbin/adduser")
-    pivot_on: host
-    window: 6h
-  - name: 'Persistence after root: cron, ssh keys, systemd'
-    query: data_process_exec_process_arguments:(*crontab* OR *authorized_keys* OR */etc/cron* OR *systemctl*enable*)
-    pivot_on: host
-    window: 6h
-  - name: Download and netcat tooling
-    query: data_process_exec_process_binary:("/usr/bin/curl" OR "/usr/bin/wget" OR "/usr/bin/nc" OR "/usr/bin/ncat")
-    pivot_on: host
+  - name: Shell spawned from privilege wrappers
+    query: (data_process_exec_process_binary:/.*\/(sh|bash|dash|zsh)/ AND data_process_exec_parent_binary:/.*\/(doas|sudo|su)/)
+    pivot_on:
+    - host
+    window: 2h
+  - name: Account or credential file manipulation
+    query: data_process_exec_process_binary:/.*\/(useradd|usermod|passwd|chpasswd|adduser|visudo)/
+    pivot_on:
+    - host
     window: 4h
+  - name: Downloaders and transfer tools on host
+    query: data_process_exec_process_binary:/.*\/(curl|wget|nc|ncat|scp)/
+    pivot_on:
+    - host
+    window: 2h

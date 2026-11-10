@@ -141,41 +141,50 @@ correlation:
   # Authored per-rule (behaviour-researched) for the correlation engine. Related CoPilot
   # Searches + telemetry pivots to run around an alert, scoped to its host/user/ip/domain.
   related_rules:
-  - id: cf8d753e-a8fe-11eb-8f58-acde48001122
-    name: Icacls Deny Command
-    reason: Deny ACEs set via icacls are the lock-out variant of the same permission tampering, used to block defenders or users from files.
   - id: b1b1e316-accc-11eb-a9b4-acde48001122
     name: ICACLS Grant Command
-    reason: Grant-flavoured icacls on the same host shows the actor widening access to staged payloads or protected paths.
+    reason: Granting rights is the permission-weakening half of the same icacls abuse.
+  - id: cf8d753e-a8fe-11eb-8f58-acde48001122
+    name: Icacls Deny Command
+    reason: Deny ACEs are used to lock defenders or users out of the dropped payload folder.
   - id: 4ae81040-fc1c-4249-bfa3-938d260214d9
     name: Use Icacls to Hide File to Everyone
-    reason: Denying Everyone on a dropped file hides persistence/payload files; commonly paired with ACL changes by Amadey-style loaders.
+    reason: Amadey-style malware hides its dropped files from all users with icacls denies.
   - id: fa7ca5c6-c9d8-11eb-bce9-acde48001122
     name: Permission Modification using Takeown App
-    reason: 'takeown typically precedes icacls: ownership is seized first, then ACLs rewritten on protected files.'
+    reason: takeown is the ownership step that typically precedes an icacls grant.
   - id: 554601fb-9b71-4bcc-abf4-21a611be4fde
     name: Suspicious Recursive Takeown
-    reason: Recursive ownership grabs on directories are the bulk-access step before mass icacls changes, as in ransomware and miner prep.
-  window: 4h
+    reason: Recursive ownership grabs precede wide ACL changes.
+  - id: 6e5a3ae4-90a3-462d-9aa6-0119f638c0f1
+    name: Hiding Files And Directories With Attrib exe
+    reason: Often paired with icacls to hide the malware drop directory.
+  - id: c5c00f49-b3f9-45a6-997e-cfdecc6e1967
+    name: Suspicious Schtasks Execution AppData Folder
+    reason: After ACLs are set, Amadey creates a scheduled task to persist the payload from AppData.
+  - id: windows-process-creating-lnk-suspicious-location-001
+    name: Windows Process Creating LNK File in Suspicious Location
+    reason: Amadey also drops LNK persistence files shortly after permission changes.
+  window: 2h
   enrichment_searches:
   # Behaviour-targeted hunts the engine runs around the alert (not a sweep).
-  - name: Ownership seizure and ACL commands
-    query: data_win_system_eventID:1 AND data_win_eventdata_image:(/.*\\[Tt]akeown\.exe/ OR /.*\\[Ii]cacls\.exe/ OR /.*\\[Cc]acls\.exe/)
-    pivot_on: host
+  - name: Scheduled task creation for persistence
+    query: data_win_system_eventID:"1" AND data_win_eventdata_image:/.*\\[Ss][Cc][Hh][Tt][Aa][Ss][Kk][Ss]\.[Ee][Xx][Ee]/ AND data_win_eventdata_commandLine:/.*\/[Cc][Rr][Ee][Aa][Tt][Ee].*/
+    pivot_on:
+    - host
     window: 2h
-  - name: Executables launched from user-writable paths
-    query: data_win_system_eventID:1 AND data_win_eventdata_image:(/.*\\[Aa]pp[Dd]ata\\.*\.[Ee][Xx][Ee]/ OR /.*\\[Tt]emp\\.*\.[Ee][Xx][Ee]/ OR /.*\\[Pp]rogram[Dd]ata\\.*\.[Ee][Xx][Ee]/)
-    pivot_on: host
+  - name: Ownership and attribute changes
+    query: data_win_system_eventID:"1" AND data_win_eventdata_image:/.*\\([Tt][Aa][Kk][Ee][Oo][Ww][Nn]|[Aa][Tt][Tt][Rr][Ii][Bb])\.[Ee][Xx][Ee]/
+    pivot_on:
+    - host
     window: 2h
-  - name: Persistence via schtasks or Run keys
-    query: data_win_system_eventID:1 AND (data_win_eventdata_image:/.*\\[Ss]chtasks\.exe/ OR data_win_eventdata_commandLine:/.*[Cc]urrent[Vv]ersion\\[Rr]un.*/) AND data_win_eventdata_commandLine:/.*([Cc]reate|[Aa]dd).*/
-    pivot_on: host
-    window: 4h
-  - name: Defender or firewall weakening
-    query: data_win_system_eventID:1 AND (data_win_eventdata_commandLine:/.*[Ss]et-[Mm]p[Pp]reference.*/ OR data_win_eventdata_commandLine:/.*[Aa]dd-[Mm]p[Pp]reference.*[Ee]xclusion.*/ OR data_win_eventdata_commandLine:/.*[Nn]etsh.*[Aa]dv[Ff]irewall.*/)
-    pivot_on: host
-    window: 4h
-  - name: Network connections by binaries in user-writable paths
-    query: data_win_system_eventID:3 AND data_win_eventdata_image:(/.*\\[Aa]pp[Dd]ata\\.*/ OR /.*\\[Tt]emp\\.*/)
-    pivot_on: host
+  - name: Executables dropped into user-writable paths
+    query: data_win_system_eventID:"11" AND data_win_eventdata_targetFilename:/.*\\([Aa][Pp][Pp][Dd][Aa][Tt][Aa]|[Tt][Ee][Mm][Pp]|[Pp][Rr][Oo][Gg][Rr][Aa][Mm][Dd][Aa][Tt][Aa])\\.*\.[Ee][Xx][Ee]/
+    pivot_on:
+    - host
+    window: 2h
+  - name: Run-key autostart written
+    query: (data_win_system_eventID:"12" OR data_win_system_eventID:"13") AND data_win_eventdata_targetObject:/.*[Cc][Uu][Rr][Rr][Ee][Nn][Tt][Vv][Ee][Rr][Ss][Ii][Oo][Nn]\\[Rr][Uu][Nn].*/
+    pivot_on:
+    - host
     window: 4h

@@ -113,25 +113,53 @@ graylog:
   query: full_log:/.*apt.*/ AND full_log:/.*Pre-Invoke.*/ AND NOT _exists_:data_win_system_eventID AND NOT rule_groups:/.*windows.*/
 
 correlation:
-  # Authored by the correlation engine for review. Related CoPilot Searches to run
-  # around an alert from this rule, scoped to the same host/user/IP within the window.
+  # Authored per-rule (behaviour-researched) for the correlation engine. Related CoPilot
+  # Searches + telemetry pivots to run around an alert, scoped to its host/user/ip/domain.
   related_rules:
-    - id: 26f86252-1549-45e1-a212-eb26840e86bc
-      name: "File Download or Read to Pipe Execution"
-      reason: "same analytic story: Linux Living Off The Land"
-  window: 1h
+  - id: bb382fd5-b454-47ea-a264-1828e4c766d6
+    name: Shell Invocation via Apt - Linux
+    reason: Direct same-binary sibling detecting apt spawning a shell.
+  - id: linux-auditd-apt-get-privilege-escalation-001
+    name: Linux Auditd Apt-Get Privilege Escalation
+    reason: Sibling rule for apt-get Pre-Invoke; attackers try both package managers.
+  - id: linux-sudo-or-su-execution-001
+    name: Linux Sudo Or Su Execution
+    reason: The abuse requires sudo rights on apt; sudo execution precedes it.
+  - id: linux-auditd-possible-access-sudoers-file-001
+    name: Linux Auditd Possible Access To Sudoers File
+    reason: Sudoers inspection reveals the apt NOPASSWD entry being abused.
+  - id: 700fb7e8-2981-401c-8430-be58e189e741
+    name: Suspicious Package Installed - Linux
+    reason: Package-manager abuse may accompany installation of attacker tooling.
+  - id: linux-setuid-using-chmod-utility-001
+    name: Linux Setuid Using Chmod Utility
+    reason: Post-root SUID backdoor planting.
+  - id: linux-auditd-add-user-001
+    name: Linux Auditd Add User
+    reason: Post-root rogue account creation.
+  - id: linux-unix-shell-configuration-modification-001
+    name: Linux Unix Shell Configuration Modification
+    reason: Post-root persistence through shell profiles.
+  window: 2h
   enrichment_searches:
-  # Rule-specific telemetry pivots the engine runs around an alert from this rule,
-  # scoped to the alert's host/user/IP within the window (behaviour-targeted, not a sweep).
-    - name: "Privilege-escalation tooling executed on this host"
-      query: 'data_process_exec_process_binary:/.*(\/[Ss][Uu][Dd][Oo]|\/[Ss][Uu]|\/[Pp][Kk][Ee][Xx][Ee][Cc]|\/[Dd][Oo][Aa][Ss]|\/[Ss][Ee][Tt][Cc][Aa][Pp]|\/[Cc][Hh][Ss][Hh]|\/[Nn][Ee][Ww][Gg][Rr][Pp])/'
-      pivot_on: [host]
-      window: 2h
-    - name: "Shell / interpreter execution on this host"
-      query: '((data_process_exec_process_binary:/.*(\/[Bb][Aa][Ss][Hh]|\/[Ss][Hh]|\/[Dd][Aa][Ss][Hh]|\/[Zz][Ss][Hh]|\/[Kk][Ss][Hh]|\/[Aa][Ss][Hh]|\/[Bb][Uu][Ss][Yy][Bb][Oo][Xx])/) OR (data_process_exec_process_binary:/.*(\/[Pp][Yy][Tt][Hh][Oo][Nn]|\/[Pp][Yy][Tt][Hh][Oo][Nn]3|\/[Pp][Ee][Rr][Ll]|\/[Rr][Uu][Bb][Yy]|\/[Pp][Hh][Pp]|\/[Nn][Oo][Dd][Ee]|\/[Ll][Uu][Aa]|\/[Aa][Ww][Kk])/))'
-      pivot_on: [host]
-      window: 1h
-    - name: "Reconnaissance commands on this host"
-      query: 'data_process_exec_process_binary:/.*(\/[Ww][Hh][Oo][Aa][Mm][Ii]|\/[Ii][Dd]|\/[Uu][Nn][Aa][Mm][Ee]|\/[Hh][Oo][Ss][Tt][Nn][Aa][Mm][Ee]|\/[Hh][Oo][Ss][Tt][Nn][Aa][Mm][Ee][Cc][Tt][Ll]|\/[Ss][Ss]|\/[Nn][Ee][Tt][Ss][Tt][Aa][Tt]|\/[Ii][Ff][Cc][Oo][Nn][Ff][Ii][Gg]|\/[Aa][Rr][Pp]|\/[Ww]|\/[Ww][Hh][Oo]|\/[Ll][Aa][Ss][Tt]|\/[Ll][Ss][Oo][Ff]|\/[Nn][Mm][Aa][Pp]|\/[Dd][Ii][Gg]|\/[Ff][Ii][Nn][Dd])/'
-      pivot_on: [host]
-      window: 1h
+  # Behaviour-targeted hunts the engine runs around the alert (not a sweep).
+  - name: Sudo privilege discovery and use
+    query: (data_process_exec_process_binary:/.*(\/[Ss][Uu][Dd][Oo]|\/[Ss][Uu]|\/[Pp][Kk][Ee][Xx][Ee][Cc]|\/[Dd][Oo][Aa][Ss])/ OR data_process_exec_process_arguments:/.*(sudo\s+\-[Ll]|\/[Ee][Tt][Cc]\/[Ss][Uu][Dd][Oo][Ee][Rr][Ss]).*/)
+    pivot_on: user
+    window: 2h
+  - name: Apt with Pre-Invoke / option injection
+    query: data_process_exec_process_binary:/.*(\/[Aa][Pp][Tt]|\/[Aa][Pp][Tt]-[Gg][Ee][Tt])/ AND data_process_exec_process_arguments:/.*([Pp][Rr][Ee]-[Ii][Nn][Vv][Oo][Kk][Ee]|[Pp][Oo][Ss][Tt]-[Ii][Nn][Vv][Oo][Kk][Ee]|[Aa][Pp][Tt]\:\:).*/
+    pivot_on: host
+    window: 2h
+  - name: Shell spawned with elevated flags
+    query: data_process_exec_process_binary:/.*(\/[Bb][Aa][Ss][Hh]|\/[Ss][Hh]|\/[Dd][Aa][Ss][Hh]|\/[Zz][Ss][Hh])/ AND data_process_exec_process_arguments:/.*(\-[IiPpCc]).*/
+    pivot_on: host
+    window: 2h
+  - name: Post-escalation account and SUID changes
+    query: data_process_exec_process_binary:/.*(\/[Uu][Ss][Ee][Rr][Aa][Dd][Dd]|\/[Aa][Dd][Dd][Uu][Ss][Ee][Rr]|\/[Uu][Ss][Ee][Rr][Mm][Oo][Dd]|\/[Cc][Hh][Pp][Aa][Ss][Ss][Ww][Dd]|\/[Pp][Aa][Ss][Ss][Ww][Dd])/ OR (data_process_exec_process_binary:/.*(\/[Cc][Hh][Mm][Oo][Dd]|\/[Ss][Ee][Tt][Cc][Aa][Pp])/ AND data_process_exec_process_arguments:/.*([Uu]\+[Ss]|[4][0-7][0-7][0-7]|[Cc][Aa][Pp]_[Ss][Ee][Tt][Uu][Ii][Dd]).*/)
+    pivot_on: host
+    window: 6h
+  - name: Tooling staged in temp paths
+    query: data_process_exec_process_binary:/.*\/(tmp|dev\/shm|var\/tmp)\/.*/
+    pivot_on: host
+    window: 6h

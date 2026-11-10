@@ -117,29 +117,53 @@ graylog:
   query: full_log:/.*whoami.*/ AND NOT _exists_:data_win_system_eventID AND NOT rule_groups:/.*windows.*/
 
 correlation:
-  # Authored by the correlation engine for review. Related CoPilot Searches to run
-  # around an alert from this rule, scoped to the same host/user/IP within the window.
+  # Authored per-rule (behaviour-researched) for the correlation engine. Related CoPilot
+  # Searches + telemetry pivots to run around an alert, scoped to its host/user/ip/domain.
   related_rules:
-    - id: 26f86252-1549-45e1-a212-eb26840e86bc
-      name: "File Download or Read to Pipe Execution"
-      reason: "same analytic story: Linux Living Off The Land"
+  - id: 0cf7a157-8879-41a2-8f55-388dd23746b7
+    name: Linux Recon Indicators
+    reason: Whoami is typically one line in a broader Linux recon script.
+  - id: linux-system-network-configuration-discovery-001
+    name: Linux System Network Configuration Discovery
+    reason: Network enumeration follows identity checks in initial recon.
+  - id: linux-sudo-or-su-execution-001
+    name: Linux Sudo Or Su Execution
+    reason: Checking privileges leads to sudo/su attempts.
+  - id: linux-common-process-elevation-control-001
+    name: Linux Common Process For Elevation Control
+    reason: Elevation-control binaries show the actor moving to escalate.
+  - id: ea3ecad2-db86-4a89-ad0b-132a10d2db55
+    name: Interactive Bash Suspicious Children
+    reason: Whoami from an interactive bash spawned by an app suggests a fresh shell foothold.
+  - id: 7f734ed0-4f47-46c0-837f-6ee62505abd9
+    name: Potential Netcat Reverse Shell Execution
+    reason: Reverse shells are followed immediately by whoami to confirm access.
+  - id: c4042d54-110d-45dd-a0e1-05c47822c937
+    name: Python Spawning Pretty TTY Via PTY Module
+    reason: TTY upgrade then whoami is the standard post-shell sequence.
+  - id: 4d5e6f7a-8b90-2345-6789-01abcdef2345
+    name: Linux Credential Discovery
+    reason: Credential discovery is the next step after learning the user context.
   window: 1h
   enrichment_searches:
-  # Rule-specific telemetry pivots the engine runs around an alert from this rule,
-  # scoped to the alert's host/user/IP within the window (behaviour-targeted, not a sweep).
-    - name: "User / owner reconnaissance commands on this host"
-      query: 'data_process_exec_process_binary:/.*(\/[Ww][Hh][Oo][Aa][Mm][Ii]|\/[Ii][Dd]|\/[Uu][Nn][Aa][Mm][Ee]|\/[Hh][Oo][Ss][Tt][Nn][Aa][Mm][Ee]|\/[Hh][Oo][Ss][Tt][Nn][Aa][Mm][Ee][Cc][Tt][Ll]|\/[Ss][Ss]|\/[Nn][Ee][Tt][Ss][Tt][Aa][Tt]|\/[Ii][Ff][Cc][Oo][Nn][Ff][Ii][Gg]|\/[Aa][Rr][Pp]|\/[Ww]|\/[Ww][Hh][Oo]|\/[Ll][Aa][Ss][Tt]|\/[Ll][Ss][Oo][Ff]|\/[Nn][Mm][Aa][Pp]|\/[Dd][Ii][Gg]|\/[Ff][Ii][Nn][Dd])/'
-      pivot_on: [host]
-      window: 1h
-    - name: "Privilege-escalation tooling executed on this host"
-      query: 'data_process_exec_process_binary:/.*(\/[Ss][Uu][Dd][Oo]|\/[Ss][Uu]|\/[Pp][Kk][Ee][Xx][Ee][Cc]|\/[Dd][Oo][Aa][Ss]|\/[Ss][Ee][Tt][Cc][Aa][Pp]|\/[Cc][Hh][Ss][Hh]|\/[Nn][Ee][Ww][Gg][Rr][Pp])/'
-      pivot_on: [host]
-      window: 2h
-    - name: "Shell / interpreter execution on this host"
-      query: '((data_process_exec_process_binary:/.*(\/[Bb][Aa][Ss][Hh]|\/[Ss][Hh]|\/[Dd][Aa][Ss][Hh]|\/[Zz][Ss][Hh]|\/[Kk][Ss][Hh]|\/[Aa][Ss][Hh]|\/[Bb][Uu][Ss][Yy][Bb][Oo][Xx])/) OR (data_process_exec_process_binary:/.*(\/[Pp][Yy][Tt][Hh][Oo][Nn]|\/[Pp][Yy][Tt][Hh][Oo][Nn]3|\/[Pp][Ee][Rr][Ll]|\/[Rr][Uu][Bb][Yy]|\/[Pp][Hh][Pp]|\/[Nn][Oo][Dd][Ee]|\/[Ll][Uu][Aa]|\/[Aa][Ww][Kk])/))'
-      pivot_on: [host]
-      window: 1h
-    - name: "Reconnaissance commands on this host"
-      query: 'data_process_exec_process_binary:/.*(\/[Ww][Hh][Oo][Aa][Mm][Ii]|\/[Ii][Dd]|\/[Uu][Nn][Aa][Mm][Ee]|\/[Hh][Oo][Ss][Tt][Nn][Aa][Mm][Ee]|\/[Hh][Oo][Ss][Tt][Nn][Aa][Mm][Ee][Cc][Tt][Ll]|\/[Ss][Ss]|\/[Nn][Ee][Tt][Ss][Tt][Aa][Tt]|\/[Ii][Ff][Cc][Oo][Nn][Ff][Ii][Gg]|\/[Aa][Rr][Pp]|\/[Ww]|\/[Ww][Hh][Oo]|\/[Ll][Aa][Ss][Tt]|\/[Ll][Ss][Oo][Ff]|\/[Nn][Mm][Aa][Pp]|\/[Dd][Ii][Gg]|\/[Ff][Ii][Nn][Dd])/'
-      pivot_on: [host]
-      window: 1h
+  # Behaviour-targeted hunts the engine runs around the alert (not a sweep).
+  - name: Companion identity and host commands
+    query: full_log:/.*(\bid\b|uname -a|hostname|groups|w -h|\blast\b|\/etc\/passwd|sudo -l).*/
+    pivot_on: host
+    window: 1h
+  - name: Shell upgrade or reverse shell
+    query: full_log:/.*(pty\.spawn|\/dev\/tcp|nc -e|bash -i|mkfifo|socat.*exec|script \/dev\/null).*/
+    pivot_on: host
+    window: 1h
+  - name: Privilege escalation attempts
+    query: full_log:/.*(sudo|su -|pkexec|setuid|chmod [0-9]*[4-7][0-9][0-9][0-9]|find .* -perm).*/
+    pivot_on: user
+    window: 2h
+  - name: Staging and download from the shell
+    query: full_log:/.*(curl|wget).*(\/tmp|\/dev\/shm|http).*/
+    pivot_on: host
+    window: 1h
+  - name: Credential and key hunting
+    query: full_log:/.*(\.ssh\/|id_rsa|\/etc\/shadow|\.bash_history|\.aws\/credentials).*/
+    pivot_on: user
+    window: 2h

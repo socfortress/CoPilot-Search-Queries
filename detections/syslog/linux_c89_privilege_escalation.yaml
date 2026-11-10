@@ -115,25 +115,44 @@ graylog:
   query: full_log:/.*c89.*/ AND NOT _exists_:data_win_system_eventID AND NOT rule_groups:/.*syscheck.*/
 
 correlation:
-  # Authored by the correlation engine for review. Related CoPilot Searches to run
-  # around an alert from this rule, scoped to the same host/user/IP within the window.
+  # Authored per-rule (behaviour-researched) for the correlation engine. Related CoPilot
+  # Searches + telemetry pivots to run around an alert, scoped to its host/user/ip/domain.
   related_rules:
-    - id: 26f86252-1549-45e1-a212-eb26840e86bc
-      name: "File Download or Read to Pipe Execution"
-      reason: "same analytic story: Linux Living Off The Land"
+  - id: linux-sudo-or-su-execution-001
+    name: Linux Sudo Or Su Execution
+    reason: c89 -wrapper abuse requires sudo; sudo/su records show the invoking user and target
+  - id: 9b5de532-a757-4d70-946c-1f3e44f48b4d
+    name: Shell Execution GCC  - Linux
+    reason: the compiler front-end spawns a shell through gcc; this Tetragon rule confirms the compile-chain shell
+  - id: 26f86252-1549-45e1-a212-eb26840e86bc
+    name: File Download or Read to Pipe Execution
+    reason: attacker tooling is commonly fetched and executed immediately before the compiler abuse
+  - id: linux-setuid-using-chmod-utility-001
+    name: Linux Setuid Using Chmod Utility
+    reason: a root shell from the compiler wrapper is often followed by setuid binary creation
+  - id: linux-sudoers-tmp-file-creation-001
+    name: Linux Sudoers Tmp File Creation
+    reason: post-escalation sudoers changes make the compiler-obtained root access permanent
   window: 1h
   enrichment_searches:
-  # Rule-specific telemetry pivots the engine runs around an alert from this rule,
-  # scoped to the alert's host/user/IP within the window (behaviour-targeted, not a sweep).
-    - name: "Privilege-escalation tooling executed on this host"
-      query: 'data_process_exec_process_binary:/.*(\/[Ss][Uu][Dd][Oo]|\/[Ss][Uu]|\/[Pp][Kk][Ee][Xx][Ee][Cc]|\/[Dd][Oo][Aa][Ss]|\/[Ss][Ee][Tt][Cc][Aa][Pp]|\/[Cc][Hh][Ss][Hh]|\/[Nn][Ee][Ww][Gg][Rr][Pp])/'
-      pivot_on: [host]
-      window: 2h
-    - name: "Shell / interpreter execution on this host"
-      query: '((data_process_exec_process_binary:/.*(\/[Bb][Aa][Ss][Hh]|\/[Ss][Hh]|\/[Dd][Aa][Ss][Hh]|\/[Zz][Ss][Hh]|\/[Kk][Ss][Hh]|\/[Aa][Ss][Hh]|\/[Bb][Uu][Ss][Yy][Bb][Oo][Xx])/) OR (data_process_exec_process_binary:/.*(\/[Pp][Yy][Tt][Hh][Oo][Nn]|\/[Pp][Yy][Tt][Hh][Oo][Nn]3|\/[Pp][Ee][Rr][Ll]|\/[Rr][Uu][Bb][Yy]|\/[Pp][Hh][Pp]|\/[Nn][Oo][Dd][Ee]|\/[Ll][Uu][Aa]|\/[Aa][Ww][Kk])/))'
-      pivot_on: [host]
-      window: 1h
-    - name: "Reconnaissance commands on this host"
-      query: 'data_process_exec_process_binary:/.*(\/[Ww][Hh][Oo][Aa][Mm][Ii]|\/[Ii][Dd]|\/[Uu][Nn][Aa][Mm][Ee]|\/[Hh][Oo][Ss][Tt][Nn][Aa][Mm][Ee]|\/[Hh][Oo][Ss][Tt][Nn][Aa][Mm][Ee][Cc][Tt][Ll]|\/[Ss][Ss]|\/[Nn][Ee][Tt][Ss][Tt][Aa][Tt]|\/[Ii][Ff][Cc][Oo][Nn][Ff][Ii][Gg]|\/[Aa][Rr][Pp]|\/[Ww]|\/[Ww][Hh][Oo]|\/[Ll][Aa][Ss][Tt]|\/[Ll][Ss][Oo][Ff]|\/[Nn][Mm][Aa][Pp]|\/[Dd][Ii][Gg]|\/[Ff][Ii][Nn][Dd])/'
-      pivot_on: [host]
-      window: 1h
+  # Behaviour-targeted hunts the engine runs around the alert (not a sweep).
+  - name: c89 compiler invoked with -wrapper
+    query: data_process_exec_process_binary:/.*\/([Cc]89|[Gg][Cc][Cc]|[Cc][Cc])/ AND data_process_exec_process_arguments:/.*-wrapper.*/
+    pivot_on:
+    - host
+    window: 1h
+  - name: Shell spawned as root with sudo
+    query: (data_process_exec_process_binary:/.*\/([Ss][Uu][Dd][Oo]|[Dd][Oo][Aa][Ss]|[Pp][Kk][Ee][Xx][Ee][Cc])/) OR (data_process_exec_process_binary:/.*\/([Bb][Aa][Ss][Hh]|[Ss][Hh]|[Dd][Aa][Ss][Hh]|[Zz][Ss][Hh]|[Aa][Ss][Hh])/ AND data_process_exec_process_arguments:/.*(-[Ii]|-[Pp]|-[Cc]).*/)
+    pivot_on:
+    - host
+    window: 1h
+  - name: Download tooling on host
+    query: data_process_exec_process_binary:/.*\/([Cc][Uu][Rr][Ll]|[Ww][Gg][Ee][Tt]|[Ff][Tt][Pp]|[Tt][Ff][Tt][Pp]|[Nn][Cc]|[Nn][Cc][Aa][Tt]|[Ss][Oo][Cc][Aa][Tt])/
+    pivot_on:
+    - host
+    window: 2h
+  - name: SUID/capability changes after escalation
+    query: (data_process_exec_process_binary:/.*\/([Cc][Hh][Mm][Oo][Dd]|[Ss][Ee][Tt][Cc][Aa][Pp])/ AND data_process_exec_process_arguments:/.*([+][Ss]|[24]7[0-9][0-9]|[Cc][Aa][Pp]_[Ss][Ee][Tt][Uu][Ii][Dd]).*/)
+    pivot_on:
+    - host
+    window: 4h

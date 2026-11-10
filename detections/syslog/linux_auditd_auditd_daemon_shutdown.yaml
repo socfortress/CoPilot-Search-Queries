@@ -105,19 +105,50 @@ graylog:
   query: full_log:/.*type=DAEMON_END.*/ AND NOT _exists_:data_win_system_eventID AND NOT rule_groups:/.*windows.*/
 
 correlation:
-  # Authored by the correlation engine for review.
+  # Authored per-rule (behaviour-researched) for the correlation engine. Related CoPilot
+  # Searches + telemetry pivots to run around an alert, scoped to its host/user/ip/domain.
+  related_rules:
+  - id: linux-auditd-daemon-abort-001
+    name: Linux Auditd Daemon Abort
+    reason: Abnormal termination vs clean DAEMON_END distinguishes kill from stop
+  - id: linux-auditd-daemon-start-001
+    name: Linux Auditd Daemon Start
+    reason: A matching start shows reboot/maintenance; absence means auditing stayed off
+  - id: linux-stop-services-001
+    name: Linux Stop Services
+    reason: systemctl/service stop auditd is the direct cause
+  - id: linux-security-monitoring-service-stop-001
+    name: Linux Security Monitoring Service Stop
+    reason: Other security agents stopped at the same moment
+  - id: bed26dea-4525-47f4-b24a-76e30e44ffb0
+    name: Audit Rules Deleted Via Auditctl
+    reason: Rule removal alongside daemon stop
+  - id: linux-system-reboot-via-sysrq-001
+    name: Linux System Reboot Via System Request Key
+    reason: Distinguishes forced reboot from a targeted stop
+  - id: 80915f59-9b56-4616-9de0-fd0dea6c12fe
+    name: Linux Logs Clearing Attempts
+    reason: Log clearing during the audit gap
+  window: 2h
   enrichment_searches:
-  # Rule-specific telemetry pivots the engine runs around an alert from this rule,
-  # scoped to the alert's host/user/IP within the window (behaviour-targeted, not a sweep).
-    - name: "Security-tool / firewall tampering on this host"
-      query: '((data_process_exec_process_binary:/.*(\/[Cc][Hh][Aa][Tt][Tt][Rr]|\/[Ss][Hh][Rr][Ee][Dd]|\/[Aa][Uu][Dd][Ii][Tt][Cc][Tt][Ll]|\/[Ss][Ee][Tt][Ee][Nn][Ff][Oo][Rr][Cc][Ee])/) OR (data_process_exec_process_arguments:/.*[Hh][Ii][Ss][Tt][Oo][Rr][Yy] -[Cc].*/) OR (data_process_exec_process_arguments:/.*\/[Vv][Aa][Rr]\/[Ll][Oo][Gg].*/) OR (data_process_exec_process_arguments:/.*[Ii][Pp][Tt][Aa][Bb][Ll][Ee][Ss] -[Ff].*/))'
-      pivot_on: [host]
-      window: 2h
-    - name: "Shell / interpreter execution on this host"
-      query: '((data_process_exec_process_binary:/.*(\/[Bb][Aa][Ss][Hh]|\/[Ss][Hh]|\/[Dd][Aa][Ss][Hh]|\/[Zz][Ss][Hh]|\/[Kk][Ss][Hh]|\/[Aa][Ss][Hh]|\/[Bb][Uu][Ss][Yy][Bb][Oo][Xx])/) OR (data_process_exec_process_binary:/.*(\/[Pp][Yy][Tt][Hh][Oo][Nn]|\/[Pp][Yy][Tt][Hh][Oo][Nn]3|\/[Pp][Ee][Rr][Ll]|\/[Rr][Uu][Bb][Yy]|\/[Pp][Hh][Pp]|\/[Nn][Oo][Dd][Ee]|\/[Ll][Uu][Aa]|\/[Aa][Ww][Kk])/))'
-      pivot_on: [host]
-      window: 1h
-    - name: "Reconnaissance commands on this host"
-      query: 'data_process_exec_process_binary:/.*(\/[Ww][Hh][Oo][Aa][Mm][Ii]|\/[Ii][Dd]|\/[Uu][Nn][Aa][Mm][Ee]|\/[Hh][Oo][Ss][Tt][Nn][Aa][Mm][Ee]|\/[Hh][Oo][Ss][Tt][Nn][Aa][Mm][Ee][Cc][Tt][Ll]|\/[Ss][Ss]|\/[Nn][Ee][Tt][Ss][Tt][Aa][Tt]|\/[Ii][Ff][Cc][Oo][Nn][Ff][Ii][Gg]|\/[Aa][Rr][Pp]|\/[Ww]|\/[Ww][Hh][Oo]|\/[Ll][Aa][Ss][Tt]|\/[Ll][Ss][Oo][Ff]|\/[Nn][Mm][Aa][Pp]|\/[Dd][Ii][Gg]|\/[Ff][Ii][Nn][Dd])/'
-      pivot_on: [host]
-      window: 1h
+  # Behaviour-targeted hunts the engine runs around the alert (not a sweep).
+  - name: Service stop of auditing/logging
+    query: full_log:/.*(systemctl|service|kill|pkill|killall).*/ AND full_log:/.*(auditd|rsyslog|syslog-ng|wazuh-agent|osquery).*/
+    pivot_on:
+    - host
+    window: 2h
+  - name: System shutdown/reboot context
+    query: full_log:/.*(shutdown|reboot|poweroff|halt|type=SYSTEM_SHUTDOWN|type=SYSTEM_RUNLEVEL|type=SYSTEM_BOOT).*/
+    pivot_on:
+    - host
+    window: 2h
+  - name: Audit rule deletion or config change
+    query: full_log:/.*(auditctl|audit\.rules|auditd\.conf|type=CONFIG_CHANGE).*/
+    pivot_on:
+    - host
+    window: 2h
+  - name: Log deletion in audit gap
+    query: data_process_exec_process_binary:/.*(\/[Rr][Mm]|\/[Ss][Hh][Rr][Ee][Dd]|\/[Tt][Rr][Uu][Nn][Cc][Aa][Tt][Ee])/ AND full_log:/.*\/var\/log.*/
+    pivot_on:
+    - host
+    window: 4h

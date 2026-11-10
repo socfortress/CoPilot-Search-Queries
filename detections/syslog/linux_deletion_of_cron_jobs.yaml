@@ -126,31 +126,53 @@ graylog:
   query: (full_log:/.*\/usr\/bin\/rm.*\/etc\/cron\..*/ OR full_log:/.*rm -f.*\/etc\/cron\..*/ OR full_log:/.*rm -rf.*\/etc\/cron\..*/) AND NOT _exists_:data_win_system_eventID AND NOT rule_groups:/.*windows.*/
 
 correlation:
-  # Authored by the correlation engine for review. Related CoPilot Searches to run
-  # around an alert from this rule, scoped to the same host/user/IP within the window.
+  # Authored per-rule (behaviour-researched) for the correlation engine. Related CoPilot
+  # Searches + telemetry pivots to run around an alert, scoped to its host/user/ip/domain.
   related_rules:
-    - id: de25eeb8-3655-4643-ac3a-b662d3f26b6b
-      name: "Disable Or Stop Services"
-      reason: "next kill-chain tactic: Impact"
-    - id: 2992ac4d-31e9-4325-99f2-b18a73221bb2
-      name: "ESXi VM Kill Via ESXCLI"
-      reason: "next kill-chain tactic: Impact"
-    - id: 8a46f16c-8c4c-82d1-b121-0fdd3ba70a84
-      name: "Group Has Been Deleted Via Groupdel"
-      reason: "next kill-chain tactic: Impact"
-  window: 1h
+  - id: c2e234de-03a3-41e1-b39a-1e56dc17ba67
+    name: Remove Scheduled Cron Task/Job
+    reason: Tetragon view of cron task removal such as crontab -r; same tampering
+  - id: linux-auditd-crontab-directory-files-modification-001
+    name: Linux Auditd Crontab Directory Files Modification
+    reason: 'Cron dir file changes: attacker replaces jobs after deleting originals'
+  - id: linux-append-cronjob-entry-001
+    name: Linux Append Cronjob Entry On Existing Cronjob File
+    reason: Appending a malicious job often follows deleting legitimate ones
+  - id: linux-edit-cron-table-parameter-001
+    name: Linux Edit Cron Table Parameter
+    reason: crontab edit as alternative persistence/tamper
+  - id: 4e2a6c91-7f3d-4b6e-9a4f-1c8b0e5a92d4
+    name: Crontab Interactive Edit Execution
+    reason: Interactive crontab edit near the deletion
+  - id: linux-security-monitoring-service-stop-001
+    name: Linux Security Monitoring Service Stop
+    reason: Removing cron jobs can disable scheduled security/backup tasks, paired with stopping agents
+  - id: a3b7c9d2-4f5e-4b6d-8c1a-2d3f4e5b6c7a
+    name: Linux Critical Directory Deletion
+    reason: Wider destructive rm -rf campaign on same host
+  - id: linux-sudo-or-su-execution-001
+    name: Linux Sudo Or Su Execution
+    reason: Root needed to touch /etc/cron.*; shows the privilege path
+  window: 6h
   enrichment_searches:
-  # Rule-specific telemetry pivots the engine runs around an alert from this rule,
-  # scoped to the alert's host/user/IP within the window (behaviour-targeted, not a sweep).
-    - name: "Destructive / data-wipe tooling on this host"
-      query: '((data_process_exec_process_binary:/.*(\/[Dd][Dd]|\/[Mm][Kk][Ff][Ss]|\/[Ww][Ii][Pp][Ee][Ff][Ss]|\/[Ss][Hh][Rr][Ee][Dd]|\/[Cc][Rr][Yy][Pp][Tt][Ss][Ee][Tt][Uu][Pp])/) OR (data_process_exec_process_arguments:/.*[Rr][Mm] -[Rr][Ff].*/) OR (data_process_exec_process_arguments:/.*--[Nn][Oo]-[Pp][Rr][Ee][Ss][Ee][Rr][Vv][Ee]-[Rr][Oo][Oo][Tt].*/))'
-      pivot_on: [host]
-      window: 2h
-    - name: "Shell / interpreter execution on this host"
-      query: '((data_process_exec_process_binary:/.*(\/[Bb][Aa][Ss][Hh]|\/[Ss][Hh]|\/[Dd][Aa][Ss][Hh]|\/[Zz][Ss][Hh]|\/[Kk][Ss][Hh]|\/[Aa][Ss][Hh]|\/[Bb][Uu][Ss][Yy][Bb][Oo][Xx])/) OR (data_process_exec_process_binary:/.*(\/[Pp][Yy][Tt][Hh][Oo][Nn]|\/[Pp][Yy][Tt][Hh][Oo][Nn]3|\/[Pp][Ee][Rr][Ll]|\/[Rr][Uu][Bb][Yy]|\/[Pp][Hh][Pp]|\/[Nn][Oo][Dd][Ee]|\/[Ll][Uu][Aa]|\/[Aa][Ww][Kk])/))'
-      pivot_on: [host]
-      window: 1h
-    - name: "Reconnaissance commands on this host"
-      query: 'data_process_exec_process_binary:/.*(\/[Ww][Hh][Oo][Aa][Mm][Ii]|\/[Ii][Dd]|\/[Uu][Nn][Aa][Mm][Ee]|\/[Hh][Oo][Ss][Tt][Nn][Aa][Mm][Ee]|\/[Hh][Oo][Ss][Tt][Nn][Aa][Mm][Ee][Cc][Tt][Ll]|\/[Ss][Ss]|\/[Nn][Ee][Tt][Ss][Tt][Aa][Tt]|\/[Ii][Ff][Cc][Oo][Nn][Ff][Ii][Gg]|\/[Aa][Rr][Pp]|\/[Ww]|\/[Ww][Hh][Oo]|\/[Ll][Aa][Ss][Tt]|\/[Ll][Ss][Oo][Ff]|\/[Nn][Mm][Aa][Pp]|\/[Dd][Ii][Gg]|\/[Ff][Ii][Nn][Dd])/'
-      pivot_on: [host]
-      window: 1h
+  # Behaviour-targeted hunts the engine runs around the alert (not a sweep).
+  - name: Cron file removal or crontab -r
+    query: (data_process_exec_process_binary:/.*\/[Rr][Mm]/ AND data_process_exec_process_arguments:/.*\/etc\/cron.*/) OR (data_process_exec_process_binary:/.*\/[Cc][Rr][Oo][Nn][Tt][Aa][Bb]/ AND data_process_exec_process_arguments:/.*-[Rr].*/)
+    pivot_on: host
+    window: 6h
+  - name: Cron entries written or edited
+    query: data_process_exec_process_arguments:/.*(\/etc\/cron\.|\/var\/spool\/cron|\/etc\/crontab).*/ AND NOT data_process_exec_process_binary:/.*\/[Rr][Mm]/
+    pivot_on: host
+    window: 6h
+  - name: Alternative schedulers at/systemd timers
+    query: data_process_exec_process_binary:/.*(\/[Aa][Tt]|\/[Bb][Aa][Tt][Cc][Hh])/ OR data_process_exec_process_arguments:/.*(\.timer|\/etc\/systemd\/system).*/
+    pivot_on: host
+    window: 6h
+  - name: Service stop or disable
+    query: data_process_exec_process_binary:/.*\/[Ss][Yy][Ss][Tt][Ee][Mm][Cc][Tt][Ll]/ AND data_process_exec_process_arguments:/.*([Ss][Tt][Oo][Pp]|[Dd][Ii][Ss][Aa][Bb][Ll][Ee]|[Mm][Aa][Ss][Kk]).*/
+    pivot_on: host
+    window: 4h
+  - name: Downloads following tamper
+    query: data_process_exec_process_binary:/.*(\/[Cc][Uu][Rr][Ll]|\/[Ww][Gg][Ee][Tt])/
+    pivot_on: host
+    window: 4h

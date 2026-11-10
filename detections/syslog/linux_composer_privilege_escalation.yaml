@@ -126,25 +126,44 @@ graylog:
   query: full_log:/.*composer.*/ AND (full_log:/.*run\-script.*/ OR full_log:/.*sudo.*/ OR full_log:/.*72756E2D736372697074.*/) AND NOT _exists_:data_win_system_eventID AND NOT rule_groups:/.*windows.*/
 
 correlation:
-  # Authored by the correlation engine for review. Related CoPilot Searches to run
-  # around an alert from this rule, scoped to the same host/user/IP within the window.
+  # Authored per-rule (behaviour-researched) for the correlation engine. Related CoPilot
+  # Searches + telemetry pivots to run around an alert, scoped to its host/user/ip/domain.
   related_rules:
-    - id: 26f86252-1549-45e1-a212-eb26840e86bc
-      name: "File Download or Read to Pipe Execution"
-      reason: "same analytic story: Linux Living Off The Land"
+  - id: linux-sudo-or-su-execution-001
+    name: Linux Sudo Or Su Execution
+    reason: composer run-script is abused via sudo; sudo records show invoking user and target
+  - id: 26f86252-1549-45e1-a212-eb26840e86bc
+    name: File Download or Read to Pipe Execution
+    reason: composer scripts or payloads are often fetched from the network and run just before
+  - id: 2d2f44ff-4611-4778-a8fc-323a0e9850cc
+    name: Inline Python Execution - Spawn Shell Via OS System Library
+    reason: a script spawning a shell via an OS call is the composer run-script payload path
+  - id: linux-setuid-using-chmod-utility-001
+    name: Linux Setuid Using Chmod Utility
+    reason: root obtained through composer is often followed by setuid persistence
+  - id: linux-sudoers-tmp-file-creation-001
+    name: Linux Sudoers Tmp File Creation
+    reason: root access via composer is commonly locked in by sudoers edits
   window: 1h
   enrichment_searches:
-  # Rule-specific telemetry pivots the engine runs around an alert from this rule,
-  # scoped to the alert's host/user/IP within the window (behaviour-targeted, not a sweep).
-    - name: "Privilege-escalation tooling executed on this host"
-      query: 'data_process_exec_process_binary:/.*(\/[Ss][Uu][Dd][Oo]|\/[Ss][Uu]|\/[Pp][Kk][Ee][Xx][Ee][Cc]|\/[Dd][Oo][Aa][Ss]|\/[Ss][Ee][Tt][Cc][Aa][Pp]|\/[Cc][Hh][Ss][Hh]|\/[Nn][Ee][Ww][Gg][Rr][Pp])/'
-      pivot_on: [host]
-      window: 2h
-    - name: "Shell / interpreter execution on this host"
-      query: '((data_process_exec_process_binary:/.*(\/[Bb][Aa][Ss][Hh]|\/[Ss][Hh]|\/[Dd][Aa][Ss][Hh]|\/[Zz][Ss][Hh]|\/[Kk][Ss][Hh]|\/[Aa][Ss][Hh]|\/[Bb][Uu][Ss][Yy][Bb][Oo][Xx])/) OR (data_process_exec_process_binary:/.*(\/[Pp][Yy][Tt][Hh][Oo][Nn]|\/[Pp][Yy][Tt][Hh][Oo][Nn]3|\/[Pp][Ee][Rr][Ll]|\/[Rr][Uu][Bb][Yy]|\/[Pp][Hh][Pp]|\/[Nn][Oo][Dd][Ee]|\/[Ll][Uu][Aa]|\/[Aa][Ww][Kk])/))'
-      pivot_on: [host]
-      window: 1h
-    - name: "Reconnaissance commands on this host"
-      query: 'data_process_exec_process_binary:/.*(\/[Ww][Hh][Oo][Aa][Mm][Ii]|\/[Ii][Dd]|\/[Uu][Nn][Aa][Mm][Ee]|\/[Hh][Oo][Ss][Tt][Nn][Aa][Mm][Ee]|\/[Hh][Oo][Ss][Tt][Nn][Aa][Mm][Ee][Cc][Tt][Ll]|\/[Ss][Ss]|\/[Nn][Ee][Tt][Ss][Tt][Aa][Tt]|\/[Ii][Ff][Cc][Oo][Nn][Ff][Ii][Gg]|\/[Aa][Rr][Pp]|\/[Ww]|\/[Ww][Hh][Oo]|\/[Ll][Aa][Ss][Tt]|\/[Ll][Ss][Oo][Ff]|\/[Nn][Mm][Aa][Pp]|\/[Dd][Ii][Gg]|\/[Ff][Ii][Nn][Dd])/'
-      pivot_on: [host]
-      window: 1h
+  # Behaviour-targeted hunts the engine runs around the alert (not a sweep).
+  - name: Composer run-script execution
+    query: data_process_exec_process_binary:/.*\/([Cc][Oo][Mm][Pp][Oo][Ss][Ee][Rr]|[Pp][Hh][Pp])/ AND data_process_exec_process_arguments:/.*([Rr][Uu][Nn]-[Ss][Cc][Rr][Ii][Pp][Tt]|[Ss][Cc][Rr][Ii][Pp][Tt][Ss]).*/
+    pivot_on:
+    - host
+    window: 1h
+  - name: Shell spawned under sudo
+    query: (data_process_exec_process_binary:/.*\/([Ss][Uu][Dd][Oo]|[Dd][Oo][Aa][Ss]|[Pp][Kk][Ee][Xx][Ee][Cc])/) OR (data_process_exec_process_binary:/.*\/([Bb][Aa][Ss][Hh]|[Ss][Hh]|[Dd][Aa][Ss][Hh]|[Zz][Ss][Hh]|[Aa][Ss][Hh])/ AND data_process_exec_process_arguments:/.*(-[Ii]|-[Pp]|-[Cc]).*/)
+    pivot_on:
+    - host
+    window: 1h
+  - name: Tooling downloaded to stage composer.json
+    query: data_process_exec_process_binary:/.*\/([Cc][Uu][Rr][Ll]|[Ww][Gg][Ee][Tt]|[Ff][Tt][Pp]|[Tt][Ff][Tt][Pp]|[Nn][Cc]|[Nn][Cc][Aa][Tt]|[Ss][Oo][Cc][Aa][Tt])/
+    pivot_on:
+    - host
+    window: 2h
+  - name: SUID/capability changes after escalation
+    query: (data_process_exec_process_binary:/.*\/([Cc][Hh][Mm][Oo][Dd]|[Ss][Ee][Tt][Cc][Aa][Pp])/ AND data_process_exec_process_arguments:/.*([+][Ss]|[24]7[0-9][0-9]|[Cc][Aa][Pp]_[Ss][Ee][Tt][Uu][Ii][Dd]).*/)
+    pivot_on:
+    - host
+    window: 4h

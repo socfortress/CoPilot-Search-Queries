@@ -114,19 +114,49 @@ graylog:
   query: full_log:/.*profile\.d.*/ AND NOT _exists_:data_win_system_eventID AND NOT rule_groups:/.*windows.*/
 
 correlation:
-  # Authored by the correlation engine for review.
+  # Authored per-rule (behaviour-researched) for the correlation engine. Related CoPilot
+  # Searches + telemetry pivots to run around an alert, scoped to its host/user/ip/domain.
+  related_rules:
+  - id: linux-append-cronjob-entry-001
+    name: Linux Append Cronjob Entry On Existing Cronjob File
+    reason: Kaiji-style malware pairs profile.d hooks with cron entries for redundant persistence.
+  - id: linux-service-file-created-in-systemd-directory-001
+    name: Linux Service File Created In Systemd Directory
+    reason: Systemd units are the other boot persistence commonly dropped together with login hooks.
+  - id: linux-preload-hijack-via-preload-file-001
+    name: Linux Preload Hijack Via Preload File
+    reason: Both run attacker code in every login or process; often combined in rootkit-grade persistence.
+  - id: linux-sudo-or-su-execution-001
+    name: Linux Sudo Or Su Execution
+    reason: Writing to /etc/profile.d requires root, so the preceding sudo/su identifies the account used for elevation.
+  - id: linux-auditd-ssh-config-keys-deletion-001
+    name: Linux Auditd SSH Config Keys Deletion
+    reason: Kaiji-like malware manipulates SSH keys and config around persistence installation.
+  window: 4h
   enrichment_searches:
-  # Rule-specific telemetry pivots the engine runs around an alert from this rule,
-  # scoped to the alert's host/user/IP within the window (behaviour-targeted, not a sweep).
-    - name: "Shell-profile / init persistence on this host"
-      query: '((data_process_exec_process_arguments:/.*\.[Bb][Aa][Ss][Hh][Rr][Cc].*/) OR (data_process_exec_process_arguments:/.*\.[Bb][Aa][Ss][Hh]_[Pp][Rr][Oo][Ff][Ii][Ll][Ee].*/) OR (data_process_exec_process_arguments:/.*\/[Ee][Tt][Cc]\/[Pp][Rr][Oo][Ff][Ii][Ll][Ee].*/) OR (data_process_exec_process_arguments:/.*[Rr][Cc]\.[Ll][Oo][Cc][Aa][Ll].*/) OR (data_process_exec_process_arguments:/.*[Aa][Uu][Tt][Hh][Oo][Rr][Ii][Zz][Ee][Dd]_[Kk][Ee][Yy][Ss].*/))'
-      pivot_on: [host]
-      window: 4h
-    - name: "Shell / interpreter execution on this host"
-      query: '((data_process_exec_process_binary:/.*(\/[Bb][Aa][Ss][Hh]|\/[Ss][Hh]|\/[Dd][Aa][Ss][Hh]|\/[Zz][Ss][Hh]|\/[Kk][Ss][Hh]|\/[Aa][Ss][Hh]|\/[Bb][Uu][Ss][Yy][Bb][Oo][Xx])/) OR (data_process_exec_process_binary:/.*(\/[Pp][Yy][Tt][Hh][Oo][Nn]|\/[Pp][Yy][Tt][Hh][Oo][Nn]3|\/[Pp][Ee][Rr][Ll]|\/[Rr][Uu][Bb][Yy]|\/[Pp][Hh][Pp]|\/[Nn][Oo][Dd][Ee]|\/[Ll][Uu][Aa]|\/[Aa][Ww][Kk])/))'
-      pivot_on: [host]
-      window: 1h
-    - name: "Reconnaissance commands on this host"
-      query: 'data_process_exec_process_binary:/.*(\/[Ww][Hh][Oo][Aa][Mm][Ii]|\/[Ii][Dd]|\/[Uu][Nn][Aa][Mm][Ee]|\/[Hh][Oo][Ss][Tt][Nn][Aa][Mm][Ee]|\/[Hh][Oo][Ss][Tt][Nn][Aa][Mm][Ee][Cc][Tt][Ll]|\/[Ss][Ss]|\/[Nn][Ee][Tt][Ss][Tt][Aa][Tt]|\/[Ii][Ff][Cc][Oo][Nn][Ff][Ii][Gg]|\/[Aa][Rr][Pp]|\/[Ww]|\/[Ww][Hh][Oo]|\/[Ll][Aa][Ss][Tt]|\/[Ll][Ss][Oo][Ff]|\/[Nn][Mm][Aa][Pp]|\/[Dd][Ii][Gg]|\/[Ff][Ii][Nn][Dd])/'
-      pivot_on: [host]
-      window: 1h
+  # Behaviour-targeted hunts the engine runs around the alert (not a sweep).
+  - name: Writes into profile.d and shell startup files
+    query: (data_process_exec_process_arguments:/.*(\/[Ee][Tt][Cc]\/[Pp][Rr][Oo][Ff][Ii][Ll][Ee]\.[Dd]\/|\/[Ee][Tt][Cc]\/[Pp][Rr][Oo][Ff][Ii][Ll][Ee]|\.[Bb][Aa][Ss][Hh][Rr][Cc]|\.[Bb][Aa][Ss][Hh]_[Pp][Rr][Oo][Ff][Ii][Ll][Ee]|\.[Pp][Rr][Oo][Ff][Ii][Ll][Ee]|\/[Ee][Tt][Cc]\/[Bb][Aa][Ss][Hh]\.[Bb][Aa][Ss][Hh][Rr][Cc]|\/[Ee][Tt][Cc]\/[Ee][Nn][Vv][Ii][Rr][Oo][Nn][Mm][Ee][Nn][Tt]).*/) AND (data_process_exec_process_binary:/.*\/([Tt][Ee][Ee]|[Cc][Pp]|[Mm][Vv]|[Cc][Hh][Mm][Oo][Dd]|[Ss][Ee][Dd]|[Ii][Nn][Ss][Tt][Aa][Ll][Ll]|[Tt][Oo][Uu][Cc][Hh]|[Ee][Cc][Hh][Oo]|[Cc][Aa][Tt]|[Bb][Aa][Ss][Hh]|[Ss][Hh])/)
+    pivot_on:
+    - host
+    window: 2h
+  - name: Elevation preceding the write
+    query: (data_process_exec_process_binary:/.*\/([Ss][Uu][Dd][Oo]|[Ss][Uu]|[Pp][Kk][Ee][Xx][Ee][Cc]|[Dd][Oo][Aa][Ss]|[Ss][Ee][Tt][Cc][Aa][Pp]|[Cc][Hh][Mm][Oo][Dd]|[Cc][Hh][Oo][Ww][Nn])/ OR data_process_exec_process_arguments:/.*([Cc][Hh][Mm][Oo][Dd] \+[Ss]|[Cc][Hh][Mm][Oo][Dd] [Uu]\+[Ss]|[Cc][Hh][Mm][Oo][Dd] 4755|[Cc][Hh][Mm][Oo][Dd] \+[Xx]).*/) AND data_process_exec_process_arguments:/.*([Pp][Rr][Oo][Ff][Ii][Ll][Ee]|\/[Ee][Tt][Cc]\/).*/
+    pivot_on:
+    - host
+    window: 2h
+  - name: Payload download or staging from writable paths
+    query: ((data_process_exec_process_binary:/.*\/([Cc][Uu][Rr][Ll]|[Ww][Gg][Ee][Tt])/ AND data_process_exec_process_arguments:/.*([Hh][Tt][Tt][Pp]:\/\/|[Hh][Tt][Tt][Pp][Ss]:\/\/|[Ff][Tt][Pp]:\/\/).*/) OR (data_process_exec_process_arguments:/.*(\/[Tt][Mm][Pp]\/|\/[Dd][Ee][Vv]\/[Ss][Hh][Mm]\/|\/[Vv][Aa][Rr]\/[Tt][Mm][Pp]\/).*/ AND data_process_exec_process_binary:/.*\/([Cc][Hh][Mm][Oo][Dd]|[Bb][Aa][Ss][Hh]|[Ss][Hh])/))
+    pivot_on:
+    - host
+    window: 4h
+  - name: Redundant persistence on host
+    query: (data_process_exec_process_arguments:/.*(\/[Ee][Tt][Cc]\/[Cc][Rr][Oo][Nn]|[Cc][Rr][Oo][Nn][Tt][Aa][Bb]|\/[Ee][Tt][Cc]\/[Ss][Yy][Ss][Tt][Ee][Mm][Dd]\/|[Ss][Yy][Ss][Tt][Ee][Mm][Cc][Tt][Ll] [Ee][Nn][Aa][Bb][Ll][Ee]|[Ll][Dd]\.[Ss][Oo]\.[Pp][Rr][Ee][Ll][Oo][Aa][Dd]|[Aa][Uu][Tt][Hh][Oo][Rr][Ii][Zz][Ee][Dd]_[Kk][Ee][Yy][Ss]|\/[Ee][Tt][Cc]\/[Rr][Cc]\.[Ll][Oo][Cc][Aa][Ll]|\/[Ee][Tt][Cc]\/[Ii][Nn][Ii][Tt]\.[Dd]\/|\/[Ee][Tt][Cc]\/[Pp][Rr][Oo][Ff][Ii][Ll][Ee]).*/ OR data_process_exec_process_binary:/.*\/([Cc][Rr][Oo][Nn][Tt][Aa][Bb]|[Ss][Yy][Ss][Tt][Ee][Mm][Cc][Tt][Ll]|[Uu][Pp][Dd][Aa][Tt][Ee]\-[Rr][Cc]\.[Dd]|[Cc][Hh][Kk][Cc][Oo][Nn][Ff][Ii][Gg]|[Aa][Tt])/) AND NOT data_process_exec_process_arguments:/.*(\/[Ee][Tt][Cc]\/[Pp][Rr][Oo][Ff][Ii][Ll][Ee]).*/
+    pivot_on:
+    - host
+    window: 24h
+  - name: Interactive logins that would trigger the hook
+    query: full_log:/.*([Ss][Ee][Ss][Ss][Ii][Oo][Nn] [Oo][Pp][Ee][Nn][Ee][Dd] [Ff][Oo][Rr] [Uu][Ss][Ee][Rr]|[Aa][Cc][Cc][Ee][Pp][Tt][Ee][Dd] [Pp][Aa][Ss][Ss][Ww][Oo][Rr][Dd]|[Aa][Cc][Cc][Ee][Pp][Tt][Ee][Dd] [Pp][Uu][Bb][Ll][Ii][Cc][Kk][Ee][Yy]).*/
+    pivot_on:
+    - host
+    window: 24h

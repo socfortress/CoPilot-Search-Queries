@@ -138,25 +138,53 @@ graylog:
   query: (full_log:/.*\.bashrc.*/ OR full_log:/.*\.bash_profile.*/ OR full_log:/.*profile\.d.*/ OR full_log:/.*\/etc\/profile.*/ OR full_log:/.*\.zshrc.*/ OR full_log:/.*\.zprofile.*/ OR full_log:/.*\/etc\/shells.*/ OR full_log:/.*\.bash_login.*/ OR full_log:/.*\.bash_logout.*/ OR full_log:/.*\/etc\/bash\.bashrc.*/) AND NOT _exists_:data_win_system_eventID AND NOT rule_groups:/.*windows.*/
 
 correlation:
-  # Authored by the correlation engine for review. Related CoPilot Searches to run
-  # around an alert from this rule, scoped to the same host/user/IP within the window.
+  # Authored per-rule (behaviour-researched) for the correlation engine. Related CoPilot
+  # Searches + telemetry pivots to run around an alert, scoped to its host/user/ip/domain.
   related_rules:
-    - id: 26f86252-1549-45e1-a212-eb26840e86bc
-      name: "File Download or Read to Pipe Execution"
-      reason: "same analytic story: Linux Living Off The Land"
-  window: 1h
+  - id: linux-file-creation-profile-directory-001
+    name: Linux File Creation In Profile Directory
+    reason: Dropping scripts in profile.d is the system-wide variant of the same login-persistence trick.
+  - id: a94cdd87-6c54-4678-a6cc-2814ffe5a13d
+    name: Unix Shell Configuration Modification
+    reason: Sibling detection for the same shell-config file edits from another telemetry shape.
+  - id: linux-edit-cron-table-parameter-001
+    name: Linux Edit Cron Table Parameter
+    reason: Attackers pair rc-file persistence with cron for redundancy.
+  - id: linux-service-file-created-in-systemd-directory-001
+    name: Linux Service File Created In Systemd Directory
+    reason: Systemd units are the other common persistence path added alongside rc edits.
+  - id: linux-preload-hijack-via-preload-file-001
+    name: Linux Preload Hijack Via Preload File
+    reason: ld.so.preload hijack is a stealthier persistence that follows a shell-level foothold.
+  - id: ba592c6d-6888-43c3-b8c6-689b8fe47337
+    name: Linux Base64 Encoded Pipe to Shell
+    reason: Payload planted in an rc file is often a base64 pipe-to-shell one-liner.
+  - id: f1e2d3c4-5b6a-7d8e-9f0a-1b2c3d4e5f6a
+    name: Linux Kernel Module Load
+    reason: Hidden files/directories hold the staged payload the rc file launches.
+  - id: 1182f3b3-e716-4efa-99ab-d2685d04360f
+    name: History File Deletion
+    reason: History deletion after editing rc files indicates cleanup of the persistence step.
+  window: 24h
   enrichment_searches:
-  # Rule-specific telemetry pivots the engine runs around an alert from this rule,
-  # scoped to the alert's host/user/IP within the window (behaviour-targeted, not a sweep).
-    - name: "Shell-profile / init persistence on this host"
-      query: '((data_process_exec_process_arguments:/.*\.[Bb][Aa][Ss][Hh][Rr][Cc].*/) OR (data_process_exec_process_arguments:/.*\.[Bb][Aa][Ss][Hh]_[Pp][Rr][Oo][Ff][Ii][Ll][Ee].*/) OR (data_process_exec_process_arguments:/.*\/[Ee][Tt][Cc]\/[Pp][Rr][Oo][Ff][Ii][Ll][Ee].*/) OR (data_process_exec_process_arguments:/.*[Rr][Cc]\.[Ll][Oo][Cc][Aa][Ll].*/) OR (data_process_exec_process_arguments:/.*[Aa][Uu][Tt][Hh][Oo][Rr][Ii][Zz][Ee][Dd]_[Kk][Ee][Yy][Ss].*/))'
-      pivot_on: [host]
-      window: 4h
-    - name: "Shell / interpreter execution on this host"
-      query: '((data_process_exec_process_binary:/.*(\/[Bb][Aa][Ss][Hh]|\/[Ss][Hh]|\/[Dd][Aa][Ss][Hh]|\/[Zz][Ss][Hh]|\/[Kk][Ss][Hh]|\/[Aa][Ss][Hh]|\/[Bb][Uu][Ss][Yy][Bb][Oo][Xx])/) OR (data_process_exec_process_binary:/.*(\/[Pp][Yy][Tt][Hh][Oo][Nn]|\/[Pp][Yy][Tt][Hh][Oo][Nn]3|\/[Pp][Ee][Rr][Ll]|\/[Rr][Uu][Bb][Yy]|\/[Pp][Hh][Pp]|\/[Nn][Oo][Dd][Ee]|\/[Ll][Uu][Aa]|\/[Aa][Ww][Kk])/))'
-      pivot_on: [host]
-      window: 1h
-    - name: "Reconnaissance commands on this host"
-      query: 'data_process_exec_process_binary:/.*(\/[Ww][Hh][Oo][Aa][Mm][Ii]|\/[Ii][Dd]|\/[Uu][Nn][Aa][Mm][Ee]|\/[Hh][Oo][Ss][Tt][Nn][Aa][Mm][Ee]|\/[Hh][Oo][Ss][Tt][Nn][Aa][Mm][Ee][Cc][Tt][Ll]|\/[Ss][Ss]|\/[Nn][Ee][Tt][Ss][Tt][Aa][Tt]|\/[Ii][Ff][Cc][Oo][Nn][Ff][Ii][Gg]|\/[Aa][Rr][Pp]|\/[Ww]|\/[Ww][Hh][Oo]|\/[Ll][Aa][Ss][Tt]|\/[Ll][Ss][Oo][Ff]|\/[Nn][Mm][Aa][Pp]|\/[Dd][Ii][Gg]|\/[Ff][Ii][Nn][Dd])/'
-      pivot_on: [host]
-      window: 1h
+  # Behaviour-targeted hunts the engine runs around the alert (not a sweep).
+  - name: Payload patterns in shell/profile writes
+    query: full_log:/.*(bashrc|bash_profile|\.profile|zshrc|profile\.d).*(curl|wget|base64|nc |bash -i|\/dev\/tcp|python -c|eval).*/
+    pivot_on: host
+    window: 24h
+  - name: Fetch-and-execute commands
+    query: full_log:/.*(curl|wget).*(\| *(ba)?sh|-O \/tmp|-o \/tmp).*/
+    pivot_on: host
+    window: 6h
+  - name: Persistence via cron or systemd
+    query: full_log:/.*(crontab|\/etc\/cron|\/etc\/systemd\/system|systemctl enable).*/
+    pivot_on: host
+    window: 24h
+  - name: Editors and redirects touching rc files
+    query: full_log:/.*(vim|nano|vi |sed -i|tee -a|echo .*>>).*(rc|profile).*/
+    pivot_on: user
+    window: 6h
+  - name: Alias or PATH tampering
+    query: full_log:/.*(alias sudo|alias ssh|export PATH=|LD_PRELOAD).*/
+    pivot_on: host
+    window: 24h

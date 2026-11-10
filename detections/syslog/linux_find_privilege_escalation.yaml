@@ -115,25 +115,52 @@ graylog:
   query: full_log:/.*find.*-exec.*/ AND NOT _exists_:data_win_system_eventID AND NOT rule_groups:/.*windows.*/
 
 correlation:
-  # Authored by the correlation engine for review. Related CoPilot Searches to run
-  # around an alert from this rule, scoped to the same host/user/IP within the window.
+  # Authored per-rule (behaviour-researched) for the correlation engine. Related CoPilot
+  # Searches + telemetry pivots to run around an alert, scoped to its host/user/ip/domain.
   related_rules:
-    - id: 26f86252-1549-45e1-a212-eb26840e86bc
-      name: "File Download or Read to Pipe Execution"
-      reason: "same analytic story: Linux Living Off The Land"
-  window: 1h
+  - id: linux-sudo-or-su-execution-001
+    name: Linux Sudo Or Su Execution
+    reason: The find -exec abuse depends on a sudo rule; the sudo invocation shows which user and rule were used.
+  - id: linux-sudoers-tmp-file-creation-001
+    name: Linux Sudoers Tmp File Creation
+    reason: Attackers lacking a GTFOBin may edit sudoers; sudoers edits nearby reveal the privilege setup.
+  - id: linux-auditd-possible-access-sudoers-file-001
+    name: Linux Auditd Possible Access To Sudoers File
+    reason: Sudoers reading is the recon step that finds the NOPASSWD find entry.
+  - id: linux-pkexec-privilege-escalation-001
+    name: Linux pkexec Privilege Escalation
+    reason: Alternative local root path tried when find via sudo is unavailable.
+  - id: linux-gdb-privilege-escalation-001
+    name: Linux GDB Privilege Escalation
+    reason: Another GTFOBins sudo abuse often tried in sequence on the same host.
+  - id: ba592c6d-6888-43c3-b8c6-689b8fe47337
+    name: Linux Base64 Encoded Pipe to Shell
+    reason: Post-root payload delivery commonly runs via encoded pipe to shell.
+  window: 2h
   enrichment_searches:
-  # Rule-specific telemetry pivots the engine runs around an alert from this rule,
-  # scoped to the alert's host/user/IP within the window (behaviour-targeted, not a sweep).
-    - name: "Privilege-escalation tooling executed on this host"
-      query: 'data_process_exec_process_binary:/.*(\/[Ss][Uu][Dd][Oo]|\/[Ss][Uu]|\/[Pp][Kk][Ee][Xx][Ee][Cc]|\/[Dd][Oo][Aa][Ss]|\/[Ss][Ee][Tt][Cc][Aa][Pp]|\/[Cc][Hh][Ss][Hh]|\/[Nn][Ee][Ww][Gg][Rr][Pp])/'
-      pivot_on: [host]
-      window: 2h
-    - name: "Shell / interpreter execution on this host"
-      query: '((data_process_exec_process_binary:/.*(\/[Bb][Aa][Ss][Hh]|\/[Ss][Hh]|\/[Dd][Aa][Ss][Hh]|\/[Zz][Ss][Hh]|\/[Kk][Ss][Hh]|\/[Aa][Ss][Hh]|\/[Bb][Uu][Ss][Yy][Bb][Oo][Xx])/) OR (data_process_exec_process_binary:/.*(\/[Pp][Yy][Tt][Hh][Oo][Nn]|\/[Pp][Yy][Tt][Hh][Oo][Nn]3|\/[Pp][Ee][Rr][Ll]|\/[Rr][Uu][Bb][Yy]|\/[Pp][Hh][Pp]|\/[Nn][Oo][Dd][Ee]|\/[Ll][Uu][Aa]|\/[Aa][Ww][Kk])/))'
-      pivot_on: [host]
-      window: 1h
-    - name: "Reconnaissance commands on this host"
-      query: 'data_process_exec_process_binary:/.*(\/[Ww][Hh][Oo][Aa][Mm][Ii]|\/[Ii][Dd]|\/[Uu][Nn][Aa][Mm][Ee]|\/[Hh][Oo][Ss][Tt][Nn][Aa][Mm][Ee]|\/[Hh][Oo][Ss][Tt][Nn][Aa][Mm][Ee][Cc][Tt][Ll]|\/[Ss][Ss]|\/[Nn][Ee][Tt][Ss][Tt][Aa][Tt]|\/[Ii][Ff][Cc][Oo][Nn][Ff][Ii][Gg]|\/[Aa][Rr][Pp]|\/[Ww]|\/[Ww][Hh][Oo]|\/[Ll][Aa][Ss][Tt]|\/[Ll][Ss][Oo][Ff]|\/[Nn][Mm][Aa][Pp]|\/[Dd][Ii][Gg]|\/[Ff][Ii][Nn][Dd])/'
-      pivot_on: [host]
-      window: 1h
+  # Behaviour-targeted hunts the engine runs around the alert (not a sweep).
+  - name: find -exec spawning shells or sensitive commands
+    query: data_process_exec_process_binary:/.*\/([Ff][Ii][Nn][Dd])/ AND data_process_exec_process_arguments:/.*(\-[Ee][Xx][Ee][Cc]|\-[Ee][Xx][Ee][Cc][Dd][Ii][Rr]).*/ AND data_process_exec_process_arguments:/.*(\/[Bb][Ii][Nn]\/[Ss][Hh]|\/[Bb][Ii][Nn]\/[Bb][Aa][Ss][Hh]|[Ss][Hh] \-[Pp]|[Cc][Hh][Mm][Oo][Dd]|[Cc][Hh][Oo][Ww][Nn]|[Cc][Pp] |\/[Ee][Tt][Cc]\/[Ss][Hh][Aa][Dd][Oo][Ww]|\/[Ee][Tt][Cc]\/[Pp][Aa][Ss][Ss][Ww][Dd]|[Nn][Cc] |[Pp][Yy][Tt][Hh][Oo][Nn]).*/
+    pivot_on:
+    - host
+    window: 2h
+  - name: Sudo listing and sudoers recon
+    query: (data_process_exec_process_binary:/.*\/([Ss][Uu][Dd][Oo])/ AND data_process_exec_process_arguments:/.*( \-[Ll]|\-[Ll][Ll]|\-\-[Ll][Ii][Ss][Tt]).*/) OR full_log:/.*(\/[Ee][Tt][Cc]\/[Ss][Uu][Dd][Oo][Ee][Rr][Ss]|[Ss][Uu][Dd][Oo][Ee][Rr][Ss]\.[Dd]).*/
+    pivot_on:
+    - host
+    window: 4h
+  - name: SUID creation and credential file access after elevation
+    query: data_process_exec_process_arguments:/.*([Cc][Hh][Mm][Oo][Dd] \+[Ss]|[Cc][Hh][Mm][Oo][Dd] [Uu]\+[Ss]|[Cc][Hh][Mm][Oo][Dd] 4755|\/[Ee][Tt][Cc]\/[Ss][Hh][Aa][Dd][Oo][Ww]|\/[Ee][Tt][Cc]\/[Pp][Aa][Ss][Ss][Ww][Dd]|[Uu][Ss][Ee][Rr][Aa][Dd][Dd]|[Uu][Ss][Ee][Rr][Mm][Oo][Dd] \-[Aa][Gg]|[Aa][Dd][Dd][Uu][Ss][Ee][Rr]|[Vv][Ii][Ss][Uu][Dd][Oo]).*/
+    pivot_on:
+    - host
+    window: 4h
+  - name: Root shell artifacts and new privileged accounts
+    query: data_process_exec_process_arguments:/.*([Ss][Hh] \-[Pp]|[Bb][Aa][Ss][Hh] \-[Pp]|[Uu][Ss][Ee][Rr][Mm][Oo][Dd]|[Uu][Ss][Ee][Rr][Aa][Dd][Dd]|[Pp][Aa][Ss][Ss][Ww][Dd] ).*/
+    pivot_on:
+    - host
+    window: 2h
+  - name: Payload download after elevation
+    query: (data_process_exec_process_binary:/.*\/([Cc][Uu][Rr][Ll]|[Ww][Gg][Ee][Tt])/ AND data_process_exec_process_arguments:/.*([Hh][Tt][Tt][Pp]:\/\/|[Hh][Tt][Tt][Pp][Ss]:\/\/|[Ff][Tt][Pp]:\/\/).*/)
+    pivot_on:
+    - host
+    window: 4h
