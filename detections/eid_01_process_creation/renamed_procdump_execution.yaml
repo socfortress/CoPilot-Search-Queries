@@ -229,23 +229,53 @@ graylog:
   query: data_win_system_eventID:"1" AND (data_win_eventdata_originalFileName:/[Pp][Rr][Oo][Cc][Dd][Uu][Mm][Pp]/ OR ((data_win_eventdata_commandLine:/.* -[Mm][Aa] .*/ OR data_win_eventdata_commandLine:/.* \/[Mm][Aa] .*/ OR data_win_eventdata_commandLine:/.* –[Mm][Aa] .*/ OR data_win_eventdata_commandLine:/.* —[Mm][Aa] .*/ OR data_win_eventdata_commandLine:/.* ―[Mm][Aa] .*/ OR data_win_eventdata_commandLine:/.* -[Mm][Pp] .*/ OR data_win_eventdata_commandLine:/.* \/[Mm][Pp] .*/ OR data_win_eventdata_commandLine:/.* –[Mm][Pp] .*/ OR data_win_eventdata_commandLine:/.* —[Mm][Pp] .*/ OR data_win_eventdata_commandLine:/.* ―[Mm][Pp] .*/) AND (data_win_eventdata_commandLine:/.* -[Aa][Cc][Cc][Ee][Pp][Tt][Ee][Uu][Ll][Aa].*/ OR data_win_eventdata_commandLine:/.* \/[Aa][Cc][Cc][Ee][Pp][Tt][Ee][Uu][Ll][Aa].*/ OR data_win_eventdata_commandLine:/.* –[Aa][Cc][Cc][Ee][Pp][Tt][Ee][Uu][Ll][Aa].*/ OR data_win_eventdata_commandLine:/.* —[Aa][Cc][Cc][Ee][Pp][Tt][Ee][Uu][Ll][Aa].*/ OR data_win_eventdata_commandLine:/.* ―[Aa][Cc][Cc][Ee][Pp][Tt][Ee][Uu][Ll][Aa].*/))) AND _exists_:data_win_eventdata_image AND NOT (data_win_eventdata_image:/.*\\[Pp][Rr][Oo][Cc][Dd][Uu][Mm][Pp]\.[Ee][Xx][Ee]/ OR data_win_eventdata_image:/.*\\[Pp][Rr][Oo][Cc][Dd][Uu][Mm][Pp]64\.[Ee][Xx][Ee]/ OR data_win_eventdata_image:/.*\\[Pp][Rr][Oo][Cc][Dd][Uu][Mm][Pp]64[Aa]\.[Ee][Xx][Ee]/)
 
 correlation:
-  # Authored by the correlation engine for review.
+  # Authored per-rule (behaviour-researched) for the correlation engine. Related CoPilot
+  # Searches + telemetry pivots to run around an alert, scoped to its host/user/ip/domain.
+  related_rules:
+  - id: 5afee48e-67dd-4e03-a783-f74259dcf998
+    name: Potential LSASS Process Dump Via Procdump
+    reason: Procdump targeting LSASS is the most likely purpose of the renamed binary
+  - id: 2e65275c-8288-4ab4-aeb7-6274f58b6b20
+    name: Procdump Execution
+    reason: Un-renamed procdump runs on the same host indicate repeated dump attempts
+  - id: 79b06761-465f-4f88-9ef2-150e24d3d737
+    name: Potential SysInternals ProcDump Evasion
+    reason: Other procdump evasion variants in the same session
+  - id: ffa6861c-4461-4f59-8a41-578c39f3f23e
+    name: LSASS Dump Keyword In CommandLine
+    reason: lsass keyword on the command line confirms credential-dump intent
+  - id: 8943b567-f14d-4ee8-a0bb-2121d4ce3184
+    name: Dump LSASS via comsvcs DLL
+    reason: comsvcs MiniDump is the fallback if procdump gets blocked
+  - id: 1a1ed54a-2ba4-4221-94d5-01dee560d71e
+    name: Renamed CreateDump Utility Execution
+    reason: Renamed createdump is another renamed dumper used the same way
+  - id: b2815d0d-7481-4bf0-9b6c-a4c48a94b349
+    name: PowerShell Get-Process LSASS
+    reason: Get-Process lsass precedes dumping to obtain the PID
+  - id: 044ba588-dff4-4918-9808-3f95e8160606
+    name: Copy .DMP/.DUMP Files From Remote Share Via Cmd.EXE
+    reason: Dump files copied off via share is the exfil step after dumping
+  window: 4h
   enrichment_searches:
-  # Rule-specific telemetry pivots the engine runs around an alert from this rule,
-  # scoped to the alert's host/user/IP within the window (behaviour-targeted, not a sweep).
-    - name: "Execution from user-writable / masquerading paths on this host"
-      query: 'data_win_system_eventID:"1" AND (data_win_eventdata_image:/.*\\[Uu][Ss][Ee][Rr][Ss]\\.*/ OR data_win_eventdata_image:/.*\\[Pp][Rr][Oo][Gg][Rr][Aa][Mm][Dd][Aa][Tt][Aa]\\.*/ OR data_win_eventdata_image:/.*\\[Ww][Ii][Nn][Dd][Oo][Ww][Ss]\\[Tt][Ee][Mm][Pp]\\.*/ OR data_win_eventdata_image:/.*\\[Aa][Pp][Pp][Dd][Aa][Tt][Aa]\\.*/ OR data_win_eventdata_image:/.*\\[Pp][Uu][Bb][Ll][Ii][Cc]\\.*/ OR data_win_eventdata_image:/.*\\\$[Rr][Ee][Cc][Yy][Cc][Ll][Ee].*/)'
-      pivot_on: [host]
-      window: 1h
-    - name: "Other executions of this tool-set on this host (any arguments)"
-      query: 'data_win_system_eventID:"1" AND data_win_eventdata_image:/.*(\\[Pp][Rr][Oo][Cc][Dd][Uu][Mm][Pp]\.[Ee][Xx][Ee]|\\[Pp][Rr][Oo][Cc][Dd][Uu][Mm][Pp]64\.[Ee][Xx][Ee]|\\[Pp][Rr][Oo][Cc][Dd][Uu][Mm][Pp]64[Aa]\.[Ee][Xx][Ee])/'
-      pivot_on: [host]
-      window: 2h
-    - name: "Follow-on LOLBin / signed-binary-proxy execution on this host"
-      query: 'data_win_system_eventID:"1" AND data_win_eventdata_image:/.*(\\[Rr][Uu][Nn][Dd][Ll][Ll]32\.[Ee][Xx][Ee]|\\[Rr][Ee][Gg][Ss][Vv][Rr]32\.[Ee][Xx][Ee]|\\[Mm][Ss][Hh][Tt][Aa]\.[Ee][Xx][Ee]|\\[Ii][Nn][Ss][Tt][Aa][Ll][Ll][Uu][Tt][Ii][Ll]\.[Ee][Xx][Ee]|\\[Rr][Ee][Gg][Aa][Ss][Mm]\.[Ee][Xx][Ee]|\\[Rr][Ee][Gg][Ss][Vv][Cc][Ss]\.[Ee][Xx][Ee]|\\[Mm][Ss][Bb][Uu][Ii][Ll][Dd]\.[Ee][Xx][Ee]|\\[Cc][Ee][Rr][Tt][Uu][Tt][Ii][Ll]\.[Ee][Xx][Ee]|\\[Bb][Ii][Tt][Ss][Aa][Dd][Mm][Ii][Nn]\.[Ee][Xx][Ee]|\\[Ww][Mm][Ii][Cc]\.[Ee][Xx][Ee]|\\[Cc][Mm][Ss][Tt][Pp]\.[Ee][Xx][Ee]|\\[Oo][Dd][Bb][Cc][Cc][Oo][Nn][Ff]\.[Ee][Xx][Ee]|\\[Ff][Oo][Rr][Ff][Ii][Ll][Ee][Ss]\.[Ee][Xx][Ee]|\\[Pp][Cc][Aa][Ll][Uu][Aa]\.[Ee][Xx][Ee]|\\[Mm][Aa][Vv][Ii][Nn][Jj][Ee][Cc][Tt]\.[Ee][Xx][Ee]|\\[Ss][Cc][Rr][Ii][Pp][Tt][Rr][Uu][Nn][Nn][Ee][Rr]\.[Ee][Xx][Ee])/'
-      pivot_on: [host]
-      window: 1h
-    - name: "Outbound connections by script interpreters on this host"
-      query: 'data_win_system_eventID:"3" AND data_win_eventdata_image:/.*(\\[Pp][Oo][Ww][Ee][Rr][Ss][Hh][Ee][Ll][Ll]\.[Ee][Xx][Ee]|\\[Pp][Ww][Ss][Hh]\.[Ee][Xx][Ee]|\\[Pp][Oo][Ww][Ee][Rr][Ss][Hh][Ee][Ll][Ll]_[Ii][Ss][Ee]\.[Ee][Xx][Ee]|\\[Cc][Mm][Dd]\.[Ee][Xx][Ee]|\\[Ww][Ss][Cc][Rr][Ii][Pp][Tt]\.[Ee][Xx][Ee]|\\[Cc][Ss][Cc][Rr][Ii][Pp][Tt]\.[Ee][Xx][Ee]|\\[Mm][Ss][Hh][Tt][Aa]\.[Ee][Xx][Ee]|\\[Rr][Uu][Nn][Dd][Ll][Ll]32\.[Ee][Xx][Ee]|\\[Rr][Ee][Gg][Ss][Vv][Rr]32\.[Ee][Xx][Ee])/'
-      pivot_on: [host]
-      window: 1h
+  # Behaviour-targeted hunts the engine runs around the alert (not a sweep).
+  - name: LSASS targeting in command lines
+    query: data_win_system_eventID:1 AND data_win_eventdata_commandLine:(/.*[Ll][Ss][Aa][Ss][Ss].*/ OR /.*[Mm]ini[Dd]ump.*/)
+    pivot_on: host
+    window: 4h
+  - name: Dump files written
+    query: data_win_system_eventID:11 AND data_win_eventdata_targetFilename:(/.*\.[Dd][Mm][Pp]/ OR /.*[Ll][Ss][Aa][Ss][Ss].*/)
+    pivot_on: host
+    window: 4h
+  - name: LSASS process access
+    query: data_win_system_eventID:10 AND data_win_eventdata_targetImage:/.*[Ll][Ss][Aa][Ss][Ss]\.[Ee][Xx][Ee]/
+    pivot_on: host
+    window: 4h
+  - name: Archiving or staging dumps
+    query: data_win_system_eventID:1 AND data_win_eventdata_commandLine:/.*\.[Dd][Mm][Pp].*/
+    pivot_on: host
+    window: 6h
+  - name: Network logons after dump
+    query: data_win_system_eventID:4624 AND data_win_eventdata_logonType:(3 OR 9)
+    pivot_on: user
+    window: 6h

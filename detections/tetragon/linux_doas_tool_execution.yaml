@@ -129,44 +129,50 @@ correlation:
   # Authored per-rule (behaviour-researched) for the correlation engine. Related CoPilot
   # Searches + telemetry pivots to run around an alert, scoped to its host/user/ip/domain.
   related_rules:
-  - id: lnx-doas-001
-    name: Linux doas Execution Detection
-    reason: Sibling doas execution detection from auditd/syslog; corroborates the same invocation from a second telemetry source.
-  - id: linux-sudo-or-su-execution-001
-    name: Linux Sudo Or Su Execution
-    reason: Attacker without working doas often falls back to sudo/su on the same host; shows which escalation path worked.
+  - id: 0f79c4d2-4e1f-4683-9c36-b5469a665e06
+    name: Access of Sudoers File Content
+    reason: Recon of privilege config on the same host, often just before or after switching to doas
+  - id: linux-auditd-possible-access-sudoers-file-001
+    name: Linux Auditd Possible Access To Sudoers File
+    reason: Reading or editing privilege config (sudoers, doas.conf) alongside doas use points to deliberate rule tampering
   - id: linux-sudoers-tmp-file-creation-001
     name: Linux Sudoers Tmp File Creation
-    reason: Privilege-config tampering (sudoers) accompanies or follows doas-based escalation.
+    reason: Sudoers edit in progress on the same host; a doas.conf edit is the equivalent persistence step
   - id: linux-setuid-using-chmod-utility-001
     name: Linux Setuid Using Chmod Utility
-    reason: Escalated shell commonly plants a SUID binary for persistent root.
-  - id: linux-auditd-add-user-001
-    name: Linux Auditd Add User
-    reason: Root obtained via doas is typically followed by creating a backdoor account.
-  - id: linux-edit-cron-table-parameter-001
-    name: Linux Edit Cron Table Parameter
-    reason: Root-level cron edit is a common persistence step after elevation.
-  window: 2h
+    reason: After gaining root via doas, attackers plant SUID binaries for persistent escalation
+  - id: fa4aaed5-4fe0-498d-bbc0-08e3346387ba
+    name: Copy Passwd Or Shadow From TMP Path
+    reason: Root obtained via doas is commonly used to stage passwd/shadow for credential theft
+  - id: 1182f3b3-e716-4efa-99ab-d2685d04360f
+    name: History File Deletion
+    reason: 'Post-escalation anti-forensics: shell history wiped after privileged commands'
+  - id: 759d0d51-bc99-4b5e-9add-8f5b2c8e7512
+    name: Creation Of An User Account
+    reason: Root-level persistence by adding a local account right after elevation
+  - id: linux-sudo-or-su-execution-001
+    name: Linux Sudo Or Su Execution
+    reason: Sibling elevation mechanism; sudo/su/doas together show escalation hunting on this host
+  window: 4h
   enrichment_searches:
   # Behaviour-targeted hunts the engine runs around the alert (not a sweep).
-  - name: Commands executed via doas
-    query: data_process_exec_parent_binary:"/usr/bin/doas"
-    pivot_on: host
-    window: 2h
-  - name: Account creation or password changes
-    query: data_process_exec_process_binary:("/usr/sbin/useradd" OR "/usr/sbin/usermod" OR "/usr/bin/passwd" OR "/usr/sbin/adduser" OR "/usr/sbin/chpasswd")
+  - name: Privileged account or group changes
+    query: data_process_exec_process_binary:("/usr/sbin/useradd" OR "/usr/sbin/usermod" OR "/usr/sbin/adduser" OR "/usr/bin/passwd" OR "/usr/sbin/groupadd")
     pivot_on: host
     window: 4h
-  - name: Privilege config edits (sudoers/doas.conf)
-    query: data_process_exec_process_arguments:(*sudoers* OR *doas.conf* OR *visudo*)
+  - name: Edits to doas, sudoers or passwd files
+    query: data_process_exec_process_arguments:(/.*doas\.conf.*/ OR /.*sudoers.*/ OR /.*\/etc\/passwd.*/ OR /.*\/etc\/shadow.*/)
+    pivot_on: host
+    window: 6h
+  - name: SUID bit or capabilities set
+    query: data_process_exec_process_binary:("/usr/bin/chmod" OR "/usr/sbin/setcap") AND data_process_exec_process_arguments:(/.*u\+s.*/ OR /.*[24][0-7][0-7][0-7].*/ OR /.*cap_setuid.*/)
+    pivot_on: host
+    window: 6h
+  - name: Reverse shell or interpreter spawn
+    query: data_process_exec_process_binary:("/bin/bash" OR "/bin/sh" OR "/usr/bin/python3" OR "/usr/bin/perl") AND data_process_exec_process_arguments:(/.*\/dev\/tcp.*/ OR /.*socket.*connect.*/ OR /.*nc .*-e.*/)
     pivot_on: host
     window: 4h
-  - name: SUID or capability changes
-    query: data_process_exec_process_binary:("/usr/bin/chmod" OR "/usr/sbin/setcap") AND data_process_exec_process_arguments:(*u+s* OR *4755* OR *4777* OR *cap_setuid*)
-    pivot_on: host
-    window: 4h
-  - name: Persistence via cron or systemd
-    query: data_process_exec_process_arguments:(*crontab* OR */etc/cron* OR */etc/systemd/system*)
+  - name: Persistence via cron or ssh keys
+    query: data_process_exec_process_arguments:(/.*crontab.*/ OR /.*authorized_keys.*/ OR /.*\/etc\/cron.*/ OR /.*\.bashrc.*/)
     pivot_on: host
     window: 6h
