@@ -129,40 +129,52 @@ correlation:
   # Authored per-rule (behaviour-researched) for the correlation engine. Related CoPilot
   # Searches + telemetry pivots to run around an alert, scoped to its host/user/ip/domain.
   related_rules:
+  - id: lnx-doas-001
+    name: Linux doas Execution Detection
+    reason: Same doas behaviour seen via syslog/auditd; corroborates the Tetragon exec and shows the invoking user and command.
+  - id: 6a50f16c-3b7b-42d1-b081-0fdd3ba70a73
+    name: User Added To Root/Sudoers Group Using Usermod
+    reason: Attacker who wins doas root commonly adds a user to root/sudo groups to keep privileged access.
   - id: 0f79c4d2-4e1f-4683-9c36-b5469a665e06
     name: Access of Sudoers File Content
-    reason: Attackers read sudoers/doas config to learn elevation paths just before using doas or sudo.
-  - id: fa4aaed5-4fe0-498d-bbc0-08e3346387ba
-    name: Copy Passwd Or Shadow From TMP Path
-    reason: Root via doas is typically followed by credential file harvesting staged in /tmp.
-  - id: 6419afd1-3742-47a5-a7e6-b50386cd15f8
-    name: Chmod Targeting Sensitive Directories
-    reason: Post-elevation permission tampering on sensitive directories to persist or widen access.
+    reason: Reading sudoers/doas policy is the recon step before or after trying doas.
+  - id: linux-setuid-using-chmod-utility-001
+    name: Linux Setuid Using Chmod Utility
+    reason: Root via doas is often used to plant a SUID backdoor shell.
   - id: 1182f3b3-e716-4efa-99ab-d2685d04360f
     name: History File Deletion
-    reason: Anti-forensics commonly follows a successful escalation to root.
-  - id: ba592c6d-6888-43c3-b8c6-689b8fe47337
-    name: Linux Base64 Encoded Pipe to Shell
-    reason: Encoded payload piped to a shell is a common first command run as the elevated user.
-  - id: 2d2f44ff-4611-4778-a8fc-323a0e9850cc
-    name: Inline Python Execution - Spawn Shell Via OS System Library
-    reason: Shell-spawning python one-liners are a common foothold step run before escalating.
-  window: 2h
+    reason: 'Post-escalation anti-forensics: wiping shell history of the escalating account.'
+  - id: 80915f59-9b56-4616-9de0-fd0dea6c12fe
+    name: Linux Logs Clearing Attempts
+    reason: Root obtained through doas is used to truncate logs covering the activity.
+  - id: 6b14bac8-3e3a-4324-8109-42f0546a347f
+    name: Scheduled Cron Task/Job - Linux
+    reason: Elevated cron job creation is the common persistence step after doas root.
+  window: 4h
   enrichment_searches:
   # Behaviour-targeted hunts the engine runs around the alert (not a sweep).
-  - name: Commands executed through doas
-    query: data_process_exec_parent_binary:"/usr/bin/doas"
-    pivot_on: host
+  - name: Shells and sensitive commands run through doas
+    query: data_process_exec_parent_binary:"/usr/bin/doas" AND (data_process_exec_process_binary:/.*\/(sh|bash|dash|zsh|cat|cp|chmod|chown|useradd|usermod|passwd|visudo)/)
+    pivot_on:
+    - host
     window: 2h
-  - name: Sudo/su/pkexec elevation attempts
-    query: data_process_exec_process_binary:("/usr/bin/sudo" OR "/usr/bin/su" OR "/usr/bin/pkexec")
-    pivot_on: host
-    window: 2h
-  - name: Reads of doas.conf, sudoers or shadow
-    query: data_process_exec_process_arguments:(*doas.conf* OR *sudoers* OR *\/etc\/shadow* OR *\/etc\/passwd*)
-    pivot_on: host
+  - name: Account and persistence tampering on this host
+    query: data_process_exec_process_binary:/.*\/(useradd|usermod|adduser|chpasswd|crontab|visudo)/
+    pivot_on:
+    - host
     window: 4h
-  - name: Account and key persistence after elevation
-    query: data_process_exec_process_binary:(*useradd* OR *usermod* OR *adduser* OR *chpasswd*) OR data_process_exec_process_arguments:(*authorized_keys* OR *crontab*)
-    pivot_on: host
-    window: 6h
+  - name: Credential and sudoers file reads
+    query: data_process_exec_process_binary:/.*\/(cat|less|more|head|tail|cp|scp)/ AND data_process_exec_process_arguments:/.*(\/etc\/shadow|\/etc\/sudoers|\/etc\/doas\.conf|id_rsa|authorized_keys).*/
+    pivot_on:
+    - host
+    window: 4h
+  - name: Setuid and capability changes on binaries
+    query: data_process_exec_process_binary:/.*\/(chmod|setcap)/ AND data_process_exec_process_arguments:/.*(\+s|4755|6755|cap_setuid).*/
+    pivot_on:
+    - host
+    window: 4h
+  - name: Tool downloads and reverse shell primitives
+    query: data_process_exec_process_binary:/.*\/(curl|wget|nc|ncat|socat)/ AND data_process_exec_process_arguments:/.*(http|\/dev\/tcp|exec).*/
+    pivot_on:
+    - host
+    window: 4h
