@@ -121,25 +121,44 @@ graylog:
   query: full_log:/.*mysql.*/ AND (full_log:/.*-e.*/ OR full_log:/.*\\!.*/) AND NOT _exists_:data_win_system_eventID AND NOT rule_groups:/.*windows.*/
 
 correlation:
-  # Authored by the correlation engine for review. Related CoPilot Searches to run
-  # around an alert from this rule, scoped to the same host/user/IP within the window.
+  # Authored per-rule (behaviour-researched) for the correlation engine. Related CoPilot
+  # Searches + telemetry pivots to run around an alert, scoped to its host/user/ip/domain.
   related_rules:
-    - id: 26f86252-1549-45e1-a212-eb26840e86bc
-      name: "File Download or Read to Pipe Execution"
-      reason: "same analytic story: Linux Living Off The Land"
+  - id: linux-sudo-or-su-execution-001
+    name: Linux Sudo Or Su Execution
+    reason: The mysql shell escape only yields root when run through sudo; sudo/su execution shows who ran it and what else they elevated
+  - id: linux-setuid-using-chmod-utility-001
+    name: Linux Setuid Using Chmod Utility
+    reason: A root shell gained via mysql is commonly followed by planting a setuid binary for persistent root
+  - id: 6a50f16c-3b7b-42d1-b081-0fdd3ba70a73
+    name: User Added To Root/Sudoers Group Using Usermod
+    reason: Adding the user to root/sudoers via usermod is a typical follow-on once root is obtained
+  - id: fa4aaed5-4fe0-498d-bbc0-08e3346387ba
+    name: Copy Passwd Or Shadow From TMP Path
+    reason: Root access is often used to copy passwd/shadow for offline cracking
+  - id: 26f86252-1549-45e1-a212-eb26840e86bc
+    name: File Download or Read to Pipe Execution
+    reason: Download-and-pipe-to-shell payload delivery commonly runs from the elevated shell
   window: 1h
   enrichment_searches:
-  # Rule-specific telemetry pivots the engine runs around an alert from this rule,
-  # scoped to the alert's host/user/IP within the window (behaviour-targeted, not a sweep).
-    - name: "Privilege-escalation tooling executed on this host"
-      query: 'data_process_exec_process_binary:/.*(\/[Ss][Uu][Dd][Oo]|\/[Ss][Uu]|\/[Pp][Kk][Ee][Xx][Ee][Cc]|\/[Dd][Oo][Aa][Ss]|\/[Ss][Ee][Tt][Cc][Aa][Pp]|\/[Cc][Hh][Ss][Hh]|\/[Nn][Ee][Ww][Gg][Rr][Pp])/'
-      pivot_on: [host]
-      window: 2h
-    - name: "Shell / interpreter execution on this host"
-      query: '((data_process_exec_process_binary:/.*(\/[Bb][Aa][Ss][Hh]|\/[Ss][Hh]|\/[Dd][Aa][Ss][Hh]|\/[Zz][Ss][Hh]|\/[Kk][Ss][Hh]|\/[Aa][Ss][Hh]|\/[Bb][Uu][Ss][Yy][Bb][Oo][Xx])/) OR (data_process_exec_process_binary:/.*(\/[Pp][Yy][Tt][Hh][Oo][Nn]|\/[Pp][Yy][Tt][Hh][Oo][Nn]3|\/[Pp][Ee][Rr][Ll]|\/[Rr][Uu][Bb][Yy]|\/[Pp][Hh][Pp]|\/[Nn][Oo][Dd][Ee]|\/[Ll][Uu][Aa]|\/[Aa][Ww][Kk])/))'
-      pivot_on: [host]
-      window: 1h
-    - name: "Reconnaissance commands on this host"
-      query: 'data_process_exec_process_binary:/.*(\/[Ww][Hh][Oo][Aa][Mm][Ii]|\/[Ii][Dd]|\/[Uu][Nn][Aa][Mm][Ee]|\/[Hh][Oo][Ss][Tt][Nn][Aa][Mm][Ee]|\/[Hh][Oo][Ss][Tt][Nn][Aa][Mm][Ee][Cc][Tt][Ll]|\/[Ss][Ss]|\/[Nn][Ee][Tt][Ss][Tt][Aa][Tt]|\/[Ii][Ff][Cc][Oo][Nn][Ff][Ii][Gg]|\/[Aa][Rr][Pp]|\/[Ww]|\/[Ww][Hh][Oo]|\/[Ll][Aa][Ss][Tt]|\/[Ll][Ss][Oo][Ff]|\/[Nn][Mm][Aa][Pp]|\/[Dd][Ii][Gg]|\/[Ff][Ii][Nn][Dd])/'
-      pivot_on: [host]
-      window: 1h
+  # Behaviour-targeted hunts the engine runs around the alert (not a sweep).
+  - name: mysql client invoked with -e or shell escape
+    query: (data_process_exec_process_binary:/.*\/(mysql|mariadb)/ AND data_process_exec_process_arguments:/.*(-e|\\!|system).*/)
+    pivot_on: host
+    window: 1h
+  - name: Setuid or capability planting after elevation
+    query: (data_process_exec_process_binary:/.*\/(chmod|setcap)/ AND data_process_exec_process_arguments:/.*(\+s|[2467]755|[2467]777|cap_setuid).*/)
+    pivot_on: host
+    window: 2h
+  - name: Account, sudoers or password manipulation
+    query: data_process_exec_process_binary:/.*\/(useradd|usermod|adduser|chpasswd|passwd|visudo)/
+    pivot_on: host
+    window: 4h
+  - name: Access to shadow or sudoers files
+    query: full_log:/.*(\/etc\/shadow|\/etc\/sudoers|\/etc\/passwd).*/
+    pivot_on: host
+    window: 4h
+  - name: Payload download or reverse-shell tooling after root
+    query: data_process_exec_process_binary:/.*\/(curl|wget|nc|ncat|socat)/
+    pivot_on: host
+    window: 2h

@@ -127,25 +127,53 @@ graylog:
   query: (full_log:/.*SERVICE_STOP.*/ OR full_log:/.*sysmon.*/ OR full_log:/.*tetragon.*/ OR full_log:/.*wazuh.*/ OR full_log:/.*auditd.*/ OR full_log:/.*osquery.*/) AND NOT _exists_:data_win_system_eventID AND NOT rule_groups:/.*windows.*/
 
 correlation:
-  # Authored by the correlation engine for review. Related CoPilot Searches to run
-  # around an alert from this rule, scoped to the same host/user/IP within the window.
+  # Authored per-rule (behaviour-researched) for the correlation engine. Related CoPilot
+  # Searches + telemetry pivots to run around an alert, scoped to its host/user/ip/domain.
   related_rules:
-    - id: 26f86252-1549-45e1-a212-eb26840e86bc
-      name: "File Download or Read to Pipe Execution"
-      reason: "same analytic story: Linux Living Off The Land"
-  window: 1h
+  - id: linux-stop-services-001
+    name: Linux Stop Services
+    reason: Direct service-stop commands usually cause the SERVICE_STOP event.
+  - id: de25eeb8-3655-4643-ac3a-b662d3f26b6b
+    name: Disable Or Stop Services
+    reason: systemctl disable/stop of security agents is the command-line view of this tamper.
+  - id: linux-auditd-osquery-service-stop-001
+    name: Linux Auditd Osquery Service Stop
+    reason: Osquery stop is one specific agent tamper in the same family.
+  - id: linux-auditd-daemon-shutdown-001
+    name: Linux Auditd Daemon Shutdown
+    reason: Auditd itself going down blinds host telemetry.
+  - id: linux-auditd-daemon-abort-001
+    name: Linux Auditd Daemon Abort
+    reason: Abnormal auditd abort may be a forced kill rather than clean stop.
+  - id: bed26dea-4525-47f4-b24a-76e30e44ffb0
+    name: Audit Rules Deleted Via Auditctl
+    reason: Audit rules wiped as an alternative or addition to stopping the daemon.
+  - id: 977ef627-4539-4875-adf4-ed8f780c4922
+    name: Auditing Configuration Changes on Linux Host
+    reason: Auditing config edits accompany defense evasion.
+  - id: c830f15d-6f6e-430f-8074-6f73d6807841
+    name: Logging Configuration Changes on Linux Host
+    reason: Logging config tampering precedes silent activity.
+  window: 4h
   enrichment_searches:
-  # Rule-specific telemetry pivots the engine runs around an alert from this rule,
-  # scoped to the alert's host/user/IP within the window (behaviour-targeted, not a sweep).
-    - name: "Shell / interpreter execution on this host"
-      query: '((data_process_exec_process_binary:/.*(\/[Bb][Aa][Ss][Hh]|\/[Ss][Hh]|\/[Dd][Aa][Ss][Hh]|\/[Zz][Ss][Hh]|\/[Kk][Ss][Hh]|\/[Aa][Ss][Hh]|\/[Bb][Uu][Ss][Yy][Bb][Oo][Xx])/) OR (data_process_exec_process_binary:/.*(\/[Pp][Yy][Tt][Hh][Oo][Nn]|\/[Pp][Yy][Tt][Hh][Oo][Nn]3|\/[Pp][Ee][Rr][Ll]|\/[Rr][Uu][Bb][Yy]|\/[Pp][Hh][Pp]|\/[Nn][Oo][Dd][Ee]|\/[Ll][Uu][Aa]|\/[Aa][Ww][Kk])/))'
-      pivot_on: [host]
-      window: 1h
-    - name: "Reconnaissance commands on this host"
-      query: 'data_process_exec_process_binary:/.*(\/[Ww][Hh][Oo][Aa][Mm][Ii]|\/[Ii][Dd]|\/[Uu][Nn][Aa][Mm][Ee]|\/[Hh][Oo][Ss][Tt][Nn][Aa][Mm][Ee]|\/[Hh][Oo][Ss][Tt][Nn][Aa][Mm][Ee][Cc][Tt][Ll]|\/[Ss][Ss]|\/[Nn][Ee][Tt][Ss][Tt][Aa][Tt]|\/[Ii][Ff][Cc][Oo][Nn][Ff][Ii][Gg]|\/[Aa][Rr][Pp]|\/[Ww]|\/[Ww][Hh][Oo]|\/[Ll][Aa][Ss][Tt]|\/[Ll][Ss][Oo][Ff]|\/[Nn][Mm][Aa][Pp]|\/[Dd][Ii][Gg]|\/[Ff][Ii][Nn][Dd])/'
-      pivot_on: [host]
-      window: 1h
-    - name: "Persistence via cron / systemd / shell profiles on this host"
-      query: '((data_process_exec_process_binary:/.*(\/[Cc][Rr][Oo][Nn][Tt][Aa][Bb]|\/[Ss][Yy][Ss][Tt][Ee][Mm][Cc][Tt][Ll]|\/[Aa][Tt]|\/[Uu][Pp][Dd][Aa][Tt][Ee]-[Rr][Cc]\.[Dd])/) OR (data_process_exec_process_arguments:/.*\/[Ee][Tt][Cc]\/[Cc][Rr][Oo][Nn].*/) OR (data_process_exec_process_arguments:/.*\/[Ee][Tt][Cc]\/[Ss][Yy][Ss][Tt][Ee][Mm][Dd].*/) OR (data_process_exec_process_arguments:/.*[Rr][Cc]\.[Ll][Oo][Cc][Aa][Ll].*/) OR (data_process_exec_process_arguments:/.*\.[Bb][Aa][Ss][Hh][Rr][Cc].*/) OR (data_process_exec_process_arguments:/.*\.[Bb][Aa][Ss][Hh]_[Pp][Rr][Oo][Ff][Ii][Ll][Ee].*/) OR (data_process_exec_process_arguments:/.*\/[Ee][Tt][Cc]\/[Pp][Rr][Oo][Ff][Ii][Ll][Ee].*/) OR (data_process_exec_process_arguments:/.*[Aa][Uu][Tt][Hh][Oo][Rr][Ii][Zz][Ee][Dd]_[Kk][Ee][Yy][Ss].*/) OR (data_process_exec_process_arguments:/.*\/[Ee][Tt][Cc]\/[Ii][Nn][Ii][Tt]\.[Dd].*/))'
-      pivot_on: [host]
-      window: 4h
+  # Behaviour-targeted hunts the engine runs around the alert (not a sweep).
+  - name: Security agent stop/kill/disable
+    query: full_log:/.*(systemctl|service|kill|pkill|killall).*(stop|disable|mask|-9).*(wazuh|auditd|tetragon|osquery|sysmon|falco|ossec).*/
+    pivot_on: host
+    window: 4h
+  - name: Audit and logging tamper
+    query: full_log:/.*(auditctl -D|\/etc\/audit|rsyslog|journald).*(rm |truncate|sed -i|-D).*/
+    pivot_on: host
+    window: 4h
+  - name: Agent files or config altered
+    query: full_log:/.*(\/var\/ossec|\/etc\/wazuh|\/opt\/tetragon|\/etc\/osquery).*(rm |mv |chattr|sed -i).*/
+    pivot_on: host
+    window: 4h
+  - name: Activity after monitoring gap
+    query: full_log:/.*(wget|curl|chmod \+x|useradd|crontab|base64 -d).*/
+    pivot_on: host
+    window: 2h
+  - name: Firewall changes blocking manager
+    query: full_log:/.*(iptables|ufw|nft|firewall-cmd).*(DROP|REJECT|1514|1515).*/
+    pivot_on: host
+    window: 4h

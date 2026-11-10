@@ -144,48 +144,53 @@ correlation:
   related_rules:
   - id: c70834fa-fb9d-4aa0-9e7d-45ceed36f3f7
     name: Linux Suspicious Child Process from Node.js - React2Shell
-    reason: Same React2Shell Node.js child-process behaviour seen from the Tetragon side; corroborates exploitation on the same host.
+    reason: Companion detection of the same CVE-2025-55182 node-to-child pattern; corroborates with stricter parent matching.
+  - id: 880973f3-9708-491c-a77b-2a35a1921158
+    name: Linux Shell Pipe to Shell
+    reason: React2Shell payloads commonly run curl|sh to fetch a second stage.
   - id: a2d9e2f3-0f43-4c7a-bcd9-9acfc0d723aa
     name: Suspicious Download and Execute Pattern via Curl/Wget
-    reason: 'Typical first post-exploit step: the Node-spawned shell curls/wgets a payload and executes it.'
+    reason: Follow-on staging of miner or backdoor after RCE through the Node.js server.
   - id: 7f734ed0-4f47-46c0-837f-6ee62505abd9
     name: Potential Netcat Reverse Shell Execution
-    reason: Node child process commonly pivots to a netcat reverse shell for interactive access.
+    reason: Reverse shell is a common post-exploit action from child_process.
   - id: 32e62bc7-3de0-4bb1-90af-532978fe42c0
     name: Python Reverse Shell Execution Via PTY And Socket Modules
-    reason: Python pty/socket reverse shell is a common follow-on once RCE lands in the web app.
+    reason: Python pty reverse shell is a frequent React2Shell payload shape.
   - id: 2fade0b6-7423-4835-9d4f-335b39b83867
     name: Shell Execution Of Process Located In Tmp Directory
-    reason: Dropped payloads are run from /tmp after exploitation.
+    reason: Dropped payload executed from /tmp after the initial RCE.
   - id: 9069ea3c-b213-4c52-be13-86506a227ab1
     name: Linux Crypto Mining Indicators
-    reason: React2Shell campaigns are widely used to deploy cryptominers.
+    reason: Mass exploitation of React2Shell was widely used to deploy cryptominers.
   - id: 818f7b24-0fba-4c49-a073-8b755573b9c7
     name: Linux Webshell Indicators
-    reason: RCE in a web server is often followed by webshell placement for persistence.
-  - id: linux-ingress-tool-transfer-hunting-001
-    name: Linux Ingress Tool Transfer Hunting
-    reason: Tool download onto the host after the app server was compromised.
-  window: 2h
+    reason: Attackers leave webshells in the web root for persistent access after RCE.
+  window: 1h
   enrichment_searches:
   # Behaviour-targeted hunts the engine runs around the alert (not a sweep).
-  - name: Download or fetch of payload via curl/wget
-    query: (data_process_exec_process_binary:/.*(curl|wget)$/ OR full_log:/.*(curl|wget) .*https?:.*/)
-    pivot_on: host
+  - name: Download and staging tools run on host
+    query: (data_process_exec_process_binary:/.*(\/[Cc][Uu][Rr][Ll]|\/[Ww][Gg][Ee][Tt]|\/[Tt][Ff][Tt][Pp]|\/[Ff][Tt][Pp]|\/[Ss][Cc][Pp])/ AND _exists_:data_process_exec_process_arguments)
+    pivot_on:
+    - host
+    window: 1h
+  - name: Reverse shell and tunnelling primitives
+    query: (data_process_exec_process_binary:/.*(\/[Nn][Cc]|\/[Nn][Cc][Aa][Tt]|\/[Nn][Ee][Tt][Cc][Aa][Tt]|\/[Ss][Oo][Cc][Aa][Tt]|\/[Mm][Kk][Ff][Ii][Ff][Oo])/ OR (data_process_exec_process_arguments:/.*/[Dd][Ee][Vv]/[Tt][Cc][Pp]/.*/ OR data_process_exec_process_arguments:/.*[Bb][Aa][Ss][Hh] -[Ii].*/ OR data_process_exec_process_arguments:/.*[Pp][Tt][Yy].[Ss][Pp][Aa][Ww][Nn].*/ OR data_process_exec_process_arguments:/.*[Ee][Xx][Ee][Cc] [Ss][Hh].*/))
+    pivot_on:
+    - host
+    window: 1h
+  - name: Execution from world-writable staging directories
+    query: (data_process_exec_process_binary:/(\/tmp|\/var\/tmp|\/dev\/shm)\/.*/ OR (data_process_exec_process_arguments:/.*/[Tt][Mm][Pp]/.*/ OR data_process_exec_process_arguments:/.*/[Dd][Ee][Vv]/[Ss][Hh][Mm]/.*/ OR data_process_exec_process_arguments:/.*/[Vv][Aa][Rr]/[Tt][Mm][Pp]/.*/))
+    pivot_on:
+    - host
     window: 2h
-  - name: Reverse shell / network tool launch
-    query: full_log:/.*(nc |ncat|netcat|socat|\/dev\/tcp\/|mkfifo|bash -i).*/
-    pivot_on: host
-    window: 2h
-  - name: Execution from tmp or shm directories
-    query: full_log:/.*(\/tmp\/|\/dev\/shm\/|\/var\/tmp\/).*(chmod|\.sh|\.elf|\.bin|exec).*/
-    pivot_on: host
+  - name: Persistence and secret theft after RCE
+    query: (data_process_exec_process_binary:/.*(\/[Cc][Rr][Oo][Nn][Tt][Aa][Bb]|\/[Ss][Yy][Ss][Tt][Ee][Mm][Cc][Tt][Ll])/ OR (data_process_exec_process_arguments:/.*/[Ee][Tt][Cc]/[Cc][Rr][Oo][Nn].*/ OR data_process_exec_process_arguments:/.*[Aa][Uu][Tt][Hh][Oo][Rr][Ii][Zz][Ee][Dd]_[Kk][Ee][Yy][Ss].*/ OR data_process_exec_process_arguments:/.*/[Ee][Tt][Cc]/[Ss][Hh][Aa][Dd][Oo][Ww].*/ OR data_process_exec_process_arguments:/.*.[Ee][Nn][Vv].*/ OR data_process_exec_process_arguments:/.*.[Aa][Ww][Ss]/[Cc][Rr][Ee][Dd][Ee][Nn][Tt][Ii][Aa][Ll][Ss].*/ OR data_process_exec_process_arguments:/.*[Ii][Dd]_[Rr][Ss][Aa].*/))
+    pivot_on:
+    - host
     window: 4h
-  - name: Persistence and account changes after compromise
-    query: full_log:/.*(crontab|\/etc\/cron|useradd|adduser|authorized_keys|systemd\/system).*/
-    pivot_on: host
-    window: 6h
-  - name: Credential and environment file reads
-    query: full_log:/.*(\/etc\/passwd|\/etc\/shadow|\.env|id_rsa|\.aws\/credentials|\/proc\/self\/environ).*/
-    pivot_on: host
+  - name: Cryptominer deployment and competitor cleanup
+    query: (data_process_exec_process_arguments:/.*[Xx][Mm][Rr][Ii][Gg].*/ OR data_process_exec_process_arguments:/.*[Ss][Tt][Rr][Aa][Tt][Uu][Mm]+[Tt][Cc][Pp].*/ OR data_process_exec_process_arguments:/.*[Mm][Ii][Nn][Ee][Rr][Dd].*/ OR data_process_exec_process_arguments:/.*[Pp][Kk][Ii][Ll][Ll].*/ OR data_process_exec_process_arguments:/.*[Kk][Ii][Ll][Ll] -9.*/ OR data_process_exec_process_arguments:/.*--[Dd][Oo][Nn][Aa][Tt][Ee]-[Ll][Ee][Vv][Ee][Ll].*/)
+    pivot_on:
+    - host
     window: 4h

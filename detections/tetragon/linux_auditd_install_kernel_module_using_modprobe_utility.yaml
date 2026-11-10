@@ -114,52 +114,46 @@ correlation:
   # Authored per-rule (behaviour-researched) for the correlation engine. Related CoPilot
   # Searches + telemetry pivots to run around an alert, scoped to its host/user/ip/domain.
   related_rules:
-  - id: linux-auditd-crontab-directory-files-modification-001
-    name: Linux Auditd Crontab Directory Files Modification
-    reason: Hidden payloads are commonly paired with cron entries that execute them for persistence
-  - id: linux-append-cronjob-entry-001
-    name: Linux Append Cronjob Entry On Existing Cronjob File
-    reason: Appending a cronjob to run the hidden file is the usual persistence follow-on
-  - id: b3c8e2d1-4f1a-4b7c-9a22-91a6f2c4e8de
-    name: Linux Init Script Persistence Detection
-    reason: Init-script persistence referencing the hidden path ties staging to boot-time execution
-  - id: linux-setuid-using-chmod-utility-001
-    name: Linux Setuid Using Chmod Utility
-    reason: Marking the hidden file setuid/executable turns staging into a privilege-escalation backdoor
-  - id: 4b3cb710-5e83-4715-8c45-8b2b5b3e5751
-    name: Modification of ld.so.preload
-    reason: ld.so.preload edits pointing at a hidden library combine hiding with rootkit-style hijack
-  - id: fa4aaed5-4fe0-498d-bbc0-08e3346387ba
-    name: Copy Passwd Or Shadow From TMP Path
-    reason: Copying passwd/shadow into temp or hidden locations is staging for exfiltration
-  - id: linux-auditd-ssh-config-keys-deletion-001
-    name: Linux Auditd SSH Config Keys Deletion
-    reason: Hidden .ssh-area manipulation can accompany planting of backdoor keys
-  window: 2h
+  - id: cf610c15-ed71-46e1-bdf8-2bd1a99de6c4
+    name: Download File To Potentially Suspicious Directory Via Wget
+    reason: Hidden dot-directories are a common drop zone; a wget into one shortly before shows the payload staging.
+  - id: a39d7fa7-3fbd-4dc2-97e1-d87f546b1bbc
+    name: Program Executions in Suspicious Folders
+    reason: 'Follow-on: files placed in a hidden directory are executed from it next.'
+  - id: 5cd16c8f-44a6-4654-81e7-a84d6db507d4
+    name: Process Execution From Shared Memory Directory
+    reason: 'Same staging pattern: hidden files plus execution from /dev/shm.'
+  - id: e2f3g4h5-6789-1011-1213-141516171819
+    name: Linux File Permission Modification Detection
+    reason: A hidden file is usually made executable with chmod right after creation.
+  - id: a5b977d6-8a81-4475-91b9-49dbfcd941f7
+    name: Remove Immutable File Attribute - Auditd
+    reason: Adversaries planting hidden persistence files also tamper with chattr attributes.
+  - id: a94cdd87-6c54-4678-a6cc-2814ffe5a13d
+    name: Unix Shell Configuration Modification
+    reason: Hidden dotfiles such as .bashrc/.profile are persistence targets; edits confirm persistence intent.
+  - id: 6b14bac8-3e3a-4324-8109-42f0546a347f
+    name: Scheduled Cron Task/Job - Linux
+    reason: Hidden scripts are often wired into cron after creation.
+  - id: 2fade0b6-7423-4835-9d4f-335b39b83867
+    name: Shell Execution Of Process Located In Tmp Directory
+    reason: Shell execution of a staged payload follows hidden-file staging.
+  window: 4h
   enrichment_searches:
   # Behaviour-targeted hunts the engine runs around the alert (not a sweep).
-  - name: Executable or setuid permission applied
-    query: (data_process_exec_process_binary:/.*\/[Cc][Hh][Mm][Oo][Dd]/) AND (data_process_exec_process_arguments:/.*(\+x|[0-7]?7[0-7][0-7]|u\+s|4755).*/)
-    pivot_on:
-    - host
-    window: 2h
+  - name: Downloads preceding hidden staging
+    query: (full_log:/.*curl.*/ OR full_log:/.*wget.*/ OR full_log:/.*scp .*/ OR full_log:/.*sftp.*/) AND NOT _exists_:data_win_system_eventID AND NOT rule_groups:/.*windows.*/
+    pivot_on: host
+    window: 4h
+  - name: chmod/chattr on hidden paths
+    query: ((full_log:/.*chmod.*/ OR full_log:/.*chattr.*/) AND full_log:/.*\/\..*/) AND NOT _exists_:data_win_system_eventID AND NOT rule_groups:/.*windows.*/
+    pivot_on: host
+    window: 4h
   - name: Execution from hidden paths
-    query: data_process_exec_process_binary:/.*\/\.[A-Za-z0-9_-]+.*/
-    pivot_on:
-    - host
+    query: ((full_log:/.*execve.*/ OR full_log:/.*exec.*/) AND (full_log:/.*\/tmp\/\..*/ OR full_log:/.*\/dev\/shm\/\..*/ OR full_log:/.*\/var\/tmp\/\..*/)) AND NOT _exists_:data_win_system_eventID AND NOT rule_groups:/.*windows.*/
+    pivot_on: host
     window: 4h
-  - name: Download tools writing payloads to staging dirs
-    query: (data_process_exec_process_binary:/.*\/([Cc][Uu][Rr][Ll]|[Ww][Gg][Ee][Tt]|[Tt][Ff][Tt][Pp]).*/) AND (data_process_exec_process_arguments:/.*(-o |-O |--output|\/tmp|\/dev\/shm|\/var\/tmp).*/)
-    pivot_on:
-    - host
-    window: 2h
-  - name: Persistence locations referencing hidden paths
-    query: (data_process_exec_process_arguments:/.*(\/etc\/cron|crontab|rc\.local|\.bashrc|\.profile|\/etc\/systemd|\/etc\/init\.d).*/) AND (data_process_exec_process_arguments:/.*\/\..*/)
-    pivot_on:
-    - host
-    window: 4h
-  - name: Immutable flag or timestomping on files
-    query: (data_process_exec_process_binary:/.*\/([Cc][Hh][Aa][Tt][Tt][Rr]|[Tt][Oo][Uu][Cc][Hh]).*/) AND (data_process_exec_process_arguments:/.*(\+i|-r |-t |-d ).*/)
-    pivot_on:
-    - host
-    window: 2h
+  - name: Persistence edits in dotfiles and cron
+    query: (full_log:/.*\.bashrc.*/ OR full_log:/.*\.profile.*/ OR full_log:/.*crontab.*/ OR full_log:/.*authorized_keys.*/ OR full_log:/.*rc\.local.*/) AND NOT _exists_:data_win_system_eventID AND NOT rule_groups:/.*windows.*/
+    pivot_on: host
+    window: 24h

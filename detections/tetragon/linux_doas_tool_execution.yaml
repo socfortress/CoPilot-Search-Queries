@@ -131,50 +131,48 @@ correlation:
   related_rules:
   - id: lnx-doas-001
     name: Linux doas Execution Detection
-    reason: Same doas execution seen through syslog/auditd telemetry; confirms the privilege-escalation attempt from a second sensor.
-  - id: 0f79c4d2-4e1f-4683-9c36-b5469a665e06
-    name: Access of Sudoers File Content
-    reason: Reading sudoers/doas policy is the reconnaissance step that precedes picking doas or sudo as an escalation path.
-  - id: fa4aaed5-4fe0-498d-bbc0-08e3346387ba
-    name: Copy Passwd Or Shadow From TMP Path
-    reason: Once elevated through doas, staging passwd/shadow copies is the typical credential-harvest follow-on.
-  - id: 6419afd1-3742-47a5-a7e6-b50386cd15f8
-    name: Chmod Targeting Sensitive Directories
-    reason: Root via doas is commonly used to loosen permissions on sensitive paths for persistence or access.
-  - id: 30bcce26-51c5-49f2-99c8-7b59e3af36c7
-    name: Execution Of Script Located In Potentially Suspicious Directory
-    reason: A script dropped in /tmp or similar and run under doas indicates the escalated payload stage.
-  - id: e3a8a052-111f-4606-9aee-f28ebeb76776
-    name: Disabling Security Tools
-    reason: Elevated actors frequently stop EDR/audit agents right after gaining root.
-  - id: 1182f3b3-e716-4efa-99ab-d2685d04360f
-    name: History File Deletion
-    reason: Clearing shell history after privileged commands is a common cleanup step following escalation.
-  window: 2h
+    reason: Syslog/auditd view of the same doas invocation; confirms the exec from a second telemetry source and shows the full command line run via doas.
+  - id: linux-sudo-or-su-execution-001
+    name: Linux Sudo Or Su Execution
+    reason: An actor with doas rights usually also tries sudo/su; co-occurring elevation attempts on the same host widen the escalation picture.
+  - id: linux-pkexec-privilege-escalation-001
+    name: Linux pkexec Privilege Escalation
+    reason: Alternative escalation primitive tried when doas or sudo is unavailable or denied.
+  - id: linux-auditd-chown-to-root-001
+    name: Linux Auditd Chown To Root
+    reason: 'Post-escalation step: files handed to root to plant a SUID backdoor or persist elevated access.'
+  - id: linux-auditd-add-user-001
+    name: Linux Auditd Add User
+    reason: 'Common follow-on once root is obtained: creating a backdoor account.'
+  - id: linux-unix-shell-configuration-modification-001
+    name: Linux Unix Shell Configuration Modification
+    reason: 'Persistence after elevation: shell rc/profile edits so the privileged foothold survives re-login.'
+  - id: linux-append-cronjob-entry-001
+    name: Linux Append Cronjob Entry On Existing Cronjob File
+    reason: Root-level persistence via cron typically follows successful privilege escalation.
+  - id: 4e2a6c91-7f3d-4b6e-9a4f-1c8b0e5a92d4
+    name: Crontab Interactive Edit Execution
+    reason: Interactive crontab edit under elevated context is a frequent persistence follow-on to doas use.
+  window: 1h
   enrichment_searches:
   # Behaviour-targeted hunts the engine runs around the alert (not a sweep).
-  - name: Commands run through doas with their arguments
-    query: data_process_exec_parent_binary:"/usr/bin/doas"
+  - name: Commands run through doas (what executed as root)
+    query: data_process_exec_process_binary:/.*(\/[Dd][Oo][Aa][Ss])/ AND _exists_:data_process_exec_process_arguments
+    pivot_on:
+    - host
+    window: 1h
+  - name: Account, sudoers and doas.conf changes
+    query: (data_process_exec_process_binary:/.*(\/[Uu][Ss][Ee][Rr][Aa][Dd][Dd]|\/[Uu][Ss][Ee][Rr][Mm][Oo][Dd]|\/[Aa][Dd][Dd][Uu][Ss][Ee][Rr]|\/[Vv][Ii][Ss][Uu][Dd][Oo]|\/[Pp][Aa][Ss][Ss][Ww][Dd]|\/[Cc][Hh][Pp][Aa][Ss][Ss][Ww][Dd]|\/[Vv][Ii][Pp][Ww])/ OR (data_process_exec_process_arguments:/.*/[Ee][Tt][Cc]/[Dd][Oo][Aa][Ss].[Cc][Oo][Nn][Ff].*/ OR data_process_exec_process_arguments:/.*/[Ee][Tt][Cc]/[Ss][Uu][Dd][Oo][Ee][Rr][Ss].*/ OR data_process_exec_process_arguments:/.*/[Ee][Tt][Cc]/[Pp][Aa][Ss][Ss][Ww][Dd].*/ OR data_process_exec_process_arguments:/.*/[Ee][Tt][Cc]/[Ss][Hh][Aa][Dd][Oo][Ww].*/))
     pivot_on:
     - host
     window: 2h
-  - name: Reads or edits of doas/sudo policy files
-    query: data_process_exec_process_arguments:/.*(doas\.conf|\/etc\/sudoers).*/
-    pivot_on:
-    - host
-    window: 6h
-  - name: Shell spawned from privilege wrappers
-    query: (data_process_exec_process_binary:/.*\/(sh|bash|dash|zsh)/ AND data_process_exec_parent_binary:/.*\/(doas|sudo|su)/)
+  - name: SUID and capability tampering
+    query: (data_process_exec_process_binary:/.*(\/[Cc][Hh][Mm][Oo][Dd]|\/[Cc][Hh][Oo][Ww][Nn]|\/[Ss][Ee][Tt][Cc][Aa][Pp]|\/[Cc][Hh][Aa][Tt][Tt][Rr])/ AND (data_process_exec_process_arguments:/.*[Uu]+[Ss].*/ OR data_process_exec_process_arguments:/.*4755.*/ OR data_process_exec_process_arguments:/.*4777.*/ OR data_process_exec_process_arguments:/.*+[Ss].*/ OR data_process_exec_process_arguments:/.*[Cc][Aa][Pp]_[Ss][Ee][Tt][Uu][Ii][Dd].*/))
     pivot_on:
     - host
     window: 2h
-  - name: Account or credential file manipulation
-    query: data_process_exec_process_binary:/.*\/(useradd|usermod|passwd|chpasswd|adduser|visudo)/
+  - name: Persistence set up after escalation
+    query: (data_process_exec_process_binary:/.*(\/[Cc][Rr][Oo][Nn][Tt][Aa][Bb]|\/[Ss][Yy][Ss][Tt][Ee][Mm][Cc][Tt][Ll]|\/[Aa][Tt])/ OR (data_process_exec_process_arguments:/.*/[Ee][Tt][Cc]/[Cc][Rr][Oo][Nn].*/ OR data_process_exec_process_arguments:/.*/[Ee][Tt][Cc]/[Ss][Yy][Ss][Tt][Ee][Mm][Dd]/[Ss][Yy][Ss][Tt][Ee][Mm].*/ OR data_process_exec_process_arguments:/.*/[Ee][Tt][Cc]/[Rr][Cc].[Ll][Oo][Cc][Aa][Ll].*/ OR data_process_exec_process_arguments:/.*.[Bb][Aa][Ss][Hh][Rr][Cc].*/ OR data_process_exec_process_arguments:/.*.[Pp][Rr][Oo][Ff][Ii][Ll][Ee].*/ OR data_process_exec_process_arguments:/.*[Aa][Uu][Tt][Hh][Oo][Rr][Ii][Zz][Ee][Dd]_[Kk][Ee][Yy][Ss].*/))
     pivot_on:
     - host
     window: 4h
-  - name: Downloaders and transfer tools on host
-    query: data_process_exec_process_binary:/.*\/(curl|wget|nc|ncat|scp)/
-    pivot_on:
-    - host
-    window: 2h
