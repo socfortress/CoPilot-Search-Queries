@@ -201,23 +201,47 @@ graylog:
   query: data_win_system_eventID:"1" AND (data_win_eventdata_image:/.*\\[Ff][Ll][Tt][Mm][Cc]\.[Ee][Xx][Ee]/ OR data_win_eventdata_originalFileName:/[Ff][Ll][Tt][Mm][Cc]\.[Ee][Xx][Ee]/) AND data_win_eventdata_commandLine:/.*[Uu][Nn][Ll][Oo][Aa][Dd].*/ AND _exists_:data_win_eventdata_parentImage AND _exists_:data_win_eventdata_commandLine AND NOT (((data_win_eventdata_parentImage:/.*\\[Aa][Pp][Pp][Dd][Aa][Tt][Aa]\\[Ll][Oo][Cc][Aa][Ll]\\[Tt][Ee][Mm][Pp]\\.*/ OR data_win_eventdata_parentImage:/.*:\\[Ww][Ii][Nn][Dd][Oo][Ww][Ss]\\[Tt][Ee][Mm][Pp]\\.*/) AND data_win_eventdata_parentImage:/.*\\[Ee][Nn][Dd][Pp][Oo][Ii][Nn][Tt]-[Pp][Rr][Oo][Tt][Ee][Cc][Tt][Ii][Oo][Nn]-[Ii][Nn][Ss][Tt][Aa][Ll][Ll][Ee][Rr]-[Xx]64\.[Tt][Mm][Pp]/ AND (data_win_eventdata_commandLine:/.*[Uu][Nn][Ll][Oo][Aa][Dd] [Rr][Tt][Pp]_[Ff][Ii][Ll][Ee][Ss][Yy][Ss][Tt][Ee][Mm]_[Ff][Ii][Ll][Tt][Ee][Rr]/ OR data_win_eventdata_commandLine:/.*[Uu][Nn][Ll][Oo][Aa][Dd] [Rr][Tt][Pp]_[Ff][Ii][Ll][Tt][Ee][Rr]/)) OR (data_win_eventdata_parentImage:/[Cc]:\\[Pp][Rr][Oo][Gg][Rr][Aa][Mm] [Ff][Ii][Ll][Ee][Ss] \([Xx]86\)\\[Mm][Aa][Nn][Aa][Gg][Ee][Ee][Nn][Gg][Ii][Nn][Ee]\\[Uu][Ee][Mm][Ss]_[Aa][Gg][Ee][Nn][Tt]\\[Bb][Ii][Nn]\\[Dd][Cc][Ff][Aa][Ss][Ee][Rr][Vv][Ii][Cc][Ee]64\.[Ee][Xx][Ee]/ AND data_win_eventdata_commandLine:/.*[Uu][Nn][Ll][Oo][Aa][Dd] [Dd][Ff][Mm][Ff][Ii][Ll][Tt][Ee][Rr]/))
 
 correlation:
-  # Authored by the correlation engine for review.
+  # Authored per-rule (behaviour-researched) for the correlation engine. Related CoPilot
+  # Searches + telemetry pivots to run around an alert, scoped to its host/user/ip/domain.
+  related_rules:
+  - id: 4d7cda18-1b12-4e52-b45c-d28653210df8
+    name: Sysmon Driver Unloaded Via Fltmc.EXE
+    reason: Specific case where the unloaded minifilter is Sysmon itself, blinding telemetry; confirms defence evasion.
+  - id: 37db85d1-b089-490a-a59a-c7b6f984f480
+    name: Sysmon Discovery Via Default Driver Altitude Using Findstr.EXE
+    reason: Attackers enumerate filters/altitudes to find Sysmon before unloading it.
+  - id: 4916a35e-bfc4-47d0-8e25-a003d7067061
+    name: Sysmon Driver Altitude Change
+    reason: Alternative way to disable the Sysmon filter driver, via registry altitude change.
+  - id: fdb829a8-db84-4832-b64b-3e964cd44f01
+    name: Windows Eventlog Cleared Via Wevtutil
+    reason: Log clearing frequently accompanies telemetry-blinding to erase remaining traces.
+  - id: 236e7c8e-c9d9-11eb-a824-acde48001122
+    name: Disable Logs Using WevtUtil
+    reason: Disabling event channels is a companion defence-evasion step.
+  - id: 1444443e-6757-43e4-9ea4-c8fc705f79a2
+    name: Boot Configuration Tampering Via Bcdedit.EXE
+    reason: 'Ransomware-style prep: security tooling disabled, then boot recovery tampered.'
+  window: 6h
   enrichment_searches:
-  # Rule-specific telemetry pivots the engine runs around an alert from this rule,
-  # scoped to the alert's host/user/IP within the window (behaviour-targeted, not a sweep).
-    - name: "Log-clearing / anti-forensic activity on this host"
-      query: '(((data_win_eventdata_commandLine:/.*[Ww][Ee][Vv][Tt][Uu][Tt][Ii][Ll] [Cc][Ll].*/ OR data_win_eventdata_commandLine:/.*[Cc][Ll][Ee][Aa][Rr]-[Ee][Vv][Ee][Nn][Tt][Ll][Oo][Gg].*/ OR data_win_eventdata_commandLine:/.*[Ff][Ss][Uu][Tt][Ii][Ll] [Uu][Ss][Nn] [Dd][Ee][Ll][Ee][Tt][Ee][Jj][Oo][Uu][Rr][Nn][Aa][Ll].*/ OR data_win_eventdata_commandLine:/.*[Vv][Ss][Ss][Aa][Dd][Mm][Ii][Nn] [Dd][Ee][Ll][Ee][Tt][Ee].*/ OR data_win_eventdata_commandLine:/.*[Ww][Ee][Vv][Tt][Uu][Tt][Ii][Ll] [Cc][Ll][Ee][Aa][Rr]-[Ll][Oo][Gg].*/)) OR ((data_win_system_eventID:"1102" OR data_win_system_eventID:"104")))'
-      pivot_on: [host]
-      window: 2h
-    - name: "Other executions of this tool-set on this host (any arguments)"
-      query: 'data_win_system_eventID:"1" AND data_win_eventdata_image:/.*(\\[Ff][Ll][Tt][Mm][Cc]\.[Ee][Xx][Ee]|\\[Dd][Cc][Ff][Aa][Ss][Ee][Rr][Vv][Ii][Cc][Ee]64\.[Ee][Xx][Ee])/'
-      pivot_on: [host]
-      window: 2h
-    - name: "Follow-on LOLBin / signed-binary-proxy execution on this host"
-      query: 'data_win_system_eventID:"1" AND data_win_eventdata_image:/.*(\\[Rr][Uu][Nn][Dd][Ll][Ll]32\.[Ee][Xx][Ee]|\\[Rr][Ee][Gg][Ss][Vv][Rr]32\.[Ee][Xx][Ee]|\\[Mm][Ss][Hh][Tt][Aa]\.[Ee][Xx][Ee]|\\[Ii][Nn][Ss][Tt][Aa][Ll][Ll][Uu][Tt][Ii][Ll]\.[Ee][Xx][Ee]|\\[Rr][Ee][Gg][Aa][Ss][Mm]\.[Ee][Xx][Ee]|\\[Rr][Ee][Gg][Ss][Vv][Cc][Ss]\.[Ee][Xx][Ee]|\\[Mm][Ss][Bb][Uu][Ii][Ll][Dd]\.[Ee][Xx][Ee]|\\[Cc][Ee][Rr][Tt][Uu][Tt][Ii][Ll]\.[Ee][Xx][Ee]|\\[Bb][Ii][Tt][Ss][Aa][Dd][Mm][Ii][Nn]\.[Ee][Xx][Ee]|\\[Ww][Mm][Ii][Cc]\.[Ee][Xx][Ee]|\\[Cc][Mm][Ss][Tt][Pp]\.[Ee][Xx][Ee]|\\[Oo][Dd][Bb][Cc][Cc][Oo][Nn][Ff]\.[Ee][Xx][Ee]|\\[Ff][Oo][Rr][Ff][Ii][Ll][Ee][Ss]\.[Ee][Xx][Ee]|\\[Pp][Cc][Aa][Ll][Uu][Aa]\.[Ee][Xx][Ee]|\\[Mm][Aa][Vv][Ii][Nn][Jj][Ee][Cc][Tt]\.[Ee][Xx][Ee]|\\[Ss][Cc][Rr][Ii][Pp][Tt][Rr][Uu][Nn][Nn][Ee][Rr]\.[Ee][Xx][Ee])/'
-      pivot_on: [host]
-      window: 1h
-    - name: "Outbound connections by script interpreters on this host"
-      query: 'data_win_system_eventID:"3" AND data_win_eventdata_image:/.*(\\[Pp][Oo][Ww][Ee][Rr][Ss][Hh][Ee][Ll][Ll]\.[Ee][Xx][Ee]|\\[Pp][Ww][Ss][Hh]\.[Ee][Xx][Ee]|\\[Pp][Oo][Ww][Ee][Rr][Ss][Hh][Ee][Ll][Ll]_[Ii][Ss][Ee]\.[Ee][Xx][Ee]|\\[Cc][Mm][Dd]\.[Ee][Xx][Ee]|\\[Ww][Ss][Cc][Rr][Ii][Pp][Tt]\.[Ee][Xx][Ee]|\\[Cc][Ss][Cc][Rr][Ii][Pp][Tt]\.[Ee][Xx][Ee]|\\[Mm][Ss][Hh][Tt][Aa]\.[Ee][Xx][Ee]|\\[Rr][Uu][Nn][Dd][Ll][Ll]32\.[Ee][Xx][Ee]|\\[Rr][Ee][Gg][Ss][Vv][Rr]32\.[Ee][Xx][Ee])/'
-      pivot_on: [host]
-      window: 1h
+  # Behaviour-targeted hunts the engine runs around the alert (not a sweep).
+  - name: Fltmc activity on host
+    query: data_win_system_eventID:1 AND data_win_eventdata_image:/.*[Ff]lt[Mm][Cc]\.exe/
+    pivot_on: host
+    window: 6h
+  - name: Sysmon or EDR service stop attempts
+    query: data_win_system_eventID:1 AND (data_win_eventdata_commandLine:/.*(sc|net)(\.exe)? +(stop|config).*(sysmon|sense|defend|crowdstrike|csagent|sentinel|carbon).*/ OR data_win_eventdata_commandLine:/.*sysmon.* -u.*/)
+    pivot_on: host
+    window: 6h
+  - name: Sysmon state change and config events
+    query: data_win_system_eventID:(4 OR 16)
+    pivot_on: host
+    window: 6h
+  - name: Defender tampering via PowerShell or registry
+    query: data_win_system_eventID:1 AND (data_win_eventdata_commandLine:/.*[Ss]et-[Mm]p[Pp]reference.*/ OR data_win_eventdata_commandLine:/.*DisableAntiSpyware.*/ OR data_win_eventdata_commandLine:/.*[Aa]dd-[Mm]p[Pp]reference.*[Ee]xclusion.*/)
+    pivot_on: host
+    window: 6h
+  - name: Event log clearing
+    query: data_win_system_eventID:1 AND data_win_eventdata_image:/.*[Ww]evtutil\.exe/ AND (data_win_eventdata_commandLine:/.* cl .*/ OR data_win_eventdata_commandLine:/.*clear-log.*/)
+    pivot_on: host
+    window: 6h
