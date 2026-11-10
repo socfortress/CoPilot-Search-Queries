@@ -129,47 +129,50 @@ correlation:
   # Authored per-rule (behaviour-researched) for the correlation engine. Related CoPilot
   # Searches + telemetry pivots to run around an alert, scoped to its host/user/ip/domain.
   related_rules:
+  - id: 0cf7a157-8879-41a2-8f55-388dd23746b7
+    name: Linux Recon Indicators
+    reason: Enumeration of users, SUID binaries and privilege config typically precedes an attacker reaching for doas.
   - id: 0f79c4d2-4e1f-4683-9c36-b5469a665e06
     name: Access of Sudoers File Content
-    reason: Reading sudoers/doas policy is the recon step before relying on privilege rules; same privilege-config discovery path
-  - id: 6a50f16c-3b7b-42d1-b081-0fdd3ba70a73
-    name: User Added To Root/Sudoers Group Using Usermod
-    reason: 'Follow-on persistence: after elevating via doas an attacker grants a user lasting root/sudo rights'
+    reason: Reading sudoers/privilege config on the same host is the sibling check for what a user may escalate to.
+  - id: 86157017-c2b1-4d4a-8c33-93b8e67e4af4
+    name: Potential Suspicious Change To Sensitive/Critical Files
+    reason: Once root via doas, edits to critical files (passwd, sudoers, ld.so.preload) follow.
   - id: fa4aaed5-4fe0-498d-bbc0-08e3346387ba
     name: Copy Passwd Or Shadow From TMP Path
-    reason: Root obtained through doas is commonly used to read/copy credential files
+    reason: Root obtained through doas is commonly used to copy credential files for offline cracking.
+  - id: 6b14bac8-3e3a-4324-8109-42f0546a347f
+    name: Scheduled Cron Task/Job - Linux
+    reason: Elevated access is commonly converted into cron persistence.
   - id: 1182f3b3-e716-4efa-99ab-d2685d04360f
     name: History File Deletion
-    reason: Defense evasion typically follows root escalation to hide the elevated commands
+    reason: Anti-forensics after privileged activity.
   - id: 80915f59-9b56-4616-9de0-fd0dea6c12fe
     name: Linux Logs Clearing Attempts
-    reason: Root-level log wiping after privileged execution
+    reason: Root-level log wiping is the usual cleanup once doas escalation succeeded.
   - id: e3a8a052-111f-4606-9aee-f28ebeb76776
     name: Disabling Security Tools
-    reason: Elevated shell is used to stop auditd/EDR agents before further action
-  - id: 4e2a6c91-7f3d-4b6e-9a4f-1c8b0e5a92d4
-    name: Crontab Interactive Edit Execution
-    reason: Root persistence via cron after privilege gain
-  window: 4h
+    reason: Root access enables stopping auditd/EDR agents before further actions.
+  window: 2h
   enrichment_searches:
   # Behaviour-targeted hunts the engine runs around the alert (not a sweep).
-  - name: Commands run through doas on this host
-    query: data_process_exec_parent_binary:"/usr/bin/doas"
-    pivot_on: host
-    window: 4h
-  - name: Edits to doas.conf or sudoers policy
-    query: (data_process_exec_process_arguments:/.*doas\.conf.*/ OR data_process_exec_process_arguments:/.*sudoers.*/) AND data_process_exec_process_binary:/.*\/(vi|vim|nano|tee|sed|cp|mv|echo|cat)/
-    pivot_on: host
-    window: 6h
-  - name: Interactive shell spawned with elevated privilege
-    query: data_process_exec_process_binary:/.*\/(bash|sh|zsh|dash)/ AND data_process_exec_parent_binary:/.*\/(doas|su|sudo)/
+  - name: Commands run through doas
+    query: data_process_exec_parent_binary:"/usr/bin/doas" OR data_process_exec_process_binary:"/usr/bin/doas"
     pivot_on: host
     window: 2h
-  - name: Account or credential-file changes
-    query: data_process_exec_process_binary:/.*\/(useradd|usermod|passwd|chpasswd|adduser)/ OR data_process_exec_process_arguments:/.*\/etc\/(shadow|passwd).*/
+  - name: Privileged shell spawns
+    query: data_process_exec_process_binary:/.*\/(ba|da|z|k)?sh/ AND data_process_exec_process_arguments:/.* -[ic].*/
     pivot_on: host
-    window: 6h
-  - name: SUID or cron persistence by root
-    query: (data_process_exec_process_binary:/.*\/chmod/ AND data_process_exec_process_arguments:/.*u\+s.*/) OR data_process_exec_process_binary:/.*\/(crontab|setcap)/
+    window: 2h
+  - name: Credential and privilege config access
+    query: data_process_exec_process_arguments:/.*(\/etc\/shadow|\/etc\/passwd|\/etc\/sudoers|\/etc\/doas\.conf).*/
     pivot_on: host
-    window: 6h
+    window: 4h
+  - name: Persistence via cron, systemd or authorized_keys
+    query: data_process_exec_process_arguments:/.*(\/etc\/cron|crontab|\/etc\/systemd\/system|authorized_keys|\.bashrc).*/
+    pivot_on: host
+    window: 4h
+  - name: User or permission changes
+    query: data_process_exec_process_binary:/.*\/(useradd|usermod|adduser|chmod|chown|setcap)/
+    pivot_on: host
+    window: 4h
