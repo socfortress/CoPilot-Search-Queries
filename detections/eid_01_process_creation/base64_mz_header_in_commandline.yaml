@@ -150,19 +150,50 @@ graylog:
   query: data_win_system_eventID:"1" AND (data_win_eventdata_commandLine:/.*[Tt][Vv][Qq][Qq][Aa][Aa][Mm][Aa][Aa][Aa][Aa][Ee][Aa][Aa][Aa][Aa].*/ OR data_win_eventdata_commandLine:/.*[Tt][Vv][Pp][Qq][Aa][Aa][Ii][Aa][Aa][Aa][Aa][Ee][Aa][Aa]8[Aa].*/ OR data_win_eventdata_commandLine:/.*[Tt][Vv][Qq][Aa][Aa][Aa][Ee][Aa][Aa][Aa][Aa][Ee][Aa][Bb][Aa][Aa].*/ OR data_win_eventdata_commandLine:/.*[Tt][Vv][Oo][Aa][Aa][Aa][Aa][Aa][Aa][Aa][Aa][Aa][Aa][Aa][Aa][Aa].*/ OR data_win_eventdata_commandLine:/.*[Tt][Vv][Pp][Tt][Aa][Qq][Ee][Aa][Aa][Aa][Aa][Ee][Aa][Aa][Aa][Aa].*/)
 
 correlation:
-  # Authored by the correlation engine for review.
+  # Authored per-rule (behaviour-researched) for the correlation engine. Related CoPilot
+  # Searches + telemetry pivots to run around an alert, scoped to its host/user/ip/domain.
+  related_rules:
+  - id: 62b7ccc9-23b4-471e-aa15-6da3663c4d59
+    name: PowerShell Base64 Encoded Reflective Assembly Load
+    reason: Base64 PE bytes on a command line are usually fed to [Reflection.Assembly]::Load; this is the loader that consumes the MZ blob.
+  - id: e32d4572-9826-4738-b651-95fa63747e8a
+    name: Base64 Encoded PowerShell Command Detected
+    reason: 'Delivery wrapper: the base64 PE is typically carried inside an -EncodedCommand PowerShell invocation.'
+  - id: c4db14d9-7909-48b4-a054-aa14d89dbb19
+    name: Malicious PowerShell Process - Encoded Command
+    reason: Encoded PowerShell process that commonly embeds the base64 MZ payload.
+  - id: f26c6093-6f14-4b12-800f-0fcb46f5ffd0
+    name: Malicious Base64 Encoded PowerShell Keywords in Command Lines
+    reason: Base64-encoded PowerShell keywords (Assembly/Load/FromBase64) often accompany an inline PE payload.
+  - id: 9c0295ce-d60d-40bd-bd74-84673b7592b1
+    name: Suspicious Encoded And Obfuscated Reflection Assembly Load Function Call
+    reason: 'Obfuscated reflection assembly load: the in-memory execution step after the MZ blob is decoded.'
+  - id: 0a99eb3e-1617-41bd-b095-13dc767f3def
+    name: HackTool - Jlaive In-Memory Assembly Execution
+    reason: Jlaive packs a .NET PE as base64 and loads it in memory; same MZ-in-commandline tradecraft.
+  - id: cc9cbe82-7bc0-4ef5-bc23-bbfb83947be7
+    name: File Decoded From Base64/Hex Via Certutil.EXE
+    reason: 'Alternative decode path: certutil -decode turns a base64 blob into a PE on disk.'
+  window: 4h
   enrichment_searches:
-  # Rule-specific telemetry pivots the engine runs around an alert from this rule,
-  # scoped to the alert's host/user/IP within the window (behaviour-targeted, not a sweep).
-    - name: "Autostart persistence written on this host (Run keys, services, IFEO)"
-      query: '(data_win_system_eventID:"12" OR data_win_system_eventID:"13") AND (data_win_eventdata_targetObject:/.*[Cc][Uu][Rr][Rr][Ee][Nn][Tt][Vv][Ee][Rr][Ss][Ii][Oo][Nn]\\[Rr][Uu][Nn].*/ OR data_win_eventdata_targetObject:/.*[Cc][Uu][Rr][Rr][Ee][Nn][Tt][Vv][Ee][Rr][Ss][Ii][Oo][Nn]\\[Rr][Uu][Nn][Oo][Nn][Cc][Ee].*/ OR data_win_eventdata_targetObject:/.*[Cc][Uu][Rr][Rr][Ee][Nn][Tt][Cc][Oo][Nn][Tt][Rr][Oo][Ll][Ss][Ee][Tt]\\[Ss][Ee][Rr][Vv][Ii][Cc][Ee][Ss]\\.*/ OR data_win_eventdata_targetObject:/.*[Ii][Mm][Aa][Gg][Ee] [Ff][Ii][Ll][Ee] [Ee][Xx][Ee][Cc][Uu][Tt][Ii][Oo][Nn] [Oo][Pp][Tt][Ii][Oo][Nn][Ss]\\.*/ OR data_win_eventdata_targetObject:/.*[Ww][Ii][Nn][Ll][Oo][Gg][Oo][Nn]\\[Ss][Hh][Ee][Ll][Ll].*/ OR data_win_eventdata_targetObject:/.*[Ww][Ii][Nn][Ll][Oo][Gg][Oo][Nn]\\[Uu][Ss][Ee][Rr][Ii][Nn][Ii][Tt].*/ OR data_win_eventdata_targetObject:/.*[Cc][Uu][Rr][Rr][Ee][Nn][Tt][Vv][Ee][Rr][Ss][Ii][Oo][Nn]\\[Ee][Xx][Pp][Ll][Oo][Rr][Ee][Rr]\\[Rr][Uu][Nn].*/ OR data_win_eventdata_targetObject:/.*[Pp][Oo][Ll][Ii][Cc][Ii][Ee][Ss]\\[Ee][Xx][Pp][Ll][Oo][Rr][Ee][Rr]\\[Rr][Uu][Nn].*/ OR data_win_eventdata_targetObject:/.*[Cc][Uu][Rr][Rr][Ee][Nn][Tt][Vv][Ee][Rr][Ss][Ii][Oo][Nn]\\[Ww][Ii][Nn][Dd][Oo][Ww][Ss]\\[Ll][Oo][Aa][Dd].*/)'
-      pivot_on: [host]
-      window: 4h
-    - name: "Follow-on LOLBin / signed-binary-proxy execution on this host"
-      query: 'data_win_system_eventID:"1" AND data_win_eventdata_image:/.*(\\[Rr][Uu][Nn][Dd][Ll][Ll]32\.[Ee][Xx][Ee]|\\[Rr][Ee][Gg][Ss][Vv][Rr]32\.[Ee][Xx][Ee]|\\[Mm][Ss][Hh][Tt][Aa]\.[Ee][Xx][Ee]|\\[Ii][Nn][Ss][Tt][Aa][Ll][Ll][Uu][Tt][Ii][Ll]\.[Ee][Xx][Ee]|\\[Rr][Ee][Gg][Aa][Ss][Mm]\.[Ee][Xx][Ee]|\\[Rr][Ee][Gg][Ss][Vv][Cc][Ss]\.[Ee][Xx][Ee]|\\[Mm][Ss][Bb][Uu][Ii][Ll][Dd]\.[Ee][Xx][Ee]|\\[Cc][Ee][Rr][Tt][Uu][Tt][Ii][Ll]\.[Ee][Xx][Ee]|\\[Bb][Ii][Tt][Ss][Aa][Dd][Mm][Ii][Nn]\.[Ee][Xx][Ee]|\\[Ww][Mm][Ii][Cc]\.[Ee][Xx][Ee]|\\[Cc][Mm][Ss][Tt][Pp]\.[Ee][Xx][Ee]|\\[Oo][Dd][Bb][Cc][Cc][Oo][Nn][Ff]\.[Ee][Xx][Ee]|\\[Ff][Oo][Rr][Ff][Ii][Ll][Ee][Ss]\.[Ee][Xx][Ee]|\\[Pp][Cc][Aa][Ll][Uu][Aa]\.[Ee][Xx][Ee]|\\[Mm][Aa][Vv][Ii][Nn][Jj][Ee][Cc][Tt]\.[Ee][Xx][Ee]|\\[Ss][Cc][Rr][Ii][Pp][Tt][Rr][Uu][Nn][Nn][Ee][Rr]\.[Ee][Xx][Ee])/'
-      pivot_on: [host]
-      window: 1h
-    - name: "Outbound connections by script interpreters on this host"
-      query: 'data_win_system_eventID:"3" AND data_win_eventdata_image:/.*(\\[Pp][Oo][Ww][Ee][Rr][Ss][Hh][Ee][Ll][Ll]\.[Ee][Xx][Ee]|\\[Pp][Ww][Ss][Hh]\.[Ee][Xx][Ee]|\\[Pp][Oo][Ww][Ee][Rr][Ss][Hh][Ee][Ll][Ll]_[Ii][Ss][Ee]\.[Ee][Xx][Ee]|\\[Cc][Mm][Dd]\.[Ee][Xx][Ee]|\\[Ww][Ss][Cc][Rr][Ii][Pp][Tt]\.[Ee][Xx][Ee]|\\[Cc][Ss][Cc][Rr][Ii][Pp][Tt]\.[Ee][Xx][Ee]|\\[Mm][Ss][Hh][Tt][Aa]\.[Ee][Xx][Ee]|\\[Rr][Uu][Nn][Dd][Ll][Ll]32\.[Ee][Xx][Ee]|\\[Rr][Ee][Gg][Ss][Vv][Rr]32\.[Ee][Xx][Ee])/'
-      pivot_on: [host]
-      window: 1h
+  # Behaviour-targeted hunts the engine runs around the alert (not a sweep).
+  - name: Reflection/assembly load in command lines
+    query: data_win_system_eventID:"1" AND (data_win_eventdata_commandLine:/.*[Rr]eflection\.[Aa]ssembly.*/ OR data_win_eventdata_commandLine:/.*[Ll]oad[Ww]ith[Pp]artial[Nn]ame.*/ OR data_win_eventdata_commandLine:/.*[Ff]rom[Bb]ase64[Ss]tring.*/)
+    pivot_on: host
+    window: 2h
+  - name: Encoded PowerShell on the host
+    query: data_win_system_eventID:"1" AND data_win_eventdata_image:/.*[Pp]ower[Ss]hell.*/ AND (data_win_eventdata_commandLine:/.* -[Ee][Nn][Cc].*/ OR data_win_eventdata_commandLine:/.*[Ee]ncoded[Cc]ommand.*/)
+    pivot_on: host
+    window: 2h
+  - name: Executables written to user-writable paths
+    query: data_win_system_eventID:"11" AND data_win_eventdata_targetFilename:/.*\.([Ee][Xx][Ee]|[Dd][Ll][Ll])/ AND (data_win_eventdata_targetFilename:/.*[Tt]emp.*/ OR data_win_eventdata_targetFilename:/.*[Aa]pp[Dd]ata.*/ OR data_win_eventdata_targetFilename:/.*[Pp]ublic.*/)
+    pivot_on: host
+    window: 2h
+  - name: Network connections from script interpreters
+    query: data_win_system_eventID:"3" AND (data_win_eventdata_image:/.*[Pp]ower[Ss]hell.*/ OR data_win_eventdata_image:/.*[Cc]script\.[Ee][Xx][Ee]/ OR data_win_eventdata_image:/.*[Ww]script\.[Ee][Xx][Ee]/ OR data_win_eventdata_image:/.*[Cc][Mm][Dd]\.[Ee][Xx][Ee])
+    pivot_on: host
+    window: 2h
+  - name: Certutil/bitsadmin download or decode
+    query: data_win_system_eventID:"1" AND (data_win_eventdata_commandLine:/.*[Cc]ertutil.*(-[Dd]ecode|-[Uu]rlcache).*/ OR data_win_eventdata_commandLine:/.*[Bb]itsadmin.*[Tt]ransfer.*/)
+    pivot_on: host
+    window: 4h

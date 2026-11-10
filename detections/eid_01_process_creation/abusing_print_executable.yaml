@@ -156,19 +156,34 @@ graylog:
   query: data_win_system_eventID:"1" AND data_win_eventdata_image:/.*\\[Pp][Rr][Ii][Nn][Tt]\.[Ee][Xx][Ee]/ AND data_win_eventdata_commandLine:/[Pp][Rr][Ii][Nn][Tt].*/ AND data_win_eventdata_commandLine:/.*\/[Dd].*/ AND data_win_eventdata_commandLine:/.*\.[Ee][Xx][Ee].*/ AND _exists_:data_win_eventdata_commandLine AND NOT (data_win_eventdata_commandLine:/.*[Pp][Rr][Ii][Nn][Tt]\.[Ee][Xx][Ee].*/)
 
 correlation:
-  # Authored by the correlation engine for review.
+  # Authored per-rule (behaviour-researched) for the correlation engine. Related CoPilot
+  # Searches + telemetry pivots to run around an alert, scoped to its host/user/ip/domain.
+  related_rules:
+  - id: 2fcda7e2-8c57-4904-86ac-37fc3157e09d
+    name: Sensitive File Dump Via Print.EXE
+    reason: Same binary abused to copy sensitive files to a remote UNC target; confirms print.exe used as a data-movement LOLBin.
+  - id: 19b08b1c-861d-4e75-a1ef-ea0c1baf202b
+    name: Suspicious Download Via Certutil.EXE
+    reason: Alternate LOLBin file transfer (certutil) commonly used alongside print.exe to stage the same payload.
+  - id: d059842b-6b9d-4ed1-b5c3-5b89143c6ede
+    name: File Download Via Bitsadmin
+    reason: Bitsadmin download is a sibling remote-file-fetch technique; co-occurrence suggests payload staging.
+  window: 4h
   enrichment_searches:
-  # Rule-specific telemetry pivots the engine runs around an alert from this rule,
-  # scoped to the alert's host/user/IP within the window (behaviour-targeted, not a sweep).
-    - name: "Follow-on LOLBin / signed-binary-proxy execution on this host"
-      query: 'data_win_system_eventID:"1" AND data_win_eventdata_image:/.*(\\[Rr][Uu][Nn][Dd][Ll][Ll]32\.[Ee][Xx][Ee]|\\[Rr][Ee][Gg][Ss][Vv][Rr]32\.[Ee][Xx][Ee]|\\[Mm][Ss][Hh][Tt][Aa]\.[Ee][Xx][Ee]|\\[Ii][Nn][Ss][Tt][Aa][Ll][Ll][Uu][Tt][Ii][Ll]\.[Ee][Xx][Ee]|\\[Rr][Ee][Gg][Aa][Ss][Mm]\.[Ee][Xx][Ee]|\\[Rr][Ee][Gg][Ss][Vv][Cc][Ss]\.[Ee][Xx][Ee]|\\[Mm][Ss][Bb][Uu][Ii][Ll][Dd]\.[Ee][Xx][Ee]|\\[Cc][Ee][Rr][Tt][Uu][Tt][Ii][Ll]\.[Ee][Xx][Ee]|\\[Bb][Ii][Tt][Ss][Aa][Dd][Mm][Ii][Nn]\.[Ee][Xx][Ee]|\\[Ww][Mm][Ii][Cc]\.[Ee][Xx][Ee]|\\[Cc][Mm][Ss][Tt][Pp]\.[Ee][Xx][Ee]|\\[Oo][Dd][Bb][Cc][Cc][Oo][Nn][Ff]\.[Ee][Xx][Ee]|\\[Ff][Oo][Rr][Ff][Ii][Ll][Ee][Ss]\.[Ee][Xx][Ee]|\\[Pp][Cc][Aa][Ll][Uu][Aa]\.[Ee][Xx][Ee]|\\[Mm][Aa][Vv][Ii][Nn][Jj][Ee][Cc][Tt]\.[Ee][Xx][Ee]|\\[Ss][Cc][Rr][Ii][Pp][Tt][Rr][Uu][Nn][Nn][Ee][Rr]\.[Ee][Xx][Ee])/'
-      pivot_on: [host]
-      window: 1h
-    - name: "Other executions of this tool-set on this host (any arguments)"
-      query: 'data_win_system_eventID:"1" AND data_win_eventdata_image:/.*(\\[Pp][Rr][Ii][Nn][Tt]\.[Ee][Xx][Ee])/'
-      pivot_on: [host]
-      window: 2h
-    - name: "Outbound connections by script interpreters on this host"
-      query: 'data_win_system_eventID:"3" AND data_win_eventdata_image:/.*(\\[Pp][Oo][Ww][Ee][Rr][Ss][Hh][Ee][Ll][Ll]\.[Ee][Xx][Ee]|\\[Pp][Ww][Ss][Hh]\.[Ee][Xx][Ee]|\\[Pp][Oo][Ww][Ee][Rr][Ss][Hh][Ee][Ll][Ll]_[Ii][Ss][Ee]\.[Ee][Xx][Ee]|\\[Cc][Mm][Dd]\.[Ee][Xx][Ee]|\\[Ww][Ss][Cc][Rr][Ii][Pp][Tt]\.[Ee][Xx][Ee]|\\[Cc][Ss][Cc][Rr][Ii][Pp][Tt]\.[Ee][Xx][Ee]|\\[Mm][Ss][Hh][Tt][Aa]\.[Ee][Xx][Ee]|\\[Rr][Uu][Nn][Dd][Ll][Ll]32\.[Ee][Xx][Ee]|\\[Rr][Ee][Gg][Ss][Vv][Rr]32\.[Ee][Xx][Ee])/'
-      pivot_on: [host]
-      window: 1h
+  # Behaviour-targeted hunts the engine runs around the alert (not a sweep).
+  - name: print.exe executions with /D target
+    query: data_win_system_eventID:1 AND data_win_eventdata_image:/.*[Pp]rint\.exe/
+    pivot_on: host
+    window: 4h
+  - name: Executables launched from user-writable paths after copy
+    query: data_win_system_eventID:1 AND (data_win_eventdata_image:/.*[Pp]rogram[Dd]ata.*/ OR data_win_eventdata_image:/.*[Tt]emp.*/ OR data_win_eventdata_image:/.*[Pp]ublic.*/)
+    pivot_on: host
+    window: 2h
+  - name: Other LOLBin transfer tools
+    query: data_win_system_eventID:1 AND (data_win_eventdata_image:/.*[Cc]ertutil\.exe/ OR data_win_eventdata_image:/.*[Bb]itsadmin\.exe/ OR data_win_eventdata_image:/.*[Ee]xpand\.exe/ OR data_win_eventdata_image:/.*[Ee]xtrac32\.exe/)
+    pivot_on: host
+    window: 4h
+  - name: Files created in staging directories
+    query: data_win_system_eventID:11 AND (data_win_eventdata_targetFilename:/.*[Pp]rogram[Dd]ata.*\.exe/ OR data_win_eventdata_targetFilename:/.*[Tt]emp.*\.(exe|dll)/)
+    pivot_on: host
+    window: 2h
