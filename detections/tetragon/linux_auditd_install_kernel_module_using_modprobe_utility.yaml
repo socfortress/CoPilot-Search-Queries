@@ -1,5 +1,5 @@
 name: Linux Kernel Module Load
-id: f1e2d3c4-5b6a-7d8e-9f0a-1b2c3d4e5f6a
+id: 72b824cb-faf1-47e5-a608-31703f943130
 version: 1
 schema_version: "1.0"
 date: "2026-01-30"
@@ -109,3 +109,52 @@ tags:
 
 graylog:
   query: (data_process_exec_process_binary:/.*modprobe.*/ OR full_log:/.*modprobe.*/) AND NOT _exists_:data_win_system_eventID AND NOT rule_groups:/.*windows.*/
+
+correlation:
+  # Authored per-rule (behaviour-researched) for the correlation engine. Related CoPilot
+  # Searches + telemetry pivots to run around an alert, scoped to its host/user/ip/domain.
+  related_rules:
+  - id: 106d7cbd-80ff-4985-b682-a7043e5acb72
+    name: Loading of Kernel Module via Insmod
+    reason: insmod is the direct-load alternative to modprobe for the same unauthorized kernel-module behaviour.
+  - id: linux-kernel-module-rmmod-utility-001
+    name: Linux Kernel Module Using Rmmod Utility
+    reason: rmmod unloading a module is the paired action when a rootkit swaps or hides kernel modules.
+  - id: linux-unload-module-via-modprobe-001
+    name: Linux Unload Module Via Modprobe
+    reason: modprobe -r unload is the inverse of this load, often used to replace a legitimate module with a malicious one.
+  - id: a1b2c3d4-5e6f-7a8b-9c0d-1e2f3a4b5c6d
+    name: Linux Kernel Module Insertion
+    reason: Generic kernel-module insertion detection covering the same T1215 persistence/privesc behaviour.
+  - id: 22236d75-d5a0-4287-bf06-c93b1770860f
+    name: Triple Cross eBPF Rootkit Install Commands
+    reason: Triple Cross eBPF rootkit install commands — a module/eBPF load used for stealth kernel persistence.
+  - id: d9f4b1a6-3c52-4a5c-9c8e-6b7f3e21a0dd
+    name: Linux Kernel Driver Activity Detection
+    reason: Kernel driver activity on the host corroborates deliberate kernel-space manipulation.
+  - id: 7692f583-bd30-4008-8615-75dab3f08a99
+    name: Enable BPF Kprobes Tracing
+    reason: Enabling BPF kprobe tracing is a sibling kernel-instrumentation action attackers use for stealth and hooking.
+  window: 4h
+  enrichment_searches:
+  # Behaviour-targeted hunts the engine runs around the alert (not a sweep).
+  - name: Kernel module load/unload via modprobe / insmod / rmmod
+    query: (data_process_exec_process_binary:/.*\/(modprobe|insmod|rmmod|depmod)/ OR full_log:/.*(modprobe|insmod|rmmod).*/)
+    pivot_on:
+    - host
+    window: 4h
+  - name: Kernel module files or driver directories touched
+    query: full_log:/.*(\.ko|\/lib\/modules\/|\/etc\/modules).*/
+    pivot_on:
+    - host
+    window: 6h
+  - name: eBPF / kprobe tracing or rootkit install indicators
+    query: (full_log:/.*(kprobe|\/sys\/kernel\/debug\/tracing|bpf_probe).*/ OR data_process_exec_process_arguments:/.*(bpf|kprobe).*/)
+    pivot_on:
+    - host
+    window: 4h
+  - name: Kernel-persistence config (ld.so.preload / modules-load.d)
+    query: full_log:/.*(ld\.so\.preload|\/etc\/modules-load\.d|modprobe\.d).*/
+    pivot_on:
+    - host
+    window: 6h

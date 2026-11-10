@@ -111,3 +111,52 @@ tags:
 
 graylog:
   query: full_log:/.*rm.*/ AND full_log:/.*\-rf.*/ AND full_log:/.*no-preserve-root.*/ AND NOT _exists_:data_win_system_eventID AND NOT rule_groups:/.*windows.*/
+
+correlation:
+  # Authored per-rule (behaviour-researched) for the correlation engine. Related CoPilot
+  # Searches + telemetry pivots to run around an alert, scoped to its host/user/ip/domain.
+  related_rules:
+  - id: a6957eb2-86f2-4aeb-aa1b-8c9340f718d4
+    name: Linux Data Destruction via rm --no-preserve-root
+    reason: Sibling detection for the identical rm -rf --no-preserve-root wiper command; co-firing confirms a destruction attempt.
+  - id: linux-dd-file-overwrite-001
+    name: Linux DD File Overwrite
+    reason: dd overwrite is the Industroyer2/AwfulShred alternative to rm for destroying file contents on the same host.
+  - id: a3b7c9d2-4f5e-4b6d-8c1a-2d3f4e5b6c7a
+    name: Linux Critical Directory Deletion
+    reason: Recursive deletion of critical directories is the same data-destruction objective by a slightly different command.
+  - id: linux-stop-services-001
+    name: Linux Stop Services
+    reason: AwfulShred stops services (to unlock files and disable recovery) immediately before or after the wipe.
+  - id: linux-system-reboot-via-sysrq-001
+    name: Linux System Reboot Via System Request Key
+    reason: SysRq reboot is the final AwfulShred step that renders the wiped host unbootable.
+  - id: linux-unix-shell-enable-all-sysrq-functions-001
+    name: Linux Unix Shell Enable All SysRq Functions
+    reason: Enabling all SysRq functions arms the forced reboot that completes the wiper chain.
+  - id: 6e2f9a41-3b7c-4d5e-8c9f-1a2b3d4f5e6a
+    name: Linux Init.d Script Deletion
+    reason: Deletion of init.d scripts is destructive tampering that accompanies the filesystem wipe.
+  window: 2h
+  enrichment_searches:
+  # Behaviour-targeted hunts the engine runs around the alert (not a sweep).
+  - name: Destructive rm / recursive-force commands on this host
+    query: (full_log:/.*rm .*-rf.*/ OR full_log:/.*no-preserve-root.*/ OR data_process_exec_process_arguments:/.*--no-preserve-root.*/ OR data_process_exec_process_arguments:/.* -rf.*/)
+    pivot_on:
+    - host
+    window: 2h
+  - name: Disk or file overwrite via dd / shred / wipe
+    query: (data_process_exec_process_binary:/.*\/(dd|shred|wipe)/ OR full_log:/.*(dd if=|shred ).*/)
+    pivot_on:
+    - host
+    window: 2h
+  - name: Service and logging teardown in the AwfulShred chain
+    query: full_log:/.*(systemctl (stop|disable)|service [a-z0-9_-]+ stop|journalctl --vacuum).*/
+    pivot_on:
+    - host
+    window: 4h
+  - name: Forced reboot / SysRq trigger completing the wipe
+    query: (full_log:/.*(sysrq|reboot -f|\/proc\/sysrq-trigger).*/ OR data_process_exec_process_arguments:/.*sysrq.*/)
+    pivot_on:
+    - host
+    window: 4h

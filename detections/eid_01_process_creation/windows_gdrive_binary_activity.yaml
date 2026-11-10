@@ -1,5 +1,5 @@
-name: Windows Files and Dirs Access Rights Modification Via Icacls
-id: windows-files-dirs-access-rights-icacls-001
+name: Windows Google Drive Binary Activity
+id: 30ec61dc-011e-403a-8d45-80f9d87418b8
 version: 1
 schema_version: "1.0"
 date: "2026-02-23"
@@ -136,3 +136,44 @@ tags:
 
 graylog:
   query: data_win_system_eventID:"1" AND (data_win_eventdata_image:/.*icacls\.exe/ OR data_win_eventdata_image:/.*cacls\.exe/ OR data_win_eventdata_image:/.*xcacls\.exe/) AND (data_win_eventdata_commandLine:/.*:F.*/ OR data_win_eventdata_commandLine:/.*:W.*/ OR data_win_eventdata_commandLine:/.*:R.*/ OR data_win_eventdata_commandLine:/.*:C.*/ OR data_win_eventdata_commandLine:/.*:N.*/ OR data_win_eventdata_commandLine:/.*\/grant.*/ OR data_win_eventdata_commandLine:/.*\/deny.*/)
+
+correlation:
+  # Authored per-rule (behaviour-researched) for the correlation engine. Related CoPilot
+  # Searches + telemetry pivots to run around an alert, scoped to its host/user/ip/domain.
+  related_rules:
+  - id: windows-files-dirs-access-rights-icacls-001
+    name: Windows Files and Dirs Access Rights Modification Via Icacls
+    reason: Sibling icacls access-rights detection sharing the same defense-evasion behaviour this rule's query matches.
+  - id: b1b1e316-accc-11eb-a9b4-acde48001122
+    name: ICACLS Grant Command
+    reason: icacls grant ACE weakening permissions on attacker-controlled files.
+  - id: cf8d753e-a8fe-11eb-8f58-acde48001122
+    name: Icacls Deny Command
+    reason: icacls deny ACE blocking defenders or users from dropped artifacts.
+  - id: fa7ca5c6-c9d8-11eb-bce9-acde48001122
+    name: Permission Modification using Takeown App
+    reason: takeown ownership seizure that precedes an icacls ACL rewrite.
+  - id: 6e5a3ae4-90a3-462d-9aa6-0119f638c0f1
+    name: Hiding Files And Directories With Attrib exe
+    reason: attrib file-hiding co-occurs with ACL tampering to conceal payloads (defense evasion).
+  - id: c76b796c-27e1-4520-91c4-4a58695c749e
+    name: Windows Files and Dirs Access Rights Modification Via Icacls
+    reason: Parallel Amadey icacls access-rights detection on the same host.
+  window: 2h
+  enrichment_searches:
+  # Behaviour-targeted hunts the engine runs around the alert (not a sweep).
+  - name: ACL / permission modification via icacls, cacls or takeown on this host
+    query: data_win_system_eventID:"1" AND data_win_eventdata_image:/.*\\(icacls|cacls|xcacls|takeown)\.exe/ AND (data_win_eventdata_commandLine:/.*\/grant.*/ OR data_win_eventdata_commandLine:/.*\/deny.*/ OR data_win_eventdata_commandLine:/.*:F.*/ OR data_win_eventdata_commandLine:/.*:R.*/)
+    pivot_on:
+    - host
+    window: 2h
+  - name: Files hidden or marked system via attrib around the ACL change
+    query: data_win_system_eventID:"1" AND data_win_eventdata_image:/.*\\attrib\.exe/ AND (data_win_eventdata_commandLine:/.*\+h.*/ OR data_win_eventdata_commandLine:/.*\+s.*/)
+    pivot_on:
+    - host
+    window: 2h
+  - name: Suspicious binaries dropped into user-writable paths then re-permissioned
+    query: data_win_system_eventID:"11" AND (data_win_eventdata_targetFilename:/.*\\AppData\\.*\.exe/ OR data_win_eventdata_targetFilename:/.*\\Temp\\.*\.exe/ OR data_win_eventdata_targetFilename:/.*\\ProgramData\\.*\.exe/)
+    pivot_on:
+    - host
+    window: 4h

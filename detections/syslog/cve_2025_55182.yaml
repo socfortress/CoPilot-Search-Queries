@@ -137,3 +137,52 @@ tags:
   cve:
     - CVE-2025-55182
     - CVE-2025-66478
+
+correlation:
+  # Authored per-rule (behaviour-researched) for the correlation engine. Related CoPilot
+  # Searches + telemetry pivots to run around an alert, scoped to its host/user/ip/domain.
+  related_rules:
+  - id: c70834fa-fb9d-4aa0-9e7d-45ceed36f3f7
+    name: Linux Suspicious Child Process from Node.js - React2Shell
+    reason: Tetragon sibling of the same React2Shell behaviour — a Node process spawning an OS child after RCE.
+  - id: 818f7b24-0fba-4c49-a073-8b755573b9c7
+    name: Linux Webshell Indicators
+    reason: A webshell dropped under the web root is the persistence the attacker installs once the Node RCE gives command execution.
+  - id: a2d9e2f3-0f43-4c7a-bcd9-9acfc0d723aa
+    name: Suspicious Download and Execute Pattern via Curl/Wget
+    reason: curl/wget download-and-execute is the usual next step the spawned child runs to stage a payload.
+  - id: 7f734ed0-4f47-46c0-837f-6ee62505abd9
+    name: Potential Netcat Reverse Shell Execution
+    reason: Netcat reverse shell is a frequent interactive-access payload launched from the Node child process.
+  - id: 32e62bc7-3de0-4bb1-90af-532978fe42c0
+    name: Python Reverse Shell Execution Via PTY And Socket Modules
+    reason: Python PTY reverse shell is another common hands-on-keyboard follow-on to the RCE.
+  - id: c6714a24-d7d5-4283-a36b-3ffd091d5f7e
+    name: Potential PHP Reverse Shell
+    reason: PHP reverse shell variant seen when the app stack includes PHP alongside Node.
+  - id: 69dea60b-2deb-4c9e-a685-ad542f4367f9
+    name: Suspicious Child Process of SAP NetWeaver - Linux
+    reason: Same application-server-RCE-to-child-process pattern (SAP NetWeaver) for cross-correlating exploitation bursts.
+  window: 1h
+  enrichment_searches:
+  # Behaviour-targeted hunts the engine runs around the alert (not a sweep).
+  - name: Node / web-app process spawning a shell or LOLBIN child
+    query: (data_process_exec_parent_binary:/.*\/node/ OR full_log:/.*node.*/) AND (data_process_exec_process_binary:/.*\/(sh|bash|dash|curl|wget|python3|python|perl|ruby|php|nc|ncat|socat)/ OR full_log:/.*(curl |wget |\/bin\/sh|nc ).*/)
+    pivot_on:
+    - host
+    window: 1h
+  - name: Reverse-shell patterns on this host
+    query: (data_process_exec_process_arguments:/.*(\/dev\/tcp\/|bash -i|sh -i|pty\.spawn|nc .*-e).*/ OR full_log:/.*(\/dev\/tcp\/|bash -i|pty\.spawn).*/)
+    pivot_on:
+    - host
+    window: 2h
+  - name: Ingress tool transfer (payload download) to the host
+    query: (data_process_exec_process_binary:/.*\/(curl|wget)/ AND data_process_exec_process_arguments:/.*(http|ftp).*/) OR full_log:/.*(curl .*http|wget .*http).*/
+    pivot_on:
+    - host
+    window: 2h
+  - name: Webshell or suspicious files written under web roots
+    query: (data_process_exec_process_arguments:/.*(\/var\/www\/|\/usr\/share\/nginx\/|\.php|\.jsp).*/ OR full_log:/.*(\/var\/www\/|webshell).*/)
+    pivot_on:
+    - host
+    window: 4h
