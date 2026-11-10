@@ -138,19 +138,44 @@ graylog:
   query: data_win_system_eventID:"1" AND data_win_eventdata_parentImage:/.*\\[Ss][Vv][Cc][Hh][Oo][Ss][Tt]\.[Ee][Xx][Ee]/ AND data_win_eventdata_image:/.*\\[Mm][Ss][Hh][Tt][Aa]\.[Ee][Xx][Ee]/
 
 correlation:
-  # Authored by the correlation engine for review.
+  # Authored per-rule (behaviour-researched) for the correlation engine. Related CoPilot
+  # Searches + telemetry pivots to run around an alert, scoped to its host/user/ip/domain.
+  related_rules:
+  - id: f1f3bf22-deb2-418d-8cce-e1a45e46a5bd
+    name: MMC20 Lateral Movement
+    reason: LethalHTA abuses DCOM like MMC20 lateral movement; same remote DCOM activation family.
+  - id: 03cc0c25-389f-4bf8-b48d-11878079f1ca
+    name: Suspicious MSHTA Child Process
+    reason: 'Next step: mshta spawning PowerShell/cmd to run the payload.'
+  - id: 4aa5d062-e893-11eb-9eb2-acde48001122
+    name: Mshta spawning Rundll32 OR Regsvr32 Process
+    reason: Common second stage from the HTA host.
+  - id: b98d0db6-511d-45de-ad02-e82a98729620
+    name: Remotely Hosted HTA File Executed Via Mshta.EXE
+    reason: A remotely hosted HTA payload is the typical content run in this technique.
+  - id: 692f0bec-83ba-4d04-af7e-e884a96059b6
+    name: Potential WMI Lateral Movement WmiPrvSE Spawned PowerShell
+    reason: Parallel remote-execution technique an operator may also try on the same host.
+  window: 4h
   enrichment_searches:
-  # Rule-specific telemetry pivots the engine runs around an alert from this rule,
-  # scoped to the alert's host/user/IP within the window (behaviour-targeted, not a sweep).
-    - name: "Follow-on LOLBin / signed-binary-proxy execution on this host"
-      query: 'data_win_system_eventID:"1" AND data_win_eventdata_image:/.*(\\[Rr][Uu][Nn][Dd][Ll][Ll]32\.[Ee][Xx][Ee]|\\[Rr][Ee][Gg][Ss][Vv][Rr]32\.[Ee][Xx][Ee]|\\[Mm][Ss][Hh][Tt][Aa]\.[Ee][Xx][Ee]|\\[Ii][Nn][Ss][Tt][Aa][Ll][Ll][Uu][Tt][Ii][Ll]\.[Ee][Xx][Ee]|\\[Rr][Ee][Gg][Aa][Ss][Mm]\.[Ee][Xx][Ee]|\\[Rr][Ee][Gg][Ss][Vv][Cc][Ss]\.[Ee][Xx][Ee]|\\[Mm][Ss][Bb][Uu][Ii][Ll][Dd]\.[Ee][Xx][Ee]|\\[Cc][Ee][Rr][Tt][Uu][Tt][Ii][Ll]\.[Ee][Xx][Ee]|\\[Bb][Ii][Tt][Ss][Aa][Dd][Mm][Ii][Nn]\.[Ee][Xx][Ee]|\\[Ww][Mm][Ii][Cc]\.[Ee][Xx][Ee]|\\[Cc][Mm][Ss][Tt][Pp]\.[Ee][Xx][Ee]|\\[Oo][Dd][Bb][Cc][Cc][Oo][Nn][Ff]\.[Ee][Xx][Ee]|\\[Ff][Oo][Rr][Ff][Ii][Ll][Ee][Ss]\.[Ee][Xx][Ee]|\\[Pp][Cc][Aa][Ll][Uu][Aa]\.[Ee][Xx][Ee]|\\[Mm][Aa][Vv][Ii][Nn][Jj][Ee][Cc][Tt]\.[Ee][Xx][Ee]|\\[Ss][Cc][Rr][Ii][Pp][Tt][Rr][Uu][Nn][Nn][Ee][Rr]\.[Ee][Xx][Ee])/'
-      pivot_on: [host]
-      window: 1h
-    - name: "Other executions of this tool-set on this host (any arguments)"
-      query: 'data_win_system_eventID:"1" AND data_win_eventdata_image:/.*(\\[Mm][Ss][Hh][Tt][Aa]\.[Ee][Xx][Ee])/'
-      pivot_on: [host]
-      window: 2h
-    - name: "Outbound connections by script interpreters on this host"
-      query: 'data_win_system_eventID:"3" AND data_win_eventdata_image:/.*(\\[Pp][Oo][Ww][Ee][Rr][Ss][Hh][Ee][Ll][Ll]\.[Ee][Xx][Ee]|\\[Pp][Ww][Ss][Hh]\.[Ee][Xx][Ee]|\\[Pp][Oo][Ww][Ee][Rr][Ss][Hh][Ee][Ll][Ll]_[Ii][Ss][Ee]\.[Ee][Xx][Ee]|\\[Cc][Mm][Dd]\.[Ee][Xx][Ee]|\\[Ww][Ss][Cc][Rr][Ii][Pp][Tt]\.[Ee][Xx][Ee]|\\[Cc][Ss][Cc][Rr][Ii][Pp][Tt]\.[Ee][Xx][Ee]|\\[Mm][Ss][Hh][Tt][Aa]\.[Ee][Xx][Ee]|\\[Rr][Uu][Nn][Dd][Ll][Ll]32\.[Ee][Xx][Ee]|\\[Rr][Ee][Gg][Ss][Vv][Rr]32\.[Ee][Xx][Ee])/'
-      pivot_on: [host]
-      window: 1h
+  # Behaviour-targeted hunts the engine runs around the alert (not a sweep).
+  - name: Mshta child processes
+    query: data_win_system_eventID:1 AND data_win_eventdata_parentImage:/.*[Mm][Ss][Hh][Tt][Aa]\.[Ee][Xx][Ee]/
+    pivot_on: host
+    window: 2h
+  - name: Mshta network connections
+    query: data_win_system_eventID:3 AND data_win_eventdata_image:/.*[Mm][Ss][Hh][Tt][Aa]\.[Ee][Xx][Ee]/ AND data_win_eventdata_initiated:true
+    pivot_on: host
+    window: 2h
+  - name: Network logons to host
+    query: data_win_system_eventID:4624 AND data_win_eventdata_logonType:3
+    pivot_on: user
+    window: 1h
+  - name: Files written by mshta
+    query: data_win_system_eventID:11 AND data_win_eventdata_image:/.*[Mm][Ss][Hh][Tt][Aa]\.[Ee][Xx][Ee]/
+    pivot_on: host
+    window: 2h
+  - name: Persistence after HTA execution
+    query: data_win_system_eventID:13 AND data_win_eventdata_targetObject:/.*(\\CurrentVersion\\Run|Winlogon).*/
+    pivot_on: host
+    window: 4h

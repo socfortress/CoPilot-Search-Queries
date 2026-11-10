@@ -129,50 +129,40 @@ correlation:
   # Authored per-rule (behaviour-researched) for the correlation engine. Related CoPilot
   # Searches + telemetry pivots to run around an alert, scoped to its host/user/ip/domain.
   related_rules:
-  - id: lnx-doas-001
-    name: Linux doas Execution Detection
-    reason: Same doas execution seen via syslog/auditd telemetry; confirms the invocation and who ran it.
-  - id: linux-sudo-or-su-execution-001
-    name: Linux Sudo Or Su Execution
-    reason: Attacker pivoting between doas and sudo/su on the same host to obtain root.
   - id: 0f79c4d2-4e1f-4683-9c36-b5469a665e06
     name: Access of Sudoers File Content
-    reason: Reading privilege config usually precedes choosing doas or sudo as the escalation path.
-  - id: linux-setuid-using-chmod-utility-001
-    name: Linux Setuid Using Chmod Utility
-    reason: Root obtained via doas is commonly used to plant setuid binaries for persistent privilege.
-  - id: 6a50f16c-3b7b-42d1-b081-0fdd3ba70a73
-    name: User Added To Root/Sudoers Group Using Usermod
-    reason: 'Follow-on persistence: granting the account durable root rights after escalation.'
+    reason: Attackers read sudoers/doas config to learn elevation paths just before using doas or sudo.
   - id: fa4aaed5-4fe0-498d-bbc0-08e3346387ba
     name: Copy Passwd Or Shadow From TMP Path
-    reason: Credential harvesting that typically follows once root is gained.
+    reason: Root via doas is typically followed by credential file harvesting staged in /tmp.
+  - id: 6419afd1-3742-47a5-a7e6-b50386cd15f8
+    name: Chmod Targeting Sensitive Directories
+    reason: Post-elevation permission tampering on sensitive directories to persist or widen access.
   - id: 1182f3b3-e716-4efa-99ab-d2685d04360f
     name: History File Deletion
-    reason: Post-escalation anti-forensics clearing shell history.
-  - id: bed26dea-4525-47f4-b24a-76e30e44ffb0
-    name: Audit Rules Deleted Via Auditctl
-    reason: Root-level defense evasion removing audit rules after escalation.
-  window: 1h
+    reason: Anti-forensics commonly follows a successful escalation to root.
+  - id: ba592c6d-6888-43c3-b8c6-689b8fe47337
+    name: Linux Base64 Encoded Pipe to Shell
+    reason: Encoded payload piped to a shell is a common first command run as the elevated user.
+  - id: 2d2f44ff-4611-4778-a8fc-323a0e9850cc
+    name: Inline Python Execution - Spawn Shell Via OS System Library
+    reason: Shell-spawning python one-liners are a common foothold step run before escalating.
+  window: 2h
   enrichment_searches:
   # Behaviour-targeted hunts the engine runs around the alert (not a sweep).
-  - name: Commands run as root via doas
+  - name: Commands executed through doas
     query: data_process_exec_parent_binary:"/usr/bin/doas"
     pivot_on: host
-    window: 1h
-  - name: Shadow/passwd/sudoers access
-    query: data_process_exec_process_arguments:/.*(shadow|sudoers|doas\.conf|passwd).*/
+    window: 2h
+  - name: Sudo/su/pkexec elevation attempts
+    query: data_process_exec_process_binary:("/usr/bin/sudo" OR "/usr/bin/su" OR "/usr/bin/pkexec")
     pivot_on: host
     window: 2h
-  - name: Account or privilege changes
-    query: data_process_exec_process_binary:("/usr/sbin/useradd" OR "/usr/sbin/usermod" OR "/usr/bin/passwd" OR "/usr/bin/chmod")
-    pivot_on: host
-    window: 2h
-  - name: Persistence via cron/systemd/ssh keys
-    query: data_process_exec_process_arguments:/.*(crontab|\/etc\/cron|systemctl|authorized_keys|\/etc\/systemd).*/
+  - name: Reads of doas.conf, sudoers or shadow
+    query: data_process_exec_process_arguments:(*doas.conf* OR *sudoers* OR *\/etc\/shadow* OR *\/etc\/passwd*)
     pivot_on: host
     window: 4h
-  - name: Download or reverse shell tooling
-    query: data_process_exec_process_binary:("/usr/bin/curl" OR "/usr/bin/wget" OR "/usr/bin/nc" OR "/usr/bin/ncat")
+  - name: Account and key persistence after elevation
+    query: data_process_exec_process_binary:(*useradd* OR *usermod* OR *adduser* OR *chpasswd*) OR data_process_exec_process_arguments:(*authorized_keys* OR *crontab*)
     pivot_on: host
-    window: 2h
+    window: 6h
