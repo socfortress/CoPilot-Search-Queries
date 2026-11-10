@@ -172,19 +172,46 @@ graylog:
   query: data_win_system_eventID:"1" AND data_win_eventdata_commandLine:/.*[Ss][Hh][Ee][Ll][Ll][Ee][Xx][Ee][Cc]_[Rr][Uu][Nn][Dd][Ll][Ll].*/ AND (data_win_eventdata_commandLine:/.*\\[Dd][Ee][Ss][Kk][Tt][Oo][Pp]\\.*/ OR data_win_eventdata_commandLine:/.*\\[Tt][Ee][Mm][Pp]\\.*/ OR data_win_eventdata_commandLine:/.*\\[Uu][Ss][Ee][Rr][Ss]\\[Pp][Uu][Bb][Ll][Ii][Cc]\\.*/ OR data_win_eventdata_commandLine:/.*[Cc][Oo][Mm][Ss][Pp][Ee][Cc].*/ OR data_win_eventdata_commandLine:/.*[Ii][Ee][Xx].*/ OR data_win_eventdata_commandLine:/.*[Ii][Nn][Vv][Oo][Kk][Ee]-.*/ OR data_win_eventdata_commandLine:/.*[Mm][Ss][Ii][Ee][Xx][Ee][Cc].*/ OR data_win_eventdata_commandLine:/.*[Oo][Dd][Bb][Cc][Cc][Oo][Nn][Ff].*/ OR data_win_eventdata_commandLine:/.*[Rr][Ee][Gg][Ss][Vv][Rr]32.*/)
 
 correlation:
-  # Authored by the correlation engine for review.
+  # Authored per-rule (behaviour-researched) for the correlation engine. Related CoPilot
+  # Searches + telemetry pivots to run around an alert, scoped to its host/user/ip/domain.
+  related_rules:
+  - id: e593cf51-88db-4ee1-b920-37e89012a3c9
+    name: Potentially Suspicious Rundll32 Activity
+    reason: Broader rundll32 abuse detection that co-fires when ShellExec_RunDLL launches a payload.
+  - id: b236190c-1c61-41e9-84b3-3fe03f6d76b0
+    name: Potential Regsvr32 Commandline Flag Anomaly
+    reason: ShellExec_RunDLL is used to proxy regsvr32 launches; this catches the proxied child.
+  - id: 9f0a8bf3-a65b-440a-8c1e-5cb1547c8e70
+    name: New DLL Registered Via Odbcconf.EXE
+    reason: odbcconf is one of the binaries chained via ShellExec_RunDLL to load a DLL.
+  - id: 84f52741-8834-4a8c-a413-2eb2269aa6c8
+    name: DllUnregisterServer Function Call Via Msiexec.EXE
+    reason: msiexec is another proxied binary in this chain for DLL execution.
+  - id: 1723e720-616d-4ddc-ab02-f7e3685a4713
+    name: Rundll32 Spawned Via Explorer.EXE
+    reason: Indicates user-initiated rundll32 launch, as when a lure or shortcut runs it.
+  - id: c3a99af4-35a9-4668-879e-c09aeb4f2bdf
+    name: Rundll32 Execution With Uncommon DLL Extension
+    reason: Payload DLLs run by a follow-up rundll32 often carry a non-.dll extension.
+  - id: cea72823-df4d-4567-950c-0b579eaf0846
+    name: Potential Dropper Script Execution Via WScript/CScript/MSHTA
+    reason: Droppers placing payloads in Temp/Public/Desktop frequently precede this launch.
+  window: 2h
   enrichment_searches:
-  # Rule-specific telemetry pivots the engine runs around an alert from this rule,
-  # scoped to the alert's host/user/IP within the window (behaviour-targeted, not a sweep).
-    - name: "Follow-on LOLBin / signed-binary-proxy execution on this host"
-      query: 'data_win_system_eventID:"1" AND data_win_eventdata_image:/.*(\\[Rr][Uu][Nn][Dd][Ll][Ll]32\.[Ee][Xx][Ee]|\\[Rr][Ee][Gg][Ss][Vv][Rr]32\.[Ee][Xx][Ee]|\\[Mm][Ss][Hh][Tt][Aa]\.[Ee][Xx][Ee]|\\[Ii][Nn][Ss][Tt][Aa][Ll][Ll][Uu][Tt][Ii][Ll]\.[Ee][Xx][Ee]|\\[Rr][Ee][Gg][Aa][Ss][Mm]\.[Ee][Xx][Ee]|\\[Rr][Ee][Gg][Ss][Vv][Cc][Ss]\.[Ee][Xx][Ee]|\\[Mm][Ss][Bb][Uu][Ii][Ll][Dd]\.[Ee][Xx][Ee]|\\[Cc][Ee][Rr][Tt][Uu][Tt][Ii][Ll]\.[Ee][Xx][Ee]|\\[Bb][Ii][Tt][Ss][Aa][Dd][Mm][Ii][Nn]\.[Ee][Xx][Ee]|\\[Ww][Mm][Ii][Cc]\.[Ee][Xx][Ee]|\\[Cc][Mm][Ss][Tt][Pp]\.[Ee][Xx][Ee]|\\[Oo][Dd][Bb][Cc][Cc][Oo][Nn][Ff]\.[Ee][Xx][Ee]|\\[Ff][Oo][Rr][Ff][Ii][Ll][Ee][Ss]\.[Ee][Xx][Ee]|\\[Pp][Cc][Aa][Ll][Uu][Aa]\.[Ee][Xx][Ee]|\\[Mm][Aa][Vv][Ii][Nn][Jj][Ee][Cc][Tt]\.[Ee][Xx][Ee]|\\[Ss][Cc][Rr][Ii][Pp][Tt][Rr][Uu][Nn][Nn][Ee][Rr]\.[Ee][Xx][Ee])/'
-      pivot_on: [host]
-      window: 1h
-    - name: "Outbound connections by script interpreters on this host"
-      query: 'data_win_system_eventID:"3" AND data_win_eventdata_image:/.*(\\[Pp][Oo][Ww][Ee][Rr][Ss][Hh][Ee][Ll][Ll]\.[Ee][Xx][Ee]|\\[Pp][Ww][Ss][Hh]\.[Ee][Xx][Ee]|\\[Pp][Oo][Ww][Ee][Rr][Ss][Hh][Ee][Ll][Ll]_[Ii][Ss][Ee]\.[Ee][Xx][Ee]|\\[Cc][Mm][Dd]\.[Ee][Xx][Ee]|\\[Ww][Ss][Cc][Rr][Ii][Pp][Tt]\.[Ee][Xx][Ee]|\\[Cc][Ss][Cc][Rr][Ii][Pp][Tt]\.[Ee][Xx][Ee]|\\[Mm][Ss][Hh][Tt][Aa]\.[Ee][Xx][Ee]|\\[Rr][Uu][Nn][Dd][Ll][Ll]32\.[Ee][Xx][Ee]|\\[Rr][Ee][Gg][Ss][Vv][Rr]32\.[Ee][Xx][Ee])/'
-      pivot_on: [host]
-      window: 1h
-    - name: "Memory/credential-dump creation & LSASS access on this host"
-      query: '((data_win_system_eventID:"1" AND data_win_eventdata_image:/.*(\\[Pp][Rr][Oo][Cc][Dd][Uu][Mm][Pp]\.[Ee][Xx][Ee]|\\[Pp][Rr][Oo][Cc][Dd][Uu][Mm][Pp]64\.[Ee][Xx][Ee]|\\[Ss][Qq][Ll][Dd][Uu][Mm][Pp][Ee][Rr]\.[Ee][Xx][Ee]|\\[Cc][Rr][Ee][Aa][Tt][Ee][Dd][Uu][Mm][Pp]\.[Ee][Xx][Ee]|\\[Rr][Dd][Rr][Ll][Ee][Aa][Kk][Dd][Ii][Aa][Gg]\.[Ee][Xx][Ee]|\\[Dd][Uu][Mm][Pp][Ee][Rr][Tt]\.[Ee][Xx][Ee]|\\[Nn][Aa][Nn][Oo][Dd][Uu][Mm][Pp]\.[Ee][Xx][Ee]|\\[Aa][Vv][Dd][Uu][Mm][Pp]\.[Ee][Xx][Ee])/) OR (data_win_system_eventID:"1" AND (data_win_eventdata_commandLine:/.*[Cc][Oo][Mm][Ss][Vv][Cc][Ss]\.[Dd][Ll][Ll].*/ OR data_win_eventdata_commandLine:/.*[Mm][Ii][Nn][Ii][Dd][Uu][Mm][Pp].*/ OR data_win_eventdata_commandLine:/.*[Dd][Uu][Mm][Pp][Ee][Rr][Tt].*/ OR data_win_eventdata_commandLine:/.*[Nn][Aa][Nn][Oo][Dd][Uu][Mm][Pp].*/ OR data_win_eventdata_commandLine:/.*[Ll][Ss][Aa][Ss][Ss].*/ OR data_win_eventdata_commandLine:/.*[Ss][Ee][Kk][Uu][Rr][Ll][Ss][Aa].*/ OR data_win_eventdata_commandLine:/.*[Nn][Tt][Dd][Ss]\.[Dd][Ii][Tt].*/ OR data_win_eventdata_commandLine:/.*[Nn][Tt][Dd][Ss][Uu][Tt][Ii][Ll].*/)) OR (data_win_system_eventID:"10" AND data_win_eventdata_targetImage:/.*(\\[Ll][Ss][Aa][Ss][Ss]\.[Ee][Xx][Ee])/))'
-      pivot_on: [host]
-      window: 1h
+  # Behaviour-targeted hunts the engine runs around the alert (not a sweep).
+  - name: Children of rundll32 (proxied LOLBins)
+    query: data_win_system_eventID:"1" AND data_win_eventdata_parentImage:/.*\\([Rr][Uu][Nn][Dd][Ll][Ll]32)\.[Ee][Xx][Ee]/ AND data_win_eventdata_image:/.*\\([Cc][Mm][Dd]|[Pp][Oo][Ww][Ee][Rr][Ss][Hh][Ee][Ll][Ll]|[Rr][Ee][Gg][Ss][Vv][Rr]32|[Mm][Ss][Ii][Ee][Xx][Ee][Cc]|[Oo][Dd][Bb][Cc][Cc][Oo][Nn][Ff]|[Mm][Ss][Hh][Tt][Aa])\.[Ee][Xx][Ee]/
+    pivot_on: host
+    window: 1h
+  - name: Executables or DLLs written to Temp or Public
+    query: data_win_system_eventID:"11" AND data_win_eventdata_targetFilename:(/.*\\[Tt][Ee][Mm][Pp]\\.*\.([Dd][Ll][Ll]|[Ee][Xx][Ee])/ OR /.*\\[Uu][Ss][Ee][Rr][Ss]\\[Pp][Uu][Bb][Ll][Ii][Cc]\\.*\.([Dd][Ll][Ll]|[Ee][Xx][Ee])/)
+    pivot_on: host
+    window: 4h
+  - name: Rundll32 network connections
+    query: data_win_system_eventID:"3" AND data_win_eventdata_image:/.*\\([Rr][Uu][Nn][Dd][Ll][Ll]32)\.[Ee][Xx][Ee]/
+    pivot_on: host
+    window: 2h
+  - name: DLL image loads from user-writable paths
+    query: data_win_system_eventID:"7" AND data_win_eventdata_imageLoaded:/.*\\([Tt][Ee][Mm][Pp]|[Uu][Ss][Ee][Rr][Ss]\\[Pp][Uu][Bb][Ll][Ii][Cc]|[Dd][Ee][Ss][Kk][Tt][Oo][Pp])\\.*\.[Dd][Ll][Ll]/
+    pivot_on: host
+    window: 2h

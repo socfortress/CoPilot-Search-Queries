@@ -157,19 +157,55 @@ graylog:
   query: data_win_system_eventID:"1" AND (data_win_eventdata_originalFileName:/[Pp][Ss][Ss][Uu][Ss][Pp][Ee][Nn][Dd]\.[Ee][Xx][Ee]/ OR data_win_eventdata_image:/.*\\[Pp][Ss][Ss][Uu][Ss][Pp][Ee][Nn][Dd]\.[Ee][Xx][Ee]/ OR data_win_eventdata_image:/.*\\[Pp][Ss][Ss][Uu][Ss][Pp][Ee][Nn][Dd]64\.[Ee][Xx][Ee]/ OR data_win_eventdata_image:/.*\\[Pp][Ss][Ss][Uu][Ss][Pp][Ee][Nn][Dd]64[Aa]\.[Ee][Xx][Ee]/) AND data_win_eventdata_commandLine:/.*[Mm][Ss][Mm][Pp][Ee][Nn][Gg]\.[Ee][Xx][Ee].*/
 
 correlation:
-  # Authored by the correlation engine for review.
+  # Authored per-rule (behaviour-researched) for the correlation engine. Related CoPilot
+  # Searches + telemetry pivots to run around an alert, scoped to its host/user/ip/domain.
+  related_rules:
+  - id: a7ee1722-c3c5-aeff-3212-c777e4733217
+    name: Disable Windows Defender AV Security Monitoring
+    reason: Suspending MsMpEng is a quieter alternative to disabling Defender; operators often try both on the same host.
+  - id: windows-attempt-stop-security-service-001
+    name: Windows Attempt To Stop Security Service
+    reason: Service stop attempts on security products are the loud fallback when suspending the process is not enough.
+  - id: windows-disable-modify-tools-taskkill-001
+    name: Windows Disable or Modify Tools Via Taskkill
+    reason: Taskkill against AV/EDR processes is the sibling technique to pssuspend for neutralising defenders.
+  - id: 730fc21b-eaff-474b-ad23-90fd265d4988
+    name: Psexec Execution
+    reason: PsSuspend is often staged with PsExec; SYSTEM context is usually needed to suspend protected AV processes.
+  - id: 18da1007-3f26-470f-875d-f77faf1cab31
+    name: Ps.exe Renamed SysInternals Tool
+    reason: Renamed Sysinternals tools indicate the same operator hiding tool use.
+  - id: 2e65275c-8288-4ab4-aeb7-6274f58b6b20
+    name: Procdump Execution
+    reason: Defender is typically suspended just before LSASS dumping with Sysinternals procdump.
+  - id: 5afee48e-67dd-4e03-a783-f74259dcf998
+    name: Potential LSASS Process Dump Via Procdump
+    reason: Credential theft is the common payoff once AV is frozen.
+  window: 2h
   enrichment_searches:
-  # Rule-specific telemetry pivots the engine runs around an alert from this rule,
-  # scoped to the alert's host/user/IP within the window (behaviour-targeted, not a sweep).
-    - name: "Other executions of this tool-set on this host (any arguments)"
-      query: 'data_win_system_eventID:"1" AND data_win_eventdata_image:/.*(\\[Pp][Ss][Ss][Uu][Ss][Pp][Ee][Nn][Dd]\.[Ee][Xx][Ee]|\\[Pp][Ss][Ss][Uu][Ss][Pp][Ee][Nn][Dd]64\.[Ee][Xx][Ee]|\\[Pp][Ss][Ss][Uu][Ss][Pp][Ee][Nn][Dd]64[Aa]\.[Ee][Xx][Ee])/'
-      pivot_on: [host]
-      window: 2h
-    - name: "Follow-on LOLBin / signed-binary-proxy execution on this host"
-      query: 'data_win_system_eventID:"1" AND data_win_eventdata_image:/.*(\\[Rr][Uu][Nn][Dd][Ll][Ll]32\.[Ee][Xx][Ee]|\\[Rr][Ee][Gg][Ss][Vv][Rr]32\.[Ee][Xx][Ee]|\\[Mm][Ss][Hh][Tt][Aa]\.[Ee][Xx][Ee]|\\[Ii][Nn][Ss][Tt][Aa][Ll][Ll][Uu][Tt][Ii][Ll]\.[Ee][Xx][Ee]|\\[Rr][Ee][Gg][Aa][Ss][Mm]\.[Ee][Xx][Ee]|\\[Rr][Ee][Gg][Ss][Vv][Cc][Ss]\.[Ee][Xx][Ee]|\\[Mm][Ss][Bb][Uu][Ii][Ll][Dd]\.[Ee][Xx][Ee]|\\[Cc][Ee][Rr][Tt][Uu][Tt][Ii][Ll]\.[Ee][Xx][Ee]|\\[Bb][Ii][Tt][Ss][Aa][Dd][Mm][Ii][Nn]\.[Ee][Xx][Ee]|\\[Ww][Mm][Ii][Cc]\.[Ee][Xx][Ee]|\\[Cc][Mm][Ss][Tt][Pp]\.[Ee][Xx][Ee]|\\[Oo][Dd][Bb][Cc][Cc][Oo][Nn][Ff]\.[Ee][Xx][Ee]|\\[Ff][Oo][Rr][Ff][Ii][Ll][Ee][Ss]\.[Ee][Xx][Ee]|\\[Pp][Cc][Aa][Ll][Uu][Aa]\.[Ee][Xx][Ee]|\\[Mm][Aa][Vv][Ii][Nn][Jj][Ee][Cc][Tt]\.[Ee][Xx][Ee]|\\[Ss][Cc][Rr][Ii][Pp][Tt][Rr][Uu][Nn][Nn][Ee][Rr]\.[Ee][Xx][Ee])/'
-      pivot_on: [host]
-      window: 1h
-    - name: "Outbound connections by script interpreters on this host"
-      query: 'data_win_system_eventID:"3" AND data_win_eventdata_image:/.*(\\[Pp][Oo][Ww][Ee][Rr][Ss][Hh][Ee][Ll][Ll]\.[Ee][Xx][Ee]|\\[Pp][Ww][Ss][Hh]\.[Ee][Xx][Ee]|\\[Pp][Oo][Ww][Ee][Rr][Ss][Hh][Ee][Ll][Ll]_[Ii][Ss][Ee]\.[Ee][Xx][Ee]|\\[Cc][Mm][Dd]\.[Ee][Xx][Ee]|\\[Ww][Ss][Cc][Rr][Ii][Pp][Tt]\.[Ee][Xx][Ee]|\\[Cc][Ss][Cc][Rr][Ii][Pp][Tt]\.[Ee][Xx][Ee]|\\[Mm][Ss][Hh][Tt][Aa]\.[Ee][Xx][Ee]|\\[Rr][Uu][Nn][Dd][Ll][Ll]32\.[Ee][Xx][Ee]|\\[Rr][Ee][Gg][Ss][Vv][Rr]32\.[Ee][Xx][Ee])/'
-      pivot_on: [host]
-      window: 1h
+  # Behaviour-targeted hunts the engine runs around the alert (not a sweep).
+  - name: Other tools touching security product processes
+    query: data_win_system_eventID:"1" AND data_win_eventdata_commandLine:/.*([Tt]askkill|[Pp]skill|[Ss]top-[Pp]rocess|[Mm]sMpEng|[Ss]ense[Ii][Rr]|[Cc]s[Ff]alcon|[Ss]ophos|[Ss]entinel).*/
+    pivot_on:
+    - host
+    window: 2h
+  - name: Defender disable or exclusion commands
+    query: data_win_system_eventID:"1" AND data_win_eventdata_commandLine:/.*([Ss]et-[Mm]p[Pp]reference|[Aa]dd-[Mm]p[Pp]reference|[Dd]isable[Rr]ealtime|[Dd]isable[Aa]nti[Ss]pyware).*/
+    pivot_on:
+    - host
+    window: 2h
+  - name: Credential dump tooling after AV frozen
+    query: data_win_system_eventID:"1" AND data_win_eventdata_commandLine:/.*([Ll]sass|[Pp]rocdump|[Cc]omsvcs|[Mm]ini[Dd]ump|[Ss]ekurlsa).*/
+    pivot_on:
+    - host
+    window: 4h
+  - name: Sysinternals tool execution
+    query: data_win_system_eventID:"1" AND data_win_eventdata_image:/.*([Pp]s[Ee]xec|[Pp]s[Ss]uspend|[Pp]rocdump|[Pp]s[Kk]ill).*/
+    pivot_on:
+    - host
+    window: 6h
+  - name: Process access to LSASS
+    query: data_win_system_eventID:"10" AND data_win_eventdata_targetImage:/.*[Ll]sass\.exe/
+    pivot_on:
+    - host
+    window: 2h
