@@ -129,55 +129,46 @@ correlation:
   # Authored per-rule (behaviour-researched) for the correlation engine. Related CoPilot
   # Searches + telemetry pivots to run around an alert, scoped to its host/user/ip/domain.
   related_rules:
-  - id: lnx-doas-001
-    name: Linux doas Execution Detection
-    reason: Auditd view of the same doas execution; confirms the escalation and gives the invoking user and exact command line
-  - id: linux-sudo-or-su-execution-001
-    name: Linux Sudo Or Su Execution
-    reason: Other privilege-switch tooling on the host; shows whether the actor also tried sudo/su before or after doas
-  - id: 0cf7a157-8879-41a2-8f55-388dd23746b7
-    name: Linux Recon Indicators
-    reason: Host and user recon commands usually precede an escalation attempt via doas
+  - id: 0f79c4d2-4e1f-4683-9c36-b5469a665e06
+    name: Access of Sudoers File Content
+    reason: Reading sudoers to learn privilege rules shows the attacker enumerating the sudo/doas escalation path
   - id: 6a50f16c-3b7b-42d1-b081-0fdd3ba70a73
     name: User Added To Root/Sudoers Group Using Usermod
-    reason: 'Common follow-on once root: adding an account to the root/sudoers group for persistence'
-  - id: linux-setuid-using-chmod-utility-001
-    name: Linux Setuid Using Chmod Utility
-    reason: 'Root-level persistence follow-on: planting a setuid binary after elevating'
+    reason: Follow-on persistence of elevated rights once doas gives root
   - id: fa4aaed5-4fe0-498d-bbc0-08e3346387ba
     name: Copy Passwd Or Shadow From TMP Path
-    reason: 'Credential harvesting follow-on: copying passwd/shadow out of tmp staging once root is obtained'
-  - id: 6b14bac8-3e3a-4324-8109-42f0546a347f
-    name: Scheduled Cron Task/Job - Linux
-    reason: Cron persistence is typically installed with the elevated privileges doas grants
+    reason: Root obtained via doas is commonly followed by credential file harvesting
+  - id: 6419afd1-3742-47a5-a7e6-b50386cd15f8
+    name: Chmod Targeting Sensitive Directories
+    reason: Root-level permission tampering often follows successful escalation
   - id: 1182f3b3-e716-4efa-99ab-d2685d04360f
     name: History File Deletion
-    reason: 'Anti-forensics after elevated activity: shell history removal'
-  window: 2h
+    reason: Post-escalation anti-forensics clearing shell history of the doas session
+  window: 4h
   enrichment_searches:
   # Behaviour-targeted hunts the engine runs around the alert (not a sweep).
-  - name: Shells spawned by doas (root shell obtained)
-    query: data_process_exec_parent_binary:"/usr/bin/doas" AND data_process_exec_process_binary:/.*\/([Ss][Hh]|[Bb][Aa][Ss][Hh]|[Dd][Aa][Ss][Hh]|[Zz][Ss][Hh]|[Kk][Ss][Hh]|[Aa][Ss][Hh]|[Bb][Uu][Ss][Yy][Bb][Oo][Xx])/
-    pivot_on:
-    - host
-    window: 1h
-  - name: Setuid / capability / doas-sudoers config tampering
-    query: (data_process_exec_process_binary:/.*\/([Cc][Hh][Mm][Oo][Dd]|[Ss][Ee][Tt][Cc][Aa][Pp])/ AND data_process_exec_process_arguments:/.*(\+[Ss]|[2467][0-7]{3}|[Cc][Aa][Pp]_[Ss][Ee][Tt][Uu][Ii][Dd]).*/) OR data_process_exec_process_arguments:/.*(\/etc\/doas\.conf|\/etc\/sudoers).*/
-    pivot_on:
-    - host
-    window: 2h
-  - name: Account and credential manipulation on this host
-    query: data_process_exec_process_binary:/.*\/([Uu][Ss][Ee][Rr][Aa][Dd][Dd]|[Aa][Dd][Dd][Uu][Ss][Ee][Rr]|[Uu][Ss][Ee][Rr][Mm][Oo][Dd]|[Pp][Aa][Ss][Ss][Ww][Dd]|[Cc][Hh][Pp][Aa][Ss][Ss][Ww][Dd]|[Vv][Ii][Ss][Uu][Dd][Oo]|[Gg][Rr][Oo][Uu][Pp][Aa][Dd][Dd]|[Gg][Pp][Aa][Ss][Ss][Ww][Dd])/
-    pivot_on:
-    - host
-    window: 2h
-  - name: Sensitive credential files read or copied
-    query: data_process_exec_process_arguments:/.*(\/etc\/shadow|\/etc\/passwd|\.ssh\/id_|authorized_keys|\/etc\/doas\.conf).*/ AND data_process_exec_process_binary:/.*\/([Cc][Aa][Tt]|[Cc][Pp]|[Tt][Aa][Rr]|[Ss][Cc][Pp]|[Bb][Aa][Ss][Ee]64|[Ll][Ee][Ss][Ss]|[Hh][Ee][Aa][Dd]|[Tt][Aa][Ii][Ll]|[Gg][Rr][Ee][Pp]|[Rr][Ss][Yy][Nn][Cc])/
-    pivot_on:
-    - host
-    window: 2h
-  - name: Tooling pulled into tmp / shared-memory staging paths
-    query: data_process_exec_process_binary:/.*\/([Cc][Uu][Rr][Ll]|[Ww][Gg][Ee][Tt]|[Nn][Cc]|[Nn][Cc][Aa][Tt]|[Ss][Cc][Pp]|[Tt][Ff][Tt][Pp])/ AND data_process_exec_process_arguments:/.*(\/tmp\/|\/dev\/shm\/|\/var\/tmp\/).*/
+  - name: Commands run as root through doas (child of doas)
+    query: data_process_exec_parent_binary:"/usr/bin/doas"
     pivot_on:
     - host
     window: 4h
+  - name: Reads or edits of doas.conf / sudoers rules
+    query: data_process_exec_process_arguments:/.*(doas\.conf|sudoers).*/ AND data_process_exec_process_binary:/.*(cat|vi|vim|nano|sed|tee|less|grep).*/
+    pivot_on:
+    - host
+    window: 4h
+  - name: Account or group changes granting privilege
+    query: data_process_exec_process_binary:/.*(useradd|usermod|adduser|passwd|chpasswd|gpasswd).*/
+    pivot_on:
+    - host
+    window: 4h
+  - name: Credential file access (shadow/passwd) on host
+    query: data_process_exec_process_arguments:/.*(\/etc\/shadow|\/etc\/passwd).*/
+    pivot_on:
+    - host
+    window: 4h
+  - name: Download-and-run tooling before or after escalation
+    query: data_process_exec_process_binary:/.*(curl|wget).*/ AND data_process_exec_process_arguments:/.*(http|ftp).*/
+    pivot_on:
+    - host
+    window: 2h

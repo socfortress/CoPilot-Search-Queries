@@ -146,19 +146,53 @@ graylog:
   query: data_win_system_eventID:"13" AND data_win_eventdata_targetObject:/.*\\[Cc][Ll][Ss][Ii][Dd]\\\{[Ff][Dd][Bb]00[Ee]52-[Aa]214-4[Aa][Aa]1-8[Ff][Bb][Aa]-4357[Bb][Bb]0072[Ee][Cc]\}\\[Ii][Nn][Pp][Rr][Oo][Cc][Ss][Ee][Rr][Vv][Ee][Rr]32\\\([Dd][Ee][Ff][Aa][Uu][Ll][Tt]\)/ AND _exists_:data_win_eventdata_details AND NOT (data_win_eventdata_details:/%[Ww][Ii][Nn][Dd][Ii][Rr]%\\[Ss][Yy][Ss][Tt][Ee][Mm]32\\[Aa][Mm][Ss][Ii]\.[Dd][Ll][Ll]/)
 
 correlation:
-  # Authored by the correlation engine for review.
+  # Authored per-rule (behaviour-researched) for the correlation engine. Related CoPilot
+  # Searches + telemetry pivots to run around an alert, scoped to its host/user/ip/domain.
+  related_rules:
+  - id: aa37cbb0-da36-42cb-a90f-fdf216fc7467
+    name: AMSI Disabled via Registry Modification
+    reason: Sibling AMSI-disable registry change; attackers frequently stack several AMSI neutralisations.
+  - id: 33efc23c-6ea2-4503-8cfe-bdf82ce8f705
+    name: Potential Persistence Via New AMSI Providers - Registry
+    reason: Registering a rogue AMSI provider is the other registry route to subvert AMSI.
+  - id: 41d1058a-aea7-4952-9293-29eaaf516465
+    name: Removal Of AMSI Provider Registry Keys
+    reason: Deleting provider keys (e.g. Defender's) achieves the same blinding of script scanning.
+  - id: 7dbbcac2-57a0-45ac-b306-ff30a8bd2981
+    name: Windows AMSI Related Registry Tampering Via CommandLine
+    reason: Command-line view of the same tampering; shows the tool (reg.exe/powershell) that wrote the CLSID.
+  - id: a21e3484-c94d-11eb-b55b-acde48001122
+    name: Unloading AMSI via Reflection
+    reason: In-memory AMSI bypass commonly run in the same PowerShell session just before or after the registry change.
+  - id: e0d6c087-2d1c-47fd-8799-3904103c5a98
+    name: AMSI Bypass Pattern Assembly GetType
+    reason: Script-block evidence of amsiInitFailed-style bypass in the same intrusion.
+  - id: 6ec86d9e-912e-4726-91a2-209359b999b9
+    name: Amsi.DLL Loaded Via LOLBIN Process
+    reason: With the COM server hijacked, a LOLBIN loading amsi.dll can pull in the attacker DLL instead of the real one.
+  - id: 790317c0-0a36-4a6a-a105-6e576bf99a14
+    name: COM Object Hijacking Via Modification Of Default System CLSID Default Value
+    reason: Generic COM InprocServer32 hijack; this rule is the AMSI-specific instance.
+  window: 6h
   enrichment_searches:
-  # Rule-specific telemetry pivots the engine runs around an alert from this rule,
-  # scoped to the alert's host/user/IP within the window (behaviour-targeted, not a sweep).
-    - name: "Other writes to the same registry location on this host"
-      query: '(data_win_system_eventID:"12" OR data_win_system_eventID:"13") AND (data_win_eventdata_targetObject:/.*\([Dd][Ee][Ff][Aa][Uu][Ll][Tt]\).*/)'
-      pivot_on: [host]
-      window: 4h
-    - name: "Autostart persistence written on this host"
-      query: '(data_win_system_eventID:"12" OR data_win_system_eventID:"13") AND (data_win_eventdata_targetObject:/.*[Cc][Uu][Rr][Rr][Ee][Nn][Tt][Vv][Ee][Rr][Ss][Ii][Oo][Nn]\\[Rr][Uu][Nn].*/ OR data_win_eventdata_targetObject:/.*[Cc][Uu][Rr][Rr][Ee][Nn][Tt][Vv][Ee][Rr][Ss][Ii][Oo][Nn]\\[Rr][Uu][Nn][Oo][Nn][Cc][Ee].*/ OR data_win_eventdata_targetObject:/.*[Cc][Uu][Rr][Rr][Ee][Nn][Tt][Cc][Oo][Nn][Tt][Rr][Oo][Ll][Ss][Ee][Tt]\\[Ss][Ee][Rr][Vv][Ii][Cc][Ee][Ss]\\.*/ OR data_win_eventdata_targetObject:/.*[Ii][Mm][Aa][Gg][Ee] [Ff][Ii][Ll][Ee] [Ee][Xx][Ee][Cc][Uu][Tt][Ii][Oo][Nn] [Oo][Pp][Tt][Ii][Oo][Nn][Ss]\\.*/ OR data_win_eventdata_targetObject:/.*[Ww][Ii][Nn][Ll][Oo][Gg][Oo][Nn]\\[Ss][Hh][Ee][Ll][Ll].*/ OR data_win_eventdata_targetObject:/.*[Ww][Ii][Nn][Ll][Oo][Gg][Oo][Nn]\\[Uu][Ss][Ee][Rr][Ii][Nn][Ii][Tt].*/ OR data_win_eventdata_targetObject:/.*[Cc][Uu][Rr][Rr][Ee][Nn][Tt][Vv][Ee][Rr][Ss][Ii][Oo][Nn]\\[Ee][Xx][Pp][Ll][Oo][Rr][Ee][Rr]\\[Rr][Uu][Nn].*/ OR data_win_eventdata_targetObject:/.*[Pp][Oo][Ll][Ii][Cc][Ii][Ee][Ss]\\[Ee][Xx][Pp][Ll][Oo][Rr][Ee][Rr]\\[Rr][Uu][Nn].*/ OR data_win_eventdata_targetObject:/.*[Cc][Uu][Rr][Rr][Ee][Nn][Tt][Vv][Ee][Rr][Ss][Ii][Oo][Nn]\\[Ww][Ii][Nn][Dd][Oo][Ww][Ss]\\[Ll][Oo][Aa][Dd].*/)'
-      pivot_on: [host]
-      window: 2h
-    - name: "Security-tool / Defender tampering on this host"
-      query: 'data_win_system_eventID:"1" AND (data_win_eventdata_commandLine:/.*[Ss][Ee][Tt]-[Mm][Pp][Pp][Rr][Ee][Ff][Ee][Rr][Ee][Nn][Cc][Ee].*/ OR data_win_eventdata_commandLine:/.*[Dd][Ii][Ss][Aa][Bb][Ll][Ee][Rr][Ee][Aa][Ll][Tt][Ii][Mm][Ee][Mm][Oo][Nn][Ii][Tt][Oo][Rr][Ii][Nn][Gg].*/ OR data_win_eventdata_commandLine:/.*[Dd][Ii][Ss][Aa][Bb][Ll][Ee][Aa][Nn][Tt][Ii][Ss][Pp][Yy][Ww][Aa][Rr][Ee].*/ OR data_win_eventdata_commandLine:/.*[Aa][Dd][Dd]-[Mm][Pp][Pp][Rr][Ee][Ff][Ee][Rr][Ee][Nn][Cc][Ee] -[Ee][Xx][Cc][Ll][Uu][Ss][Ii][Oo][Nn][Pp][Aa][Tt][Hh].*/ OR data_win_eventdata_commandLine:/.*[Ww][Ee][Vv][Tt][Uu][Tt][Ii][Ll].*/ OR data_win_eventdata_commandLine:/.*[Cc][Ll][Ee][Aa][Rr]-[Ee][Vv][Ee][Nn][Tt][Ll][Oo][Gg].*/ OR data_win_eventdata_commandLine:/.*[Ff][Ss][Uu][Tt][Ii][Ll] [Uu][Ss][Nn] [Dd][Ee][Ll][Ee][Tt][Ee][Jj][Oo][Uu][Rr][Nn][Aa][Ll].*/ OR data_win_eventdata_commandLine:/.*[Vv][Ss][Ss][Aa][Dd][Mm][Ii][Nn].*/ OR data_win_eventdata_commandLine:/.*[Ss][Tt][Oo][Pp]-[Ss][Ee][Rr][Vv][Ii][Cc][Ee].*/ OR data_win_eventdata_commandLine:/.*[Ss][Cc] [Ss][Tt][Oo][Pp].*/ OR data_win_eventdata_commandLine:/.*[Ss][Cc] [Cc][Oo][Nn][Ff][Ii][Gg].*/)'
-      pivot_on: [host]
-      window: 2h
+  # Behaviour-targeted hunts the engine runs around the alert (not a sweep).
+  - name: PowerShell AMSI bypass script blocks
+    query: data_win_system_eventID:"4104" AND data_win_eventdata_scriptBlockText:/.*([Aa][Mm][Ss][Ii][Ii][Nn][Ii][Tt][Ff][Aa][Ii][Ll][Ee][Dd]|[Aa][Mm][Ss][Ii][Uu][Tt][Ii][Ll][Ss]|[Aa][Mm][Ss][Ii][Ss][Cc][Aa][Nn][Bb][Uu][Ff][Ff][Ee][Rr]|[Aa][Mm][Ss][Ii][Cc][Oo][Nn][Tt][Ee][Xx][Tt]|[Aa][Mm][Ss][Ii]\.[Dd][Ll][Ll]|[Ss][Yy][Ss][Tt][Ee][Mm]\.[Mm][Aa][Nn][Aa][Gg][Ee][Mm][Ee][Nn][Tt]\.[Aa][Uu][Tt][Oo][Mm][Aa][Tt][Ii][Oo][Nn]\.[Aa][Mm][Ss][Ii]).*/
+    pivot_on: host
+    window: 6h
+  - name: Defender/AV tampering commands
+    query: data_win_system_eventID:"1" AND data_win_eventdata_commandLine:/.*([Ss][Ee][Tt]-[Mm][Pp][Pp][Rr][Ee][Ff][Ee][Rr][Ee][Nn][Cc][Ee]|[Aa][Dd][Dd]-[Mm][Pp][Pp][Rr][Ee][Ff][Ee][Rr][Ee][Nn][Cc][Ee]|[Dd][Ii][Ss][Aa][Bb][Ll][Ee][Rr][Ee][Aa][Ll][Tt][Ii][Mm][Ee][Mm][Oo][Nn][Ii][Tt][Oo][Rr][Ii][Nn][Gg]|[Dd][Ii][Ss][Aa][Bb][Ll][Ee][Ss][Cc][Rr][Ii][Pp][Tt][Ss][Cc][Aa][Nn][Nn][Ii][Nn][Gg]|[Ee][Xx][Cc][Ll][Uu][Ss][Ii][Oo][Nn][Pp][Aa][Tt][Hh]|[Ss][Cc] [Ss][Tt][Oo][Pp] [Ww][Ii][Nn][Dd][Ee][Ff][Ee][Nn][Dd]).*/
+    pivot_on: host
+    window: 6h
+  - name: AMSI CLSID or provider keys touched by tools
+    query: data_win_system_eventID:"1" AND data_win_eventdata_commandLine:/.*([Ff][Dd][Bb]00[Ee]52-[Aa]214-4[Aa][Aa]1-8[Ff][Bb][Aa]-4357[Bb][Bb]0072[Ee][Cc]|[Aa][Mm][Ss][Ii]\\[Pp][Rr][Oo][Vv][Ii][Dd][Ee][Rr][Ss]|[Ww][Ii][Nn][Dd][Oo][Ww][Ss] [Ss][Cc][Rr][Ii][Pp][Tt]\\[Ss][Ee][Tt][Tt][Ii][Nn][Gg][Ss]\\[Aa][Mm][Ss][Ii][Ee][Nn][Aa][Bb][Ll][Ee]).*/
+    pivot_on: host
+    window: 6h
+  - name: Non-system amsi.dll or replacement DLL loaded
+    query: data_win_system_eventID:"7" AND data_win_eventdata_imageLoaded:/.*(\\[Aa][Mm][Ss][Ii]\.[Dd][Ll][Ll]).*/ AND NOT data_win_eventdata_imageLoaded:/.*(\\[Ww][Ii][Nn][Dd][Oo][Ww][Ss]\\[Ss][Yy][Ss][Tt][Ee][Mm]32\\|\\[Ww][Ii][Nn][Dd][Oo][Ww][Ss]\\[Ss][Yy][Ss][Ww][Oo][Ww]64\\|\\[Ww][Ii][Nn][Dd][Oo][Ww][Ss]\\[Ww][Ii][Nn][Ss][Xx][Ss]\\).*/
+    pivot_on: host
+    window: 6h
+  - name: Post-bypass script payloads and cradles
+    query: data_win_system_eventID:"1" AND data_win_eventdata_commandLine:/.*(-[Ee][Nn][Cc]|-[Ee][Nn][Cc][Oo][Dd][Ee][Dd][Cc][Oo][Mm][Mm][Aa][Nn][Dd]|[Ii][Ee][Xx]|[Ii][Nn][Vv][Oo][Kk][Ee]-[Ee][Xx][Pp][Rr][Ee][Ss][Ss][Ii][Oo][Nn]|[Dd][Oo][Ww][Nn][Ll][Oo][Aa][Dd][Ss][Tt][Rr][Ii][Nn][Gg]|[Dd][Oo][Ww][Nn][Ll][Oo][Aa][Dd][Ff][Ii][Ll][Ee]|[Ff][Rr][Oo][Mm][Bb][Aa][Ss][Ee]64[Ss][Tt][Rr][Ii][Nn][Gg]|[Ii][Nn][Vv][Oo][Kk][Ee]-[Ww][Ee][Bb][Rr][Ee][Qq][Uu][Ee][Ss][Tt]).*/
+    pivot_on: host
+    window: 2h
