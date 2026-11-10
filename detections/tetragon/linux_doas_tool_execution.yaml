@@ -131,48 +131,42 @@ correlation:
   related_rules:
   - id: lnx-doas-001
     name: Linux doas Execution Detection
-    reason: Same doas invocation seen via syslog/auditd; confirms the escalation from a second sensor.
+    reason: Sibling doas execution detection from auditd/syslog; corroborates the same invocation from a second telemetry source.
   - id: linux-sudo-or-su-execution-001
     name: Linux Sudo Or Su Execution
-    reason: Attacker probing alternative escalation paths (sudo/su) before or after doas on the same host.
-  - id: a1b2c3d4-5e6f-7a8b-9c0d-e1f2a3b4c5d6
-    name: Linux Sudoers File Access
-    reason: Recon of privilege configuration precedes choosing doas or sudo; same intent as reading doas.conf.
+    reason: Attacker without working doas often falls back to sudo/su on the same host; shows which escalation path worked.
+  - id: linux-sudoers-tmp-file-creation-001
+    name: Linux Sudoers Tmp File Creation
+    reason: Privilege-config tampering (sudoers) accompanies or follows doas-based escalation.
   - id: linux-setuid-using-chmod-utility-001
     name: Linux Setuid Using Chmod Utility
-    reason: 'Follow-on persistence: planting a setuid binary once root is obtained via doas.'
-  - id: b3c8e2d1-4f1a-4b7c-9a22-91a6f2c4e8de
-    name: Linux Init Script Persistence Detection
-    reason: Root gained through doas is commonly used to install init-script persistence.
-  - id: linux-append-cronjob-entry-001
-    name: Linux Append Cronjob Entry On Existing Cronjob File
-    reason: Root-level cron persistence frequently follows privileged execution.
-  - id: 3b4c5d6e-7f80-1234-5678-90abcdef1234
-    name: Linux SSH Key Discovery
-    reason: Post-escalation credential hunting for SSH keys under root.
-  - id: a94cdd87-6c54-4678-a6cc-2814ffe5a13d
-    name: Unix Shell Configuration Modification
-    reason: Shell profile tampering to persist after privilege gain.
-  window: 4h
+    reason: Escalated shell commonly plants a SUID binary for persistent root.
+  - id: linux-auditd-add-user-001
+    name: Linux Auditd Add User
+    reason: Root obtained via doas is typically followed by creating a backdoor account.
+  - id: linux-edit-cron-table-parameter-001
+    name: Linux Edit Cron Table Parameter
+    reason: Root-level cron edit is a common persistence step after elevation.
+  window: 2h
   enrichment_searches:
   # Behaviour-targeted hunts the engine runs around the alert (not a sweep).
-  - name: Doas process execution
-    query: data_process_exec_process_binary:"/usr/bin/doas" OR data_process_exec_parent_binary:"/usr/bin/doas"
+  - name: Commands executed via doas
+    query: data_process_exec_parent_binary:"/usr/bin/doas"
     pivot_on: host
-    window: 1h
-  - name: doas.conf read or edited
-    query: data_process_exec_process_arguments:*doas.conf* OR full_log:*doas.conf*
-    pivot_on: host
-    window: 4h
-  - name: Shell spawned under doas
-    query: data_process_exec_parent_binary:"/usr/bin/doas" AND data_process_exec_process_binary:(*\/sh OR *\/bash OR *\/dash OR *\/zsh)
-    pivot_on: host
-    window: 1h
-  - name: Sensitive file access after escalation
-    query: data_process_exec_process_arguments:(*\/etc\/shadow* OR *\/etc\/sudoers* OR *authorized_keys* OR *id_rsa*)
+    window: 2h
+  - name: Account creation or password changes
+    query: data_process_exec_process_binary:("/usr/sbin/useradd" OR "/usr/sbin/usermod" OR "/usr/bin/passwd" OR "/usr/sbin/adduser" OR "/usr/sbin/chpasswd")
     pivot_on: host
     window: 4h
-  - name: Download or persistence tooling
-    query: data_process_exec_process_binary:(*\/curl OR *\/wget OR *\/crontab OR *\/chmod OR *\/systemctl)
+  - name: Privilege config edits (sudoers/doas.conf)
+    query: data_process_exec_process_arguments:(*sudoers* OR *doas.conf* OR *visudo*)
     pivot_on: host
     window: 4h
+  - name: SUID or capability changes
+    query: data_process_exec_process_binary:("/usr/bin/chmod" OR "/usr/sbin/setcap") AND data_process_exec_process_arguments:(*u+s* OR *4755* OR *4777* OR *cap_setuid*)
+    pivot_on: host
+    window: 4h
+  - name: Persistence via cron or systemd
+    query: data_process_exec_process_arguments:(*crontab* OR */etc/cron* OR */etc/systemd/system*)
+    pivot_on: host
+    window: 6h

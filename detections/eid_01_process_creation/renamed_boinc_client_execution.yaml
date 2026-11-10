@@ -145,19 +145,31 @@ graylog:
   query: data_win_system_eventID:"1" AND data_win_eventdata_originalFileName:/[Bb][Oo][Ii][Nn][Cc]\.[Ee][Xx][Ee]/ AND _exists_:data_win_eventdata_image AND NOT (data_win_eventdata_image:/.*\\[Bb][Oo][Ii][Nn][Cc]\.[Ee][Xx][Ee]/)
 
 correlation:
-  # Authored by the correlation engine for review.
+  # Authored per-rule (behaviour-researched) for the correlation engine. Related CoPilot
+  # Searches + telemetry pivots to run around an alert, scoped to its host/user/ip/domain.
+  related_rules:
+  - id: 66c3b204-9f88-4d0a-a7f7-8a57d521ca55
+    name: Potential Crypto Mining Activity
+    reason: BOINC is a volunteer-compute client; abuse can overlap with mining or hidden compute and shares the same resource-hijack story.
+  - id: 36480ae1-a1cb-4eaa-a0d6-29801d7e9142
+    name: Potential Defense Evasion Via Binary Rename
+    reason: Same masquerade technique appearing on the host.
+  window: 6h
   enrichment_searches:
-  # Rule-specific telemetry pivots the engine runs around an alert from this rule,
-  # scoped to the alert's host/user/IP within the window (behaviour-targeted, not a sweep).
-    - name: "Other executions of this tool-set on this host (any arguments)"
-      query: 'data_win_system_eventID:"1" AND data_win_eventdata_image:/.*(\\[Bb][Oo][Ii][Nn][Cc]\.[Ee][Xx][Ee])/'
-      pivot_on: [host]
-      window: 2h
-    - name: "Follow-on LOLBin / signed-binary-proxy execution on this host"
-      query: 'data_win_system_eventID:"1" AND data_win_eventdata_image:/.*(\\[Rr][Uu][Nn][Dd][Ll][Ll]32\.[Ee][Xx][Ee]|\\[Rr][Ee][Gg][Ss][Vv][Rr]32\.[Ee][Xx][Ee]|\\[Mm][Ss][Hh][Tt][Aa]\.[Ee][Xx][Ee]|\\[Ii][Nn][Ss][Tt][Aa][Ll][Ll][Uu][Tt][Ii][Ll]\.[Ee][Xx][Ee]|\\[Rr][Ee][Gg][Aa][Ss][Mm]\.[Ee][Xx][Ee]|\\[Rr][Ee][Gg][Ss][Vv][Cc][Ss]\.[Ee][Xx][Ee]|\\[Mm][Ss][Bb][Uu][Ii][Ll][Dd]\.[Ee][Xx][Ee]|\\[Cc][Ee][Rr][Tt][Uu][Tt][Ii][Ll]\.[Ee][Xx][Ee]|\\[Bb][Ii][Tt][Ss][Aa][Dd][Mm][Ii][Nn]\.[Ee][Xx][Ee]|\\[Ww][Mm][Ii][Cc]\.[Ee][Xx][Ee]|\\[Cc][Mm][Ss][Tt][Pp]\.[Ee][Xx][Ee]|\\[Oo][Dd][Bb][Cc][Cc][Oo][Nn][Ff]\.[Ee][Xx][Ee]|\\[Ff][Oo][Rr][Ff][Ii][Ll][Ee][Ss]\.[Ee][Xx][Ee]|\\[Pp][Cc][Aa][Ll][Uu][Aa]\.[Ee][Xx][Ee]|\\[Mm][Aa][Vv][Ii][Nn][Jj][Ee][Cc][Tt]\.[Ee][Xx][Ee]|\\[Ss][Cc][Rr][Ii][Pp][Tt][Rr][Uu][Nn][Nn][Ee][Rr]\.[Ee][Xx][Ee])/'
-      pivot_on: [host]
-      window: 1h
-    - name: "Outbound connections by script interpreters on this host"
-      query: 'data_win_system_eventID:"3" AND data_win_eventdata_image:/.*(\\[Pp][Oo][Ww][Ee][Rr][Ss][Hh][Ee][Ll][Ll]\.[Ee][Xx][Ee]|\\[Pp][Ww][Ss][Hh]\.[Ee][Xx][Ee]|\\[Pp][Oo][Ww][Ee][Rr][Ss][Hh][Ee][Ll][Ll]_[Ii][Ss][Ee]\.[Ee][Xx][Ee]|\\[Cc][Mm][Dd]\.[Ee][Xx][Ee]|\\[Ww][Ss][Cc][Rr][Ii][Pp][Tt]\.[Ee][Xx][Ee]|\\[Cc][Ss][Cc][Rr][Ii][Pp][Tt]\.[Ee][Xx][Ee]|\\[Mm][Ss][Hh][Tt][Aa]\.[Ee][Xx][Ee]|\\[Rr][Uu][Nn][Dd][Ll][Ll]32\.[Ee][Xx][Ee]|\\[Rr][Ee][Gg][Ss][Vv][Rr]32\.[Ee][Xx][Ee])/'
-      pivot_on: [host]
-      window: 1h
+  # Behaviour-targeted hunts the engine runs around the alert (not a sweep).
+  - name: BOINC config and state files
+    query: data_win_system_eventID:11 AND data_win_eventdata_targetFilename:(/.*[Bb][Oo][Ii][Nn][Cc].*/ OR /.*client_state\.xml/ OR /.*gui_rpc_auth\.cfg/ OR /.*cc_config\.xml/)
+    pivot_on: host
+    window: 6h
+  - name: BOINC command-line RPC flags
+    query: data_win_system_eventID:1 AND data_win_eventdata_commandLine:(/.*--(attach_project|detach_project|gui_rpc_port|allow_remote_gui_rpc).*/ OR /.*[Bb][Oo][Ii][Nn][Cc].*/)
+    pivot_on: host
+    window: 6h
+  - name: Network connections from user-writable paths
+    query: data_win_system_eventID:3 AND data_win_eventdata_image:(/.*\\[Aa]pp[Dd]ata\\.*/ OR /.*\\[Tt]emp\\.*/ OR /.*\\[Pp]rogram[Dd]ata\\.*/ OR /.*\\[Pp]ublic\\.*/)
+    pivot_on: host
+    window: 6h
+  - name: Persistence via scheduled task or Run key
+    query: data_win_system_eventID:(1 OR 13) AND (data_win_eventdata_commandLine:/.*[Ss]chtasks.*\/[Cc]reate.*/ OR data_win_eventdata_targetObject:/.*\\CurrentVersion\\Run.*/)
+    pivot_on: host
+    window: 6h
