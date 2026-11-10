@@ -131,39 +131,48 @@ correlation:
   related_rules:
   - id: lnx-doas-001
     name: Linux doas Execution Detection
-    reason: Sibling doas execution detection on the same host; repeated hits show a sustained elevation pattern rather than a one-off.
+    reason: Same doas invocation seen through auditd/syslog; confirms the execution from a second telemetry source.
+  - id: a1b2c3d4-5e6f-7a8b-9c0d-e1f2a3b4c5d6
+    name: Linux Sudoers File Access
+    reason: Actor probing sudo/doas privilege config before or after using doas to elevate.
+  - id: 0f79c4d2-4e1f-4683-9c36-b5469a665e06
+    name: Access of Sudoers File Content
+    reason: Reading sudoers/doas policy to learn what elevation paths exist; a typical precursor.
   - id: linux-sudo-or-su-execution-001
     name: Linux Sudo Or Su Execution
-    reason: Attacker lacking doas often falls back to sudo/su; co-occurrence maps the full elevation toolset in use.
+    reason: Alternative elevation tooling used by the same actor when doas is unavailable or denied.
   - id: linux-setuid-using-chmod-utility-001
     name: Linux Setuid Using Chmod Utility
-    reason: After gaining root via doas, setting SUID bits is a common persistence step.
-  - id: linux-setuid-using-setcap-utility-001
-    name: Linux Setuid Using Setcap Utility
-    reason: Capability grants are the alternative root-persistence follow-on to doas elevation.
-  - id: linux-visudo-utility-execution-001
-    name: Linux Visudo Utility Execution
-    reason: Editing privilege policy (visudo) alongside doas use suggests the privilege config itself is being tampered with.
+    reason: 'Post-elevation persistence: root shell/binary given setuid bit.'
+  - id: fa4aaed5-4fe0-498d-bbc0-08e3346387ba
+    name: Copy Passwd Or Shadow From TMP Path
+    reason: Root obtained through doas is commonly used to stage passwd/shadow for cracking.
+  - id: 1182f3b3-e716-4efa-99ab-d2685d04360f
+    name: History File Deletion
+    reason: Anti-forensics after privileged commands are run via doas.
+  - id: 4e2a6c91-7f3d-4b6e-9a4f-1c8b0e5a92d4
+    name: Crontab Interactive Edit Execution
+    reason: Root-level cron persistence typically follows successful elevation.
   window: 4h
   enrichment_searches:
   # Behaviour-targeted hunts the engine runs around the alert (not a sweep).
-  - name: Everything executed through doas
+  - name: Commands executed as children of doas
     query: data_process_exec_parent_binary:"/usr/bin/doas"
     pivot_on: host
     window: 4h
-  - name: Edits to doas/sudoers privilege config
-    query: full_log:(*doas.conf* OR *sudoers*)
+  - name: Sudoers/doas policy file access
+    query: data_process_exec_process_arguments:(/.*doas\.conf.*/ OR /.*sudoers.*/)
     pivot_on: host
     window: 6h
-  - name: Shells and interpreters spawned as root
-    query: data_process_exec_process_binary:("/bin/sh" OR "/bin/bash" OR "/usr/bin/python3" OR "/usr/bin/perl")
+  - name: Shell spawned with root-level elevation tooling
+    query: data_process_exec_process_binary:("/usr/bin/sudo" OR "/usr/bin/su" OR "/usr/bin/pkexec") AND data_process_exec_process_arguments:(/.*[Bb]ash.*/ OR /.*\/bin\/sh.*/)
     pivot_on: host
-    window: 2h
-  - name: SUID/capability changes
-    query: data_process_exec_process_binary:("/usr/bin/chmod" OR "/usr/sbin/setcap") AND data_process_exec_process_arguments:(*+s* OR *4755* OR *cap_setuid*)
+    window: 4h
+  - name: Passwd/shadow access or copy
+    query: data_process_exec_process_arguments:(/.*\/etc\/shadow.*/ OR /.*\/etc\/passwd.*/)
     pivot_on: host
     window: 6h
-  - name: New accounts or SSH keys after elevation
-    query: data_process_exec_process_binary:("/usr/sbin/useradd" OR "/usr/sbin/usermod" OR "/usr/bin/passwd") OR full_log:*authorized_keys*
+  - name: Persistence set up via cron or systemd
+    query: data_process_exec_process_arguments:(/.*crontab.*/ OR /.*\/etc\/cron.*/ OR /.*systemctl.*enable.*/)
     pivot_on: host
     window: 6h
