@@ -135,19 +135,37 @@ graylog:
   query: data_win_system_eventID:"1" AND data_win_eventdata_parentImage:/.*\\[Rr][Uu][Nn][Ee][Xx][Ee][Hh][Ee][Ll][Pp][Ee][Rr]\.[Ee][Xx][Ee]/
 
 correlation:
-  # Authored by the correlation engine for review.
+  # Authored per-rule (behaviour-researched) for the correlation engine. Related CoPilot
+  # Searches + telemetry pivots to run around an alert, scoped to its host/user/ip/domain.
+  related_rules:
+  - id: 727454c0-d851-48b0-8b89-385611ab0704
+    name: Lolbin Unregmp2.exe Use As Proxy
+    reason: Sibling signed-binary proxy-execution abuse; attackers cycle through such LOLBINs on the same host.
+  - id: 729ce0ea-5d8f-4769-9762-e35de441586d
+    name: MpiExec Lolbin
+    reason: Another rarely-used signed binary that launches arbitrary executables as proxy.
+  - id: d3bf399f-b0cf-4250-8bb4-dfc192ab81dc
+    name: Ie4uinit Lolbin Use From Invalid Path
+    reason: Same T1218 proxy-execution family, often chained after the first proxy succeeds or is blocked.
+  - id: d4ca7c59-e9e4-42d8-bf57-91a776efcb87
+    name: LOLBIN Execution From Abnormal Drive
+    reason: Runexehelper copied to or run from a removable/mounted drive would also trip this.
+  window: 2h
   enrichment_searches:
-  # Rule-specific telemetry pivots the engine runs around an alert from this rule,
-  # scoped to the alert's host/user/IP within the window (behaviour-targeted, not a sweep).
-    - name: "Follow-on LOLBin / signed-binary-proxy execution on this host"
-      query: 'data_win_system_eventID:"1" AND data_win_eventdata_image:/.*(\\[Rr][Uu][Nn][Dd][Ll][Ll]32\.[Ee][Xx][Ee]|\\[Rr][Ee][Gg][Ss][Vv][Rr]32\.[Ee][Xx][Ee]|\\[Mm][Ss][Hh][Tt][Aa]\.[Ee][Xx][Ee]|\\[Ii][Nn][Ss][Tt][Aa][Ll][Ll][Uu][Tt][Ii][Ll]\.[Ee][Xx][Ee]|\\[Rr][Ee][Gg][Aa][Ss][Mm]\.[Ee][Xx][Ee]|\\[Rr][Ee][Gg][Ss][Vv][Cc][Ss]\.[Ee][Xx][Ee]|\\[Mm][Ss][Bb][Uu][Ii][Ll][Dd]\.[Ee][Xx][Ee]|\\[Cc][Ee][Rr][Tt][Uu][Tt][Ii][Ll]\.[Ee][Xx][Ee]|\\[Bb][Ii][Tt][Ss][Aa][Dd][Mm][Ii][Nn]\.[Ee][Xx][Ee]|\\[Ww][Mm][Ii][Cc]\.[Ee][Xx][Ee]|\\[Cc][Mm][Ss][Tt][Pp]\.[Ee][Xx][Ee]|\\[Oo][Dd][Bb][Cc][Cc][Oo][Nn][Ff]\.[Ee][Xx][Ee]|\\[Ff][Oo][Rr][Ff][Ii][Ll][Ee][Ss]\.[Ee][Xx][Ee]|\\[Pp][Cc][Aa][Ll][Uu][Aa]\.[Ee][Xx][Ee]|\\[Mm][Aa][Vv][Ii][Nn][Jj][Ee][Cc][Tt]\.[Ee][Xx][Ee]|\\[Ss][Cc][Rr][Ii][Pp][Tt][Rr][Uu][Nn][Nn][Ee][Rr]\.[Ee][Xx][Ee])/'
-      pivot_on: [host]
-      window: 1h
-    - name: "Other executions of this tool-set on this host (any arguments)"
-      query: 'data_win_system_eventID:"1" AND data_win_eventdata_image:/.*(\\[Rr][Uu][Nn][Ee][Xx][Ee][Hh][Ee][Ll][Pp][Ee][Rr]\.[Ee][Xx][Ee])/'
-      pivot_on: [host]
-      window: 2h
-    - name: "Outbound connections by script interpreters on this host"
-      query: 'data_win_system_eventID:"3" AND data_win_eventdata_image:/.*(\\[Pp][Oo][Ww][Ee][Rr][Ss][Hh][Ee][Ll][Ll]\.[Ee][Xx][Ee]|\\[Pp][Ww][Ss][Hh]\.[Ee][Xx][Ee]|\\[Pp][Oo][Ww][Ee][Rr][Ss][Hh][Ee][Ll][Ll]_[Ii][Ss][Ee]\.[Ee][Xx][Ee]|\\[Cc][Mm][Dd]\.[Ee][Xx][Ee]|\\[Ww][Ss][Cc][Rr][Ii][Pp][Tt]\.[Ee][Xx][Ee]|\\[Cc][Ss][Cc][Rr][Ii][Pp][Tt]\.[Ee][Xx][Ee]|\\[Mm][Ss][Hh][Tt][Aa]\.[Ee][Xx][Ee]|\\[Rr][Uu][Nn][Dd][Ll][Ll]32\.[Ee][Xx][Ee]|\\[Rr][Ee][Gg][Ss][Vv][Rr]32\.[Ee][Xx][Ee])/'
-      pivot_on: [host]
-      window: 1h
+  # Behaviour-targeted hunts the engine runs around the alert (not a sweep).
+  - name: Runexehelper executions
+    query: data_win_system_eventID:"1" AND data_win_eventdata_image:/.*\\([Rr][Uu][Nn][Ee][Xx][Ee][Hh][Ee][Ll][Pp][Ee][Rr].[Ee][Xx][Ee])/
+    pivot_on: host
+    window: 4h
+  - name: Runexehelper binary dropped or copied
+    query: data_win_system_eventID:"11" AND data_win_eventdata_targetFilename:/.*[Rr][Uu][Nn][Ee][Xx][Ee][Hh][Ee][Ll][Pp][Ee][Rr].*/
+    pivot_on: host
+    window: 24h
+  - name: Shells and scripting engines spawned by it
+    query: data_win_system_eventID:"1" AND data_win_eventdata_parentImage:/.*\\([Rr][Uu][Nn][Ee][Xx][Ee][Hh][Ee][Ll][Pp][Ee][Rr].[Ee][Xx][Ee])/ AND data_win_eventdata_image:/.*\\([Cc][Mm][Dd].[Ee][Xx][Ee]|[Pp][Oo][Ww][Ee][Rr][Ss][Hh][Ee][Ll][Ll].[Ee][Xx][Ee]|[Pp][Ww][Ss][Hh].[Ee][Xx][Ee]|[Ww][Ss][Cc][Rr][Ii][Pp][Tt].[Ee][Xx][Ee]|[Cc][Ss][Cc][Rr][Ii][Pp][Tt].[Ee][Xx][Ee]|[Mm][Ss][Hh][Tt][Aa].[Ee][Xx][Ee])/
+    pivot_on: host
+    window: 2h
+  - name: Network from proxy-launched processes
+    query: data_win_system_eventID:"3" AND data_win_eventdata_image:/.*\\([Pp][Oo][Ww][Ee][Rr][Ss][Hh][Ee][Ll][Ll].[Ee][Xx][Ee]|[Cc][Mm][Dd].[Ee][Xx][Ee]|[Rr][Uu][Nn][Dd][Ll][Ll]32.[Ee][Xx][Ee]|[Rr][Ee][Gg][Ss][Vv][Rr]32.[Ee][Xx][Ee]|[Mm][Ss][Hh][Tt][Aa].[Ee][Xx][Ee])/
+    pivot_on: host
+    window: 2h

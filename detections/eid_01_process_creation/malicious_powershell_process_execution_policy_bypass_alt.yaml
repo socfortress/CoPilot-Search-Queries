@@ -126,58 +126,50 @@ graylog:
   query: data_win_system_eventID:"1" AND (data_win_eventdata_image:/.*powershell.*/ OR data_win_eventdata_image:/.*pwsh.*/) AND data_win_eventdata_commandLine:/.*\-ex.*/ AND data_win_eventdata_commandLine:/.*bypass.*/
 
 correlation:
-  # Authored by the correlation engine for review. Related CoPilot Searches to run
-  # around an alert from this rule, scoped to the same host/user/IP within the window.
+  # Authored per-rule (behaviour-researched) for the correlation engine. Related CoPilot
+  # Searches + telemetry pivots to run around an alert, scoped to its host/user/ip/domain.
   related_rules:
-    - id: 2452e632-9e0d-11eb-bacd-acde48001122
-      name: "DNS Exfiltration Using Nslookup App"
-      reason: "same analytic story: Compromised Windows Host"
-    - id: cc316032-924a-11eb-91a2-acde48001122
-      name: "DSQuery Domain Discovery"
-      reason: "same analytic story: Compromised Windows Host"
-    - id: 9b3af1e6-5b68-11eb-ae93-0242ac130002
-      name: "Detect MSHTA Url in Command Line"
-      reason: "same analytic story: Compromised Windows Host"
-    - id: 27c3a83d-cada-47c6-9042-67baf19d2574
-      name: "Detect PsExec With accepteula Flag"
-      reason: "same analytic story: Volt Typhoon"
-    - id: 72170ec5-f7d2-42f5-aefb-2b8be6aad15f
-      name: "Detect Regasm Spawning a Process"
-      reason: "same analytic story: Compromised Windows Host"
-    - id: bc477b57-5c21-4ab6-9c33-668772e7f114
-      name: "Detect Regsvcs Spawning a Process"
-      reason: "same analytic story: Compromised Windows Host"
-    - id: 070e9b80-6252-11eb-ae93-0242ac130002
-      name: "Detect Regsvr32 Application Control Bypass"
-      reason: "same analytic story: Compromised Windows Host"
-    - id: 683e6196-b8e8-11eb-9a79-acde48001122
-      name: "Detect Renamed PSExec"
-      reason: "same analytic story: Salt Typhoon"
-    - id: 1b7bfb2c-b8e6-11eb-99ac-acde48001122
-      name: "Detect Renamed WinRAR"
-      reason: "same analytic story: Salt Typhoon"
-    - id: a0873b32-5b68-11eb-ae93-0242ac130002
-      name: "Detect mshta inline hta execution"
-      reason: "same analytic story: Compromised Windows Host"
-    - id: 8943b567-f14d-4ee8-a0bb-2121d4ce3184
-      name: "Dump LSASS via comsvcs DLL"
-      reason: "same analytic story: Volt Typhoon"
-    - id: b06a555e-dce0-417d-a2eb-28a5d8d66ef7
-      name: "Execution of File with Multiple Extensions"
-      reason: "same analytic story: AsyncRAT"
-  window: 1h
+  - id: 9be56c82-b1cc-4318-87eb-d138afaaca39
+    name: Malicious PowerShell Process - Execution Policy Bypass
+    reason: Stricter sibling (-ex* plus space-bounded bypass); co-firing means a true flag rather than a stray substring.
+  - id: 87e3c4e8-a6a8-4ad9-bb4f-46e7ff99a180
+    name: Change PowerShell Policies to an Insecure Level
+    reason: Persistent policy weakening (Set-ExecutionPolicy) is the durable form of the per-session bypass.
+  - id: fad91067-08c5-4d1a-8d8c-d96a21b37814
+    name: Potential PowerShell Execution Policy Tampering
+    reason: Registry-level policy change on the same host indicates the attacker made the bypass permanent.
+  - id: 754ed792-634f-40ae-b3bc-e0448d33f695
+    name: Suspicious PowerShell Parent Process
+    reason: Shows what launched the bypassing PowerShell (Office, WMI, script engine), separating admin automation from intrusion.
+  - id: ac175779-025a-4f12-98b0-acdaeb77ea85
+    name: PowerShell Script Run in AppData
+    reason: Bypass flag is used to run an unsigned script file, commonly dropped in AppData.
+  - id: a6a39bdb-935c-4f0a-ab77-35f4bbf44d33
+    name: Potentially Suspicious Powershell Script Execution From Temp Folder
+    reason: Bypass with a script staged in Temp points to a dropped payload script.
+  - id: 85b0b087-eddf-4a2b-b033-d771fa2b9775
+    name: PowerShell Download and Execution Cradles
+    reason: Bypass sessions often fetch and run a remote script as the next step.
+  window: 4h
   enrichment_searches:
-  # Rule-specific telemetry pivots the engine runs around an alert from this rule,
-  # scoped to the alert's host/user/IP within the window (behaviour-targeted, not a sweep).
-    - name: "Outbound connections by script interpreters on this host"
-      query: 'data_win_system_eventID:"3" AND data_win_eventdata_image:/.*(\\[Pp][Oo][Ww][Ee][Rr][Ss][Hh][Ee][Ll][Ll]\.[Ee][Xx][Ee]|\\[Pp][Ww][Ss][Hh]\.[Ee][Xx][Ee]|\\[Pp][Oo][Ww][Ee][Rr][Ss][Hh][Ee][Ll][Ll]_[Ii][Ss][Ee]\.[Ee][Xx][Ee]|\\[Cc][Mm][Dd]\.[Ee][Xx][Ee]|\\[Ww][Ss][Cc][Rr][Ii][Pp][Tt]\.[Ee][Xx][Ee]|\\[Cc][Ss][Cc][Rr][Ii][Pp][Tt]\.[Ee][Xx][Ee]|\\[Mm][Ss][Hh][Tt][Aa]\.[Ee][Xx][Ee]|\\[Rr][Uu][Nn][Dd][Ll][Ll]32\.[Ee][Xx][Ee]|\\[Rr][Ee][Gg][Ss][Vv][Rr]32\.[Ee][Xx][Ee])/'
-      pivot_on: [host]
-      window: 1h
-    - name: "Autostart persistence written on this host (Run keys, services, IFEO)"
-      query: '(data_win_system_eventID:"12" OR data_win_system_eventID:"13") AND (data_win_eventdata_targetObject:/.*[Cc][Uu][Rr][Rr][Ee][Nn][Tt][Vv][Ee][Rr][Ss][Ii][Oo][Nn]\\[Rr][Uu][Nn].*/ OR data_win_eventdata_targetObject:/.*[Cc][Uu][Rr][Rr][Ee][Nn][Tt][Vv][Ee][Rr][Ss][Ii][Oo][Nn]\\[Rr][Uu][Nn][Oo][Nn][Cc][Ee].*/ OR data_win_eventdata_targetObject:/.*[Cc][Uu][Rr][Rr][Ee][Nn][Tt][Cc][Oo][Nn][Tt][Rr][Oo][Ll][Ss][Ee][Tt]\\[Ss][Ee][Rr][Vv][Ii][Cc][Ee][Ss]\\.*/ OR data_win_eventdata_targetObject:/.*[Ii][Mm][Aa][Gg][Ee] [Ff][Ii][Ll][Ee] [Ee][Xx][Ee][Cc][Uu][Tt][Ii][Oo][Nn] [Oo][Pp][Tt][Ii][Oo][Nn][Ss]\\.*/ OR data_win_eventdata_targetObject:/.*[Ww][Ii][Nn][Ll][Oo][Gg][Oo][Nn]\\[Ss][Hh][Ee][Ll][Ll].*/ OR data_win_eventdata_targetObject:/.*[Ww][Ii][Nn][Ll][Oo][Gg][Oo][Nn]\\[Uu][Ss][Ee][Rr][Ii][Nn][Ii][Tt].*/ OR data_win_eventdata_targetObject:/.*[Cc][Uu][Rr][Rr][Ee][Nn][Tt][Vv][Ee][Rr][Ss][Ii][Oo][Nn]\\[Ee][Xx][Pp][Ll][Oo][Rr][Ee][Rr]\\[Rr][Uu][Nn].*/ OR data_win_eventdata_targetObject:/.*[Pp][Oo][Ll][Ii][Cc][Ii][Ee][Ss]\\[Ee][Xx][Pp][Ll][Oo][Rr][Ee][Rr]\\[Rr][Uu][Nn].*/ OR data_win_eventdata_targetObject:/.*[Cc][Uu][Rr][Rr][Ee][Nn][Tt][Vv][Ee][Rr][Ss][Ii][Oo][Nn]\\[Ww][Ii][Nn][Dd][Oo][Ww][Ss]\\[Ll][Oo][Aa][Dd].*/)'
-      pivot_on: [host]
-      window: 4h
-    - name: "Follow-on LOLBin / signed-binary-proxy execution on this host"
-      query: 'data_win_system_eventID:"1" AND data_win_eventdata_image:/.*(\\[Rr][Uu][Nn][Dd][Ll][Ll]32\.[Ee][Xx][Ee]|\\[Rr][Ee][Gg][Ss][Vv][Rr]32\.[Ee][Xx][Ee]|\\[Mm][Ss][Hh][Tt][Aa]\.[Ee][Xx][Ee]|\\[Ii][Nn][Ss][Tt][Aa][Ll][Ll][Uu][Tt][Ii][Ll]\.[Ee][Xx][Ee]|\\[Rr][Ee][Gg][Aa][Ss][Mm]\.[Ee][Xx][Ee]|\\[Rr][Ee][Gg][Ss][Vv][Cc][Ss]\.[Ee][Xx][Ee]|\\[Mm][Ss][Bb][Uu][Ii][Ll][Dd]\.[Ee][Xx][Ee]|\\[Cc][Ee][Rr][Tt][Uu][Tt][Ii][Ll]\.[Ee][Xx][Ee]|\\[Bb][Ii][Tt][Ss][Aa][Dd][Mm][Ii][Nn]\.[Ee][Xx][Ee]|\\[Ww][Mm][Ii][Cc]\.[Ee][Xx][Ee]|\\[Cc][Mm][Ss][Tt][Pp]\.[Ee][Xx][Ee]|\\[Oo][Dd][Bb][Cc][Cc][Oo][Nn][Ff]\.[Ee][Xx][Ee]|\\[Ff][Oo][Rr][Ff][Ii][Ll][Ee][Ss]\.[Ee][Xx][Ee]|\\[Pp][Cc][Aa][Ll][Uu][Aa]\.[Ee][Xx][Ee]|\\[Mm][Aa][Vv][Ii][Nn][Jj][Ee][Cc][Tt]\.[Ee][Xx][Ee]|\\[Ss][Cc][Rr][Ii][Pp][Tt][Rr][Uu][Nn][Nn][Ee][Rr]\.[Ee][Xx][Ee])/'
-      pivot_on: [host]
-      window: 1h
+  # Behaviour-targeted hunts the engine runs around the alert (not a sweep).
+  - name: PowerShell running script files from user-writable paths
+    query: data_win_system_eventID:1 AND data_win_eventdata_image:/.*([Pp]ower[Ss]hell|[Pp]wsh).*/ AND data_win_eventdata_commandLine:/.*(\.ps1).*(\\Temp\\|\\AppData\\|\\ProgramData\\|\\Users\\Public\\|\\Downloads\\).*/
+    pivot_on: host
+    window: 4h
+  - name: PowerShell download cradles and web requests
+    query: data_win_system_eventID:1 AND data_win_eventdata_image:/.*([Pp]ower[Ss]hell|[Pp]wsh).*/ AND data_win_eventdata_commandLine:/.*([Dd]ownload[Ss]tring|[Dd]ownload[Ff]ile|[Ii]nvoke-[Ww]eb[Rr]equest|[Nn]et\.[Ww]eb[Cc]lient|[Ss]tart-[Bb]its[Tt]ransfer).*/
+    pivot_on: host
+    window: 4h
+  - name: Script file creation by PowerShell or script hosts
+    query: data_win_system_eventID:11 AND data_win_eventdata_targetFilename:/.*\.(ps1|psm1|bat|vbs|js)/ AND data_win_eventdata_image:/.*([Pp]ower[Ss]hell|[Pp]wsh|[Cc]md|[Ww]script|[Cc]script|[Mm]shta).*/
+    pivot_on: host
+    window: 4h
+  - name: Defender or logging tampering from PowerShell
+    query: data_win_system_eventID:1 AND data_win_eventdata_commandLine:/.*([Ss]et-[Mm]p[Pp]reference|[Aa]dd-[Mm]p[Pp]reference|DisableRealtimeMonitoring|[Ee]xclusion[Pp]ath|[Ss]cript[Bb]lock[Ll]ogging).*/
+    pivot_on: host
+    window: 4h
+  - name: Bypass launches by same user
+    query: data_win_system_eventID:1 AND data_win_eventdata_image:/.*([Pp]ower[Ss]hell|[Pp]wsh).*/ AND data_win_eventdata_commandLine:/.* -[Ee][Xx].*[Bb]ypass.*/
+    pivot_on: user
+    window: 24h
