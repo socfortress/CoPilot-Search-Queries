@@ -145,19 +145,50 @@ graylog:
   query: data_win_system_eventID:"1" AND (data_win_eventdata_image:/.*\\[Rr][Ee][Gg][Ss][Vv][Rr]32\.[Ee][Xx][Ee]/ OR data_win_eventdata_originalFileName:/\\[Rr][Ee][Gg][Ss][Vv][Rr]32\.[Ee][Xx][Ee]/) AND data_win_eventdata_commandLine:/.* \\\\.*/
 
 correlation:
-  # Authored by the correlation engine for review.
+  # Authored per-rule (behaviour-researched) for the correlation engine. Related CoPilot
+  # Searches + telemetry pivots to run around an alert, scoped to its host/user/ip/domain.
+  related_rules:
+  - id: 1412aa78-a24c-4abd-83df-767dfb2c5bbe
+    name: Potentially Suspicious WebDAV LNK Execution
+    reason: A WebDAV-hosted LNK is a common delivery step that leads to regsvr32 loading a DLL from a remote share.
+  - id: f0507c0f-a3a2-40f5-acc6-7f543c334993
+    name: Suspicious File Execution From Internet Hosted WebDav Share
+    reason: Same remote-share staging, executed straight from a WebDAV path on the same host.
+  - id: 7e6237fe-3ddb-438f-9381-9bf9de5af8d0
+    name: Windows Internet Hosted WebDav Share Mount Via Net.EXE
+    reason: net use mounting the share precedes regsvr32 pulling the DLL from it.
+  - id: 6f0947a4-1c5e-4e0d-8ac7-53159b8f23ca
+    name: Potentially Suspicious Child Process Of Regsvr32
+    reason: 'Follow-on: the loaded remote DLL or scriptlet spawns shells or LOLBins from regsvr32.'
+  - id: 867356ee-9352-41c9-a8f2-1be690d78216
+    name: Potentially Suspicious Regsvr32 HTTP/FTP Pattern
+    reason: Sibling regsvr32 remote-load variant (Squiblydoo over HTTP) from the same actor.
+  - id: 5cdb711b-5740-4fb2-ba88-f7945027afac
+    name: Rundll32 UNC Path Execution
+    reason: Attackers rotate between regsvr32 and rundll32 to load DLLs from the same UNC share.
+  - id: c7e91a02-d771-4a6d-a700-42587e0b1095
+    name: Network Connection Initiated By Regsvr32.EXE
+    reason: Regsvr32 making outbound connections to fetch payload or reach C2 after loading.
+  window: 4h
   enrichment_searches:
-  # Rule-specific telemetry pivots the engine runs around an alert from this rule,
-  # scoped to the alert's host/user/IP within the window (behaviour-targeted, not a sweep).
-    - name: "Follow-on LOLBin / signed-binary-proxy execution on this host"
-      query: 'data_win_system_eventID:"1" AND data_win_eventdata_image:/.*(\\[Rr][Uu][Nn][Dd][Ll][Ll]32\.[Ee][Xx][Ee]|\\[Rr][Ee][Gg][Ss][Vv][Rr]32\.[Ee][Xx][Ee]|\\[Mm][Ss][Hh][Tt][Aa]\.[Ee][Xx][Ee]|\\[Ii][Nn][Ss][Tt][Aa][Ll][Ll][Uu][Tt][Ii][Ll]\.[Ee][Xx][Ee]|\\[Rr][Ee][Gg][Aa][Ss][Mm]\.[Ee][Xx][Ee]|\\[Rr][Ee][Gg][Ss][Vv][Cc][Ss]\.[Ee][Xx][Ee]|\\[Mm][Ss][Bb][Uu][Ii][Ll][Dd]\.[Ee][Xx][Ee]|\\[Cc][Ee][Rr][Tt][Uu][Tt][Ii][Ll]\.[Ee][Xx][Ee]|\\[Bb][Ii][Tt][Ss][Aa][Dd][Mm][Ii][Nn]\.[Ee][Xx][Ee]|\\[Ww][Mm][Ii][Cc]\.[Ee][Xx][Ee]|\\[Cc][Mm][Ss][Tt][Pp]\.[Ee][Xx][Ee]|\\[Oo][Dd][Bb][Cc][Cc][Oo][Nn][Ff]\.[Ee][Xx][Ee]|\\[Ff][Oo][Rr][Ff][Ii][Ll][Ee][Ss]\.[Ee][Xx][Ee]|\\[Pp][Cc][Aa][Ll][Uu][Aa]\.[Ee][Xx][Ee]|\\[Mm][Aa][Vv][Ii][Nn][Jj][Ee][Cc][Tt]\.[Ee][Xx][Ee]|\\[Ss][Cc][Rr][Ii][Pp][Tt][Rr][Uu][Nn][Nn][Ee][Rr]\.[Ee][Xx][Ee])/'
-      pivot_on: [host]
-      window: 1h
-    - name: "Outbound connections by script interpreters on this host"
-      query: 'data_win_system_eventID:"3" AND data_win_eventdata_image:/.*(\\[Pp][Oo][Ww][Ee][Rr][Ss][Hh][Ee][Ll][Ll]\.[Ee][Xx][Ee]|\\[Pp][Ww][Ss][Hh]\.[Ee][Xx][Ee]|\\[Pp][Oo][Ww][Ee][Rr][Ss][Hh][Ee][Ll][Ll]_[Ii][Ss][Ee]\.[Ee][Xx][Ee]|\\[Cc][Mm][Dd]\.[Ee][Xx][Ee]|\\[Ww][Ss][Cc][Rr][Ii][Pp][Tt]\.[Ee][Xx][Ee]|\\[Cc][Ss][Cc][Rr][Ii][Pp][Tt]\.[Ee][Xx][Ee]|\\[Mm][Ss][Hh][Tt][Aa]\.[Ee][Xx][Ee]|\\[Rr][Uu][Nn][Dd][Ll][Ll]32\.[Ee][Xx][Ee]|\\[Rr][Ee][Gg][Ss][Vv][Rr]32\.[Ee][Xx][Ee])/'
-      pivot_on: [host]
-      window: 1h
-    - name: "Memory/credential-dump creation & LSASS access on this host"
-      query: '((data_win_system_eventID:"1" AND data_win_eventdata_image:/.*(\\[Pp][Rr][Oo][Cc][Dd][Uu][Mm][Pp]\.[Ee][Xx][Ee]|\\[Pp][Rr][Oo][Cc][Dd][Uu][Mm][Pp]64\.[Ee][Xx][Ee]|\\[Ss][Qq][Ll][Dd][Uu][Mm][Pp][Ee][Rr]\.[Ee][Xx][Ee]|\\[Cc][Rr][Ee][Aa][Tt][Ee][Dd][Uu][Mm][Pp]\.[Ee][Xx][Ee]|\\[Rr][Dd][Rr][Ll][Ee][Aa][Kk][Dd][Ii][Aa][Gg]\.[Ee][Xx][Ee]|\\[Dd][Uu][Mm][Pp][Ee][Rr][Tt]\.[Ee][Xx][Ee]|\\[Nn][Aa][Nn][Oo][Dd][Uu][Mm][Pp]\.[Ee][Xx][Ee]|\\[Aa][Vv][Dd][Uu][Mm][Pp]\.[Ee][Xx][Ee])/) OR (data_win_system_eventID:"1" AND (data_win_eventdata_commandLine:/.*[Cc][Oo][Mm][Ss][Vv][Cc][Ss]\.[Dd][Ll][Ll].*/ OR data_win_eventdata_commandLine:/.*[Mm][Ii][Nn][Ii][Dd][Uu][Mm][Pp].*/ OR data_win_eventdata_commandLine:/.*[Dd][Uu][Mm][Pp][Ee][Rr][Tt].*/ OR data_win_eventdata_commandLine:/.*[Nn][Aa][Nn][Oo][Dd][Uu][Mm][Pp].*/ OR data_win_eventdata_commandLine:/.*[Ll][Ss][Aa][Ss][Ss].*/ OR data_win_eventdata_commandLine:/.*[Ss][Ee][Kk][Uu][Rr][Ll][Ss][Aa].*/ OR data_win_eventdata_commandLine:/.*[Nn][Tt][Dd][Ss]\.[Dd][Ii][Tt].*/ OR data_win_eventdata_commandLine:/.*[Nn][Tt][Dd][Ss][Uu][Tt][Ii][Ll].*/)) OR (data_win_system_eventID:"10" AND data_win_eventdata_targetImage:/.*(\\[Ll][Ss][Aa][Ss][Ss]\.[Ee][Xx][Ee])/))'
-      pivot_on: [host]
-      window: 1h
+  # Behaviour-targeted hunts the engine runs around the alert (not a sweep).
+  - name: Regsvr32 child processes
+    query: (data_win_eventdata_parentImage:/.*[Rr]egsvr32\.exe/) AND (data_win_eventdata_image:/.*(cmd|powershell|pwsh|rundll32|mshta|wscript|cscript)\.exe/)
+    pivot_on: host
+    window: 1h
+  - name: Regsvr32 outbound network
+    query: data_win_system_eventID:3 AND data_win_eventdata_image:/.*[Rr]egsvr32\.exe/
+    pivot_on: host
+    window: 1h
+  - name: Net use to remote shares / WebDAV
+    query: data_win_system_eventID:1 AND data_win_eventdata_commandLine:/.*[Nn]et1? use .*/
+    pivot_on: host
+    window: 2h
+  - name: Regsvr32 DNS lookups
+    query: data_win_system_eventID:22 AND data_win_eventdata_image:/.*[Rr]egsvr32\.exe/
+    pivot_on: host
+    window: 1h
+  - name: DLL files dropped to disk
+    query: data_win_system_eventID:11 AND data_win_eventdata_targetFilename:/.*\.(dll|ocx)/
+    pivot_on: host
+    window: 2h
