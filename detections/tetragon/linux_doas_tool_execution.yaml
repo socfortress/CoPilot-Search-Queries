@@ -129,50 +129,44 @@ correlation:
   # Authored per-rule (behaviour-researched) for the correlation engine. Related CoPilot
   # Searches + telemetry pivots to run around an alert, scoped to its host/user/ip/domain.
   related_rules:
+  - id: lnx-doas-001
+    name: Linux doas Execution Detection
+    reason: Same doas execution seen via another rule path; corroborates the invocation and arguments.
   - id: linux-sudo-or-su-execution-001
     name: Linux Sudo Or Su Execution
-    reason: doas is the sudo substitute; sudo/su use on the same host shows the actor's other elevation path
-  - id: linux-pkexec-privilege-escalation-001
-    name: Linux pkexec Privilege Escalation
-    reason: Without a working doas rule an attacker falls back to pkexec; same elevation-to-root goal
-  - id: a1b2c3d4-5e6f-7a8b-9c0d-e1f2a3b4c5d6
-    name: Linux Sudoers File Access
-    reason: Reading sudoers/privilege config precedes trying doas/sudo; recon for what is permitted
-  - id: 0f79c4d2-4e1f-4683-9c36-b5469a665e06
-    name: Access of Sudoers File Content
-    reason: Sudoers content access is the reconnaissance step before invoking doas
+    reason: Sudo/su use on the same host shows whether doas is one of several elevation attempts by the same actor.
+  - id: linux-auditd-possible-access-sudoers-file-001
+    name: Linux Auditd Possible Access To Sudoers File
+    reason: Reading privilege-delegation config typically precedes choosing an elevation path.
+  - id: linux-sudoers-tmp-file-creation-001
+    name: Linux Sudoers Tmp File Creation
+    reason: Editing delegation config is the persistence follow-on to successful elevation.
+  - id: linux-setuid-using-chmod-utility-001
+    name: Linux Setuid Using Chmod Utility
+    reason: A root shell from doas is often turned into a setuid backdoor.
   - id: linux-auditd-chown-to-root-001
     name: Linux Auditd Chown To Root
-    reason: After doas yields root, chown-to-root of planted binaries (SUID setup) is a typical follow-on
-  - id: 6419afd1-3742-47a5-a7e6-b50386cd15f8
-    name: Chmod Targeting Sensitive Directories
-    reason: Chmod on sensitive dirs follows once root is gained via doas
-  - id: fa4aaed5-4fe0-498d-bbc0-08e3346387ba
-    name: Copy Passwd Or Shadow From TMP Path
-    reason: Root via doas lets the actor copy passwd/shadow for credential theft
-  - id: 1182f3b3-e716-4efa-99ab-d2685d04360f
-    name: History File Deletion
-    reason: History deletion after an elevated session is a common cover-up
+    reason: Chown-to-root of a staged binary after doas gives persistent root-owned payloads.
   window: 4h
   enrichment_searches:
   # Behaviour-targeted hunts the engine runs around the alert (not a sweep).
-  - name: Other privilege elevation binaries
-    query: data_process_exec_process_binary:/.*\/([Ss][Uu][Dd][Oo]|[Ss][Uu]|[Pp][Kk][Ee][Xx][Ee][Cc]|[Dd][Oo][Aa][Ss])/
+  - name: Commands run as child of doas
+    query: data_process_exec_parent_binary:"/usr/bin/doas"
     pivot_on: host
     window: 4h
-  - name: Reads of doas/sudoers configuration
-    query: (data_process_exec_process_arguments:/.*[Dd][Oo][Aa][Ss]\.[Cc][Oo][Nn][Ff].*/ OR data_process_exec_process_arguments:/.*[Ss][Uu][Dd][Oo][Ee][Rr][Ss].*/)
+  - name: Interactive or -c shells spawned
+    query: data_process_exec_process_binary:(/.*\/(bash|sh|dash|zsh)/) AND data_process_exec_process_arguments:(/.*-[a-z]*i.*/ OR /.*-c.*/)
     pivot_on: host
-    window: 24h
-  - name: Sensitive credential files accessed
-    query: (data_process_exec_process_arguments:/.*\/etc\/([Ss][Hh][Aa][Dd][Oo][Ww]|[Pp][Aa][Ss][Ss][Ww][Dd]).*/ OR data_process_exec_process_arguments:/.*\.ssh\/.*/)
-    pivot_on: host
-    window: 4h
-  - name: Permission or ownership changes (SUID staging)
-    query: data_process_exec_process_binary:/.*\/(chmod|chown)/ AND (data_process_exec_process_arguments:/.*[+]s.*/ OR data_process_exec_process_arguments:/.*root.*/)
+    window: 2h
+  - name: Privilege config and credential file access
+    query: data_process_exec_process_arguments:(/.*doas\.conf.*/ OR /.*sudoers.*/ OR /.*\/etc\/shadow.*/ OR /.*\/etc\/passwd.*/)
     pivot_on: host
     window: 4h
-  - name: Account or cron persistence after elevation
-    query: data_process_exec_process_binary:/.*\/(useradd|usermod|adduser|crontab)/
+  - name: Persistence or setuid changes after elevation
+    query: data_process_exec_process_binary:(/.*\/(chmod|chown|useradd|usermod|crontab)/) AND data_process_exec_process_arguments:(/.*(u\+s|4755|root|-aG|-G).*/)
     pivot_on: host
     window: 6h
+  - name: Download tooling staging
+    query: data_process_exec_process_binary:(/.*\/(curl|wget|nc|ncat)/)
+    pivot_on: host
+    window: 2h
