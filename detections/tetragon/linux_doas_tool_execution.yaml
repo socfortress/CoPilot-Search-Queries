@@ -131,45 +131,35 @@ correlation:
   related_rules:
   - id: lnx-doas-001
     name: Linux doas Execution Detection
-    reason: Sibling detection of the same doas elevation on the host; confirms the doas use is not a one-off and shows the commands it was used for.
-  - id: linux-visudo-utility-execution-001
-    name: Linux Visudo Utility Execution
-    reason: Attackers who cannot use doas edit sudoers; both reflect privilege-delegation config tampering on the same host.
+    reason: Same doas execution seen through the syslog/auditd path; corroborates the Tetragon exec and shows the invoking user.
+  - id: linux-auditd-possible-access-sudoers-file-001
+    name: Linux Auditd Possible Access To Sudoers File
+    reason: Attacker touching doas often also reads or edits sudo privilege config to map or grant escalation paths.
   - id: linux-sudoers-tmp-file-creation-001
     name: Linux Sudoers Tmp File Creation
-    reason: Sudoers edit artifact; a precursor/alternate path to granting the same elevation that doas gives.
+    reason: Editing sudoers (visudo) is the sibling persistence step to writing a permissive doas.conf.
   - id: linux-setuid-using-chmod-utility-001
     name: Linux Setuid Using Chmod Utility
-    reason: Setuid on a binary is the other common root-persistence step after gaining doas/sudo-style elevation.
+    reason: 'Alternative or follow-on escalation: planting a setuid binary after gaining or testing root via doas.'
   - id: 6a50f16c-3b7b-42d1-b081-0fdd3ba70a73
     name: User Added To Root/Sudoers Group Using Usermod
-    reason: 'Follow-on persistence: after elevating, attacker adds an account to privileged groups.'
-  - id: fa4aaed5-4fe0-498d-bbc0-08e3346387ba
-    name: Copy Passwd Or Shadow From TMP Path
-    reason: Root-level credential harvesting commonly follows successful elevation.
-  - id: 7f734ed0-4f47-46c0-837f-6ee62505abd9
-    name: Potential Netcat Reverse Shell Execution
-    reason: A shell obtained via reverse shell is a typical origin of the unprivileged session that then uses doas to escalate.
+    reason: 'Follow-on persistence: adding the account to privileged groups once doas confirms root.'
   window: 4h
   enrichment_searches:
   # Behaviour-targeted hunts the engine runs around the alert (not a sweep).
-  - name: Commands executed through doas
+  - name: Commands run through doas
     query: data_process_exec_parent_binary:"/usr/bin/doas"
     pivot_on: host
     window: 4h
-  - name: Edits to doas.conf or sudoers
-    query: data_process_exec_process_arguments:(*doas.conf* OR *sudoers*)
-    pivot_on: host
-    window: 24h
-  - name: Account and group changes after elevation
-    query: data_process_exec_process_binary:("/usr/sbin/useradd" OR "/usr/sbin/usermod" OR "/usr/bin/passwd" OR "/usr/sbin/adduser")
+  - name: doas.conf read or edited
+    query: data_process_exec_process_arguments:/.*doas\.conf.*/
     pivot_on: host
     window: 4h
-  - name: Reads of shadow/passwd and SSH keys
-    query: data_process_exec_process_arguments:(*\/etc\/shadow* OR *\/etc\/passwd* OR *authorized_keys* OR *id_rsa*)
+  - name: Account and credential file access
+    query: data_process_exec_process_arguments:/.*\/etc\/(shadow|passwd|sudoers).*/
     pivot_on: host
     window: 4h
-  - name: Remote download and shell staging
-    query: data_process_exec_process_binary:("/usr/bin/curl" OR "/usr/bin/wget" OR "/usr/bin/nc" OR "/usr/bin/ncat")
+  - name: Persistence via cron or authorized_keys
+    query: data_process_exec_process_arguments:(/.*authorized_keys.*/ OR /.*crontab.*/ OR /.*\/etc\/cron.*/)
     pivot_on: host
-    window: 2h
+    window: 6h
