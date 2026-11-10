@@ -143,23 +143,53 @@ graylog:
   query: data_win_system_eventID:"11" AND data_win_eventdata_targetFilename:/[Cc]:\\[Ww][Ii][Nn][Dd][Oo][Ww][Ss]\\[Ss][Yy][Ss][Tt][Ee][Mm]32\\[Dd][Rr][Ii][Vv][Ee][Rr][Ss]\\[Ll][Ii][Vv][Ee][Kk][Dd][Dd]\.[Ss][Yy][Ss]/ AND (data_win_eventdata_image:/.*\\[Ll][Ii][Vv][Ee][Kk][Dd]\.[Ee][Xx][Ee]/ OR data_win_eventdata_image:/.*\\[Ll][Ii][Vv][Ee][Kk]64\.[Ee][Xx][Ee]/)
 
 correlation:
-  # Authored by the correlation engine for review.
+  # Authored per-rule (behaviour-researched) for the correlation engine. Related CoPilot
+  # Searches + telemetry pivots to run around an alert, scoped to its host/user/ip/domain.
+  related_rules:
+  - id: 814ddeca-3d31-4265-8e07-8cc54fb44903
+    name: LiveKD Kernel Memory Dump File Created
+    reason: 'Direct follow-on: LiveKD''s purpose is to write a kernel memory dump, so a dump file created after the driver drop confirms memory capture.'
+  - id: c7746f1c-47d3-43d6-8c45-cd1e54b6b0a2
+    name: Kernel Memory Dump Via LiveKD
+    reason: Same-session process-creation evidence of livekd with the -m dump option, confirming the driver was used to dump kernel memory.
+  - id: a85f7765-698a-4088-afa0-ecfbf8d01fa4
+    name: Potential Memory Dumping Activity Via LiveKD
+    reason: Process-creation view of livekd memory-dump command lines that explains why the driver was installed.
+  - id: 431a1fdb-4799-4f3b-91c3-a683b003fc49
+    name: New Kernel Driver Via SC.EXE
+    reason: 'Co-occurring: kernel drivers are registered as services, so sc.exe creating a kernel service next to the livekd drop shows driver loading.'
+  - id: c7da8edc-49ae-45a2-9e61-9fd860e4e73d
+    name: PUA - Sysinternals Tools Execution - Registry
+    reason: 'Co-occurring: Sysinternals tools set an EulaAccepted registry value on first run, corroborating LiveKD was executed here.'
+  - id: a5a2d357-1ab8-4675-a967-ef9990a59391
+    name: LSASS Process Memory Dump Files
+    reason: 'Downstream objective: kernel/full memory dumps are mined for LSASS credentials, so LSASS dump files are a likely outcome.'
+  - id: aba15bdd-657f-422a-bab3-ac2d2a0d6f1c
+    name: Potentially Suspicious DMP/HDMP File Creation
+    reason: 'Downstream: any DMP/HDMP file created by an unusual process around the driver drop is the memory dump artefact.'
+  - id: ec570e53-4c76-45a9-804d-dc3f355ff7a7
+    name: 7Zip Compressing Dump Files
+    reason: 'Downstream: dump files are compressed with 7-Zip before exfiltration.'
+  window: 4h
   enrichment_searches:
-  # Rule-specific telemetry pivots the engine runs around an alert from this rule,
-  # scoped to the alert's host/user/IP within the window (behaviour-targeted, not a sweep).
-    - name: "Other executions of this tool-set on this host (any arguments)"
-      query: 'data_win_system_eventID:"1" AND data_win_eventdata_image:/.*(\\[Ll][Ii][Vv][Ee][Kk][Dd]\.[Ee][Xx][Ee]|\\[Ll][Ii][Vv][Ee][Kk]64\.[Ee][Xx][Ee])/'
-      pivot_on: [host]
-      window: 2h
-    - name: "Memory/credential-dump creation & LSASS access on this host"
-      query: '((data_win_system_eventID:"1" AND data_win_eventdata_image:/.*(\\[Pp][Rr][Oo][Cc][Dd][Uu][Mm][Pp]\.[Ee][Xx][Ee]|\\[Pp][Rr][Oo][Cc][Dd][Uu][Mm][Pp]64\.[Ee][Xx][Ee]|\\[Ss][Qq][Ll][Dd][Uu][Mm][Pp][Ee][Rr]\.[Ee][Xx][Ee]|\\[Cc][Rr][Ee][Aa][Tt][Ee][Dd][Uu][Mm][Pp]\.[Ee][Xx][Ee]|\\[Rr][Dd][Rr][Ll][Ee][Aa][Kk][Dd][Ii][Aa][Gg]\.[Ee][Xx][Ee]|\\[Dd][Uu][Mm][Pp][Ee][Rr][Tt]\.[Ee][Xx][Ee]|\\[Nn][Aa][Nn][Oo][Dd][Uu][Mm][Pp]\.[Ee][Xx][Ee]|\\[Aa][Vv][Dd][Uu][Mm][Pp]\.[Ee][Xx][Ee])/) OR (data_win_system_eventID:"1" AND (data_win_eventdata_commandLine:/.*[Cc][Oo][Mm][Ss][Vv][Cc][Ss]\.[Dd][Ll][Ll].*/ OR data_win_eventdata_commandLine:/.*[Mm][Ii][Nn][Ii][Dd][Uu][Mm][Pp].*/ OR data_win_eventdata_commandLine:/.*[Dd][Uu][Mm][Pp][Ee][Rr][Tt].*/ OR data_win_eventdata_commandLine:/.*[Nn][Aa][Nn][Oo][Dd][Uu][Mm][Pp].*/ OR data_win_eventdata_commandLine:/.*[Ll][Ss][Aa][Ss][Ss].*/ OR data_win_eventdata_commandLine:/.*[Ss][Ee][Kk][Uu][Rr][Ll][Ss][Aa].*/ OR data_win_eventdata_commandLine:/.*[Nn][Tt][Dd][Ss]\.[Dd][Ii][Tt].*/ OR data_win_eventdata_commandLine:/.*[Nn][Tt][Dd][Ss][Uu][Tt][Ii][Ll].*/)) OR (data_win_system_eventID:"10" AND data_win_eventdata_targetImage:/.*(\\[Ll][Ss][Aa][Ss][Ss]\.[Ee][Xx][Ee])/))'
-      pivot_on: [host]
-      window: 1h
-    - name: "Execution of programs from user-writable paths on this host"
-      query: 'data_win_system_eventID:"1" AND (data_win_eventdata_image:/.*\\[Uu][Ss][Ee][Rr][Ss]\\.*/ OR data_win_eventdata_image:/.*\\[Pp][Rr][Oo][Gg][Rr][Aa][Mm][Dd][Aa][Tt][Aa]\\.*/ OR data_win_eventdata_image:/.*\\[Ww][Ii][Nn][Dd][Oo][Ww][Ss]\\[Tt][Ee][Mm][Pp]\\.*/ OR data_win_eventdata_image:/.*\\[Aa][Pp][Pp][Dd][Aa][Tt][Aa]\\.*/ OR data_win_eventdata_image:/.*\\[Pp][Uu][Bb][Ll][Ii][Cc]\\.*/ OR data_win_eventdata_image:/.*\\\$[Rr][Ee][Cc][Yy][Cc][Ll][Ee].*/)'
-      pivot_on: [host]
-      window: 1h
-    - name: "Autostart persistence written on this host"
-      query: '(data_win_system_eventID:"12" OR data_win_system_eventID:"13") AND (data_win_eventdata_targetObject:/.*[Cc][Uu][Rr][Rr][Ee][Nn][Tt][Vv][Ee][Rr][Ss][Ii][Oo][Nn]\\[Rr][Uu][Nn].*/ OR data_win_eventdata_targetObject:/.*[Cc][Uu][Rr][Rr][Ee][Nn][Tt][Vv][Ee][Rr][Ss][Ii][Oo][Nn]\\[Rr][Uu][Nn][Oo][Nn][Cc][Ee].*/ OR data_win_eventdata_targetObject:/.*[Cc][Uu][Rr][Rr][Ee][Nn][Tt][Cc][Oo][Nn][Tt][Rr][Oo][Ll][Ss][Ee][Tt]\\[Ss][Ee][Rr][Vv][Ii][Cc][Ee][Ss]\\.*/ OR data_win_eventdata_targetObject:/.*[Ii][Mm][Aa][Gg][Ee] [Ff][Ii][Ll][Ee] [Ee][Xx][Ee][Cc][Uu][Tt][Ii][Oo][Nn] [Oo][Pp][Tt][Ii][Oo][Nn][Ss]\\.*/ OR data_win_eventdata_targetObject:/.*[Ww][Ii][Nn][Ll][Oo][Gg][Oo][Nn]\\[Ss][Hh][Ee][Ll][Ll].*/ OR data_win_eventdata_targetObject:/.*[Ww][Ii][Nn][Ll][Oo][Gg][Oo][Nn]\\[Uu][Ss][Ee][Rr][Ii][Nn][Ii][Tt].*/ OR data_win_eventdata_targetObject:/.*[Cc][Uu][Rr][Rr][Ee][Nn][Tt][Vv][Ee][Rr][Ss][Ii][Oo][Nn]\\[Ee][Xx][Pp][Ll][Oo][Rr][Ee][Rr]\\[Rr][Uu][Nn].*/ OR data_win_eventdata_targetObject:/.*[Pp][Oo][Ll][Ii][Cc][Ii][Ee][Ss]\\[Ee][Xx][Pp][Ll][Oo][Rr][Ee][Rr]\\[Rr][Uu][Nn].*/ OR data_win_eventdata_targetObject:/.*[Cc][Uu][Rr][Rr][Ee][Nn][Tt][Vv][Ee][Rr][Ss][Ii][Oo][Nn]\\[Ww][Ii][Nn][Dd][Oo][Ww][Ss]\\[Ll][Oo][Aa][Dd].*/)'
-      pivot_on: [host]
-      window: 2h
+  # Behaviour-targeted hunts the engine runs around the alert (not a sweep).
+  - name: LiveKD execution and memory-dump options
+    query: data_win_system_eventID:"1" AND (data_win_eventdata_image:/.*\\([Ll][Ii][Vv][Ee][Kk][Dd]|[Ll][Ii][Vv][Ee][Kk][Dd]64)\.[Ee][Xx][Ee]/ OR data_win_eventdata_originalFileName:/[Ll][Ii][Vv][Ee][Kk][Dd].[Ee][Xx][Ee]/)
+    pivot_on: host
+    window: 2h
+  - name: Memory dump files written to disk
+    query: data_win_system_eventID:"11" AND (data_win_eventdata_targetFilename:/.*\.[Dd][Mm][Pp]/ OR data_win_eventdata_targetFilename:/.*\.[Hh][Dd][Mm][Pp]/)
+    pivot_on: host
+    window: 4h
+  - name: Kernel driver service registration and driver load
+    query: (data_win_system_eventID:"1" AND data_win_eventdata_image:/.*\\([Ss][Cc])\.[Ee][Xx][Ee]/ AND data_win_eventdata_commandLine:/.*[Cc][Rr][Ee][Aa][Tt][Ee].*/ AND data_win_eventdata_commandLine:/.*([Tt][Yy][Pp][Ee]= [Kk][Ee][Rr][Nn][Ee][Ll]|[Tt][Yy][Pp][Ee]=[Kk][Ee][Rr][Nn][Ee][Ll]|\.[Ss][Yy][Ss]).*/) OR (data_win_system_eventID:"6" AND data_win_eventdata_imageLoaded:/.*[Ll][Ii][Vv][Ee][Kk][Dd][Dd].[Ss][Yy][Ss]/)
+    pivot_on: host
+    window: 2h
+  - name: Sysinternals EULA registry set (tool first run)
+    query: data_win_system_eventID:"13" AND data_win_eventdata_targetObject:/.*\\[Ss][Yy][Ss][Ii][Nn][Tt][Ee][Rr][Nn][Aa][Ll][Ss]\\.*\\[Ee][Uu][Ll][Aa][Aa][Cc][Cc][Ee][Pp][Tt][Ee][Dd]/
+    pivot_on: host
+    window: 4h
+  - name: Archiving of dump files for staging
+    query: data_win_system_eventID:"1" AND (data_win_eventdata_image:/.*\\(7[Zz]|[Ww][Ii][Nn][Rr][Aa][Rr]|[Rr][Aa][Rr])\.[Ee][Xx][Ee]/ OR data_win_eventdata_commandLine:/.*[Cc][Oo][Mm][Pp][Rr][Ee][Ss][Ss]-[Aa][Rr][Cc][Hh][Ii][Vv][Ee].*/) AND data_win_eventdata_commandLine:/.*(.[Dd][Mm][Pp]|[Dd][Uu][Mm][Pp]).*/
+    pivot_on: host
+    window: 6h
