@@ -144,44 +144,53 @@ graylog:
   query: data_win_system_eventID:"11" AND (data_win_eventdata_targetFilename:/.*(\\Windows\\__1[0-9]{9}\.[0-9]{1,7})/ OR data_win_eventdata_targetFilename:/.*(C:\\__1[0-9]{9}\.[0-9]{1,7})/ OR data_win_eventdata_targetFilename:/.*(D:\\__1[0-9]{9}\.[0-9]{1,7})/)
 
 correlation:
-  # Authored by the correlation engine for review. Related CoPilot Searches to run
-  # around an alert from this rule, scoped to the same host/user/IP within the window.
+  # Authored per-rule (behaviour-researched) for the correlation engine. Related CoPilot
+  # Searches + telemetry pivots to run around an alert, scoped to its host/user/ip/domain.
   related_rules:
-    - id: ec570e53-4c76-45a9-804d-dc3f355ff7a7
-      name: "7Zip Compressing Dump Files"
-      reason: "next kill-chain tactic: Collection"
-    - id: 0a1255c5-d732-4b62-ac02-b5152d34fb83
-      name: "ADExplorer Writing Complete AD Snapshot Into .dat File"
-      reason: "next kill-chain tactic: Discovery"
-    - id: 1ea13e8c-03ea-409b-877d-ce5c3d2c1cb3
-      name: "ADFS Database Named Pipe Connection By Uncommon Tool"
-      reason: "next kill-chain tactic: Collection"
-    - id: 75bf09fa-1dd7-4d18-9af9-dd9e492562eb
-      name: "ADSI-Cache File Creation By Uncommon Tool"
-      reason: "next kill-chain tactic: Command and Control"
-    - id: 33a2d1dd-f3b0-40bd-8baf-7974468927cc
-      name: "APT PRIVATELOG Image Load Pattern"
-      reason: "next kill-chain tactic: Privilege Escalation"
-    - id: 9aa01d62-7667-4d3b-acb8-8cb5103e2014
-      name: "APT27 - Emissary Panda Activity"
-      reason: "next kill-chain tactic: Execution"
-  window: 1h
+  - id: d6e464e4-5c6a-474e-82d2-aed616a3a492
+    name: Impacket Lateral Movement WMIExec Commandline Parameters
+    reason: The cmd.exe /Q /c ... \\127.0.0.1\ADMIN$\__<ts> command line from wmiprvse is the process-side view of the same wmiexec output file.
+  - id: 692f0bec-83ba-4d04-af7e-e884a96059b6
+    name: Potential WMI Lateral Movement WmiPrvSE Spawned PowerShell
+    reason: wmiexec-style activity often shows WmiPrvSE spawning PowerShell on the target.
+  - id: 8a582fe2-0882-4b89-a82a-da6b2dc32937
+    name: Suspicious WmiPrvSE Child Process
+    reason: WmiPrvSE spawning shells/tools is the execution leg of remote WMI command execution.
+  - id: 4aafb0fa-bff5-4b9d-b99e-8093e659c65f
+    name: Writing Local Admin Share
+    reason: wmiexec redirects output through the local ADMIN$ share; this file-create variant fires beside the __timestamp output.
+  - id: ab9e3b40-0c85-4ba1-aede-455d226fd124
+    name: Suspicious Redirection to Local Admin Share
+    reason: Command-line redirection to the local admin share is how wmiexec writes its output.
+  - id: 022eaba8-f0bf-4dd9-9217-4604b0bb3bb0
+    name: HackTool - Wmiexec Default Powershell Command
+    reason: Default PowerShell command used by wmiexec variants.
+  - id: 03f4ca17-de95-428d-a75a-4ee78b047256
+    name: HackTool - Impacket File Indicators
+    reason: Impacket file indicators co-occur when wmiexec/smbexec/secretsdump tooling is used against the host.
+  - id: 7773b877-5abb-4a3e-b9c9-fd0369b59b00
+    name: WMIC Remote Command Execution
+    reason: WMIC remote command execution is the native-tool analogue of the same remote WMI execution.
+  window: 2h
   enrichment_searches:
-  # Rule-specific telemetry pivots the engine runs around an alert from this rule,
-  # scoped to the alert's host/user/IP within the window (behaviour-targeted, not a sweep).
-    - name: "WMI process execution on this host"
-      query: '((data_win_system_eventID:"1" AND data_win_eventdata_image:/.*(\\[Ww][Mm][Ii][Cc]\.[Ee][Xx][Ee])/ AND (data_win_eventdata_commandLine:/.*[Pp][Rr][Oo][Cc][Ee][Ss][Ss] [Cc][Aa][Ll][Ll] [Cc][Rr][Ee][Aa][Tt][Ee].*/ OR data_win_eventdata_commandLine:/.*\/[Nn][Oo][Dd][Ee]:.*/)) OR (data_win_system_eventID:"1" AND data_win_eventdata_parentImage:/.*(\\[Ww][Mm][Ii][Pp][Rr][Vv][Ss][Ee]\.[Ee][Xx][Ee])/) OR (data_win_system_eventID:"1" AND data_win_eventdata_image:/.*(\\[Pp][Oo][Ww][Ee][Rr][Ss][Hh][Ee][Ll][Ll]\.[Ee][Xx][Ee]|\\[Pp][Ww][Ss][Hh]\.[Ee][Xx][Ee])/ AND (data_win_eventdata_commandLine:/.*[Ii][Nn][Vv][Oo][Kk][Ee]-[Ww][Mm][Ii][Mm][Ee][Tt][Hh][Oo][Dd].*/ OR data_win_eventdata_commandLine:/.*[Gg][Ee][Tt]-[Ww][Mm][Ii][Oo][Bb][Jj][Ee][Cc][Tt].*/ OR data_win_eventdata_commandLine:/.*[Ii][Nn][Vv][Oo][Kk][Ee]-[Cc][Ii][Mm][Mm][Ee][Tt][Hh][Oo][Dd].*/)))'
-      pivot_on: [host]
-      window: 2h
-    - name: "Memory/credential-dump creation & LSASS access on this host"
-      query: '((data_win_system_eventID:"1" AND data_win_eventdata_image:/.*(\\[Pp][Rr][Oo][Cc][Dd][Uu][Mm][Pp]\.[Ee][Xx][Ee]|\\[Pp][Rr][Oo][Cc][Dd][Uu][Mm][Pp]64\.[Ee][Xx][Ee]|\\[Ss][Qq][Ll][Dd][Uu][Mm][Pp][Ee][Rr]\.[Ee][Xx][Ee]|\\[Cc][Rr][Ee][Aa][Tt][Ee][Dd][Uu][Mm][Pp]\.[Ee][Xx][Ee]|\\[Rr][Dd][Rr][Ll][Ee][Aa][Kk][Dd][Ii][Aa][Gg]\.[Ee][Xx][Ee]|\\[Dd][Uu][Mm][Pp][Ee][Rr][Tt]\.[Ee][Xx][Ee]|\\[Nn][Aa][Nn][Oo][Dd][Uu][Mm][Pp]\.[Ee][Xx][Ee]|\\[Aa][Vv][Dd][Uu][Mm][Pp]\.[Ee][Xx][Ee])/) OR (data_win_system_eventID:"1" AND (data_win_eventdata_commandLine:/.*[Cc][Oo][Mm][Ss][Vv][Cc][Ss]\.[Dd][Ll][Ll].*/ OR data_win_eventdata_commandLine:/.*[Mm][Ii][Nn][Ii][Dd][Uu][Mm][Pp].*/ OR data_win_eventdata_commandLine:/.*[Dd][Uu][Mm][Pp][Ee][Rr][Tt].*/ OR data_win_eventdata_commandLine:/.*[Nn][Aa][Nn][Oo][Dd][Uu][Mm][Pp].*/ OR data_win_eventdata_commandLine:/.*[Ll][Ss][Aa][Ss][Ss].*/ OR data_win_eventdata_commandLine:/.*[Ss][Ee][Kk][Uu][Rr][Ll][Ss][Aa].*/ OR data_win_eventdata_commandLine:/.*[Nn][Tt][Dd][Ss]\.[Dd][Ii][Tt].*/ OR data_win_eventdata_commandLine:/.*[Nn][Tt][Dd][Ss][Uu][Tt][Ii][Ll].*/)) OR (data_win_system_eventID:"10" AND data_win_eventdata_targetImage:/.*(\\[Ll][Ss][Aa][Ss][Ss]\.[Ee][Xx][Ee])/))'
-      pivot_on: [host]
-      window: 1h
-    - name: "Execution of programs from user-writable paths on this host"
-      query: 'data_win_system_eventID:"1" AND (data_win_eventdata_image:/.*\\[Uu][Ss][Ee][Rr][Ss]\\.*/ OR data_win_eventdata_image:/.*\\[Pp][Rr][Oo][Gg][Rr][Aa][Mm][Dd][Aa][Tt][Aa]\\.*/ OR data_win_eventdata_image:/.*\\[Ww][Ii][Nn][Dd][Oo][Ww][Ss]\\[Tt][Ee][Mm][Pp]\\.*/ OR data_win_eventdata_image:/.*\\[Aa][Pp][Pp][Dd][Aa][Tt][Aa]\\.*/ OR data_win_eventdata_image:/.*\\[Pp][Uu][Bb][Ll][Ii][Cc]\\.*/ OR data_win_eventdata_image:/.*\\\$[Rr][Ee][Cc][Yy][Cc][Ll][Ee].*/)'
-      pivot_on: [host]
-      window: 1h
-    - name: "Autostart persistence written on this host"
-      query: '(data_win_system_eventID:"12" OR data_win_system_eventID:"13") AND (data_win_eventdata_targetObject:/.*[Cc][Uu][Rr][Rr][Ee][Nn][Tt][Vv][Ee][Rr][Ss][Ii][Oo][Nn]\\[Rr][Uu][Nn].*/ OR data_win_eventdata_targetObject:/.*[Cc][Uu][Rr][Rr][Ee][Nn][Tt][Vv][Ee][Rr][Ss][Ii][Oo][Nn]\\[Rr][Uu][Nn][Oo][Nn][Cc][Ee].*/ OR data_win_eventdata_targetObject:/.*[Cc][Uu][Rr][Rr][Ee][Nn][Tt][Cc][Oo][Nn][Tt][Rr][Oo][Ll][Ss][Ee][Tt]\\[Ss][Ee][Rr][Vv][Ii][Cc][Ee][Ss]\\.*/ OR data_win_eventdata_targetObject:/.*[Ii][Mm][Aa][Gg][Ee] [Ff][Ii][Ll][Ee] [Ee][Xx][Ee][Cc][Uu][Tt][Ii][Oo][Nn] [Oo][Pp][Tt][Ii][Oo][Nn][Ss]\\.*/ OR data_win_eventdata_targetObject:/.*[Ww][Ii][Nn][Ll][Oo][Gg][Oo][Nn]\\[Ss][Hh][Ee][Ll][Ll].*/ OR data_win_eventdata_targetObject:/.*[Ww][Ii][Nn][Ll][Oo][Gg][Oo][Nn]\\[Uu][Ss][Ee][Rr][Ii][Nn][Ii][Tt].*/ OR data_win_eventdata_targetObject:/.*[Cc][Uu][Rr][Rr][Ee][Nn][Tt][Vv][Ee][Rr][Ss][Ii][Oo][Nn]\\[Ee][Xx][Pp][Ll][Oo][Rr][Ee][Rr]\\[Rr][Uu][Nn].*/ OR data_win_eventdata_targetObject:/.*[Pp][Oo][Ll][Ii][Cc][Ii][Ee][Ss]\\[Ee][Xx][Pp][Ll][Oo][Rr][Ee][Rr]\\[Rr][Uu][Nn].*/ OR data_win_eventdata_targetObject:/.*[Cc][Uu][Rr][Rr][Ee][Nn][Tt][Vv][Ee][Rr][Ss][Ii][Oo][Nn]\\[Ww][Ii][Nn][Dd][Oo][Ww][Ss]\\[Ll][Oo][Aa][Dd].*/)'
-      pivot_on: [host]
-      window: 2h
+  # Behaviour-targeted hunts the engine runs around the alert (not a sweep).
+  - name: Commands spawned by WmiPrvSE with output redirect
+    query: data_win_system_eventID:"1" AND data_win_eventdata_parentImage:/.*\\[Ww][Mm][Ii][Pp][Rr][Vv][Ss][Ee].[Ee][Xx][Ee]/ AND data_win_eventdata_commandLine:/.*(\\\\127\.0\.0\.1\\[Aa][Dd][Mm][Ii][Nn]\$|__[0-9]{10}\.[0-9]+).*/
+    pivot_on: host
+    window: 2h
+  - name: Network logons and admin share access
+    query: (data_win_system_eventID:"4624" AND data_win_eventdata_logonType:"3") OR (data_win_system_eventID:"5145" AND data_win_eventdata_shareName:/.*([Aa][Dd][Mm][Ii][Nn]|[Cc]|[Ii][Pp][Cc])\$.*/)
+    pivot_on: host
+    window: 2h
+  - name: Recon commands run under WmiPrvSE
+    query: data_win_system_eventID:"1" AND data_win_eventdata_parentImage:/.*\\[Ww][Mm][Ii][Pp][Rr][Vv][Ss][Ee].[Ee][Xx][Ee]/ AND data_win_eventdata_commandLine:/.*([Ww][Hh][Oo][Aa][Mm][Ii]|[Ii][Pp][Cc][Oo][Nn][Ff][Ii][Gg]|[Nn][Ee][Tt] [Uu][Ss][Ee][Rr]|[Nn][Ee][Tt] [Gg][Rr][Oo][Uu][Pp]|[Ss][Yy][Ss][Tt][Ee][Mm][Ii][Nn][Ff][Oo]|[Tt][Aa][Ss][Kk][Ll][Ii][Ss][Tt]|[Nn][Ll][Tt][Ee][Ss][Tt]|[Qq][Uu][Ss][Ee][Rr]).*/
+    pivot_on: host
+    window: 2h
+  - name: Output file deletion after read
+    query: (data_win_system_eventID:"23" OR data_win_system_eventID:"26") AND data_win_eventdata_targetFilename:/.*__[0-9]{10}\.[0-9]+/
+    pivot_on: host
+    window: 2h
+  - name: Credential access follow-on
+    query: data_win_system_eventID:"1" AND data_win_eventdata_commandLine:/.*([Rr][Ee][Gg] [Ss][Aa][Vv][Ee]|[Nn][Tt][Dd][Ss][Uu][Tt][Ii][Ll]|[Pp][Rr][Oo][Cc][Dd][Uu][Mm][Pp]|[Cc][Oo][Mm][Ss][Vv][Cc][Ss]|[Vv][Ss][Ss][Aa][Dd][Mm][Ii][Nn] [Cc][Rr][Ee][Aa][Tt][Ee]|[Ll][Ss][Aa][Ss][Ss]).*/
+    pivot_on: host
+    window: 4h
