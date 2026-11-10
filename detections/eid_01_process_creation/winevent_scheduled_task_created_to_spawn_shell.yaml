@@ -141,62 +141,53 @@ graylog:
   query: data_win_system_eventID:"1" AND data_win_eventdata_commandLine:/.*schtasks.*\/create.*/ AND (data_win_eventdata_commandLine:/.*cmd\.exe.*/ OR data_win_eventdata_commandLine:/.*powershell\.exe.*/ OR data_win_eventdata_commandLine:/.*pwsh\.exe.*/ OR data_win_eventdata_commandLine:/.*wscript\.exe.*/ OR data_win_eventdata_commandLine:/.*cscript\.exe.*/ OR data_win_eventdata_commandLine:/.*bash\.exe.*/ OR data_win_eventdata_commandLine:/.*scrcons\.exe.*/)
 
 correlation:
-  # Authored by the correlation engine for review. Related CoPilot Searches to run
-  # around an alert from this rule, scoped to the same host/user/IP within the window.
+  # Authored per-rule (behaviour-researched) for the correlation engine. Related CoPilot
+  # Searches + telemetry pivots to run around an alert, scoped to its host/user/ip/domain.
   related_rules:
-    - id: 2452e632-9e0d-11eb-bacd-acde48001122
-      name: "DNS Exfiltration Using Nslookup App"
-      reason: "same analytic story: Compromised Windows Host"
-    - id: cc316032-924a-11eb-91a2-acde48001122
-      name: "DSQuery Domain Discovery"
-      reason: "same analytic story: Compromised Windows Host"
-    - id: 5ee2bcd0-b2ff-11eb-bb34-acde48001122
-      name: "Delete ShadowCopy With PowerShell"
-      reason: "same analytic story: Ransomware"
-    - id: 9b3af1e6-5b68-11eb-ae93-0242ac130002
-      name: "Detect MSHTA Url in Command Line"
-      reason: "same analytic story: Compromised Windows Host"
-    - id: cbef820c-e1ff-407f-887f-0a9240a2d477
-      name: "Detect Path Interception By Creation Of program exe"
-      reason: "same analytic story: Windows Persistence Techniques"
-    - id: 27c3a83d-cada-47c6-9042-67baf19d2574
-      name: "Detect PsExec With accepteula Flag"
-      reason: "same analytic story: Medusa Ransomware"
-    - id: 32e0baea-b3f1-11eb-a2ce-acde48001122
-      name: "Detect RClone Command-Line Usage"
-      reason: "same analytic story: Ransomware"
-    - id: 72170ec5-f7d2-42f5-aefb-2b8be6aad15f
-      name: "Detect Regasm Spawning a Process"
-      reason: "same analytic story: Compromised Windows Host"
-    - id: bc477b57-5c21-4ab6-9c33-668772e7f114
-      name: "Detect Regsvcs Spawning a Process"
-      reason: "same analytic story: Compromised Windows Host"
-    - id: 070e9b80-6252-11eb-ae93-0242ac130002
-      name: "Detect Regsvr32 Application Control Bypass"
-      reason: "same analytic story: Compromised Windows Host"
-    - id: ccad96d7-a48c-4f13-8b9c-9f6a31cba454
-      name: "Detect Remote Access Software Usage FileInfo"
-      reason: "same analytic story: Ransomware"
-    - id: 683e6196-b8e8-11eb-9a79-acde48001122
-      name: "Detect Renamed PSExec"
-      reason: "same analytic story: Medusa Ransomware"
-  window: 1h
+  - id: f2c64357-b1d2-41b7-849f-34d2682c0fad
+    name: Suspicious Command Patterns In Scheduled Task Creation
+    reason: Same schtasks /create often carries obfuscated or LOLBin payload syntax beyond the bare shell reference; confirms the task payload is hostile.
+  - id: 89ca78fd-b37c-4310-b3d3-81a023f83936
+    name: Schtasks Creation Or Modification With SYSTEM Privileges
+    reason: A shell-spawning task registered as SYSTEM means the persistence will run with full privilege.
+  - id: 9f8573c9-22b4-40e3-89c1-72bc2b8d49ab
+    name: Scheduled Task Creation Masquerading as System Processes
+    reason: Attackers name shell-launching tasks like OS tasks to hide; a hit shows deliberate concealment.
+  - id: 1d174d38-8fda-4081-a9b6-56d9763c0cd8
+    name: Scheduled Task Creation with Curl and PowerShell Execution Combo
+    reason: Task that launches PowerShell and pulls a payload via curl is the download-and-persist variant of this alert.
+  - id: 86588b36-c6d3-465f-9cee-8f9093e07798
+    name: Scheduled Task Executing Payload from Registry
+    reason: Shell-spawning tasks frequently read a fileless payload staged in the registry.
+  - id: c4eeeeae-89f4-43a7-8b48-8d1bdfa66c78
+    name: Scheduled Task Executing Encoded Payload from Registry
+    reason: Encoded variant of registry-staged payload run by the new task's shell.
+  - id: 39019a4e-317f-4ce3-ae63-309a8c6b53c5
+    name: Suspicious Scheduled Task Creation Involving Temp Folder
+    reason: Task shell pointing at a script/binary in Temp indicates staged malware being persisted.
+  - id: 80e1f67a-4596-4351-98f5-a9c3efabac95
+    name: Suspicious Scheduled Task Write to System32 Tasks
+    reason: Task XML dropped directly into the Tasks folder bypasses schtasks logging; companion evidence of the same persistence.
+  window: 6h
   enrichment_searches:
-  # Rule-specific telemetry pivots the engine runs around an alert from this rule,
-  # scoped to the alert's host/user/IP within the window (behaviour-targeted, not a sweep).
-    - name: "Scheduled-task creation on this host"
-      query: '((data_win_system_eventID:"1" AND data_win_eventdata_image:/.*(\\[Ss][Cc][Hh][Tt][Aa][Ss][Kk][Ss]\.[Ee][Xx][Ee]|\\[Aa][Tt]\.[Ee][Xx][Ee])/) OR ((data_win_system_eventID:"4698" OR data_win_system_eventID:"4702")))'
-      pivot_on: [host]
-      window: 4h
-    - name: "Follow-on LOLBin / signed-binary-proxy execution on this host"
-      query: 'data_win_system_eventID:"1" AND data_win_eventdata_image:/.*(\\[Rr][Uu][Nn][Dd][Ll][Ll]32\.[Ee][Xx][Ee]|\\[Rr][Ee][Gg][Ss][Vv][Rr]32\.[Ee][Xx][Ee]|\\[Mm][Ss][Hh][Tt][Aa]\.[Ee][Xx][Ee]|\\[Ii][Nn][Ss][Tt][Aa][Ll][Ll][Uu][Tt][Ii][Ll]\.[Ee][Xx][Ee]|\\[Rr][Ee][Gg][Aa][Ss][Mm]\.[Ee][Xx][Ee]|\\[Rr][Ee][Gg][Ss][Vv][Cc][Ss]\.[Ee][Xx][Ee]|\\[Mm][Ss][Bb][Uu][Ii][Ll][Dd]\.[Ee][Xx][Ee]|\\[Cc][Ee][Rr][Tt][Uu][Tt][Ii][Ll]\.[Ee][Xx][Ee]|\\[Bb][Ii][Tt][Ss][Aa][Dd][Mm][Ii][Nn]\.[Ee][Xx][Ee]|\\[Ww][Mm][Ii][Cc]\.[Ee][Xx][Ee]|\\[Cc][Mm][Ss][Tt][Pp]\.[Ee][Xx][Ee]|\\[Oo][Dd][Bb][Cc][Cc][Oo][Nn][Ff]\.[Ee][Xx][Ee]|\\[Ff][Oo][Rr][Ff][Ii][Ll][Ee][Ss]\.[Ee][Xx][Ee]|\\[Pp][Cc][Aa][Ll][Uu][Aa]\.[Ee][Xx][Ee]|\\[Mm][Aa][Vv][Ii][Nn][Jj][Ee][Cc][Tt]\.[Ee][Xx][Ee]|\\[Ss][Cc][Rr][Ii][Pp][Tt][Rr][Uu][Nn][Nn][Ee][Rr]\.[Ee][Xx][Ee])/'
-      pivot_on: [host]
-      window: 1h
-    - name: "Outbound connections by script interpreters on this host"
-      query: 'data_win_system_eventID:"3" AND data_win_eventdata_image:/.*(\\[Pp][Oo][Ww][Ee][Rr][Ss][Hh][Ee][Ll][Ll]\.[Ee][Xx][Ee]|\\[Pp][Ww][Ss][Hh]\.[Ee][Xx][Ee]|\\[Pp][Oo][Ww][Ee][Rr][Ss][Hh][Ee][Ll][Ll]_[Ii][Ss][Ee]\.[Ee][Xx][Ee]|\\[Cc][Mm][Dd]\.[Ee][Xx][Ee]|\\[Ww][Ss][Cc][Rr][Ii][Pp][Tt]\.[Ee][Xx][Ee]|\\[Cc][Ss][Cc][Rr][Ii][Pp][Tt]\.[Ee][Xx][Ee]|\\[Mm][Ss][Hh][Tt][Aa]\.[Ee][Xx][Ee]|\\[Rr][Uu][Nn][Dd][Ll][Ll]32\.[Ee][Xx][Ee]|\\[Rr][Ee][Gg][Ss][Vv][Rr]32\.[Ee][Xx][Ee])/'
-      pivot_on: [host]
-      window: 1h
-    - name: "Autostart persistence written on this host (Run keys, services, IFEO)"
-      query: '(data_win_system_eventID:"12" OR data_win_system_eventID:"13") AND (data_win_eventdata_targetObject:/.*[Cc][Uu][Rr][Rr][Ee][Nn][Tt][Vv][Ee][Rr][Ss][Ii][Oo][Nn]\\[Rr][Uu][Nn].*/ OR data_win_eventdata_targetObject:/.*[Cc][Uu][Rr][Rr][Ee][Nn][Tt][Vv][Ee][Rr][Ss][Ii][Oo][Nn]\\[Rr][Uu][Nn][Oo][Nn][Cc][Ee].*/ OR data_win_eventdata_targetObject:/.*[Cc][Uu][Rr][Rr][Ee][Nn][Tt][Cc][Oo][Nn][Tt][Rr][Oo][Ll][Ss][Ee][Tt]\\[Ss][Ee][Rr][Vv][Ii][Cc][Ee][Ss]\\.*/ OR data_win_eventdata_targetObject:/.*[Ii][Mm][Aa][Gg][Ee] [Ff][Ii][Ll][Ee] [Ee][Xx][Ee][Cc][Uu][Tt][Ii][Oo][Nn] [Oo][Pp][Tt][Ii][Oo][Nn][Ss]\\.*/ OR data_win_eventdata_targetObject:/.*[Ww][Ii][Nn][Ll][Oo][Gg][Oo][Nn]\\[Ss][Hh][Ee][Ll][Ll].*/ OR data_win_eventdata_targetObject:/.*[Ww][Ii][Nn][Ll][Oo][Gg][Oo][Nn]\\[Uu][Ss][Ee][Rr][Ii][Nn][Ii][Tt].*/ OR data_win_eventdata_targetObject:/.*[Cc][Uu][Rr][Rr][Ee][Nn][Tt][Vv][Ee][Rr][Ss][Ii][Oo][Nn]\\[Ee][Xx][Pp][Ll][Oo][Rr][Ee][Rr]\\[Rr][Uu][Nn].*/ OR data_win_eventdata_targetObject:/.*[Pp][Oo][Ll][Ii][Cc][Ii][Ee][Ss]\\[Ee][Xx][Pp][Ll][Oo][Rr][Ee][Rr]\\[Rr][Uu][Nn].*/ OR data_win_eventdata_targetObject:/.*[Cc][Uu][Rr][Rr][Ee][Nn][Tt][Vv][Ee][Rr][Ss][Ii][Oo][Nn]\\[Ww][Ii][Nn][Dd][Oo][Ww][Ss]\\[Ll][Oo][Aa][Dd].*/)'
-      pivot_on: [host]
-      window: 4h
+  # Behaviour-targeted hunts the engine runs around the alert (not a sweep).
+  - name: All schtasks create/change activity and task events
+    query: (data_win_system_eventID:"1" AND (data_win_eventdata_commandLine:/.*[Ss][Cc][Hh][Tt][Aa][Ss][Kk][Ss].*/) AND (data_win_eventdata_commandLine:/.*/[Cc][Rr][Ee][Aa][Tt][Ee].*/ OR data_win_eventdata_commandLine:/.*/[Cc][Hh][Aa][Nn][Gg][Ee].*/ OR data_win_eventdata_commandLine:/.*/[Rr][Uu][Nn].*/)) OR data_win_system_eventID:"4698" OR data_win_system_eventID:"4702"
+    pivot_on: host
+    window: 6h
+  - name: Shells spawned by the Task Scheduler service
+    query: data_win_system_eventID:"1" AND (data_win_eventdata_parentCommandLine:/.*-[Ss] [Ss][Cc][Hh][Ee][Dd][Uu][Ll][Ee].*/ OR data_win_eventdata_parentCommandLine:/.*[Tt][Aa][Ss][Kk][Ee][Nn][Gg]\.[Ee][Xx][Ee].*/ OR data_win_eventdata_parentCommandLine:/.*[Tt][Aa][Ss][Kk][Hh][Oo][Ss][Tt][Ww]\.[Ee][Xx][Ee].*/) AND (data_win_eventdata_image:/.*\\([Cc][Mm][Dd]\.[Ee][Xx][Ee]|[Pp][Oo][Ww][Ee][Rr][Ss][Hh][Ee][Ll][Ll]\.[Ee][Xx][Ee]|[Pp][Ww][Ss][Hh]\.[Ee][Xx][Ee]|[Ww][Ss][Cc][Rr][Ii][Pp][Tt]\.[Ee][Xx][Ee]|[Cc][Ss][Cc][Rr][Ii][Pp][Tt]\.[Ee][Xx][Ee]|[Mm][Ss][Hh][Tt][Aa]\.[Ee][Xx][Ee])/)
+    pivot_on: host
+    window: 24h
+  - name: Task payload staged in user-writable path
+    query: data_win_system_eventID:"1" AND (data_win_eventdata_commandLine:/.*[Ss][Cc][Hh][Tt][Aa][Ss][Kk][Ss].*/) AND (data_win_eventdata_commandLine:/.*\\[Uu][Ss][Ee][Rr][Ss]\\[Pp][Uu][Bb][Ll][Ii][Cc].*/ OR data_win_eventdata_commandLine:/.*\\[Pp][Rr][Oo][Gg][Rr][Aa][Mm][Dd][Aa][Tt][Aa]\\.*/ OR data_win_eventdata_commandLine:/.*\\[Aa][Pp][Pp][Dd][Aa][Tt][Aa]\\.*/ OR data_win_eventdata_commandLine:/.*\\[Tt][Ee][Mm][Pp]\\.*/)
+    pivot_on: host
+    window: 6h
+  - name: Encoded or download-cradle shell commands
+    query: data_win_system_eventID:"1" AND (data_win_eventdata_commandLine:/.*-[Ee][Nn][Cc].*/ OR data_win_eventdata_commandLine:/.*-[Ee][Nn][Cc][Oo][Dd][Ee][Dd][Cc][Oo][Mm][Mm][Aa][Nn][Dd].*/ OR data_win_eventdata_commandLine:/.*[Ff][Rr][Oo][Mm][Bb][Aa][Ss][Ee]64[Ss][Tt][Rr][Ii][Nn][Gg].*/ OR data_win_eventdata_commandLine:/.*[Dd][Oo][Ww][Nn][Ll][Oo][Aa][Dd][Ss][Tt][Rr][Ii][Nn][Gg].*/ OR data_win_eventdata_commandLine:/.*[Ii][Nn][Vv][Oo][Kk][Ee]-[Ee][Xx][Pp][Rr][Ee][Ss][Ss][Ii][Oo][Nn].*/ OR data_win_eventdata_commandLine:/.*[Bb][Ii][Tt][Ss][Aa][Dd][Mm][Ii][Nn].*/ OR data_win_eventdata_commandLine:/.*[Cc][Ee][Rr][Tt][Uu][Tt][Ii][Ll].*/)
+    pivot_on: host
+    window: 4h
+  - name: Outbound connections from script interpreters
+    query: data_win_system_eventID:"3" AND (data_win_eventdata_image:/.*\\([Pp][Oo][Ww][Ee][Rr][Ss][Hh][Ee][Ll][Ll]\.[Ee][Xx][Ee]|[Pp][Ww][Ss][Hh]\.[Ee][Xx][Ee]|[Ww][Ss][Cc][Rr][Ii][Pp][Tt]\.[Ee][Xx][Ee]|[Cc][Ss][Cc][Rr][Ii][Pp][Tt]\.[Ee][Xx][Ee]|[Cc][Mm][Dd]\.[Ee][Xx][Ee]|[Mm][Ss][Hh][Tt][Aa]\.[Ee][Xx][Ee])/)
+    pivot_on: host
+    window: 4h

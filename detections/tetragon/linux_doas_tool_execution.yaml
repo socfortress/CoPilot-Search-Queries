@@ -129,50 +129,44 @@ correlation:
   # Authored per-rule (behaviour-researched) for the correlation engine. Related CoPilot
   # Searches + telemetry pivots to run around an alert, scoped to its host/user/ip/domain.
   related_rules:
-  - id: f74107df-b6c6-4e80-bf00-4170b658162b
-    name: Sudo Privilege Escalation CVE-2019-14287
-    reason: Alternative privilege-escalation path; an actor probing doas often tries sudo flaws on the same host
+  - id: lnx-doas-001
+    name: Linux doas Execution Detection
+    reason: Syslog/auditd view of the same doas execution; corroborates the Tetragon exec event on the same host.
+  - id: linux-sudo-or-su-execution-001
+    name: Linux Sudo Or Su Execution
+    reason: An attacker using doas often also tries sudo/su; shows the wider privilege-switch attempts.
+  - id: linux-visudo-utility-execution-001
+    name: Linux Visudo Utility Execution
+    reason: Editing privilege config to grant rights precedes doas/sudo abuse.
+  - id: linux-sudoers-tmp-file-creation-001
+    name: Linux Sudoers Tmp File Creation
+    reason: Sudoers edit in progress indicates persistence of elevated rights alongside doas use.
+  - id: linux-setuid-using-chmod-utility-001
+    name: Linux Setuid Using Chmod Utility
+    reason: Setuid planting is a common follow-on after gaining root via doas.
   - id: 6a50f16c-3b7b-42d1-b081-0fdd3ba70a73
     name: User Added To Root/Sudoers Group Using Usermod
-    reason: Escalated rights are commonly cemented by adding an account to a privileged group right after doas use
-  - id: fa4aaed5-4fe0-498d-bbc0-08e3346387ba
-    name: Copy Passwd Or Shadow From TMP Path
-    reason: Root via doas is typically followed by staging passwd/shadow for credential theft
-  - id: 6419afd1-3742-47a5-a7e6-b50386cd15f8
-    name: Chmod Targeting Sensitive Directories
-    reason: Elevated shell often used to loosen permissions on sensitive directories
-  - id: 1182f3b3-e716-4efa-99ab-d2685d04360f
-    name: History File Deletion
-    reason: 'Post-escalation anti-forensics: shell history wiped after privileged commands'
-  - id: 80915f59-9b56-4616-9de0-fd0dea6c12fe
-    name: Linux Logs Clearing Attempts
-    reason: Root access enables log clearing to hide the escalation
-  - id: 6b14bac8-3e3a-4324-8109-42f0546a347f
-    name: Scheduled Cron Task/Job - Linux
-    reason: Root persistence via cron commonly follows successful escalation
-  - id: 0cf7a157-8879-41a2-8f55-388dd23746b7
-    name: Linux Recon Indicators
-    reason: Local enumeration (id, uname, sudo/doas checks) typically precedes the escalation attempt
-  window: 4h
+    reason: Adding the account to privileged groups is an alternate or follow-on escalation route.
+  window: 2h
   enrichment_searches:
   # Behaviour-targeted hunts the engine runs around the alert (not a sweep).
-  - name: Commands run through doas
+  - name: Commands run via doas
     query: data_process_exec_parent_binary:"/usr/bin/doas"
     pivot_on: host
-    window: 4h
-  - name: doas.conf read or edited
-    query: data_process_exec_process_arguments:/.*doas\.conf.*/
-    pivot_on: host
-    window: 24h
-  - name: Interactive shells spawned
-    query: data_process_exec_process_binary:("/bin/bash" OR "/bin/sh" OR "/usr/bin/bash" OR "/usr/bin/sh") AND data_process_exec_process_arguments:/.*-[ip].*/
-    pivot_on: host
     window: 2h
-  - name: Account or password changes
+  - name: Edits to doas.conf / sudoers
+    query: data_process_exec_process_arguments:(*doas.conf* OR *sudoers*)
+    pivot_on: host
+    window: 6h
+  - name: Account and group changes
     query: data_process_exec_process_binary:("/usr/sbin/useradd" OR "/usr/sbin/usermod" OR "/usr/bin/passwd" OR "/usr/sbin/adduser")
     pivot_on: host
-    window: 4h
-  - name: Outbound download or transfer tooling
-    query: data_process_exec_process_binary:("/usr/bin/curl" OR "/usr/bin/wget" OR "/usr/bin/nc")
+    window: 6h
+  - name: 'Persistence after root: cron, ssh keys, systemd'
+    query: data_process_exec_process_arguments:(*crontab* OR *authorized_keys* OR */etc/cron* OR *systemctl*enable*)
     pivot_on: host
-    window: 2h
+    window: 6h
+  - name: Download and netcat tooling
+    query: data_process_exec_process_binary:("/usr/bin/curl" OR "/usr/bin/wget" OR "/usr/bin/nc" OR "/usr/bin/ncat")
+    pivot_on: host
+    window: 4h
