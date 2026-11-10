@@ -129,44 +129,50 @@ correlation:
   # Authored per-rule (behaviour-researched) for the correlation engine. Related CoPilot
   # Searches + telemetry pivots to run around an alert, scoped to its host/user/ip/domain.
   related_rules:
-  - id: lnx-doas-001
-    name: Linux doas Execution Detection
-    reason: Same doas execution seen via another rule path; corroborates the invocation and arguments.
-  - id: linux-sudo-or-su-execution-001
-    name: Linux Sudo Or Su Execution
-    reason: Sudo/su use on the same host shows whether doas is one of several elevation attempts by the same actor.
-  - id: linux-auditd-possible-access-sudoers-file-001
-    name: Linux Auditd Possible Access To Sudoers File
-    reason: Reading privilege-delegation config typically precedes choosing an elevation path.
-  - id: linux-sudoers-tmp-file-creation-001
-    name: Linux Sudoers Tmp File Creation
-    reason: Editing delegation config is the persistence follow-on to successful elevation.
-  - id: linux-setuid-using-chmod-utility-001
-    name: Linux Setuid Using Chmod Utility
-    reason: A root shell from doas is often turned into a setuid backdoor.
-  - id: linux-auditd-chown-to-root-001
-    name: Linux Auditd Chown To Root
-    reason: Chown-to-root of a staged binary after doas gives persistent root-owned payloads.
+  - id: f74107df-b6c6-4e80-bf00-4170b658162b
+    name: Sudo Privilege Escalation CVE-2019-14287
+    reason: Alternative privilege-escalation path; an actor probing doas often tries sudo flaws on the same host
+  - id: 6a50f16c-3b7b-42d1-b081-0fdd3ba70a73
+    name: User Added To Root/Sudoers Group Using Usermod
+    reason: Escalated rights are commonly cemented by adding an account to a privileged group right after doas use
+  - id: fa4aaed5-4fe0-498d-bbc0-08e3346387ba
+    name: Copy Passwd Or Shadow From TMP Path
+    reason: Root via doas is typically followed by staging passwd/shadow for credential theft
+  - id: 6419afd1-3742-47a5-a7e6-b50386cd15f8
+    name: Chmod Targeting Sensitive Directories
+    reason: Elevated shell often used to loosen permissions on sensitive directories
+  - id: 1182f3b3-e716-4efa-99ab-d2685d04360f
+    name: History File Deletion
+    reason: 'Post-escalation anti-forensics: shell history wiped after privileged commands'
+  - id: 80915f59-9b56-4616-9de0-fd0dea6c12fe
+    name: Linux Logs Clearing Attempts
+    reason: Root access enables log clearing to hide the escalation
+  - id: 6b14bac8-3e3a-4324-8109-42f0546a347f
+    name: Scheduled Cron Task/Job - Linux
+    reason: Root persistence via cron commonly follows successful escalation
+  - id: 0cf7a157-8879-41a2-8f55-388dd23746b7
+    name: Linux Recon Indicators
+    reason: Local enumeration (id, uname, sudo/doas checks) typically precedes the escalation attempt
   window: 4h
   enrichment_searches:
   # Behaviour-targeted hunts the engine runs around the alert (not a sweep).
-  - name: Commands run as child of doas
+  - name: Commands run through doas
     query: data_process_exec_parent_binary:"/usr/bin/doas"
     pivot_on: host
     window: 4h
-  - name: Interactive or -c shells spawned
-    query: data_process_exec_process_binary:(/.*\/(bash|sh|dash|zsh)/) AND data_process_exec_process_arguments:(/.*-[a-z]*i.*/ OR /.*-c.*/)
+  - name: doas.conf read or edited
+    query: data_process_exec_process_arguments:/.*doas\.conf.*/
+    pivot_on: host
+    window: 24h
+  - name: Interactive shells spawned
+    query: data_process_exec_process_binary:("/bin/bash" OR "/bin/sh" OR "/usr/bin/bash" OR "/usr/bin/sh") AND data_process_exec_process_arguments:/.*-[ip].*/
     pivot_on: host
     window: 2h
-  - name: Privilege config and credential file access
-    query: data_process_exec_process_arguments:(/.*doas\.conf.*/ OR /.*sudoers.*/ OR /.*\/etc\/shadow.*/ OR /.*\/etc\/passwd.*/)
+  - name: Account or password changes
+    query: data_process_exec_process_binary:("/usr/sbin/useradd" OR "/usr/sbin/usermod" OR "/usr/bin/passwd" OR "/usr/sbin/adduser")
     pivot_on: host
     window: 4h
-  - name: Persistence or setuid changes after elevation
-    query: data_process_exec_process_binary:(/.*\/(chmod|chown|useradd|usermod|crontab)/) AND data_process_exec_process_arguments:(/.*(u\+s|4755|root|-aG|-G).*/)
-    pivot_on: host
-    window: 6h
-  - name: Download tooling staging
-    query: data_process_exec_process_binary:(/.*\/(curl|wget|nc|ncat)/)
+  - name: Outbound download or transfer tooling
+    query: data_process_exec_process_binary:("/usr/bin/curl" OR "/usr/bin/wget" OR "/usr/bin/nc")
     pivot_on: host
     window: 2h
