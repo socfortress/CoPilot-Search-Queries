@@ -129,55 +129,50 @@ correlation:
   # Authored per-rule (behaviour-researched) for the correlation engine. Related CoPilot
   # Searches + telemetry pivots to run around an alert, scoped to its host/user/ip/domain.
   related_rules:
+  - id: lnx-doas-001
+    name: Linux doas Execution Detection
+    reason: Sibling doas-execution detection from syslog/auditd telemetry; confirms the same invocation on a second sensor
   - id: 0f79c4d2-4e1f-4683-9c36-b5469a665e06
     name: Access of Sudoers File Content
-    reason: doas is the sudo alternative; an actor reading /etc/sudoers first learns which elevation path is configured, so this is a likely precursor.
+    reason: Reading sudoers to learn allowed elevation paths, typically just before using doas/sudo
+  - id: f74107df-b6c6-4e80-bf00-4170b658162b
+    name: Sudo Privilege Escalation CVE-2019-14287
+    reason: Alternative escalation route (sudo -u#-1); trying sudo then doas shows escalation probing
   - id: 6a50f16c-3b7b-42d1-b081-0fdd3ba70a73
     name: User Added To Root/Sudoers Group Using Usermod
-    reason: Granting root/sudo group membership is the persistent form of the escalation doas performs transiently; parallel or follow-on privilege grant.
+    reason: 'Follow-on persistence: adding the account to root/sudo groups once elevated'
   - id: 86157017-c2b1-4d4a-8c33-93b8e67e4af4
     name: Potential Suspicious Change To Sensitive/Critical Files
-    reason: 'Elevated shells from doas are typically used to edit /etc files (passwd, sudoers, cron, init.d): the direct impact step.'
-  - id: fa4aaed5-4fe0-498d-bbc0-08e3346387ba
-    name: Copy Passwd Or Shadow From TMP Path
-    reason: Root obtained through doas enables copying shadow/passwd for credential cracking.
-  - id: 6b14bac8-3e3a-4324-8109-42f0546a347f
-    name: Scheduled Cron Task/Job - Linux
-    reason: Newly elevated attackers commonly persist as root via cron.
-  - id: 1182f3b3-e716-4efa-99ab-d2685d04360f
-    name: History File Deletion
-    reason: Anti-forensics after a privileged session to hide the doas-run commands.
-  - id: 80915f59-9b56-4616-9de0-fd0dea6c12fe
-    name: Linux Logs Clearing Attempts
-    reason: Root via doas lets the actor wipe /var/log to cover the escalation.
-  - id: 2fade0b6-7423-4835-9d4f-335b39b83867
-    name: Shell Execution Of Process Located In Tmp Directory
-    reason: A payload dropped in /tmp is often what gets run through doas; common precursor or follow-on.
+    reason: Elevated actor tampering with sensitive files such as passwd, shadow or sudoers
+  - id: linux-setuid-using-chmod-utility-001
+    name: Linux Setuid Using Chmod Utility
+    reason: 'Root-level follow-on: setting SUID bits for durable escalation'
+  - id: 4e2a6c91-7f3d-4b6e-9a4f-1c8b0e5a92d4
+    name: Crontab Interactive Edit Execution
+    reason: Root persistence via crontab right after elevation
+  - id: linux-sudo-or-su-execution-001
+    name: Linux Sudo Or Su Execution
+    reason: Other escalation tooling used on the same host by the same actor
   window: 2h
   enrichment_searches:
   # Behaviour-targeted hunts the engine runs around the alert (not a sweep).
-  - name: Elevation tool executions (sudo/su/doas/pkexec)
-    query: (data_process_exec_process_binary:/.*\/[Ss][Uu][Dd][Oo]/ OR data_process_exec_process_binary:/.*\/[Ss][Uu]/ OR data_process_exec_process_binary:/.*\/[Dd][Oo][Aa][Ss]/ OR data_process_exec_process_binary:/.*\/[Pp][Kk][Ee][Xx][Ee][Cc]/)
+  - name: 'What doas ran: privileged child processes'
+    query: data_process_exec_parent_binary:"/usr/bin/doas"
+    pivot_on:
+    - host
+    window: 1h
+  - name: Credential and privilege config file access
+    query: data_process_exec_process_arguments:/.*(\/etc\/shadow|\/etc\/sudoers|\/etc\/doas\.conf|\/etc\/passwd).*/
     pivot_on:
     - host
     window: 2h
-  - name: Reads or edits of doas.conf and sudoers
-    query: (data_process_exec_process_arguments:/.*\/[Ee][Tt][Cc]\/[Dd][Oo][Aa][Ss]\.[Cc][Oo][Nn][Ff].*/ OR data_process_exec_process_arguments:/.*\/[Ee][Tt][Cc]\/[Ss][Uu][Dd][Oo][Ee][Rr][Ss].*/)
+  - name: Account, group, SUID and ownership changes
+    query: data_process_exec_process_binary:/.*(\/[Uu][Ss][Ee][Rr][Aa][Dd][Dd]|\/[Uu][Ss][Ee][Rr][Mm][Oo][Dd]|\/[Cc][Hh][Pp][Aa][Ss][Ss][Ww][Dd]|\/[Cc][Hh][Mm][Oo][Dd]|\/[Cc][Hh][Oo][Ww][Nn]|\/[Vv][Ii][Ss][Uu][Dd][Oo])/
     pivot_on:
     - host
-    window: 6h
-  - name: Account and group changes
-    query: (data_process_exec_process_binary:/.*\/[Uu][Ss][Ee][Rr][Aa][Dd][Dd]/ OR data_process_exec_process_binary:/.*\/[Uu][Ss][Ee][Rr][Mm][Oo][Dd]/ OR data_process_exec_process_binary:/.*\/[Aa][Dd][Dd][Uu][Ss][Ee][Rr]/ OR data_process_exec_process_binary:/.*\/[Pp][Aa][Ss][Ss][Ww][Dd]/ OR data_process_exec_process_binary:/.*\/[Cc][Hh][Pp][Aa][Ss][Ss][Ww][Dd]/ OR data_process_exec_process_binary:/.*\/[Gg][Rr][Oo][Uu][Pp][Aa][Dd][Dd]/ OR data_process_exec_process_binary:/.*\/[Gg][Pp][Aa][Ss][Ss][Ww][Dd]/)
-    pivot_on:
-    - host
-    window: 6h
-  - name: Persistence set up after elevation (cron, systemd, init, ssh keys)
-    query: ((data_process_exec_process_binary:/.*\/[Cc][Rr][Oo][Nn][Tt][Aa][Bb]/ OR data_process_exec_process_binary:/.*\/[Ss][Yy][Ss][Tt][Ee][Mm][Cc][Tt][Ll]/) OR data_process_exec_process_arguments:/.*(\/[Ee][Tt][Cc]\/[Cc][Rr][Oo][Nn]|\/[Ee][Tt][Cc]\/[Ss][Yy][Ss][Tt][Ee][Mm][Dd]\/[Ss][Yy][Ss][Tt][Ee][Mm]|\/[Ee][Tt][Cc]\/[Ii][Nn][Ii][Tt]\.[Dd]|[Aa][Uu][Tt][Hh][Oo][Rr][Ii][Zz][Ee][Dd]_[Kk][Ee][Yy][Ss]).*/)
-    pivot_on:
-    - host
-    window: 6h
-  - name: Download tooling to tmp paths
-    query: ((data_process_exec_process_binary:/.*\/[Cc][Uu][Rr][Ll]/ OR data_process_exec_process_binary:/.*\/[Ww][Gg][Ee][Tt]/) AND data_process_exec_process_arguments:/.*(http|\/tmp\/|\/dev\/shm).*/)
+    window: 2h
+  - name: Persistence via cron, systemd or SSH keys
+    query: (data_process_exec_process_binary:/.*(\/[Cc][Rr][Oo][Nn][Tt][Aa][Bb]|\/[Ss][Yy][Ss][Tt][Ee][Mm][Cc][Tt][Ll]|\/[Aa][Tt])/ OR data_process_exec_process_arguments:/.*(authorized_keys|\/etc\/cron|systemd\/system).*/)
     pivot_on:
     - host
     window: 4h
