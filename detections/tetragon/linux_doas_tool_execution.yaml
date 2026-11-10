@@ -131,48 +131,45 @@ correlation:
   related_rules:
   - id: 0f79c4d2-4e1f-4683-9c36-b5469a665e06
     name: Access of Sudoers File Content
-    reason: Recon of privilege config on the same host, often just before or after switching to doas
-  - id: linux-auditd-possible-access-sudoers-file-001
-    name: Linux Auditd Possible Access To Sudoers File
-    reason: Reading or editing privilege config (sudoers, doas.conf) alongside doas use points to deliberate rule tampering
-  - id: linux-sudoers-tmp-file-creation-001
-    name: Linux Sudoers Tmp File Creation
-    reason: Sudoers edit in progress on the same host; a doas.conf edit is the equivalent persistence step
-  - id: linux-setuid-using-chmod-utility-001
-    name: Linux Setuid Using Chmod Utility
-    reason: After gaining root via doas, attackers plant SUID binaries for persistent escalation
+    reason: 'Privilege-config recon: reading sudoers/doas policy usually precedes using doas to learn what elevation is permitted.'
+  - id: 6419afd1-3742-47a5-a7e6-b50386cd15f8
+    name: Chmod Targeting Sensitive Directories
+    reason: 'Post-elevation follow-on: once root via doas, attackers loosen permissions on sensitive paths to persist.'
   - id: fa4aaed5-4fe0-498d-bbc0-08e3346387ba
     name: Copy Passwd Or Shadow From TMP Path
-    reason: Root obtained via doas is commonly used to stage passwd/shadow for credential theft
+    reason: 'Typical post-escalation credential staging: root access used to copy passwd/shadow for offline cracking.'
   - id: 1182f3b3-e716-4efa-99ab-d2685d04360f
     name: History File Deletion
-    reason: 'Post-escalation anti-forensics: shell history wiped after privileged commands'
-  - id: 759d0d51-bc99-4b5e-9add-8f5b2c8e7512
-    name: Creation Of An User Account
-    reason: Root-level persistence by adding a local account right after elevation
-  - id: linux-sudo-or-su-execution-001
-    name: Linux Sudo Or Su Execution
-    reason: Sibling elevation mechanism; sudo/su/doas together show escalation hunting on this host
+    reason: Anti-forensics commonly follows privileged command execution to hide what was run under doas.
+  - id: ea3ecad2-db86-4a89-ad0b-132a10d2db55
+    name: Interactive Bash Suspicious Children
+    reason: Doas-launched root shell often spawns suspicious children from an interactive bash.
+  - id: de25eeb8-3655-4643-ac3a-b662d3f26b6b
+    name: Disable Or Stop Services
+    reason: 'Root-level follow-on: stopping services after elevating privileges.'
+  - id: e3a8a052-111f-4606-9aee-f28ebeb76776
+    name: Disabling Security Tools
+    reason: Elevated attackers disable security tooling to evade detection after doas escalation.
   window: 4h
   enrichment_searches:
   # Behaviour-targeted hunts the engine runs around the alert (not a sweep).
-  - name: Privileged account or group changes
-    query: data_process_exec_process_binary:("/usr/sbin/useradd" OR "/usr/sbin/usermod" OR "/usr/sbin/adduser" OR "/usr/bin/passwd" OR "/usr/sbin/groupadd")
+  - name: Doas execution arguments on host
+    query: data_process_exec_process_binary:"/usr/bin/doas"
     pivot_on: host
     window: 4h
-  - name: Edits to doas, sudoers or passwd files
-    query: data_process_exec_process_arguments:(/.*doas\.conf.*/ OR /.*sudoers.*/ OR /.*\/etc\/passwd.*/ OR /.*\/etc\/shadow.*/)
+  - name: Shells and interpreters launched as children of doas
+    query: data_process_exec_parent_binary:"/usr/bin/doas" AND (data_process_exec_process_binary:/.*\/(ba|da|z|k)?sh/ OR data_process_exec_process_binary:/.*\/(python[0-9.]*|perl|ruby)/)
     pivot_on: host
-    window: 6h
-  - name: SUID bit or capabilities set
-    query: data_process_exec_process_binary:("/usr/bin/chmod" OR "/usr/sbin/setcap") AND data_process_exec_process_arguments:(/.*u\+s.*/ OR /.*[24][0-7][0-7][0-7].*/ OR /.*cap_setuid.*/)
+    window: 2h
+  - name: Edits to doas/sudoers policy files
+    query: data_process_exec_process_arguments:/.*(\/etc\/doas\.conf|\/etc\/sudoers).*/
     pivot_on: host
-    window: 6h
-  - name: Reverse shell or interpreter spawn
-    query: data_process_exec_process_binary:("/bin/bash" OR "/bin/sh" OR "/usr/bin/python3" OR "/usr/bin/perl") AND data_process_exec_process_arguments:(/.*\/dev\/tcp.*/ OR /.*socket.*connect.*/ OR /.*nc .*-e.*/)
+    window: 24h
+  - name: Credential file access (shadow/passwd)
+    query: data_process_exec_process_arguments:/.*\/etc\/(shadow|passwd).*/
     pivot_on: host
     window: 4h
-  - name: Persistence via cron or ssh keys
-    query: data_process_exec_process_arguments:(/.*crontab.*/ OR /.*authorized_keys.*/ OR /.*\/etc\/cron.*/ OR /.*\.bashrc.*/)
+  - name: Persistence after elevation (accounts, cron, ssh keys)
+    query: data_process_exec_process_binary:/.*\/(useradd|adduser|crontab|usermod)/ OR data_process_exec_process_arguments:/.*(authorized_keys|\/etc\/cron).*/
     pivot_on: host
     window: 6h
