@@ -1,0 +1,83 @@
+name: M365 Application or Service Principal Owner Added
+id: 07b3a5b9-f4bf-4146-9a78-8b5b9072b1a8
+version: 1
+schema_version: "1.0"
+date: "2026-11-20"
+author: SOCFortress LLC
+status: experimental
+type: match
+description: >
+  Detects an owner being added to an Entra ID application or service principal.
+  Owners can add credentials and change an app's configuration, so a new owner
+  on a privileged app is a quiet path to app-level persistence. FBI
+  FLASH-20261113-001 asks defenders to review new applications, service
+  principals and owners.
+  MITRE ATT&CK: T1098 (Account Manipulation).
+data_source:
+  - Office 365 Management Activity API
+  - "Workload: AzureActiveDirectory"
+workload: AzureActiveDirectory
+how_to_implement: >
+  Requires the Wazuh office365 module subscribed to Audit.AzureActiveDirectory.
+  Matches "Add owner to service principal." and "Add owner to application.",
+  with or without the trailing period. data_office365_ObjectId carries the
+  target app or service principal.
+known_false_positives: >
+  App registration hand-offs between staff, new team members taking over an
+  integration, and automation that assigns owners at creation time. Review who
+  was added and whether the app holds high-privilege permissions.
+references:
+  - https://www.ic3.gov/CSA/2026/261113.pdf
+  - https://attack.mitre.org/techniques/T1098/
+response:
+  message: >
+    Owner added to application or service principal $data_office365_ObjectId$
+    by $data_office365_UserId$. Operation: $data_office365_Operation$. Source
+    IP: $data_office365_ClientIP$. MITRE ATT&CK: T1098
+  risk_score: 50
+  severity: medium
+  risk_objects:
+    - field: data_office365_UserId
+      type: user
+      score: 50
+  threat_objects:
+    - field: data_office365_Operation
+      type: operation
+    - field: data_office365_ObjectId
+      type: other
+    - field: data_office365_ClientIP
+      type: ip_address
+tags:
+  analytic_story:
+    - ARTEX Agentic Intrusion (FBI FLASH-20261113-001)
+    - Office 365 Persistence
+  asset_type: Cloud Identity
+  mitre_attack_id:
+    - T1098
+  custom_tags:
+    - o365
+    - entra_id
+    - service_principal
+    - persistence
+    - artex
+  product:
+    - Office 365
+  security_domain: cloud
+graylog:
+  query: data_office365_Operation:/Add owner to (service principal|application)\.?/
+
+correlation:
+  related_rules:
+  - id: b3b194b9-ce18-43bf-b6dd-81347e61c04d
+    name: M365 Service Principal or Application Credentials Added
+    reason: 'The usual next step: the new owner adds a client secret to the app.'
+  - id: ac79ba54-3626-416c-81ca-f48654667092
+    name: M365 OAuth Consent or App Permission Granted
+    reason: 'Escalation of the same app: new permissions granted after ownership changes.'
+  window: 6h
+  enrichment_searches:
+  - name: App credential and permission changes by this actor
+    query: (data_office365_Operation:/Add service principal credentials[ .]*/ OR data_office365_Operation:/Consent to application\.?/ OR data_office365_Operation:/Add app role assignment to service principal\.?/)
+    pivot_on:
+    - user
+    window: 24h

@@ -1,0 +1,105 @@
+name: M365 One Identity Reading Many Mailboxes
+id: be9d9e2d-5daf-4db4-b5c5-1e65864329bf
+version: 1
+schema_version: "1.0"
+date: "2026-11-20"
+author: SOCFortress LLC
+status: experimental
+type: aggregation
+description: >
+  Detects a single identity or application accessing mail items in many
+  distinct mailboxes within an hour. Users normally read their own mailbox and
+  a few delegated ones; an app or account touching dozens is bulk collection.
+  FBI FLASH-20261113-001 reports ARTEX operators reading mailboxes and abusing
+  compromised multi-tenant apps for Graph API access.
+  MITRE ATT&CK: T1114.002 (Email Collection: Remote Email Collection).
+data_source:
+  - Office 365 Management Activity API
+  - "Workload: Exchange"
+workload: Exchange
+how_to_implement: >
+  Requires the Wazuh office365 module subscribed to Audit.Exchange, with
+  MailItemsAccessed audited for the tenant's mailboxes (check that
+  MailItemsAccessed events exist in Graylog first; licensing and mailbox audit
+  settings decide whether they are logged). The aggregation counts distinct
+  data_office365_MailboxOwnerUPN values per data_office365_UserId and
+  data_office365_AppId over 1 hour. Backup, archiving and eDiscovery apps read
+  every mailbox by design: exclude them by AppId in a tenant-specific copy, and
+  treat a new AppId reading many mailboxes as high priority.
+known_false_positives: >
+  Cloud backup and archiving services, eDiscovery and compliance searches, and
+  admins with FullAccess to many shared mailboxes. Note that the FLASH's
+  ConnectWise campaign abused a backup integration, so an excluded backup app
+  that suddenly reads from a new IP or at an unusual time is still worth a
+  look.
+references:
+  - https://www.ic3.gov/CSA/2026/261113.pdf
+  - https://attack.mitre.org/techniques/T1114/002/
+  - https://learn.microsoft.com/en-us/purview/audit-log-investigate-accounts
+response:
+  message: >
+    $data_office365_UserId$ (app $data_office365_AppId$) accessed mail items in
+    many distinct mailboxes within the aggregation window. Confirm whether this
+    is a known backup or compliance app. MITRE ATT&CK: T1114.002
+  risk_score: 70
+  severity: high
+  risk_objects:
+    - field: data_office365_UserId
+      type: user
+      score: 70
+  threat_objects:
+    - field: data_office365_AppId
+      type: other
+tags:
+  analytic_story:
+    - ARTEX Agentic Intrusion (FBI FLASH-20261113-001)
+    - Office 365 Data Exfiltration
+  asset_type: Cloud Identity
+  mitre_attack_id:
+    - T1114.002
+  custom_tags:
+    - o365
+    - exchange
+    - mailitemsaccessed
+    - collection
+    - aggregation
+    - artex
+  product:
+    - Office 365
+  security_domain: cloud
+graylog:
+  query: data_office365_Operation:"MailItemsAccessed"
+aggregation:
+  enabled: true
+  function: distinct_count
+  field: data_office365_MailboxOwnerUPN
+  group_by:
+    - data_office365_UserId
+    - data_office365_AppId
+  window: 1h
+  threshold: 10
+  condition: ">="
+
+correlation:
+  related_rules:
+  - id: ac79ba54-3626-416c-81ca-f48654667092
+    name: M365 OAuth Consent or App Permission Granted
+    reason: 'A recent mail-scope consent or app role grant for the same app explains where the access came from.'
+  - id: b3b194b9-ce18-43bf-b6dd-81347e61c04d
+    name: M365 Service Principal or Application Credentials Added
+    reason: 'A new secret on the same app shortly before the reads is the classic app-only collection setup.'
+  - id: M365_Email_Forwarding_Created
+    name: M365 Email Forwarding Created
+    reason: 'Ongoing collection alongside the bulk read: forwarding set on the same identity.'
+  window: 24h
+  enrichment_searches:
+  - name: Consent, app role and credential changes in the last day
+    query: (data_office365_Operation:/Consent to application\.?/ OR data_office365_Operation:/Add app role assignment to service principal\.?/ OR data_office365_Operation:/Add service principal credentials[ .]*/)
+    pivot_on:
+    - user
+    window: 24h
+  - name: Sign-ins by this identity
+    query: (data_office365_Operation:"UserLoggedIn" OR data_office365_Operation:"UserLoginFailed")
+    pivot_on:
+    - user
+    window: 24h
