@@ -1,0 +1,91 @@
+name: M365 Conditional Access or Authentication Policy Changed
+id: 7fc427a2-a75f-4889-a45f-b71ee909f8fe
+version: 1
+schema_version: "1.0"
+date: "2026-11-20"
+author: SOCFortress LLC
+status: experimental
+type: match
+description: >
+  Detects Conditional Access policies, and other Entra ID authentication
+  policies, being added, updated or deleted. Weakening or excluding accounts
+  from Conditional Access removes the controls that would otherwise block a
+  stolen credential or token. FBI FLASH-20261113-001 lists Conditional Access
+  changes among the Entra audit records to review.
+  MITRE ATT&CK: T1556.009 (Modify Authentication Process: Conditional Access Policies), T1484 (Domain or Tenant Policy Modification).
+data_source:
+  - Office 365 Management Activity API
+  - "Workload: AzureActiveDirectory"
+workload: AzureActiveDirectory
+how_to_implement: >
+  Requires the Wazuh office365 module subscribed to Audit.AzureActiveDirectory.
+  Matches "Add/Update/Delete conditional access policy" and the older generic
+  "Add/Update/Delete policy." operations, which also cover token lifetime and
+  home realm discovery policies (both security relevant). data_office365_ObjectId
+  carries the policy. The before and after policy JSON is in the flattened
+  ModifiedProperties field where available.
+known_false_positives: >
+  Planned Conditional Access tuning, report-only policies being switched on,
+  and break-glass exclusions during an incident. Changes outside a change
+  window, or ones that add exclusions or set a policy to disabled, warrant a
+  call to the admin.
+references:
+  - https://www.ic3.gov/CSA/2026/261113.pdf
+  - https://attack.mitre.org/techniques/T1556/009/
+  - https://attack.mitre.org/techniques/T1484/
+response:
+  message: >
+    Authentication policy changed. Operation: $data_office365_Operation$.
+    Policy: $data_office365_ObjectId$. Actor: $data_office365_UserId$. Source
+    IP: $data_office365_ClientIP$. MITRE ATT&CK: T1556.009, T1484
+  risk_score: 55
+  severity: medium
+  risk_objects:
+    - field: data_office365_UserId
+      type: user
+      score: 55
+  threat_objects:
+    - field: data_office365_Operation
+      type: operation
+    - field: data_office365_ObjectId
+      type: other
+    - field: data_office365_ClientIP
+      type: ip_address
+tags:
+  analytic_story:
+    - ARTEX Agentic Intrusion (FBI FLASH-20261113-001)
+    - Office 365 Defense Evasion
+  asset_type: Cloud Identity
+  mitre_attack_id:
+    - T1556.009
+    - T1484
+  custom_tags:
+    - o365
+    - entra_id
+    - conditional_access
+    - defense_evasion
+    - artex
+  product:
+    - Office 365
+  security_domain: cloud
+graylog:
+  query: data_office365_Operation:/(Add|Update|Delete) (conditional access )?policy\.?/
+
+correlation:
+  related_rules:
+  - id: 6b719abd-33ee-40ed-9819-e02388f40e19
+    name: M365 Directory Role Assigned
+    reason: 'Policy changes need an admin role. A fresh role grant to the actor just before the change suggests escalation, not routine admin work.'
+  - id: 13f2d3f5-6497-44a7-bf5f-dc13ffafe5dc
+    name: Azure Login Bypassing Conditional Access Policies
+    reason: 'Same goal by another route: defeating Conditional Access to let a non-compliant attacker device in.'
+  - id: 60de9b57-dc4d-48b9-a6a0-b39e0469f876
+    name: Disabling Multi Factor Authentication
+    reason: 'Paired authentication weakening in the same window.'
+  window: 6h
+  enrichment_searches:
+  - name: Role and MFA changes by this actor
+    query: (data_office365_Operation:/Add (eligible )?member to role.*/ OR data_office365_Operation:/Disable Strong Authentication\.?/)
+    pivot_on:
+    - user
+    window: 24h

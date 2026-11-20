@@ -1,0 +1,95 @@
+name: M365 Cross-Tenant Access or Partner Relationship Changed
+id: eeccfed5-8e42-44bb-8c75-79c97ffbab46
+version: 1
+schema_version: "1.0"
+date: "2026-11-20"
+author: SOCFortress LLC
+status: experimental
+type: match
+description: >
+  Detects changes to Entra ID cross-tenant access settings (B2B collaboration,
+  B2B direct connect, cross-tenant sync) and new delegated admin partner
+  relationships. These settings decide which outside tenants and partners are
+  trusted. FBI FLASH-20261113-001 reports ARTEX operators abusing cross-account
+  trust from an external partner tenant and pivoting through trusted B2B
+  federation with compromised vendor credentials.
+  MITRE ATT&CK: T1484.002 (Domain or Tenant Policy Modification: Trust Modification), T1199 (Trusted Relationship).
+data_source:
+  - Office 365 Management Activity API
+  - "Workload: AzureActiveDirectory"
+workload: AzureActiveDirectory
+how_to_implement: >
+  Requires the Wazuh office365 module subscribed to Audit.AzureActiveDirectory.
+  Matches any add, update, delete, create or reset operation that mentions
+  cross-tenant (partner and default cross-tenant access settings, identity sync
+  settings) plus "Add partner to company." for delegated admin partners. If a
+  test change in Entra produces no matching event in Graylog, these records are
+  not reaching the Management Activity feed for the tenant and need the Entra
+  audit log export instead.
+known_false_positives: >
+  Planned B2B setup with a partner organization, MSP onboarding through GDAP,
+  and tenant-to-tenant migrations. Confirm the partner tenant ID with the
+  business owner. Changes to the default (all tenants) setting are higher risk
+  than a single named partner.
+references:
+  - https://www.ic3.gov/CSA/2026/261113.pdf
+  - https://attack.mitre.org/techniques/T1484/002/
+  - https://attack.mitre.org/techniques/T1199/
+response:
+  message: >
+    Cross-tenant access or partner relationship changed. Operation:
+    $data_office365_Operation$. Target: $data_office365_ObjectId$. Actor:
+    $data_office365_UserId$. Source IP: $data_office365_ClientIP$. Confirm the
+    partner tenant is expected. MITRE ATT&CK: T1484.002, T1199
+  risk_score: 60
+  severity: medium
+  risk_objects:
+    - field: data_office365_UserId
+      type: user
+      score: 60
+  threat_objects:
+    - field: data_office365_Operation
+      type: operation
+    - field: data_office365_ObjectId
+      type: other
+    - field: data_office365_ClientIP
+      type: ip_address
+tags:
+  analytic_story:
+    - ARTEX Agentic Intrusion (FBI FLASH-20261113-001)
+    - Office 365 Trusted Relationship Abuse
+  asset_type: Cloud Identity
+  mitre_attack_id:
+    - T1484.002
+    - T1199
+  custom_tags:
+    - o365
+    - entra_id
+    - cross_tenant
+    - b2b
+    - supply_chain
+    - artex
+  product:
+    - Office 365
+  security_domain: cloud
+graylog:
+  query: (data_office365_Operation:/(Add|Update|Delete|Create|Reset).*[Cc]ross-tenant.*/ OR data_office365_Operation:/Add partner to company\.?/)
+
+correlation:
+  related_rules:
+  - id: 58f88172-a73d-442b-94c9-95eaed3cbb36
+    name: New Federated Domain Added
+    reason: 'Paired trust tampering: a new federated domain and a loosened cross-tenant setting both widen who the tenant trusts.'
+  - id: ac79ba54-3626-416c-81ca-f48654667092
+    name: M365 OAuth Consent or App Permission Granted
+    reason: 'Partner and multi-tenant app abuse often lands as consent grants to the partner''s application in the same window.'
+  - id: 6b719abd-33ee-40ed-9819-e02388f40e19
+    name: M365 Directory Role Assigned
+    reason: 'Trust changes require an admin role; a fresh role grant to the actor first is a red flag.'
+  window: 24h
+  enrichment_searches:
+  - name: Federation, domain and consent changes by this actor
+    query: (data_office365_Operation:/(Set|Add|Update) .*[Ff]ederat.*/ OR data_office365_Operation:/Consent to application\.?/ OR data_office365_Operation:/Add app role assignment to service principal\.?/)
+    pivot_on:
+    - user
+    window: 24h

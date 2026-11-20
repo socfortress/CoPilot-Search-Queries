@@ -9,10 +9,10 @@ what gets executed.
 
 | | |
 | --- | --- |
-| **Detection rules** | **3,057** — see [`detections/README.md`](detections/README.md) |
+| **Detection rules** | **3,067** — see [`detections/README.md`](detections/README.md) |
 | Log sources covered | 33 — Sysmon, PowerShell, Windows event logs, Linux (Tetragon / auditd / syslog), Microsoft 365, web |
-| ATT&CK coverage | 361 distinct techniques |
-| Severity mix | 🔴 critical 150 · 🟠 high 1,522 · 🟡 medium 1,305 · 🔵 low 80 |
+| ATT&CK coverage | 368 distinct techniques |
+| Severity mix | 🔴 critical 150 · 🟠 high 1,527 · 🟡 medium 1,310 · 🔵 low 80 |
 | Backend | OpenSearch / Wazuh Indexer (Query DSL), with a parallel Graylog query on most rules |
 
 ---
@@ -215,7 +215,7 @@ Full field reference: [`docs/SCHEMA.md`](docs/SCHEMA.md).
 
 ### Standard parameters
 
-Nearly every rule (3,002 of 3,057) takes the same five, so one parameter set drives the
+Nearly every rule (3,002 of 3,067) takes the same five, so one parameter set drives the
 whole library:
 
 | Parameter | Type | Purpose | Typical value |
@@ -268,7 +268,7 @@ bool:
 
 ```
 CoPilot-Search-Queries/
-├── detections/              3,057 rules in 33 log-source folders (each with a README)
+├── detections/              3,067 rules in 33 log-source folders (each with a README)
 │   └── README.md            ← the detection library index
 ├── docs/
 │   └── SCHEMA.md            full YAML schema reference
@@ -296,7 +296,7 @@ CoPilot-Search-Queries/
 6. **Regenerate** the folder index so the rule shows up in its README table.
 
 Rule provenance is tracked in the optional `source:` block — 2,524 rules here are converted
-from [SigmaHQ/sigma](https://github.com/SigmaHQ/sigma) under DRL-1.1, and 533 were written
+from [SigmaHQ/sigma](https://github.com/SigmaHQ/sigma) under DRL-1.1, and 543 were written
 for this repository.
 
 ## Licence

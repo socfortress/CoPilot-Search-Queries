@@ -1,0 +1,101 @@
+name: M365 Failed Sign-in Burst Against One Account
+id: 8c0bec35-db45-469d-8128-dfba743f40ba
+version: 1
+schema_version: "1.0"
+date: "2026-11-20"
+author: SOCFortress LLC
+status: experimental
+type: aggregation
+description: >
+  Detects a high number of failed Entra ID sign-ins against a single account in
+  a short window. FBI FLASH-20261113-001 describes ARTEX activity as compressed
+  bursts with high volumes of failed attempts and iterative, incremental
+  changes, which is what an automated agent guessing or replaying credentials
+  looks like in the sign-in log.
+  MITRE ATT&CK: T1110.001 (Brute Force: Password Guessing), T1110.004 (Brute Force: Credential Stuffing).
+data_source:
+  - Office 365 Management Activity API
+  - "Workload: AzureActiveDirectory"
+workload: AzureActiveDirectory
+how_to_implement: >
+  Requires the Wazuh office365 module subscribed to Audit.AzureActiveDirectory.
+  The base query isolates UserLoginFailed events and the aggregation counts
+  them per data_office365_UserId over 10 minutes. data_office365_LogonError
+  (for example InvalidUserNameOrPassword) and data_office365_ClientIP are on
+  the underlying events for triage. Use the CoPilot backtest threshold
+  sensitivity row to set the threshold per tenant.
+known_false_positives: >
+  A phone or mail client retrying an old password after a reset, a service
+  account with a stale secret, and MFA prompts timing out in a loop. These tend
+  to come from one known IP with the same LogonError every time. Many source
+  IPs or rotating errors point to an attack.
+references:
+  - https://www.ic3.gov/CSA/2026/261113.pdf
+  - https://attack.mitre.org/techniques/T1110/001/
+  - https://attack.mitre.org/techniques/T1110/004/
+response:
+  message: >
+    Burst of failed sign-ins against $data_office365_UserId$ within the
+    aggregation window. Review source IPs and LogonError values on the
+    underlying events. MITRE ATT&CK: T1110.001, T1110.004
+  risk_score: 50
+  severity: medium
+  risk_objects:
+    - field: data_office365_UserId
+      type: user
+      score: 50
+  threat_objects:
+    - field: data_office365_Operation
+      type: operation
+tags:
+  analytic_story:
+    - ARTEX Agentic Intrusion (FBI FLASH-20261113-001)
+    - Office 365 Credential Access
+  asset_type: Cloud Identity
+  mitre_attack_id:
+    - T1110.001
+    - T1110.004
+  custom_tags:
+    - o365
+    - entra_id
+    - brute_force
+    - aggregation
+    - artex
+  product:
+    - Office 365
+  security_domain: cloud
+graylog:
+  query: data_office365_Operation:"UserLoginFailed"
+aggregation:
+  enabled: true
+  function: count
+  field: null
+  group_by:
+    - data_office365_UserId
+  window: 10m
+  threshold: 20
+  condition: ">="
+
+correlation:
+  related_rules:
+  - id: 4639f8bc-31dd-4a7a-a35c-6bf18b00e626
+    name: M365 Password Spray From One IP
+    reason: 'Same campaign, other shape: the IP hammering this account may also be spraying many others.'
+  - id: d7eab125-5f94-43df-8710-795b80fa1189
+    name: Microsoft 365 - Impossible Travel Activity
+    reason: 'Success after the burst: impossible travel on the same account means a guess landed.'
+  - id: 60de9b57-dc4d-48b9-a6a0-b39e0469f876
+    name: Disabling Multi Factor Authentication
+    reason: 'Post-compromise entrenchment on the same account after a successful guess.'
+  window: 2h
+  enrichment_searches:
+  - name: Successful sign-ins for this account after the burst
+    query: data_office365_Operation:"UserLoggedIn"
+    pivot_on:
+    - user
+    window: 6h
+  - name: Other accounts failing from the same source IPs
+    query: data_office365_Operation:"UserLoginFailed"
+    pivot_on:
+    - ip
+    window: 2h

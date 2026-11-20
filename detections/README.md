@@ -1,6 +1,6 @@
 # Detection Library
 
-**3,057 detection rules** for OpenSearch / Wazuh Indexer, one YAML file each.
+**3,067 detection rules** for OpenSearch / Wazuh Indexer, one YAML file each.
 
 Rules are filed by **the log source their query actually reads** — the `data_win_system_eventID`,
 Windows channel, or `data_*` field family the search filters on. Not by tactic, not by threat name.
@@ -11,11 +11,11 @@ and every rule has exactly one home.
 
 | | |
 | --- | --- |
-| Rules | **3,057** across 33 log sources |
-| Severity | 🔴 critical 150 · 🟠 high 1522 · 🟡 medium 1305 · 🔵 low 80 |
-| Status | experimental 2463, production 594 |
-| ATT&CK coverage | 361 distinct techniques |
-| Provenance | 2524 Sigma-derived, 533 written for this repo |
+| Rules | **3,067** across 33 log sources |
+| Severity | 🔴 critical 150 · 🟠 high 1527 · 🟡 medium 1310 · 🔵 low 80 |
+| Status | experimental 2473, production 594 |
+| ATT&CK coverage | 368 distinct techniques |
+| Provenance | 2524 Sigma-derived, 543 written for this repo |
 
 ## Where to start
 
@@ -77,12 +77,12 @@ Pick the folder matching the telemetry you collect. The three that carry most of
 | [`syslog`](./syslog/) | 94 | **Linux Syslog & auth.log** — Rules that match the raw log line via `full_log`, covering distributions and daemons without structured decoders. |
 | [`tetragon`](./tetragon/) | 117 | **Cilium Tetragon** — eBPF-based process execution events from Cilium Tetragon, giving Linux endpoints Sysmon-grade process telemetry with binary, arguments, parent and credentials. |
 
-### Microsoft 365 <sub>· Cloud · 24 rules</sub>
+### Microsoft 365 <sub>· Cloud · 34 rules</sub>
 
 | Folder | Rules | What it covers |
 | --- | --- | --- |
-| [`Entra_id`](./Entra_id/) | 4 | **Microsoft Entra ID (Azure AD)** — Identity-plane activity: conditional access bypass, MFA being disabled, federation and domain changes, and other tenant-level identity backdoors. |
-| [`Exchange`](./Exchange/) | 4 | **Microsoft Exchange Online** — Mailbox-level abuse: inbox rules, external forwarding and mass mail deletion used to hide activity or exfiltrate mail. |
+| [`Entra_id`](./Entra_id/) | 13 | **Microsoft Entra ID (Azure AD)** — Identity-plane activity: conditional access bypass, MFA being disabled, federation and domain changes, and other tenant-level identity backdoors. |
+| [`Exchange`](./Exchange/) | 5 | **Microsoft Exchange Online** — Mailbox-level abuse: inbox rules, external forwarding and mass mail deletion used to hide activity or exfiltrate mail. |
 | [`sharepoint_onedrive`](./sharepoint_onedrive/) | 4 | **SharePoint & OneDrive** — File-plane activity: mass download, mass deletion and mass external sharing — the strongest data-exfiltration signals in M365. |
 | [`threat_intelligence`](./threat_intelligence/) | 12 | **Microsoft 365 Threat Intelligence** — Verdicts raised by Defender for Office 365: malicious mail, URLs and attachments detected in the tenant. |
 

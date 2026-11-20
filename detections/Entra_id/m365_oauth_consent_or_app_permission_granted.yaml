@@ -1,0 +1,104 @@
+name: M365 OAuth Consent or App Permission Granted
+id: ac79ba54-3626-416c-81ca-f48654667092
+version: 1
+schema_version: "1.0"
+date: "2026-11-20"
+author: SOCFortress LLC
+status: experimental
+type: match
+description: >
+  Detects consent being granted to an OAuth application, a delegated permission
+  grant, or an application permission (app role) being assigned to a service
+  principal. Illicit consent and app-role grants give an attacker-controlled or
+  compromised application standing access to mail, files or the directory
+  without a user password. FBI FLASH-20261113-001 asks defenders to review
+  app-role assignments and consent grants, and reports multi-tenant app abuse
+  in the ConnectWise supply chain campaign.
+  MITRE ATT&CK: T1528 (Steal Application Access Token), T1098.003 (Account Manipulation: Additional Cloud Roles).
+data_source:
+  - Office 365 Management Activity API
+  - "Workload: AzureActiveDirectory"
+workload: AzureActiveDirectory
+how_to_implement: >
+  Requires the Wazuh office365 module subscribed to Audit.AzureActiveDirectory.
+  Matches "Consent to application.", "Add delegated permission grant." and
+  "Add app role assignment to service principal.", with or without the trailing
+  period. data_office365_ObjectId carries the target app or service principal.
+  The granted scopes and app role are in the flattened ModifiedProperties field
+  where available. Once baselined, known-good app IDs can be excluded with
+  AND NOT clauses on data_office365_ObjectId.
+known_false_positives: >
+  Admins onboarding a new SaaS integration, users consenting to low-risk apps
+  where user consent is allowed, and Microsoft first-party provisioning. Review
+  the publisher, whether the app is multi-tenant, and the scopes. App-only
+  scopes such as Mail.Read, Mail.ReadWrite, Files.Read.All, Sites.Read.All and
+  Directory.ReadWrite.All are high risk on an app nobody requested.
+references:
+  - https://www.ic3.gov/CSA/2026/261113.pdf
+  - https://attack.mitre.org/techniques/T1528/
+  - https://attack.mitre.org/techniques/T1098/003/
+  - https://learn.microsoft.com/en-us/defender-office-365/detect-and-remediate-illicit-consent-grants
+response:
+  message: >
+    OAuth consent or application permission granted. Operation:
+    $data_office365_Operation$. Target app or service principal:
+    $data_office365_ObjectId$. Actor: $data_office365_UserId$. Source IP:
+    $data_office365_ClientIP$. Review the app publisher and granted scopes.
+    MITRE ATT&CK: T1528, T1098.003
+  risk_score: 65
+  severity: high
+  risk_objects:
+    - field: data_office365_UserId
+      type: user
+      score: 65
+  threat_objects:
+    - field: data_office365_Operation
+      type: operation
+    - field: data_office365_ObjectId
+      type: other
+    - field: data_office365_ClientIP
+      type: ip_address
+tags:
+  analytic_story:
+    - ARTEX Agentic Intrusion (FBI FLASH-20261113-001)
+    - Office 365 Persistence
+  asset_type: Cloud Identity
+  mitre_attack_id:
+    - T1528
+    - T1098.003
+  custom_tags:
+    - o365
+    - entra_id
+    - oauth
+    - consent
+    - persistence
+    - artex
+  product:
+    - Office 365
+  security_domain: cloud
+graylog:
+  query: (data_office365_Operation:/Consent to application\.?/ OR data_office365_Operation:/Add delegated permission grant\.?/ OR data_office365_Operation:/Add app role assignment to service principal\.?/)
+
+correlation:
+  related_rules:
+  - id: b3b194b9-ce18-43bf-b6dd-81347e61c04d
+    name: M365 Service Principal or Application Credentials Added
+    reason: 'Paired persistence: the attacker grants an app new permissions and then adds a secret so it can use them app-only. Same app, same window.'
+  - id: be9d9e2d-5daf-4db4-b5c5-1e65864329bf
+    name: M365 One Identity Reading Many Mailboxes
+    reason: 'The objective of a mail-scope consent is bulk mailbox reading. A mailbox-access spike by the same app confirms the grant is being used.'
+  - id: d7eab125-5f94-43df-8710-795b80fa1189
+    name: Microsoft 365 - Impossible Travel Activity
+    reason: 'Account-takeover precursor: a hijacked admin session is the usual route to granting tenant-wide consent.'
+  window: 6h
+  enrichment_searches:
+  - name: Credential and owner changes on apps by this actor
+    query: (data_office365_Operation:/Add service principal credentials[ .]*/ OR data_office365_Operation:/Update application . Certificates and secrets management[ .]*/ OR data_office365_Operation:/Add owner to (service principal|application)\.?/ OR data_office365_Operation:/Add (application|service principal)\.?/)
+    pivot_on:
+    - user
+    window: 24h
+  - name: Sign-ins by this actor
+    query: (data_office365_Operation:"UserLoggedIn" OR data_office365_Operation:"UserLoginFailed")
+    pivot_on:
+    - user
+    window: 24h

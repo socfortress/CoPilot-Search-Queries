@@ -1,0 +1,99 @@
+name: M365 Directory Role Assigned
+id: 6b719abd-33ee-40ed-9819-e02388f40e19
+version: 1
+schema_version: "1.0"
+date: "2026-11-20"
+author: SOCFortress LLC
+status: experimental
+type: match
+description: >
+  Detects a user, group or service principal being added to an Entra ID
+  directory role, including PIM eligible assignments. Role assignment is how an
+  intruder turns a foothold into tenant control (Global Administrator,
+  Privileged Role Administrator, Application Administrator and similar). FBI
+  FLASH-20261113-001 lists privileged role assignments among the Entra audit
+  records to review.
+  MITRE ATT&CK: T1098.003 (Account Manipulation: Additional Cloud Roles).
+data_source:
+  - Office 365 Management Activity API
+  - "Workload: AzureActiveDirectory"
+workload: AzureActiveDirectory
+how_to_implement: >
+  Requires the Wazuh office365 module subscribed to Audit.AzureActiveDirectory.
+  Matches "Add member to role." and PIM variants such as "Add eligible member
+  to role in PIM completed (permanent)". data_office365_ObjectId carries the
+  assignee. The role name is in the flattened ModifiedProperties field where
+  available. After baselining, narrow to high-impact roles if volume is high.
+known_false_positives: >
+  Planned admin onboarding, PIM activations, and role changes during
+  restructuring. Every assignment to Global Administrator, Privileged Role
+  Administrator, Application Administrator, Cloud Application Administrator or
+  Exchange Administrator deserves confirmation with the requester.
+references:
+  - https://www.ic3.gov/CSA/2026/261113.pdf
+  - https://attack.mitre.org/techniques/T1098/003/
+response:
+  message: >
+    Directory role assigned to $data_office365_ObjectId$ by
+    $data_office365_UserId$. Operation: $data_office365_Operation$. Source IP:
+    $data_office365_ClientIP$. Confirm the assignment was requested.
+    MITRE ATT&CK: T1098.003
+  risk_score: 70
+  severity: high
+  risk_objects:
+    - field: data_office365_ObjectId
+      type: user
+      score: 70
+    - field: data_office365_UserId
+      type: user
+      score: 50
+  threat_objects:
+    - field: data_office365_Operation
+      type: operation
+    - field: data_office365_ClientIP
+      type: ip_address
+tags:
+  analytic_story:
+    - ARTEX Agentic Intrusion (FBI FLASH-20261113-001)
+    - Office 365 Privilege Escalation
+  asset_type: Cloud Identity
+  mitre_attack_id:
+    - T1098.003
+  custom_tags:
+    - o365
+    - entra_id
+    - role_assignment
+    - privilege_escalation
+    - artex
+  product:
+    - Office 365
+  security_domain: cloud
+graylog:
+  query: data_office365_Operation:/Add (eligible )?member to role.*/
+
+correlation:
+  related_rules:
+  - id: 60de9b57-dc4d-48b9-a6a0-b39e0469f876
+    name: Disabling Multi Factor Authentication
+    reason: 'Identity entrenchment in the same session: a new admin role and MFA removal on the same account are paired takeover steps.'
+  - id: 7fc427a2-a75f-4889-a45f-b71ee909f8fe
+    name: M365 Conditional Access or Authentication Policy Changed
+    reason: 'With a privileged role in hand, the next move is weakening Conditional Access or authentication policy.'
+  - id: 622ba115-254b-41ec-a450-75a79baecb9c
+    name: M365 Bulk Admin Password Resets by One Actor
+    reason: 'A newly privileged account resetting other users'' passwords is account takeover at scale.'
+  - id: d7eab125-5f94-43df-8710-795b80fa1189
+    name: Microsoft 365 - Impossible Travel Activity
+    reason: 'Precursor: a hijacked session on the actor account before the role grant.'
+  window: 6h
+  enrichment_searches:
+  - name: Other role, policy and authentication changes by this actor
+    query: (data_office365_Operation:/Add (eligible )?member to role.*/ OR data_office365_Operation:/(Add|Update|Delete) (conditional access )?policy\.?/ OR data_office365_Operation:/Disable Strong Authentication\.?/ OR data_office365_Operation:/Reset user password\.?/)
+    pivot_on:
+    - user
+    window: 24h
+  - name: Sign-ins by this actor
+    query: (data_office365_Operation:"UserLoggedIn" OR data_office365_Operation:"UserLoginFailed")
+    pivot_on:
+    - user
+    window: 24h
