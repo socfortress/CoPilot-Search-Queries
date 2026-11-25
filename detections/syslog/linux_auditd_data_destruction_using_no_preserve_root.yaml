@@ -1,5 +1,5 @@
-name: Linux Auditd Data Destruction Command
-id: linux-auditd-data-destruction-command-001
+name: Linux Data Destruction via rm --no-preserve-root
+id: a6957eb2-86f2-4aeb-aa1b-8c9340f718d4
 version: 1
 schema_version: "1.0"
 date: "2026-02-04"
@@ -113,3 +113,44 @@ tags:
 
 graylog:
   query: full_log:/.*rm.*/ AND full_log:/.*\-rf.*/ AND full_log:/.*\-\-no-preserve-root.*/ AND NOT _exists_:data_win_system_eventID AND NOT rule_groups:/.*windows.*/
+
+correlation:
+  # Authored per-rule (behaviour-researched) for the correlation engine. Related CoPilot
+  # Searches + telemetry pivots to run around an alert, scoped to its host/user/ip/domain.
+  related_rules:
+  - id: linux-auditd-data-destruction-command-001
+    name: Linux Auditd Data Destruction Command
+    reason: Sibling detection for the same rm -rf --no-preserve-root pattern; the keeper carries the canonical destruction id this one duplicates in behaviour.
+  - id: linux-dd-file-overwrite-001
+    name: Linux DD File Overwrite
+    reason: dd-based overwrite is the alternative wiper primitive on the same host.
+  - id: a3b7c9d2-4f5e-4b6d-8c1a-2d3f4e5b6c7a
+    name: Linux Critical Directory Deletion
+    reason: Recursive deletion of a critical directory is the same objective by a different command form.
+  - id: linux-stop-services-001
+    name: Linux Stop Services
+    reason: Services are stopped to release file locks and disable recovery around the wipe (AwfulShred/Industroyer2).
+  - id: 3c7e5d91-8f2b-4e6a-9d4c-5b1f2e7c8a9d
+    name: Suspicious SSL Certificate Deletion
+    reason: SSL certificate deletion is destructive tampering that accompanies filesystem wiping.
+  - id: linux-system-reboot-via-sysrq-001
+    name: Linux System Reboot Via System Request Key
+    reason: A forced SysRq reboot finalises the destruction by making the host unbootable.
+  window: 2h
+  enrichment_searches:
+  # Behaviour-targeted hunts the engine runs around the alert (not a sweep).
+  - name: rm with --no-preserve-root or force-recursive on this host
+    query: (full_log:/.*no-preserve-root.*/ OR data_process_exec_process_arguments:/.*--no-preserve-root.*/ OR full_log:/.*rm .*-rf.*\/.*/)
+    pivot_on:
+    - host
+    window: 2h
+  - name: Other wiper primitives (dd / shred) on the host
+    query: (data_process_exec_process_binary:/.*\/(dd|shred|wipe)/ OR full_log:/.*(dd if=\/dev\/(zero|urandom)|shred ).*/)
+    pivot_on:
+    - host
+    window: 2h
+  - name: Service stop and reboot bracketing the wipe
+    query: full_log:/.*(systemctl (stop|disable)|service [a-z0-9_-]+ stop|reboot -f|sysrq).*/
+    pivot_on:
+    - host
+    window: 4h

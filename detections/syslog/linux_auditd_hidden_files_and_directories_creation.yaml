@@ -107,3 +107,46 @@ tags:
 
 graylog:
   query: (full_log:/.*touch.*/ OR full_log:/.*mkdir.*/ OR full_log:/.*vim.*/ OR full_log:/.*nano.*/) AND full_log:/.*\/\..*/ AND NOT _exists_:data_win_system_eventID AND NOT rule_groups:/.*windows.*/
+
+correlation:
+  # Authored per-rule (behaviour-researched) for the correlation engine. Related CoPilot
+  # Searches + telemetry pivots to run around an alert, scoped to its host/user/ip/domain.
+  related_rules:
+  - id: linux-file-creation-profile-directory-001
+    name: Linux File Creation In Profile Directory
+    reason: Dropping files into profile.d/ is the persistence step a hidden dotfile often conceals.
+  - id: linux-unix-shell-configuration-modification-001
+    name: Linux Unix Shell Configuration Modification
+    reason: Hidden shell rc files (.bashrc/.profile) are modified to persist execution — same evasion-plus-persistence behaviour.
+  - id: linux-append-cronjob-entry-001
+    name: Linux Append Cronjob Entry On Existing Cronjob File
+    reason: Cron persistence frequently references payloads stored in the hidden directories this rule flags.
+  - id: a1b2c3d4-5678-9101-1121-314151617181
+    name: Linux File Attribute Modification Detection
+    reason: chattr/attribute changes on the same files harden the hidden persistence against deletion.
+  - id: 1182f3b3-e716-4efa-99ab-d2685d04360f
+    name: History File Deletion
+    reason: Shell-history deletion is the anti-forensics step that pairs with hiding files to cover the intrusion.
+  window: 4h
+  enrichment_searches:
+  # Behaviour-targeted hunts the engine runs around the alert (not a sweep).
+  - name: Hidden file or directory creation via common utilities
+    query: ((data_process_exec_process_binary:/.*\/(touch|mkdir|cp|mv|vi|vim|nano)/ OR full_log:/.*(touch|mkdir|vim|nano).*/) AND full_log:/.*\/\..*/)
+    pivot_on:
+    - host
+    window: 4h
+  - name: Persistence written to shell rc / profile files
+    query: (data_process_exec_process_arguments:/.*(\.bashrc|\.bash_profile|\.profile|\/etc\/profile\.d).*/ OR full_log:/.*(\.bashrc|\.bash_profile|profile\.d).*/)
+    pivot_on:
+    - host
+    window: 6h
+  - name: Hidden directories staged under tmp / shm
+    query: full_log:/.*(\/tmp\/\.|\/dev\/shm\/\.|\/var\/tmp\/\.).*/
+    pivot_on:
+    - host
+    window: 4h
+  - name: Anti-forensic history or timestamp tampering alongside hidden files
+    query: (full_log:/.*(history -c|bash_history|touch -[acmr]).*/ OR data_process_exec_process_binary:/.*\/(shred|srm)/)
+    pivot_on:
+    - host
+    window: 4h

@@ -1,5 +1,5 @@
-name: Doas Privilege Escalation Detection
-id: 5f3b8a12-2d4c-4e7b-9c6d-8a1f2b4c9e3f
+name: Linux Doas Configuration File Creation
+id: 311788ad-6b3b-4578-9a28-614e45925791
 version: 1
 schema_version: "1.0"
 date: "2026-01-29"
@@ -124,3 +124,45 @@ tags:
 
 graylog:
   query: (data_process_exec_process_binary:"/usr/bin/doas" OR data_process_exec_parent_binary:"/usr/bin/doas" OR full_log:/.*\/usr\/bin\/doas.*/) AND NOT _exists_:data_win_system_eventID AND NOT rule_groups:/.*windows.*/
+
+correlation:
+  # Authored per-rule (behaviour-researched) for the correlation engine. Related CoPilot
+  # Searches + telemetry pivots to run around an alert, scoped to its host/user/ip/domain.
+  related_rules:
+  - id: 5f3b8a12-2d4c-4e7b-9c6d-8a1f2b4c9e3f
+    name: Doas Privilege Escalation Detection
+    reason: Sibling doas detection — the keeper fires on doas tool execution, the escalation this configuration enables and this rule's query matches.
+  - id: linux-sudoers-tmp-file-creation-001
+    name: Linux Sudoers Tmp File Creation
+    reason: 'Writing a doas/sudoers drop-in is the same persistence behaviour: a config that grants standing, often password-less, elevation.'
+  - id: linux-visudo-utility-execution-001
+    name: Linux Visudo Utility Execution
+    reason: visudo/doas-policy editing is the tool-driven form of creating the escalation configuration.
+  - id: a1b2c3d4-5e6f-7a8b-9c0d-e1f2a3b4c5d6
+    name: Linux Sudoers File Access
+    reason: Reading the sudoers/doas config to enumerate elevation rights is the recon before writing a new rule.
+  - id: linux-sudo-or-su-execution-001
+    name: Linux Sudo Or Su Execution
+    reason: sudo/su execution is the mainstream elevation the attacker falls back on if doas is unavailable.
+  - id: linux-common-process-elevation-control-001
+    name: Linux Common Process For Elevation Control
+    reason: Generic elevation-control detection for the same T1548 privilege-escalation family.
+  window: 4h
+  enrichment_searches:
+  # Behaviour-targeted hunts the engine runs around the alert (not a sweep).
+  - name: doas configuration file created or edited
+    query: (full_log:/.*\/etc\/doas\.conf.*/ OR data_process_exec_process_arguments:/.*doas\.conf.*/ OR full_log:/.*doas\.conf.*/)
+    pivot_on:
+    - host
+    window: 6h
+  - name: doas invoked after the config change (the escalation it enables)
+    query: (data_process_exec_process_binary:/.*\/doas/ OR data_process_exec_parent_binary:/.*\/doas/ OR full_log:/.*\/usr\/bin\/doas.*/)
+    pivot_on:
+    - host
+    - user
+    window: 2h
+  - name: Other privilege-escalation launchers or sudoers tampering on the host
+    query: (data_process_exec_process_binary:/.*\/(sudo|su|pkexec|newgrp)/ OR full_log:/.*(pkexec|NOPASSWD|\/etc\/sudoers).*/)
+    pivot_on:
+    - host
+    window: 4h

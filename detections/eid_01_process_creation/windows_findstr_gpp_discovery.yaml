@@ -136,3 +136,47 @@ tags:
 
 graylog:
   query: data_win_system_eventID:"1" AND (data_win_eventdata_image:/.*icacls\.exe/ OR data_win_eventdata_image:/.*cacls\.exe/ OR data_win_eventdata_image:/.*xcacls\.exe/) AND (data_win_eventdata_commandLine:/.*:F.*/ OR data_win_eventdata_commandLine:/.*:W.*/ OR data_win_eventdata_commandLine:/.*:R.*/ OR data_win_eventdata_commandLine:/.*:C.*/ OR data_win_eventdata_commandLine:/.*:N.*/ OR data_win_eventdata_commandLine:/.*\/grant.*/ OR data_win_eventdata_commandLine:/.*\/deny.*/)
+
+correlation:
+  # Authored per-rule (behaviour-researched) for the correlation engine. Related CoPilot
+  # Searches + telemetry pivots to run around an alert, scoped to its host/user/ip/domain.
+  related_rules:
+  - id: b1b1e316-accc-11eb-a9b4-acde48001122
+    name: ICACLS Grant Command
+    reason: Same icacls ACL-weakening behaviour (grant ACE) — a ransomware/infostealer precursor for locking or protecting dropped files.
+  - id: cf8d753e-a8fe-11eb-8f58-acde48001122
+    name: Icacls Deny Command
+    reason: icacls deny ACE used alongside grants to block AV or users from touching malware artifacts.
+  - id: fa7ca5c6-c9d8-11eb-bce9-acde48001122
+    name: Permission Modification using Takeown App
+    reason: takeown seizes ownership before icacls rewrites the ACL — the two run back-to-back in ransomware pre-encryption staging.
+  - id: 554601fb-9b71-4bcc-abf4-21a611be4fde
+    name: Suspicious Recursive Takeown
+    reason: Recursive ownership seizure across a directory tree that icacls then re-permissions.
+  - id: 4ae81040-fc1c-4249-bfa3-938d260214d9
+    name: Use Icacls to Hide File to Everyone
+    reason: icacls deny-to-Everyone used to hide dropped payloads — the defense-evasion sibling of this access-rights change.
+  - id: c76b796c-27e1-4520-91c4-4a58695c749e
+    name: Windows Files and Dirs Access Rights Modification Via Icacls
+    reason: Parallel icacls access-rights detection (Amadey); co-firing on a host strengthens confidence in deliberate ACL tampering.
+  - id: windows-modify-acl-permission-to-files-or-folder-001
+    name: Windows Modify ACL Permission To Files Or Folder
+    reason: Broader ACL-modification detection covering the same defense-evasion objective.
+  window: 2h
+  enrichment_searches:
+  # Behaviour-targeted hunts the engine runs around the alert (not a sweep).
+  - name: icacls / cacls / takeown weakening ACLs or seizing ownership on this host
+    query: data_win_system_eventID:"1" AND data_win_eventdata_image:/.*\\(icacls|cacls|xcacls|takeown)\.exe/ AND (data_win_eventdata_commandLine:/.*\/grant.*/ OR data_win_eventdata_commandLine:/.*\/deny.*/ OR data_win_eventdata_commandLine:/.*:F.*/ OR data_win_eventdata_commandLine:/.*everyone.*/)
+    pivot_on:
+    - host
+    window: 2h
+  - name: attrib hiding files around the same ACL changes
+    query: data_win_system_eventID:"1" AND data_win_eventdata_image:/.*\\attrib\.exe/ AND data_win_eventdata_commandLine:/.*\+h.*/
+    pivot_on:
+    - host
+    window: 2h
+  - name: Shadow-copy deletion or backup inhibition (ransomware pre-encryption)
+    query: data_win_system_eventID:"1" AND (data_win_eventdata_commandLine:/.*vssadmin.*delete.*shadows.*/ OR data_win_eventdata_commandLine:/.*wbadmin.*delete.*/ OR data_win_eventdata_commandLine:/.*bcdedit.*recoveryenabled.*no.*/)
+    pivot_on:
+    - host
+    window: 4h

@@ -124,3 +124,53 @@ tags:
 
 graylog:
   query: (data_process_exec_process_binary:"/usr/bin/doas" OR data_process_exec_parent_binary:"/usr/bin/doas" OR full_log:/.*\/usr\/bin\/doas.*/) AND NOT _exists_:data_win_system_eventID AND NOT rule_groups:/.*windows.*/
+
+correlation:
+  # Authored per-rule (behaviour-researched) for the correlation engine. Related CoPilot
+  # Searches + telemetry pivots to run around an alert, scoped to its host/user/ip/domain.
+  related_rules:
+  - id: linux-sudo-or-su-execution-001
+    name: Linux Sudo Or Su Execution
+    reason: sudo/su are the mainstream elevation tools; doas is the drop-in replacement an attacker pivots to, so the two cross-corroborate escalation intent.
+  - id: linux-pkexec-privilege-escalation-001
+    name: Linux pkexec Privilege Escalation
+    reason: pkexec is an alternative local-escalation vector on the same host when doas is restricted.
+  - id: linux-visudo-utility-execution-001
+    name: Linux Visudo Utility Execution
+    reason: visudo editing the sudoers/doas policy is the tamper step that grants the attacker standing elevation.
+  - id: linux-sudoers-tmp-file-creation-001
+    name: Linux Sudoers Tmp File Creation
+    reason: Writing a sudoers/doas drop-in is the persistence that makes the elevation survive and go password-less.
+  - id: a1b2c3d4-5e6f-7a8b-9c0d-e1f2a3b4c5d6
+    name: Linux Sudoers File Access
+    reason: Reading the sudoers/doas config to enumerate who may elevate is the recon that precedes abusing doas.
+  - id: linux-common-process-elevation-control-001
+    name: Linux Common Process For Elevation Control
+    reason: Generic elevation-control process detection covering the same T1548 behaviour family.
+  - id: linux-setuid-using-chmod-utility-001
+    name: Linux Setuid Using Chmod Utility
+    reason: Setting SUID on a shell is the alternative root-on-demand mechanism the same actor installs.
+  window: 2h
+  enrichment_searches:
+  # Behaviour-targeted hunts the engine runs around the alert (not a sweep).
+  - name: doas / sudo / su / pkexec elevation on this host
+    query: (data_process_exec_process_binary:/.*\/(doas|sudo|su|pkexec|newgrp)/ OR data_process_exec_parent_binary:/.*\/doas/ OR full_log:/.*\/usr\/bin\/doas.*/)
+    pivot_on:
+    - host
+    - user
+    window: 2h
+  - name: doas configuration created or modified (persistence of the escalation path)
+    query: (full_log:/.*\/etc\/doas\.conf.*/ OR data_process_exec_process_arguments:/.*doas\.conf.*/)
+    pivot_on:
+    - host
+    window: 6h
+  - name: Sudoers tampering or NOPASSWD entries around the escalation
+    query: (full_log:/.*(\/etc\/sudoers|NOPASSWD|visudo).*/ OR data_process_exec_process_arguments:/.*\/etc\/sudoers.*/)
+    pivot_on:
+    - host
+    window: 4h
+  - name: SUID or capability grant as an alternative escalation
+    query: (data_process_exec_process_arguments:/.*(4755|cap_setuid).*/ OR data_process_exec_process_binary:/.*\/(chmod|setcap)/)
+    pivot_on:
+    - host
+    window: 4h

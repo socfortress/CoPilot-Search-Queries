@@ -1,5 +1,5 @@
 name: Linux User Account Creation Detection
-id: a1b2c3d4-e5f6-7890-abcd-ef1234567890
+id: dae47c5a-769f-42c8-b256-f45c6146c320
 version: 1
 schema_version: "1.0"
 date: "2026-01-29"
@@ -122,3 +122,51 @@ tags:
 
 graylog:
   query: (full_log:/.*useradd.*/ OR full_log:/.*adduser.*/) AND NOT _exists_:data_win_system_eventID AND NOT rule_groups:/.*windows.*/
+
+correlation:
+  # Authored per-rule (behaviour-researched) for the correlation engine. Related CoPilot
+  # Searches + telemetry pivots to run around an alert, scoped to its host/user/ip/domain.
+  related_rules:
+  - id: linux-auditd-add-user-001
+    name: Linux Auditd Add User
+    reason: Auditd corroboration of the same useradd/adduser at the syscall level; confirms the account creation beyond the shell log.
+  - id: 759d0d51-bc99-4b5e-9add-8f5b2c8e7512
+    name: Creation Of An User Account
+    reason: Parallel auditd 'Creation Of An User Account' detection (T1136.001) for the same persistence action.
+  - id: linux-common-process-elevation-control-001
+    name: Linux Common Process For Elevation Control
+    reason: A freshly created account is immediately elevated via sudo/su/elevation-control to make it useful to the attacker.
+  - id: linux-auditd-possible-access-sudoers-file-001
+    name: Linux Auditd Possible Access To Sudoers File
+    reason: Granting the new account sudo rights by reading/editing the sudoers config is the typical follow-on step.
+  - id: linux-append-cronjob-entry-001
+    name: Linux Append Cronjob Entry On Existing Cronjob File
+    reason: Cron persistence is often installed under the new backdoor account in the same intrusion.
+  - id: linux-setuid-using-chmod-utility-001
+    name: Linux Setuid Using Chmod Utility
+    reason: Setuid on a shell or binary gives the new account root on demand — a common escalation follow-on.
+  window: 4h
+  enrichment_searches:
+  # Behaviour-targeted hunts the engine runs around the alert (not a sweep).
+  - name: Account creation and privileged-group changes on this host
+    query: (full_log:/.*useradd.*/ OR full_log:/.*adduser.*/ OR full_log:/.*usermod.*/ OR full_log:/.*groupadd.*/ OR data_process_exec_process_binary:/.*\/(useradd|adduser|usermod|groupadd)/)
+    pivot_on:
+    - host
+    window: 4h
+  - name: Password or shadow edits following account creation
+    query: (full_log:/.*chpasswd.*/ OR full_log:/.*passwd .*/ OR data_process_exec_process_arguments:/.*\/etc\/shadow.*/ OR data_process_exec_process_arguments:/.*\/etc\/passwd.*/)
+    pivot_on:
+    - host
+    - user
+    window: 4h
+  - name: SSH key persistence for the new account
+    query: (data_process_exec_process_binary:/.*\/ssh-keygen/ OR data_process_exec_process_arguments:/.*authorized_keys.*/ OR full_log:/.*authorized_keys.*/)
+    pivot_on:
+    - host
+    - user
+    window: 6h
+  - name: Sudoers or SUID privilege grant on the same host
+    query: (full_log:/.*\/etc\/sudoers.*/ OR data_process_exec_process_binary:/.*\/visudo/ OR data_process_exec_process_arguments:/.*4755.*/)
+    pivot_on:
+    - host
+    window: 4h

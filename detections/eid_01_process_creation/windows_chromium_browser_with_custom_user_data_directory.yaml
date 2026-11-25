@@ -130,3 +130,53 @@ tags:
   product:
     - Wazuh
   security_domain: endpoint
+
+correlation:
+  # Authored per-rule (behaviour-researched) for the correlation engine. Related CoPilot
+  # Searches + telemetry pivots to run around an alert, scoped to its host/user/ip/domain.
+  related_rules:
+  - id: 314cb263-7eeb-4d45-b693-bb21699c73d2
+    name: Windows Chromium Browser No Security Sandbox Process
+    reason: Same Malicious Inno Setup Loader / infostealer cluster — --no-sandbox is the sibling stealth flag to the GPU-disabling, custom-profile launch this rule catches.
+  - id: 88d6e60c-759d-4ac1-a447-c0f1466c2d21
+    name: Chromium Browser Instance Executed With Custom Extension
+    reason: Operators pair an isolated --user-data-dir profile with a malicious extension loaded into it; both firing on one host confirms a weaponised browser session.
+  - id: 3e8207c5-fcd2-4ea6-9418-15d45b4890e4
+    name: Potential Data Stealing Via Chromium Headless Debugging
+    reason: Headless remote-debugging is the data-exfil step that typically follows spinning up the isolated stealth profile.
+  - id: 47147b5b-9e17-4d76-b8d2-7bac24c5ce1b
+    name: Potential Browser Data Stealing
+    reason: 'Direct objective of the isolated-profile launch: reading saved logins and cookies for theft.'
+  - id: 24c77512-782b-448a-8950-eddb0785fc71
+    name: SQLite Chromium Profile Data DB Access
+    reason: Reads the Login Data / Cookies SQLite DBs inside the very profile directory this rule's --user-data-dir points at.
+  - id: 8ba484e8-4b97-11ec-b19a-acde48001122
+    name: Possible Browser Pass View Parameter
+    reason: NirSoft browser-password dumpers are the credential-harvest tool infostealers run against the stealth profile.
+  - id: 869ba261-c272-47d7-affe-5c0aa85c93d6
+    name: Headless Browser Usage
+    reason: Headless automation of the same browser families to scrape credentials and session tokens without a visible window.
+  window: 2h
+  enrichment_searches:
+  # Behaviour-targeted hunts the engine runs around the alert (not a sweep).
+  - name: Browsers launched with an isolated profile plus GPU/sandbox-disabling flags
+    query: data_win_system_eventID:"1" AND data_win_eventdata_commandLine:/.*--user-data-dir.*/ AND (data_win_eventdata_commandLine:/.*--disable-gpu.*/ OR data_win_eventdata_commandLine:/.*--disable-3d-apis.*/ OR data_win_eventdata_commandLine:/.*--headless.*/ OR data_win_eventdata_commandLine:/.*--no-sandbox.*/)
+    pivot_on:
+    - host
+    window: 2h
+  - name: Chromium profile credential stores created or copied (Login Data / Cookies / Local State)
+    query: data_win_system_eventID:"11" AND (data_win_eventdata_targetFilename:/.*User Data.*Login Data.*/ OR data_win_eventdata_targetFilename:/.*Network.*Cookies.*/ OR data_win_eventdata_targetFilename:/.*Local State.*/)
+    pivot_on:
+    - host
+    window: 2h
+  - name: Browser credential-dumping tooling on this host (esentutl / NirSoft / sqlite on browser DB)
+    query: data_win_system_eventID:"1" AND (data_win_eventdata_image:/.*\\esentutl\.exe/ OR data_win_eventdata_commandLine:/.*WebBrowserPassView.*/ OR data_win_eventdata_commandLine:/.*ChromePass.*/ OR data_win_eventdata_commandLine:/.*Login Data.*/)
+    pivot_on:
+    - host
+    - user
+    window: 4h
+  - name: Browser process spawning a shell or scripting LOLBIN
+    query: data_win_system_eventID:"1" AND data_win_eventdata_parentImage:/.*\\(chrome|msedge|brave|opera|vivaldi)\.exe/ AND data_win_eventdata_image:/.*\\(cmd|powershell|pwsh|wscript|cscript|mshta)\.exe/
+    pivot_on:
+    - host
+    window: 2h
